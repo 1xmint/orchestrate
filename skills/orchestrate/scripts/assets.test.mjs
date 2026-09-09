@@ -249,11 +249,14 @@ test('the plugin manifest points at files that exist, and agrees with the skill'
   assert.ok(Array.isArray(manifest.agents), 'agents is a list of files');
   assert.equal(manifest.agents.length, AGENT_NAMES.length);
   for (const rel of manifest.agents) assert.ok(existsSync(join(root, rel)), `${rel} exists`);
-  for (const key of ['outputStyles', 'hooks']) {
-    const rel = manifest[key];
-    assert.ok(rel, `manifest declares ${key}`);
-    assert.ok(typeof rel === 'string' && existsSync(join(root, rel)), `${key} -> ${rel} exists`);
-  }
+  // outputStyles lives outside the default scan, so it has to be declared.
+  assert.ok(typeof manifest.outputStyles === 'string' && existsSync(join(root, manifest.outputStyles)),
+    `outputStyles -> ${manifest.outputStyles} exists`);
+  // `hooks` must NOT be declared. hooks/hooks.json is loaded automatically, and
+  // naming it as well made the host refuse the whole plugin with "Duplicate
+  // hooks file detected". The manifest key is only for ADDITIONAL hook files.
+  assert.equal(manifest.hooks, undefined, 'hooks/hooks.json loads on its own');
+  assert.ok(existsSync(join(root, 'hooks', 'hooks.json')), 'and it is where the host looks');
   // skills/ is scanned by default, so the skill needs no entry, but it does
   // need to be where a plugin host looks for it.
   assert.ok(existsSync(join(root, 'skills', 'orchestrate', 'SKILL.md')));

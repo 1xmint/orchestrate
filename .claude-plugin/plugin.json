@@ -25,6 +25,5 @@
     "./skills/orchestrate/assets/agents/orch-reviewer.md",
     "./skills/orchestrate/assets/agents/orch-debugger.md"
   ],
-  "outputStyles": "./skills/orchestrate/assets/output-styles/",
-  "hooks": "./hooks/hooks.json"
+  "outputStyles": "./skills/orchestrate/assets/output-styles/"
 }
