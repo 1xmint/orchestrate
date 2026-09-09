@@ -21,7 +21,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { findRepoRoot, latestRun, readJson, DIR } from './lib/tier.mjs';
+import { findRepoRoot, latestRun, readJson, loadSession, DIR } from './lib/tier.mjs';
 
 export const PHASE = { DONE: '🔍 review', PARTIAL: '◐ partial', BLOCKED: '⛔ blocked' };
 
@@ -44,7 +44,9 @@ export function parseReturn(text) {
     task, status, restated, evidence, lines,
     branch: field(/^\s*BRANCH:\s*(.+)$/im),
     changed: field(/^\s*CHANGED:\s*(.+)$/im),
-    verdict: /^\s*(PASS|FAIL)\b/m.test(t) ? (/^\s*(PASS|FAIL)\b/m.exec(t)[1]) : null,
+    // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what a reviewer
+    // written to the older instruction produces, and is still read.
+    verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
     missing, overLong: lines > 60,
   };
 }
@@ -79,33 +81,59 @@ export function formatUsage(u) {
 // the id is escaped before it becomes part of a pattern.
 const escapeId = id => String(id).replace(/[^A-Za-z0-9_-]/g, c => `\\${c}`);
 
-// Replace the row whose second column-ish id matches, keeping every other row
-// and the rest of the file byte-for-byte. Returns the new text, or null when no
-// row matched (the caller then appends).
+// | id | phase | role · model | task | rubric | attempts | evidence |
+//
+// The three cells this hook owns are addressed from the ends, never by counting
+// from the left. Task and rubric are free text written by a human or an agent,
+// and one unescaped pipe in either shifts every later index: before this, a
+// rubric of "exit 0 | 41 passed" put the attempt count into the rubric cell and
+// left evidence empty, silently, on the row the orchestrator grades from.
+const PHASE_COL = 2;        // id and phase come before any free text
+const EVIDENCE_FROM_END = 2;
+const ATTEMPTS_FROM_END = 3;
+
+function rowCells(line) {
+  const cols = line.split('|');
+  return cols.length >= 9 ? cols : null;
+}
+
 export function updateRow(runMd, id, cells) {
   const lines = runMd.split('\n');
   const idRe = new RegExp(`^\\|\\s*${escapeId(id)}\\s*\\|`);
   for (let i = 0; i < lines.length; i++) {
     if (!idRe.test(lines[i])) continue;
-    const cols = lines[i].split('|');
-    // | id | phase | role · model | task | rubric | attempts | evidence |
-    if (cols.length >= 9) {
-      if (cells.phase) cols[2] = ` ${cells.phase} `;
-      if (cells.attempts != null) cols[6] = ` ${cells.attempts} `;
-      if (cells.evidence) cols[7] = ` ${cells.evidence} `;
-      lines[i] = cols.join('|');
-      return lines.join('\n');
-    }
+    const cols = rowCells(lines[i]);
+    if (!cols) continue;
+    if (cells.phase) cols[PHASE_COL] = ` ${cells.phase} `;
+    if (cells.attempts != null) cols[cols.length - ATTEMPTS_FROM_END] = ` ${cells.attempts} `;
+    if (cells.evidence) cols[cols.length - EVIDENCE_FROM_END] = ` ${cells.evidence} `;
+    lines[i] = cols.join('|');
+    return lines.join('\n');
   }
   return null;
 }
 
 export function bumpAttempts(runMd, id) {
   const idRe = new RegExp(`^\\|\\s*${escapeId(id)}\\s*\\|`, 'm');
-  const line = (runMd.split('\n').find(l => idRe.test(l)) || '');
-  const cols = line.split('|');
-  const n = Number((cols[6] || '').trim());
+  const cols = rowCells(runMd.split('\n').find(l => idRe.test(l)) || '');
+  const n = cols ? Number((cols[cols.length - ATTEMPTS_FROM_END] || '').trim()) : NaN;
   return Number.isFinite(n) ? n + 1 : 1;
+}
+
+// What the guard recorded for this task in the session state. Returns
+// "opus (asked for fable)" when the guard moved it, the model alone otherwise,
+// and null when there is nothing to say.
+export function describeDispatch(d) {
+  if (!d || !d.model) return null;
+  return d.requested && d.requested !== d.model ? `${d.model} (asked for ${d.requested})` : d.model;
+}
+
+function dispatchedModel(sessionId, task) {
+  try {
+    const state = loadSession(sessionId);
+    const list = (state && Array.isArray(state.dispatches) ? state.dispatches : []).filter(d => !task || d.task === task);
+    return describeDispatch(list[list.length - 1]);
+  } catch { return null; }
 }
 
 function nextReturnNumber(dir) {
@@ -149,6 +177,13 @@ function main() {
 
   const text = String(input.last_assistant_message || '');
   if (!text.trim()) return;
+
+  // Only a subagent's stop is a return. A payload with no agent identity is
+  // some other stop, and treating it as a return files the orchestrator's own
+  // last message under returns/ and lets it move a row. Two such files landed
+  // in this repo's first real run before this check existed.
+  const identity = input.agent_type || input.subagent_type || input.agent_id;
+  if (!identity) return;
   const agent = String(input.agent_type || input.subagent_type || 'agent').replace(/[^A-Za-z0-9_-]/g, '_');
 
   // The recommended install registers this hook twice: once globally in
@@ -176,7 +211,11 @@ function main() {
       if (r.task) {
         const md = readFileSync(run.runMd, 'utf8');
         const phase = PHASE[r.status] || '🔍 review';
-        const evidence = `${r.verdict ? `${r.verdict} · ` : ''}${formatUsage(usage)} · returns/${file.split(/[\\/]/).pop()}`;
+        // The model the guard actually dispatched on, which is not always the
+        // one the packet named: past the daily cap the guard rewrites fable to
+        // opus, and the agent's own return still echoes the packet.
+        const ran = dispatchedModel(input.session_id, r.task);
+        const evidence = `${r.verdict ? `${r.verdict} · ` : ''}${ran ? `${ran} · ` : ''}${formatUsage(usage)} · returns/${file.split(/[\\/]/).pop()}`;
         const next = updateRow(md, r.task, { phase, attempts: bumpAttempts(md, r.task), evidence });
         if (next) { writeFileSync(run.runMd, next); notes.push(`RUN.md row ${r.task} → ${phase}`); }
         else notes.push(`no RUN.md row for ${r.task}: write the row before the next dispatch`);

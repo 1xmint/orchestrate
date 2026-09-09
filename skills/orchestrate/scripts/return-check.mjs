@@ -36,10 +36,26 @@ export function check(text) {
   return { ok: reasons.length === 0, reasons, lines, missing };
 }
 
-// One counter per (session, agent) so two agents in the same session each get
-// their own two chances.
-function countKey(input) {
-  return sanitizeId(`${input.session_id || 'nosession'}-${input.agent_type || input.subagent_type || 'agent'}`);
+// Two chances per invocation, not per role. Keyed on agent_type alone, the
+// second implementer of a session inherited the first one's spent budget and
+// was never blocked at all: its malformed return went straight through to the
+// ledger, which then told the orchestrator to grade it Failed and pay for a
+// re-dispatch. agent_id identifies the invocation; agent_type is the fallback
+// for a host that does not send one.
+export function countKey(input) {
+  const who = input.agent_id || `${input.agent_type || input.subagent_type || 'agent'}`;
+  return sanitizeId(`${input.session_id || 'nosession'}-${who}`);
+}
+
+// Keys from previous days are dead weight; this file would otherwise grow for
+// the life of the machine.
+function prune(store, now = Date.now(), maxAgeMs = 86400000) {
+  for (const [k, v] of Object.entries(store)) {
+    if (k === 'updated') continue;
+    const at = v && typeof v === 'object' ? Date.parse(v.at) : NaN;
+    if (Number.isFinite(at) && now - at > maxAgeMs) delete store[k];
+  }
+  return store;
 }
 
 function main() {
@@ -56,11 +72,11 @@ function main() {
   if (r.ok) return;
 
   const path = join(DIR, 'return-blocks.json');
-  const store = readJson(path) || {};
+  const store = prune(readJson(path) || {});
   const key = countKey(input);
-  const n = Number(store[key]) || 0;
-  if (n >= MAX_BLOCKS) return; // let it finish; the ledger will flag the shape
-  store[key] = n + 1;
+  const rec = store[key] && typeof store[key] === 'object' ? store[key] : { n: 0 };
+  if (rec.n >= MAX_BLOCKS) return; // let it finish; the ledger will flag the shape
+  store[key] = { n: rec.n + 1, at: new Date().toISOString() };
   store.updated = new Date().toISOString();
   try { writeJsonAtomic(path, store); } catch {}
 

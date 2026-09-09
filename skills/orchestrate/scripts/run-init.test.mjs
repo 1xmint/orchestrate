@@ -28,7 +28,13 @@ function repo(files = {}, withGit = true) {
   return dir;
 }
 
-const run = (cwd, ...args) => spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8' });
+// A fake HOME, because run-init records the run it created under
+// ~/.claude/orchestrate so hooks can find it from any cwd. Without this the
+// suite would repoint the developer's own machine at a temp directory.
+const FAKE_HOME = mkdtempSync(join(tmpdir(), 'orch-runinit-home-'));
+const run = (cwd, ...args) => spawnSync(process.execPath, [SCRIPT, ...args], {
+  cwd, encoding: 'utf8', env: { ...process.env, HOME: FAKE_HOME, USERPROFILE: FAKE_HOME },
+});
 
 test('a ledger is created with the headings a resuming session looks for', () => {
   const dir = repo({ 'pyproject.toml': '[tool.pytest.ini_options]\n' });

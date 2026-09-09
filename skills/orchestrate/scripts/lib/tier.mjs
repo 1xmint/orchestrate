@@ -117,10 +117,37 @@ export function isWritten(value) {
   return true;
 }
 
+export const ACTIVE_RUN_PATH = join(DIR, 'active-run.json');
+
+// A session's cwd is often not the repo. Josh's sessions start in the folder
+// that *contains* his repos, so `findRepoRoot(cwd)` returns null and every hook
+// that looked for a run from cwd found nothing: the router said "open run: none
+// in this repo" while a run was open one directory down, and `profile --brief`
+// said "runs 0". run-init records the run it just created here, and every
+// reader tries this pointer before falling back to cwd.
+export function rememberActiveRun(root, runMd) {
+  try { writeJsonAtomic(ACTIVE_RUN_PATH, { v: 1, root, runMd, at: new Date().toISOString() }); } catch {}
+}
+
+function activeRunRoot() {
+  const p = readJson(ACTIVE_RUN_PATH);
+  return p && p.root && existsSync(join(p.root, '.orchestrator', 'runs')) ? p.root : null;
+}
+
 // The newest run under <root>/.orchestrator/runs that has a RUN.md. `open` is
 // true when a task row still carries a non-final glyph. Pickup lines come from
 // the "## Pickup" section; template placeholders count as empty.
 export function latestRun(root) {
+  const found = latestRunUnder(root);
+  if (found) return found;
+  // cwd knew nothing. Fall back to the run the last run-init recorded, but only
+  // when cwd is not itself a repo with runs, so a session working in repo B is
+  // never shown repo A's ledger.
+  const remembered = activeRunRoot();
+  return remembered && remembered !== root ? latestRunUnder(remembered) : null;
+}
+
+function latestRunUnder(root) {
   try {
     const base = join(root || process.cwd(), '.orchestrator', 'runs');
     if (!existsSync(base)) return null;
@@ -140,7 +167,7 @@ export function latestRun(root) {
         if (kv && isWritten(kv[2])) pickup[kv[1]] = kv[2].trim();
       }
     }
-    return { runId, dir: join(base, runId), runMd, mtimeMs: st.mtimeMs, open, rows: rows.length, pickup };
+    return { runId, dir: join(base, runId), runMd, root: root || process.cwd(), mtimeMs: st.mtimeMs, open, rows: rows.length, pickup };
   } catch { return null; }
 }
 

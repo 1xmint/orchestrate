@@ -13,6 +13,7 @@ import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, block } from './gate.mjs';
+import { rememberActiveRun } from './lib/tier.mjs';
 
 const args = process.argv.slice(2);
 const positional = [];
@@ -81,6 +82,10 @@ const withGate = gateBlock
 
 mkdirSync(dir, { recursive: true });
 writeFileSync(target, withGate);
+
+// Point the hooks at this run. A session whose cwd is the folder above the
+// repo — which is where Josh's sessions start — would otherwise find nothing.
+rememberActiveRun(root, target);
 
 // keep it out of git without touching tracked files. Inside a worktree or a
 // submodule `.git` is a file, so ask git where the exclude file really is.

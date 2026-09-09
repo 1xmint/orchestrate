@@ -21,8 +21,13 @@ export function toPosix(p) {
   return String(p).replace(/\\/g, '/');
 }
 
-export function commandFor(scriptPath) {
-  return `node "${toPosix(scriptPath)}"`;
+// The interpreter is written in by absolute path, not as bare `node`. A desktop
+// app launched from the dock or Start menu inherits the OS login environment,
+// not a shell's, so a Node installed by nvm, Homebrew, fnm or volta is not on
+// its PATH. With a bare `node` every hook here would fail silently and the
+// skill's `!` injection would abort the invocation outright.
+export function commandFor(scriptPath, node = process.execPath) {
+  return `"${toPosix(node)}" "${toPosix(scriptPath)}"`;
 }
 
 // The basename of the script a hook command runs, or '' when we cannot tell.
@@ -30,6 +35,9 @@ export function commandBasename(command) {
   const m = /([A-Za-z0-9_.-]+\.mjs)/.exec(String(command || ''));
   return m ? basename(m[1]) : '';
 }
+
+// The interpreter path also ends in an executable name, never in .mjs, so the
+// basename match above still finds the script and dedupe is unaffected.
 
 // Remove every hook whose command names one of `basenames`, from every event
 // array. Groups left with no hooks are dropped; untouched groups keep their

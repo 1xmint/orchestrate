@@ -24,6 +24,11 @@ import {
 } from '../skills/orchestrate/scripts/lib/settings.mjs';
 import { templateTree } from '../skills/orchestrate/scripts/lib/template.mjs';
 
+// The interpreter, quoted and forward-slashed, for the templated hook commands
+// and the skill's injected profile line. A GUI-launched desktop app has no
+// shell PATH, so a bare `node` there resolves to nothing.
+const nodeCmd = () => JSON.stringify(process.execPath.split(String.fromCharCode(92)).join('/'));
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SRC = join(ROOT, 'skills', 'orchestrate');
 const HOME = homedir();
@@ -57,7 +62,7 @@ for (const t of targets) {
     mkdirSync(dirname(t), { recursive: true });
     if (existsSync(t)) rmSync(t, { recursive: true, force: true });
     cpSync(SRC, t, { recursive: true });
-    const changed = templateTree(t, { SKILL_DIR: t });
+    const changed = templateTree(t, { SKILL_DIR: t, NODE: nodeCmd() });
     if (changed.length) say(`templated {{SKILL_DIR}} in ${changed.length} file(s)`);
   }
   say(`installed -> ${t}`);

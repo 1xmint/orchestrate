@@ -16,7 +16,7 @@ const AGENT = readFileSync(join(ROOT, 'skills', 'orchestrate', 'assets', 'agents
 test('the Claude Code source keeps what makes the rules mechanical', () => {
   assert.match(SKILL, /^hooks:$/m);
   assert.match(SKILL, /^when_to_use:/m);
-  assert.match(SKILL, /^!`node "\$\{CLAUDE_SKILL_DIR\}\/scripts\/profile\.mjs" --brief`$/m);
+  assert.match(SKILL, /^!`\{\{NODE\}\} "\$\{CLAUDE_SKILL_DIR\}\/scripts\/profile\.mjs" --brief`$/m);
   assert.match(SKILL, /version: "0\.4\.0"/);
 });
 
@@ -71,4 +71,11 @@ test('both packaged artifacts exist and the tests are not in them', () => {
     assert.doesNotMatch(zip, /\.test\.mjs/, `${f} ships no test files`);
     assert.match(zip, /orchestrate\/SKILL\.md/);
   }
+});
+
+test('the portable build falls back to plain node, since no installer runs there', () => {
+  const s = toSpec(SKILL);
+  assert.doesNotMatch(s, /\{\{NODE\}\}/);
+  const a = toSpec(AGENT);
+  assert.doesNotMatch(a, /\{\{NODE\}\}/);
 });

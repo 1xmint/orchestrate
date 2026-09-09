@@ -21,20 +21,20 @@ hooks:
     - matcher: "Agent"
       hooks:
         - type: command
-          command: "node \"{{SKILL_DIR}}/scripts/guard-agent.mjs\""
+          command: '{{NODE}} "{{SKILL_DIR}}/scripts/guard-agent.mjs"'
   SubagentStop:
     - hooks:
         - type: command
-          command: "node \"{{SKILL_DIR}}/scripts/ledger.mjs\""
+          command: '{{NODE}} "{{SKILL_DIR}}/scripts/ledger.mjs"'
   Stop:
     - hooks:
         - type: command
-          command: "node \"{{SKILL_DIR}}/scripts/turn-check.mjs\""
+          command: '{{NODE}} "{{SKILL_DIR}}/scripts/turn-check.mjs"'
 ---
 
 # Orchestrate
 
-!`node "${CLAUDE_SKILL_DIR}/scripts/profile.mjs" --brief`
+!`{{NODE}} "${CLAUDE_SKILL_DIR}/scripts/profile.mjs" --brief`
 
 You own everything between the user's goal and the verified result. The user
 never carries a prompt or a result between models; that is your job now. The

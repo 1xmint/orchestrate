@@ -95,10 +95,15 @@ test('a group with one of ours and one of theirs keeps theirs', () => {
   assert.match(s.hooks.PreToolUse[0].hooks[0].command, /their-audit/);
 });
 
-test('commands are absolute, forward-slashed, quoted, and free of shell operators', () => {
+test('commands name the interpreter by absolute path, quoted, with no shell operators', () => {
+  // Bare `node` is not enough: a desktop app launched from the dock or Start
+  // menu has the OS login environment, not a shell's, so an nvm or Homebrew
+  // Node is not on its PATH and every hook would fail silently.
   for (const e of registrations('C:\\Users\\Josh\\.claude\\skills\\orchestrate\\scripts', { router: true, guard: true })) {
-    assert.match(e.command, /^node "[^"]+\.mjs"$/);
-    assert.doesNotMatch(e.command, /\\|&&|\||;|\$\(/);
+    assert.match(e.command, /^"[^"]+" "[^"]+\.mjs"$/);
+    assert.ok(e.command.startsWith(`"${process.execPath.split('\\').join('/')}"`));
+    assert.doesNotMatch(e.command, /\\|&&|\||;|\$\(/, 'no backslashes and no shell operators');
+    assert.equal(commandBasename(e.command).endsWith('.mjs'), true, 'the script, not the interpreter, is what dedupe keys on');
   }
 });
 

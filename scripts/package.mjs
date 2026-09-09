@@ -66,6 +66,9 @@ export function toSpec(text) {
   body = body.replace(/^Tier `unknown` above:/m, 'Start by running `profile.mjs` in the skill folder. Tier `unknown`:');
   body = body.replace(/`ledger\.mjs` saves every return and moves its row to 🔍 review; grading is\nyours\./, 'Save every return under the run folder and move its row to 🔍 review yourself.');
   body = body.split('${CLAUDE_SKILL_DIR}').join('<skill folder>');
+  // No installer runs on these hosts, so nothing would substitute the
+  // interpreter placeholder; plain `node` is the honest fallback there.
+  body = body.split('{{NODE}} ').join('node ').split('{{NODE}}').join('node');
   return `---\n${fm}\n---\n${body}`;
 }
 

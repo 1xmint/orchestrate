@@ -10,8 +10,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseReturn, sumUsage, updateRow, PHASE, isRepeat } from './ledger.mjs';
-import { check as returnCheck, MAX_BLOCKS } from './return-check.mjs';
+import { parseReturn, sumUsage, updateRow, bumpAttempts, describeDispatch, PHASE, isRepeat } from './ledger.mjs';
+import { check as returnCheck, MAX_BLOCKS, countKey } from './return-check.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
 import { decide } from './guard-agent.mjs';
 
@@ -429,4 +429,74 @@ test('ledger: the dedupe window is a window, not a permanent memory', () => {
   assert.equal(isRepeat({ sig, ts: 1000 }, sig, 60000), false, 'a minute later is not');
   assert.equal(isRepeat({ sig: 'other', ts: 1000 }, sig, 1500), false);
   assert.equal(isRepeat(null, sig, 1000), false);
+});
+
+// ---- what the fresh-context audit found ------------------------------------
+
+test('ledger: a pipe in a rubric no longer writes the attempt count into it', () => {
+  const md = [
+    '| id | phase | role · model | task | rubric | attempts | evidence |',
+    '|---|---|---|---|---|---|---|',
+    '| 9-9-0001 | 🔨 running | implementer · sonnet | add flag | exit 0 | 41 passed | 0 | — |',
+  ].join('\n');
+  const out = updateRow(md, '9-9-0001', { phase: '🔍 review', attempts: 1, evidence: 'returns/001.md' });
+  const cells = out.split('\n')[2].split('|');
+  assert.equal(cells[cells.length - 2].trim(), 'returns/001.md', 'evidence is the last cell');
+  assert.equal(cells[cells.length - 3].trim(), '1', 'attempts is the one before it');
+  assert.match(out, /exit 0 \| 41 passed/, 'the free-text rubric is untouched');
+  assert.equal(bumpAttempts(md, '9-9-0001'), 1);
+});
+
+test('ledger: a stop with no agent identity is not a return', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  // Before this check, the orchestrator's own last message was filed under
+  // returns/ and could move a row. Two such files landed in a real run.
+  const out = run('ledger.mjs', {
+    hook_event_name: 'Stop', session_id: 'noid', cwd: repo.dir,
+    last_assistant_message: 'wait for the audit and apply its findings',
+  }, home);
+  assert.equal(out.stdout.trim(), '');
+  assert.equal(existsSync(join(repo.runDir, 'returns')), false);
+});
+
+test('ledger: the row records the model the guard actually used', () => {
+  assert.equal(describeDispatch({ model: 'opus', requested: 'fable' }), 'opus (asked for fable)');
+  assert.equal(describeDispatch({ model: 'sonnet', requested: 'sonnet' }), 'sonnet');
+  assert.equal(describeDispatch({ model: 'sonnet' }), 'sonnet');
+  assert.equal(describeDispatch(null), null);
+
+  const home = sandbox();
+  const repo = fixtureRepo();
+  mkdirSync(join(home, '.claude', 'orchestrate', 'sessions'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'dg.json'), JSON.stringify({
+    session_id: 'dg', dispatches: [{ at: new Date().toISOString(), agent: 'orch-planner', model: 'opus', requested: 'fable', task: '9-9-0001' }],
+  }));
+  run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'dg', cwd: repo.dir,
+    agent_type: 'orch-planner', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.match(readFileSync(repo.runMd, 'utf8'), /opus \(asked for fable\)/,
+    'the return echoes the packet, so the row is the only honest record of the downgrade');
+});
+
+test('ledger: a reviewer VERDICT line is read as the verdict', () => {
+  const r = parseReturn('TASK: 9-9-0002\nRESTATED: x\nSTATUS: DONE\nVERDICT: FAIL\nEVIDENCE: read the diff');
+  assert.equal(r.verdict, 'FAIL');
+  assert.equal(r.status, 'DONE', 'STATUS says the review finished, not whether it passed');
+  assert.deepEqual(r.missing, []);
+});
+
+test('return check: each invocation gets its own two chances, not each role', () => {
+  const home = sandbox();
+  const bad = { hook_event_name: 'SubagentStop', session_id: 'inv', agent_type: 'orch-implementer', last_assistant_message: 'done!' };
+  // First implementer spends its budget.
+  run('return-check.mjs', { ...bad, agent_id: 'a1' }, home);
+  run('return-check.mjs', { ...bad, agent_id: 'a1' }, home);
+  assert.equal(run('return-check.mjs', { ...bad, agent_id: 'a1' }, home).stdout.trim(), '');
+  // A second implementer in the same session used to inherit that spent budget
+  // and was never checked at all.
+  assert.equal(run('return-check.mjs', { ...bad, agent_id: 'a2' }, home).json.decision, 'block');
+  assert.equal(countKey({ session_id: 's', agent_id: 'a1' }), countKey({ session_id: 's', agent_id: 'a1' }));
+  assert.notEqual(countKey({ session_id: 's', agent_id: 'a1' }), countKey({ session_id: 's', agent_id: 'a2' }));
 });

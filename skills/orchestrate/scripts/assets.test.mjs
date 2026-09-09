@@ -32,7 +32,9 @@ test('every role agent carries the return check as its own Stop hook', () => {
     const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
     assert.match(fm, /^hooks:$/m, f);
     assert.match(fm, /^ {2}Stop:$/m, f);
-    assert.match(fm, /command: node "\{\{SKILL_DIR\}\}\/scripts\/return-check\.mjs"/, f);
+    // A single-quoted YAML scalar, so the interpreter path the installer
+    // substitutes can carry its own quotes and its own spaces.
+    assert.match(fm, /command: '\{\{NODE\}\} "\{\{SKILL_DIR\}\}\/scripts\/return-check\.mjs"'/, f);
     assert.ok(existsSync(join(SKILL, 'scripts', 'return-check.mjs')), 'the script the hook names exists');
   }
 });

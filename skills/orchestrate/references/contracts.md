@@ -117,10 +117,18 @@ ALLOWED FILES THE AUTHOR HAD: <globs>
 DIFF: `git diff <base>..<sha>` in that worktree
 EVIDENCE: <the author's EVIDENCE section and any log paths>
 REPO STANDARDS: <path to AGENTS.md / CLAUDE.md>
-RETURN: `TASK: <id>` then PASS or FAIL, then numbered findings with file:line
-  and the exact edit; under 60 lines. Flag only gaps that affect correctness or
-  the stated requirements; a reviewer asked for gaps will always find some.
+RETURN: the same schema as every other role — TASK, RESTATED, STATUS: DONE,
+  VERDICT: PASS|FAIL, FINDINGS (numbered, file:line, the failure it causes, the
+  exact edit), EVIDENCE, NOT VERIFIED, QUESTIONS; under 55 lines. Flag only gaps
+  that affect correctness or the stated requirements; a reviewer asked for gaps
+  will always find some.
 ```
+
+One schema, every role, including the reviewer. A reviewer told to answer
+"PASS or FAIL on the first line" writes a return with no RESTATED and no
+STATUS, which its own Stop hook then blocks twice and the ledger then reports
+as unmarkable. `VERDICT` carries the pass or fail; `STATUS` says only whether
+the review finished.
 
 The `RESTATED` line is the cheapest check that the agent understood the task.
 When it does not match the objective, stop reading and fix the packet.

@@ -10,7 +10,7 @@ memory: user
 hooks:
   Stop:
     - type: command
-      command: node "{{SKILL_DIR}}/scripts/return-check.mjs"
+      command: '{{NODE}} "{{SKILL_DIR}}/scripts/return-check.mjs"'
 ---
 
 You answer one question from evidence, not memory. The packet gives you a

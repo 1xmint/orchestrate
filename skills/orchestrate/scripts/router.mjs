@@ -39,16 +39,27 @@ function cardBody() {
 const LADDER_LINE = 'ladder: context → inline → script → skill → Explore(haiku) → orch-* worktree → fork → workflow → /batch; ask only money/public/credential/destructive/strategic; wait with Monitor, not polling';
 
 // ---- features ---------------------------------------------------------------
-const VERBS = 'add|fix|build|create|implement|write|refactor|migrate|set up|setup|deploy|release|run|test|review|research|find|check|update|remove|rename|move|convert|install|configure|wire|ship|publish|merge|split|extract|document|port|upgrade|audit|generate|investigate|debug|make|open|tag|decide|verify|measure|compare';
+const VERBS = 'add|fix|build|create|implement|write|refactor|migrate|set up|setup|deploy|release|run|test|review|research|find|check|update|remove|rename|move|convert|install|configure|wire|ship|publish|merge|split|extract|document|port|upgrade|audit|generate|investigate|debug|make|open|tag|decide|verify|measure|compare|plan|do|get|look|port|clone|land';
 const CLAUSE_SPLIT = /\s*(?:\band then\b|\band\b|\bthen\b|\bafter that\b|\bafter\b|\bbefore\b|\balso\b|\bplus\b|;|,|\n|^\s*[-*•]\s+|^\s*\d+[.)]\s+)\s*/gim;
 const HEAD_RE = new RegExp(`^(?:please\\s+|now\\s+|also\\s+|first\\s+|finally\\s+|next\\s+)?(?:${VERBS})\\b`, 'i');
 const RX = {
   question: /(\?\s*$)|^(what|why|how|when|where|which|who|is|are|does|do|can|could|should|would|will|did|any)\b/i,
-  path: /(^|[\s"'`(])(\.{1,2}\/|~\/|[A-Za-z]:[\\/]|\/[\w.-]+\/|[\w.-]+\/[\w./-]+|\*\.\w+|\*\*)/g,
+  // A bare `client.rs` names a file as surely as `src/client.rs` does. Counting
+  // only slashed paths read "implement the retry logic in client.rs and
+  // websocket.rs" as touching zero files, and so as one small inline change.
+  path: /(^|[\s"'`(])(\.{1,2}\/|~\/|[A-Za-z]:[\\/]|\/[\w.-]+\/|[\w.-]+\/[\w./-]+|\*\.\w+|\*\*|[\w-]+\.(?:m?[jt]sx?|py|rs|go|rb|java|kt|c|h|cpp|cs|php|swift|sh|sql|toml|ya?ml|json|md))\b/g,
   scope: /\b(all|every|each|across|entire|whole|repo-wide|per (file|package|crate|module|service))\b/i,
   url: /https?:\/\//g,
   deixis: /\b(as we discussed|you already|this conversation|from what we|earlier you|like you did|the diff we)\b/i,
+  // Two different questions, and they were one regex until an audit pointed at
+  // the gap. `risky` is "should the user be asked before this happens": money,
+  // public surfaces, credentials, destructive or irreversible acts. `review` is
+  // "does this class require an independent reviewer", the list in routing.md.
+  // Auth, payments and a schema default are review classes and not ask-first
+  // ones, so with a single regex an Opus manager was told to review a
+  // Sonnet-authored auth change itself.
   risky: /\b(deploy|publish|release|push (to )?(main|master|prod|production)|force[- ]push|delete|drop|rm -rf|wipe|purge|pay|buy|charge|credential|password|token|secret|prod|production|customers?|public)\b/i,
+  review: /\b(auth|authn|authz|authentication|authorisation|authorization|login|session|jwt|oauth|password|token|secret|credential|security|crypto|permission|payment|payments|billing|stripe|invoice|charge|refund|schema|migration|migrate|default|irreversible|destructive|delete|drop|truncate|backfill|rewrite|public|customers?|prod|production|deploy|publish|release)\b/i,
   wait: /\b(wait (for|until)|poll(ing)?|every \d+ ?(s|sec|m|min|h|hours?|minutes?)|check back|when (ci|the pr|deploy|the build|the deploy) (finishes|passes|is green|goes green|completes)|remind me|in \d+ (minutes|hours))\b/i,
   keepWorking: /\b(until (the |all )?(tests?|ci|build|it|they|lint) (pass|passes|is green|are green|works?|goes green)|keep going|don'?t stop|loop until|until (it'?s|its) (green|done))\b/i,
   research: /\b(latest|recommended|current(ly)?|cite|sources?|best (way|practice)|state of the art|what'?s new|documentation says)\b/i,
@@ -81,7 +92,7 @@ export function analyze(text) {
     words, heads, paste,
     question: RX.question.test(t.trim()) && heads === 0,
     paths: count(RX.path), scope: RX.scope.test(t), urls: count(RX.url), deixis: RX.deixis.test(t),
-    risky: RX.risky.test(t), wait: RX.wait.test(t), keepWorking: RX.keepWorking.test(t),
+    risky: RX.risky.test(t), review: RX.review.test(t), wait: RX.wait.test(t), keepWorking: RX.keepWorking.test(t),
     research: RX.research.test(t), explore: RX.explore.test(t), script: RX.script.test(t),
     mechanical: RX.mechanical.test(t), planFirst: RX.planFirst.test(t), browser: RX.browser.test(t),
     team: RX.team.test(t), workflowWord: RX.workflowWord.test(t), batchWord: RX.batchWord.test(t),
@@ -103,10 +114,15 @@ export function classify(f, ctx) {
   if (f.wait) orth.push('wait');
   if (f.browser) orth.push('browser');
 
+  // "continue" is one word and the short-prompt gate below dropped it before
+  // the resume rule could ever see it — the one moment a hint pays for itself,
+  // because an open run plus a resume word means read RUN.md and do not re-plan.
+  if (f.resume && ctx.openRun && ctx.openRun.open && !f.slash && !f.paste) {
+    return { rung: 11, confident: true, orth, evidence: `open run ${ctx.openRun.runId} + resume words` };
+  }
   if (f.slash || f.paste || f.words < 4) return { rung: 0, confident: false, orth, evidence: f.slash ? 'command' : f.paste ? 'paste' : 'short' };
   if (f.team) return { rung: 10, confident: true, orth, evidence: 'asks for an agent team' };
   if (f.workflowWord || f.batchWord) return { rung: 0, confident: false, orth, evidence: 'user chose the lane' };
-  if (f.resume && ctx.openRun && ctx.openRun.open) return { rung: 11, confident: true, orth, evidence: `open run ${ctx.openRun.runId} + resume words` };
   if (f.heads >= 4 && f.scope && f.perUnit) return { rung: 8, confident: true, orth, evidence: `${f.heads} steps across many units` };
   if (f.scope && f.mechanical && f.perUnit) return { rung: 9, confident: true, orth, evidence: 'one mechanical change per unit' };
   if (f.deixis && f.parallel) return { rung: 7, confident: true, orth, evidence: 'needs this conversation, in parallel' };
@@ -143,10 +159,10 @@ function modelsFor(tier, limits) {
 export function reviewClause(m, f, ctx) {
   const author = (m.impl || '').split(' or ')[0];
   const self = ctx.self && ctx.self.model;
-  if (!f.risky && self && strongerThan(self, author)) {
-    return `review the diff yourself (${self} over ${author}, not risky); dispatch orch-reviewer only if you wrote any of it`;
+  if (!f.review && self && strongerThan(self, author)) {
+    return `review the diff yourself (${self} over ${author}, not a review class); dispatch orch-reviewer only if you wrote any of it`;
   }
-  return `orch-reviewer ${m.rev}${f.risky ? ' (required: risky change)' : ''}${self && !strongerThan(self, author) ? `, at or above ${author}` : ''}`;
+  return `orch-reviewer ${m.rev}${f.review ? ' (required: this class always gets an independent reviewer)' : ''}${self && !strongerThan(self, author) ? `, at or above ${author}` : ''}`;
 }
 
 function hintFor(c, f, ctx) {

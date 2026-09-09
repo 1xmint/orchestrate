@@ -35,8 +35,9 @@ test('a first install writes all six, with {{SKILL_DIR}} substituted', () => {
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(readdirSync(join(h, '.claude', 'agents')).sort(), AGENT_NAMES.map(n => `${n}.md`).sort());
   const reviewer = readFileSync(agentPath(h, 'orch-reviewer'), 'utf8');
-  assert.match(reviewer, /command: node "\/opt\/skill\/scripts\/return-check\.mjs"/);
-  assert.doesNotMatch(reviewer, /\{\{SKILL_DIR\}\}/, 'no placeholder reaches the installed file');
+  assert.match(reviewer, /command: '".+" "\/opt\/skill\/scripts\/return-check\.mjs"'/, 'the interpreter is written in by absolute path');
+  assert.ok(reviewer.includes(`"${process.execPath.split('\\').join('/')}"`), 'and it is the Node running the installer');
+  assert.doesNotMatch(reviewer, /\{\{SKILL_DIR\}\}|\{\{NODE\}\}/, 'no placeholder reaches the installed file');
   assert.match(r.stdout, /6 installed, 0 refreshed/);
 });
 

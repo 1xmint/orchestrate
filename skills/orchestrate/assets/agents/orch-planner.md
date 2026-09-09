@@ -9,7 +9,7 @@ color: purple
 hooks:
   Stop:
     - type: command
-      command: node "{{SKILL_DIR}}/scripts/return-check.mjs"
+      command: '{{NODE}} "{{SKILL_DIR}}/scripts/return-check.mjs"'
 ---
 
 You plan; you do not build. You receive a packet with an objective, done-when

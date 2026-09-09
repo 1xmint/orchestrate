@@ -7,7 +7,22 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isWritten, latestRun, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId } from './tier.mjs';
+import { spawnSync } from 'node:child_process';
+import { isWritten, latestRun, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot } from './tier.mjs';
+
+const TIER = new URL('./tier.mjs', import.meta.url).href;
+
+// Run a snippet against this module with a HOME of its own. The active-run
+// pointer lives under the real ~/.claude/orchestrate, so a test that wrote it
+// in process would repoint the developer's own machine at a temp directory.
+function inFakeHome(code) {
+  const home = mkdtempSync(join(tmpdir(), 'orch-fakehome-'));
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
+    encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+  });
+  if (r.status !== 0) throw new Error(r.stderr);
+  return r.stdout.trim();
+}
 
 test('a Pickup value is written only when it is neither a placeholder nor the template list', () => {
   assert.equal(isWritten('dispatch 9-9-0002 once 0001 lands'), true);
@@ -84,4 +99,58 @@ test('dates are local, and ids are safe to use as filenames', () => {
   assert.equal(mapTier('MAX'), 'max5', 'unversioned max is assumed to be the smaller one');
   assert.equal(mapTier('anything else'), null);
   assert.equal(sanitizeId('a/b\\c:d'), 'a_b_c_d');
+});
+
+test('a session whose cwd is above the repo still finds the open run', () => {
+  const parent = mkdtempSync(join(tmpdir(), 'orch-parent-'));
+  const repo = join(parent, 'therepo');
+  const dir = join(repo, '.orchestrator', 'runs', '20260909-x');
+  mkdirSync(dir, { recursive: true });
+  mkdirSync(join(repo, '.git'), { recursive: true });
+  writeFileSync(join(dir, 'RUN.md'), [
+    '# Run', '', '## Tasks', '',
+    '| id | phase | role · model | task | rubric | attempts | evidence |',
+    '|---|---|---|---|---|---|---|',
+    '| 9-9-0001 | 🔨 running | implementer · sonnet | x | y | 0 | — |', '',
+    '## Pickup', '', 'Pickup prompt: carry on at step two', '',
+  ].join('\n'));
+
+  // This is the layout Josh actually works in: the session starts in the folder
+  // that contains his repos, so findRepoRoot(cwd) is null and every hook that
+  // asked cwd found nothing.
+  assert.equal(findRepoRoot(parent), null);
+
+  // The pointer lives under the real home, so this half runs in a child with a
+  // fake one; otherwise the suite would repoint the developer's own machine.
+  const before = inFakeHome(`
+    const { latestRun } = await import(${JSON.stringify(TIER)});
+    console.log(JSON.stringify(latestRun(${JSON.stringify(parent)})));
+  `);
+  assert.equal(before, 'null', 'without the pointer, nothing is found');
+
+  const after = JSON.parse(inFakeHome(`
+    const { latestRun, rememberActiveRun } = await import(${JSON.stringify(TIER)});
+    rememberActiveRun(${JSON.stringify(repo)}, ${JSON.stringify(join(dir, 'RUN.md'))});
+    console.log(JSON.stringify(latestRun(${JSON.stringify(parent)})));
+  `));
+  assert.ok(after, 'the pointer run-init wrote is the fallback');
+  assert.equal(after.runId, '20260909-x');
+  assert.equal(after.pickup['Pickup prompt'], 'carry on at step two');
+});
+
+test('the pointer never shows one repo the ledger of another', () => {
+  const a = mkdtempSync(join(tmpdir(), 'orch-a-'));
+  const b = mkdtempSync(join(tmpdir(), 'orch-b-'));
+  for (const [root, id] of [[a, '20260909-a'], [b, '20260909-b']]) {
+    const d = join(root, '.orchestrator', 'runs', id);
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, 'RUN.md'), `# Run\n\n## Tasks\n\n| id | phase | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n`);
+  }
+  const out = JSON.parse(inFakeHome(`
+    const { latestRun, rememberActiveRun } = await import(${JSON.stringify(TIER)});
+    rememberActiveRun(${JSON.stringify(a)}, 'ignored');
+    console.log(JSON.stringify({ b: latestRun(${JSON.stringify(b)}).runId, a: latestRun(${JSON.stringify(a)}).runId }));
+  `));
+  assert.equal(out.b, '20260909-b', 'a repo with its own runs is never overridden by the pointer');
+  assert.equal(out.a, '20260909-a');
 });

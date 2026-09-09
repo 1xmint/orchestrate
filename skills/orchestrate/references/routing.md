@@ -50,9 +50,12 @@ invoked (`install.mjs --with-hook` does the same globally). It denies a
 `model: fable` dispatch on pro/api/team/unknown without today's opt-in and
 denies any packet carrying a credential. On Max 5x and Max 20x it caps Fable at
 3 and 6 dispatches a day; past the cap it does not stall the run: it rewrites
-the call to `opus` (`updatedInput`) and says so in a one-line context note, so
-the orchestrator sees the downgrade in the return's `MODEL` line and the ledger.
-Without the hook the same numbers are the rule.
+the call to `opus` (`updatedInput`) and says so in a one-line context note. That
+note, at dispatch time, is where you see the downgrade: the agent echoes the
+model the packet named, not the one it ran on, so a return can say `fable` for
+work an `opus` agent did. `ledger.mjs` writes the model the guard actually used
+into the row's evidence cell from the session's dispatch record, and that cell
+is the honest answer. Without the hook the same numbers are the rule.
 
 The router (`scripts/router.mjs`, global) reads the same counter and shows
 `fable n/3 today` in its hints; it also records a model-family limit seen in
