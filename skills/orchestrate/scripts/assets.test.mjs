@@ -275,3 +275,35 @@ test('every plugin hook names a script that exists, through the plugin root', ()
   const all = JSON.stringify(hooks);
   assert.doesNotMatch(all, /turn-check|return-check/);
 });
+
+// The evaluator's prompt has one home. It is copied verbatim into SKILL.md's
+// frontmatter and read by the installer for the global registration, and a
+// drift between the copies would mean two different checks with one name.
+test('every copy of the reply check equals the one source', () => {
+  const src = readFileSync(join(SKILL, 'assets', 'reply-check.txt'), 'utf8').replace(/\n+$/, '');
+  assert.ok(src.length > 200, 'the prompt is really there');
+  assert.match(src, /\$ARGUMENTS\s*$/, 'the hook input JSON is substituted at the end');
+  assert.match(src, /"reason": "reply check: /, 'the fixed prefix measure.mjs counts');
+  assert.match(src, /If stop_hook_active is true,\s*\nanswer ok/, 'the host overrides a Stop hook after eight blocks');
+  assert.match(src, /Ask only for the basis, never for more work or more checking/,
+    'both model guides forbid asking a model to re-check its own work');
+  assert.doesNotMatch(src, /"impossible"/, 'never impossible: that ends the turn instead of asking');
+
+  const fm = frontmatter(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  const lines = fm.split('\n');
+  const i = lines.findIndex(l => l.trim() === 'prompt: |');
+  assert.ok(i > 0, 'SKILL.md registers the reply check as a prompt hook');
+  const header = lines.slice(Math.max(0, i - 3), i).join(' ');
+  assert.match(header, /type: prompt/);
+  assert.match(header, /timeout: 30/);
+  assert.match(header, /model: sonnet/, 'on Sonnet, by decision');
+
+  const indent = lines[i + 1].match(/^ */)[0].length;
+  const body = [];
+  for (let j = i + 1; j < lines.length; j++) {
+    if (lines[j].trim() === '') { body.push(''); continue; }
+    if (lines[j].match(/^ */)[0].length < indent) break;
+    body.push(lines[j].slice(indent));
+  }
+  assert.equal(body.join('\n').replace(/\n+$/, ''), src, 'the frontmatter copy has not drifted');
+});
