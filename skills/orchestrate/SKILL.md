@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (hey-vera)
-  version: "0.6.0"
+  version: "0.7.0"
 hooks:
   PreToolUse:
     - matcher: "Agent"
@@ -66,11 +66,14 @@ and return schema, worked example), `evaluation.md` (grading, failure
 classes), `lanes.md` (workflows, `/batch`, fork, teams, `/goal`, waiting),
 `hosts.md` (what the Agent tool can and cannot do).
 
-Three hooks hold what is mechanical, so you need not: `guard-agent.mjs`
-(credentials never travel in a packet, and every dispatch is recorded),
-`ledger.mjs` (the RUN.md row and the saved return), `turn-check.mjs` (the
-Pickup line). Nothing mechanical decides which model a task deserves; that is
-yours, and §0 says how.
+Four hooks hold what is mechanical, so you need not: `guard-agent.mjs`
+(credentials never travel in a packet, every dispatch is recorded, and each one
+arrives with a price on it), `ledger.mjs` (the RUN.md row, the saved return and
+what it cost), `turn-check.mjs` (the Pickup line, and the floor under a
+set-shaped recommendation answered from too few sources), and a reply check that
+reads each reply and sends the turn back once when a claim names no evidence.
+Nothing mechanical decides which model a task deserves; that is yours, and §0
+says how.
 
 ## 0. Profile
 

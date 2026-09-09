@@ -2,6 +2,147 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.7.0 — the senior engineer in the chair, 2026-09-09
+
+Plan: `C:\Users\Josh\.claude\plans\you-are-the-senior-kind-mango.md`, grounded
+2026-09-09 against `main @ 019bd5e` and the live docs for the desktop app's
+2.1.260. Seven reflexes, each with a mechanism rather than more prose. 148 tests
+became 182, green at every commit.
+
+### What changed
+
+**The setup conversation now happens.** `managerAdvice` was computed only on the
+card turn, and on a fresh session the card goes out on prompt 1, before any
+assistant record exists, so `self` was always null and the advice had never
+fired for anybody. It has its own `adviceSent` flag now, fires on the first
+prompt where the model is actually visible (prompt 2 on a fresh session), names
+the click for the host it is on (`selfModel` reads `entrypoint`), and goes quiet
+for good once `profile.mjs --set manager=accept|<model>/<effort>|ask` records the
+answer. A tier change re-opens it, because the recommendation changes with the
+tier. `--set-default model=… effort=…` writes the two keys into
+`~/.claude/settings.json` for new sessions and refuses `max`, which the host does
+not accept in either key.
+
+**A question gets a depth call before an answer.** Five rows in `ladder.md`,
+keyed on what can be observed about the question rather than on how sure the
+model feels: settled, one current fact, inherited across a set, design judgment,
+checkable by a command. Rung 3.7 is new in the router, gated on `heads === 0` so
+a build request carrying "or should we use the helper" stays a build request.
+The card gained one line and its cap moved from 1,400 to 1,550; the body is 1,546.
+
+**Every claim carries its basis, and two checks say so when it does not.**
+- The Plain style gained Anthropic's Opus 5 scope paragraph verbatim, a basis
+  rule, and a working-out-loud section that resolves the contradiction research
+  0001 found between "say what you are about to do" and "do not narrate". It
+  ships `force-for-plugin: true` (Josh's decision), so a plugin install turns the
+  voice on and disabling the plugin turns it off. 3,846 bytes against a 4,500 cap.
+- SKILL.md §9 shrank to the six rules that survive with the style off, and
+  `assets.test.mjs` checks those six against both files.
+- The reply check: a `type: "prompt"` Stop hook on Sonnet, prompt in
+  `assets/reply-check.txt`, copied verbatim into SKILL.md frontmatter. It reads
+  only the reply, so it is a fresh instance that never saw the reasoning behind
+  it. `install.mjs --with-reply-check` registers it globally; off by default.
+- The floor in `turn-check.mjs`: deterministic, for the one shape a reply-reader
+  cannot catch — a set-shaped recommendation answered from fewer than two
+  sources, with a recommendation in the reply.
+
+**Money.** `lib/prices.mjs` prices anything in list-price dollars, the unit
+`/usage` computes its own Session figure in. The ledger appends every finished
+dispatch to `~/.claude/orchestrate/costs.jsonl` (capped at 500 lines) and puts
+the figure in the RUN.md evidence cell. The guard tags every dispatch before it
+runs. `profile.mjs --brief` prints what roles have cost here;
+`measure.mjs --dollars` prices a finished session. The thresholds are 5% of a
+week to say it and 25% to ask, in `routing.md`. No counter anywhere.
+
+**Also**: a `Shape` line on every run (tasks, parallelism, models, price, why not
+smaller); one bounded interview round before a goal larger than a sitting; the
+router deduped on prompt id *and* text so a mid-turn message is not dropped;
+`docs/research/0004-loops-and-stopping.md` in the repo with its findings folded
+into `evaluation.md` §6 and §9, `lanes.md` and `models.md`.
+
+### Measured, not assumed
+
+| What | Number | How |
+|---|---|---|
+| the floor, unnarrowed | 5.57 fires a day | `turn-check.mjs --replay-week` over 51 transcripts |
+| the floor, as shipped | 0.14 a day (1 in 7 days) | the same, and the single fire is the exact 0003 question |
+| the card body | 1,546 chars | asserted at 1,550 |
+| the Plain style | 3,846 bytes | asserted at 4,500 |
+| this build session | $42.56 at list price, ~28% of a Max 5x week | `measure.mjs --latest --dollars` |
+| tests | 182 | `node --test "skills/orchestrate/scripts/**/*.test.mjs"` |
+
+The floor's narrowing is worth recording because the first version would have
+been unshippable. `research && setShape` alone fired on pasted plans and handoff
+documents: long text containing "recommended" and "for each", answered with a
+"should". Three narrowings fixed it — it must be a question, not a paste, under
+60 words, and not a host notification — and the 0003 case still fires.
+
+### Facts settled by probe, not assumed
+
+- **Skill frontmatter accepts `prompt` hooks.** The hooks doc's "Hooks in skills
+  and agents" says all hook events are supported there and all five types;
+  agent *files* are the ones limited to command and http. So the reply check
+  ships session-scoped from SKILL.md rather than global-only.
+- **Hook output is an `attachment` record**, not user-role text:
+  `{"type":"attachment","attachment":{"hookEvent":"…","content":["…"]}}`. A
+  mid-turn message is `{"type":"attachment","attachment":{"type":"queued_command",
+  "prompt":"…"}}`. `measure.mjs` read only user records and so reported **0
+  router injections on a transcript holding 4**. Fixed, with a test.
+- **The transcript shape of a *blocked* Stop was not observed.** No main-session
+  transcript on this machine holds one. Both counters therefore match a fixed
+  prefix at the start of a record, not a record shape. They also had to be
+  tightened: matching the prefix anywhere counted this plan document, which
+  quotes both reasons verbatim, as two blocks that never happened.
+
+### The over-verification audit (plan step 3d)
+
+Grepped every shipped text for `double-check|re-verify|verify your|check again|
+make sure|be thorough|to be safe`. **Two hits, zero removals.** Both already
+argue against over-verification: `evaluation.md` citing the Opus 5 guidance, and
+the new `ladder.md` row telling the model not to re-verify what is settled. The
+skill was already clean of the pattern; the audit is recorded so nobody re-runs it.
+
+### What is still reasoned rather than measured
+
+- Every price in the `models.md` starting table, and every week anchor. The week
+  rests on **one observation** and is labelled that way everywhere it is printed.
+  `profile.mjs --set week=<dollars>` replaces it with a real one.
+- `high` rather than `xhigh` for the manager. Unchanged from v0.6.0, still
+  reasoning, still marked as reasoning.
+- The 5% and 25% thresholds. Judgment, chosen so the first fires often enough to
+  be informative and the second rarely enough not to nag.
+- The reply check's block rate. It ships in orchestrate sessions first for
+  exactly this reason: nobody has measured how often a Sonnet reader asks for a
+  basis that was already there. Global after one measured week under one block a
+  day (Josh's decision 2, §8 of the plan).
+- **The field verdict of `docs/research/0001` was not re-tested.** It said
+  orchestrate was not the best drop-in a vibe coder could install that day. The
+  plugin path closed one of its two gaps in v0.6.0; the other was "has never run
+  its own loop", and this build is one session of one person, not a customer's run.
+
+### Found while building, not fixed here
+
+- **`latestRun` picks the alphabetically last run folder, not the newest.** Two
+  runs created on the same day are ordered by slug, so `20260909-v07-senior-engineer`
+  lost to `20260909-vibe-coder-audit` and every hook pointed at the older one all
+  build. Filed as its own task; the fix is to sort by RUN.md mtime.
+- **Worktree isolation refuses in this checkout.** `git` resolves the repo path
+  with different casing (`Github` vs `GitHub`), so the Agent tool rejects the
+  worktree as a `core.worktree` redirect. That is why the one planned
+  `orch-implementer` dispatch for the floor was done inline instead.
+
+### Deliberately not built, with the reason
+
+A Haiku pre-classifier on `UserPromptSubmit` (still returns only ok/reason). A
+spend cap or a running counter (v0.5.0's reasoning stands: a counter reads as an
+allowance). Skill-frontmatter `model`/`effort` for the manager (it lasts one turn
+and thrashes the prompt cache). An agent-type hook as the default reply check
+(the host calls agent hooks experimental; the prompt hook is the production
+shape and the agent hook, which could also read the turn's transcript and judge
+whether the reply answered what was asked, is the upgrade path the day that
+label goes). A rewrite of SKILL.md into a next-action loop (more instructions
+lower compliance — research 0003). Re-running the field audit (quota).
+
 ## v0.4.0 — 2026-09-09, complete
 
 Plan: `C:\Users\Josh\.claude\plans\i-want-you-to-eager-boole.md` (grounded

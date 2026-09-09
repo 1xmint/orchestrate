@@ -135,12 +135,34 @@ test('no shipped file states a numeric Fable allowance', () => {
   }
 });
 
+// Prose wraps. A sentence that has to survive is asserted against the file with
+// its line breaks flattened, so reflowing a paragraph never fails a test that
+// is about what the paragraph says.
+const flat = s => s.replace(/\s+/g, ' ');
+
 test('the skill tells the manager to ask when a model is not in the plan', () => {
-  const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
-  const routing = readFileSync(join(SKILL, 'references', 'routing.md'), 'utf8');
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  const routing = flat(readFileSync(join(SKILL, 'references', 'routing.md'), 'utf8'));
   assert.match(skill, /Never downgrade quietly to avoid asking, and never spend quietly/);
   assert.match(routing, /the choice is theirs, not yours/);
   assert.match(routing, /When Fable earns its cost/);
+});
+
+test('the skill carries the money rule with a number in it', () => {
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  const routing = flat(readFileSync(join(SKILL, 'references', 'routing.md'), 'utf8'));
+  // A rule without a number is a wish. These are the two thresholds.
+  assert.match(skill, /Over about 5% of a week, say the price in one line/);
+  assert.match(skill, /over about 25%, ask first with the recommendation in front of the question/);
+  assert.match(routing, /Say the price before you spend/);
+  assert.match(routing, /Never a running total in the conversation/);
+});
+
+test('the run ledger asks why the run is not smaller', () => {
+  const run = readFileSync(join(SKILL, 'assets', 'RUN.md'), 'utf8');
+  assert.match(run, /^## Shape$/m);
+  assert.match(run, /why not smaller/);
+  assert.match(flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8')), /Fill the `Shape` line before the first dispatch/);
 });
 
 // Each of these is a rule with a test inside it, not a wish. A wish ("be

@@ -83,10 +83,14 @@ export function measure(text) {
         if (at >= 0) { const bytes = s.length - at; r.routerInjections++; r.routerBytes += bytes; marks.push({ bytes, after: 0 }); }
         if (/orchestrate (guard|ledger):/.test(s)) r.hookContext += s.length;
         // The two checks that can send a turn back, counted by the fixed prefix
-        // each one writes. The prefix is the contract: neither the evaluator's
-        // wording nor the floor's is stable enough to match on anything else.
-        if (s.includes('reply check:')) r.replyChecks++;
-        if (/orchestrate: a recommendation across a set of cases/.test(s)) r.floorBlocks++;
+        // each one writes, and only when the record *starts* with it. Matching
+        // the prefix anywhere counted this file's own plan document, which
+        // quotes both reasons verbatim, as two blocks that never happened. A
+        // blocked Stop feeds its reason back on its own; if a host ever wraps
+        // it in a preamble this under-reports, which is the safe direction.
+        const head = s.trimStart();
+        if (head.startsWith('reply check:')) r.replyChecks++;
+        if (head.startsWith('orchestrate: a recommendation across a set of cases')) r.floorBlocks++;
         const m = /^\s*TASK:\s*(\S+)/m.exec(s);
         if (m && /^\s*(RESTATED|STATUS):/m.test(s)) r.returns.push({ task: m[1], lines: s.trim().split('\n').length });
       }

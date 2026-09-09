@@ -60,7 +60,7 @@ export function toSpec(text) {
   // Nothing enforces the rules here, so say so plainly instead of promising
   // hooks the host will never run.
   body = body.replace(
-    /Three hooks hold what is mechanical, so you need not: `guard-agent\.mjs`[\s\S]*?§0 says how\./,
+    /Four hooks hold what is mechanical, so you need not: `guard-agent\.mjs`[\s\S]*?§0\s+says how\./,
     'This host runs none of the skill\'s hooks, so nothing keeps credentials out\nof a packet, writes the ledger row or holds the Pickup line for you. Hold them\nyourself; they are stated where they apply below. Choosing the model was never\nmechanical anyway, so §0 reads the same here as everywhere.'
   );
   body = body.replace(/^Tier `unknown` above:/m, 'Start by running `profile.mjs` in the skill folder. Tier `unknown`:');

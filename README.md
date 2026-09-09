@@ -53,7 +53,8 @@ stacking them. `--dry-run` says what would happen and changes nothing.
 | `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It has no opinion about which model a task deserves: that is the manager's judgment, and when the right model is not included in your plan it asks you rather than spending or downgrading quietly |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run folder, sums its token usage, and moves its row in `RUN.md` to review, partial or blocked |
 | `return-check.mjs` | each role agent's own stop | refuses a return that is missing RESTATED, STATUS or EVIDENCE, or runs past 60 lines. Twice, then it gives up |
-| `turn-check.mjs` | when a turn ends with a run open | blocks once when `RUN.md`'s Pickup line has not moved since the last dispatch, so a session that dies is still resumable |
+| `turn-check.mjs` | when a turn ends | two rules. It blocks once when `RUN.md`'s Pickup line has not moved since the last dispatch, so a session that dies is still resumable; and once when a recommendation spanning a set of cases was answered from fewer than two sources. On last week's real transcripts the second rule would have fired once in seven days |
+| the reply check | when a turn ends | one Sonnet call reading only the last reply; sends the turn back once when a claim names no evidence. On inside orchestrate sessions, `--with-reply-check` for everywhere |
 
 Only the router and the guard are global. `return-check.mjs` is declared in
 each agent file, and the ledger and turn check also come from the skill's own
@@ -106,29 +107,79 @@ and the four tests for never reaching for a bigger model than the job needs.
 
 ## Make it talk like a person
 
-The install copies an output style called **Plain** to
-`~/.claude/output-styles/plain.md` and leaves it switched off. An output style
-is the strongest place to put "how to talk": it edits the system prompt itself,
-so it applies to every turn of every session rather than only while a skill is
-loaded. Turning one on changes all your sessions, so that stays your call. Add
-this to `~/.claude/settings.json`, or to a project's
-`.claude/settings.local.json`, and start a new session:
+There is an output style called **Plain**, and which path you installed by
+decides whether it is on:
 
-```json
-{ "outputStyle": "Plain" }
-```
+- **Installed as a plugin**, Plain is on in every session without you choosing
+  it. Disabling the plugin turns it off.
+- **Installed by script**, it is copied to `~/.claude/output-styles/plain.md`
+  and left off, because turning a style on changes all your sessions and that
+  is your call. Add `{ "outputStyle": "Plain" }` to `~/.claude/settings.json`,
+  or to a project's `.claude/settings.local.json`, and start a new session.
 
-Plain answers first, proves every claim with a path or a command, names a
-technical word once and then reuses it, compares things to everyday life rather
-than to other technology, and explains rather than defines. It never shortens an
-error, a warning, or a confirmation. It keeps Claude Code's engineering
-instructions, so it changes how you are talked to and nothing about how the work
-is done.
+An output style is the strongest place to put "how to talk": it edits the system
+prompt itself, so it applies to every turn rather than only while a skill is
+loaded.
+
+Plain answers first, says what a claim rests on, delivers what was asked at the
+scope asked, names a technical word once and then reuses it, and explains rather
+than defines. It never shortens an error, a warning, or a confirmation. It keeps
+Claude Code's engineering instructions, so it changes how you are talked to and
+nothing about how the work is done.
 
 If you only want shorter answers, Claude Code ships a built-in **Concise** style
-that leads with the result and drops the narration. Try that first. The same
-rules live in `SKILL.md` §9 for the times the style is off, and for hosts like
-Codex that have no output styles at all.
+that leads with the result and drops the narration. Try that first. The six
+rules that matter most live in `SKILL.md` §9 for the times the style is off, and
+for hosts like Codex that have no output styles at all.
+
+## The reply check
+
+Inside an orchestrate session, a second model reads each reply just before the
+turn ends. If the reply says something is done, passing or fixed without naming
+the evidence, or states a version, price, setting or best practice without
+saying what it rests on, the turn is sent back once with a one-line reason. It
+asks only for the basis, never for more work.
+
+It is one Sonnet call per turn, reading only the reply and a few fields — a few
+thousand input tokens, about half a cent at list price. It is the same machinery
+Claude Code's own `/goal` uses. What it buys is a check the writing model cannot
+talk itself out of, because the reader never saw the reasoning that produced the
+reply.
+
+To run it in every session rather than only orchestrate ones:
+
+```bash
+node scripts/install.mjs --with-reply-check
+```
+
+To see whether it is firing, and how often, `measure.mjs` counts it. To turn it
+off, remove the `Stop` entry it added from `~/.claude/settings.json`, or stop
+invoking the skill.
+
+## What one goal costs
+
+Every dispatch arrives with a price on it, in list-price dollars — the same unit
+`/usage` computes its Session figure in. Over about 5% of a week the skill says
+the price and carries on; over about 25% it asks first, with its recommendation
+in front of the question. There is no running counter, because a counter reads
+as an allowance and invites spending up to it.
+
+The week it divides by rests on **one observation**, made 2026-09-09: three
+Fable researchers running in parallel on one question read about $36 of list
+price, roughly a quarter of a Max 5x week. From that, Pro is about $30 a week,
+Max 5x about $150, Max 20x about $600. Low confidence, and easy to correct:
+
+```bash
+node skills/orchestrate/scripts/profile.mjs --set week=<dollars>
+```
+
+A finished run's real cost is `measure.mjs --latest --dollars`, after the fact,
+where it can change the next decision instead of nagging about this one.
+
+## Stop it
+
+`Esc` stops the current turn. `/tasks` stops a running worker. Whatever finished
+before you stopped is already in the ledger, so nothing is lost by stopping.
 
 ## Drop it into one repo
 
@@ -173,10 +224,12 @@ node ~/.claude/skills/orchestrate/scripts/measure.mjs --latest
 
 Reads the transcript Claude Code already wrote and prints what the turns cost
 (fresh input, cache read, cache write, output), how many dispatches went to
-which models, how long the packets and returns were, and what the router's own
-injections cost once and cumulatively. No quota, no network. The efficiency
-claims in this repo stay estimates until you run this on a real orchestration;
-the script exists so that costs nothing.
+which models, how long the packets and returns were, how often the reply check
+and the research floor sent a turn back, and what the router's own injections
+cost once and cumulatively. Add `--dollars` for the list-price figure and what
+share of a week it is. No quota, no network. The efficiency claims in this repo
+stay estimates until you run this on a real orchestration; the script exists so
+that costs nothing.
 
 ## Install from the .skill file (no git)
 

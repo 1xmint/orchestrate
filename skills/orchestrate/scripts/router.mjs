@@ -14,6 +14,7 @@
 //   node router.mjs --prune                        delete session state older than 7 days
 
 import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -335,8 +336,15 @@ function handlePrompt(input) {
   const text = promptText(input);
   if (text == null) return;
   const state = loadSession(input.session_id) || newState(input);
-  if (input.prompt_id && state.lastPromptId === input.prompt_id) return;
-  if (input.prompt_id) state.lastPromptId = input.prompt_id;
+  // Deduped on the prompt id *and* the text. A message typed mid-turn can
+  // arrive carrying the running turn's prompt id, and on the id alone it was
+  // dropped — which is exactly the engaged follow-up question the router is
+  // most useful on.
+  const promptKey = input.prompt_id
+    ? `${input.prompt_id}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`
+    : null;
+  if (promptKey && state.lastPromptId === promptKey) return;
+  if (promptKey) state.lastPromptId = promptKey;
   const trimmed = text.trim();
   if (/^router (off|on)$/i.test(trimmed)) { state.muted = /off$/i.test(trimmed); saveSession(state); return; }
   if (/^\s*\/orchestrate\b/.test(trimmed)) state.orchestrateActive = true;

@@ -34,7 +34,8 @@ test('the portable build drops hooks, when_to_use and the injection line', () =>
 });
 
 test('the portable build does not promise enforcement it cannot deliver', () => {
-  const s = toSpec(SKILL);
+  // Flattened, so reflowing a paragraph never fails a test about what it says.
+  const s = toSpec(SKILL).replace(/\s+/g, ' ');
   assert.doesNotMatch(s, /Three hooks hold the mechanical rules/);
   assert.match(s, /This host runs none of the skill's hooks/);
   assert.match(s, /it spends the user's own money, so recommend it, price it/, 'the money rule survives as prose');

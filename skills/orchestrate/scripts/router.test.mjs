@@ -411,3 +411,14 @@ test('the other four rows of the depth call are unchanged', () => {
   assert.match(prompt(home, repo, 'what is the recommended manager model and effort for each subscription tier'), /research across a set/);
   assert.equal(prompt(home, repo, 'what does RESTATED mean'), '', 'a short question is answered, silently');
 });
+
+test('a queued message sharing the running turn\'s prompt id is not discarded', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'Fix the typo in README.md.', { prompt_id: 'p-same' });
+  // Same id, different text: a message typed mid-turn. On the id alone this was
+  // dropped, which is exactly the engaged follow-up the router is useful on.
+  const out = prompt(home, repo, 'what is the recommended manager model for each subscription tier', { prompt_id: 'p-same' });
+  assert.match(out, /research across a set/);
+  // The same id and the same text is a genuine repeat, and stays dropped.
+  assert.equal(prompt(home, repo, 'what is the recommended manager model for each subscription tier', { prompt_id: 'p-same' }), '');
+});

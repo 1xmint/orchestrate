@@ -173,3 +173,17 @@ test('the dollar report prices the session and never invents a denominator', () 
   const noAnchor = dollarReport(r, 'api', null);
   assert.doesNotMatch(noAnchor, /% of a/, 'per-token billing has no week to divide by');
 });
+
+// The plan document that specified these counters quoted both reasons
+// verbatim, and matching the prefix anywhere counted it as two blocks that
+// never happened. A block's reason arrives on its own.
+test('a message that merely quotes a block reason is not counted as one', () => {
+  const quoting = 'The reason text is `reply check: <one sentence>` and the floor says '
+    + '"orchestrate: a recommendation across a set of cases, answered from N source(s)."';
+  const r = measure([
+    JSON.stringify({ type: 'user', message: { content: quoting } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: { input_tokens: 1 } } }),
+  ].join('\n'));
+  assert.equal(r.replyChecks, 0);
+  assert.equal(r.floorBlocks, 0);
+});

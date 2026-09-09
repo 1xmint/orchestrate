@@ -95,8 +95,51 @@ Opus limit") leaves other families working; a session or weekly limit stops ever
 reset. Task tools (TaskCreate/List) are off by default on Sonnet 5 and Fable, so the on-disk
 `RUN.md` is the ledger.
 
-**Not exposed here**: the Workflow tool (checked 2026-09-08 in the desktop session); see
-`lanes.md`. `subagent_type: fork` is documented but unverified in this session.
+**Documented, unverified in this build; one probe each is the check**: the Workflow tool
+(checked 2026-09-08 in the desktop session), `subagent_type: fork`, and `SendMessage` — the
+last is named in the Agent tool's own description and in every launch result, but three
+ToolSearch queries and `ListAgents` found no way to reach a running subagent with it on
+2026-09-09. Until one of those probes runs, a packet delta to a live agent is not a move here.
+See `lanes.md`.
+
+**Hooks, as of 2026-09-09.** A `prompt` hook hands its text to a model (a fast one by default;
+`model` picks another) with `$ARGUMENTS` replaced by the hook input JSON, and reads back
+`{"ok": true}` or `{"ok": false, "reason": "…"}`. On `Stop` the reason is fed back so Claude
+keeps working, unless the answer also sets `"impossible": true`. All hook events are supported
+in skill and subagent frontmatter, and all five types — including `prompt` — may be registered
+there (code.claude.com/docs/en/hooks, "Hooks in skills and agents", read 2026-09-09). A skill's
+hooks register on invocation and keep running for the rest of the session; a subagent's are
+removed when it finishes, and its `Stop` becomes `SubagentStop`. Claude Code overrides a Stop
+hook after eight consecutive blocks with no progress, so every Stop hook here blocks once per
+thing and honours `stop_hook_active`. Agent-type hooks are labelled experimental, which is why
+the reply check ships as a prompt hook.
+
+**How hook output reaches the transcript.** Injected context is its own record:
+`{"type": "attachment", "attachment": {"hookEvent": "<Event>", "hookName": "<Event>",
+"content": ["…"], "toolUseID": "hook-…"}}`. It is *not* a user-role message, which
+`measure.mjs` assumed until 2026-09-09; reading only user records reported zero router
+injections on a transcript that held four. A message typed mid-turn is
+`{"type": "attachment", "attachment": {"type": "queued_command", "prompt": "…"}}`. The
+transcript shape of a *blocked* Stop was not observed, so both counters match on a fixed
+prefix rather than on a record shape.
+
+**Plugins cannot set** `model`, `effortLevel`, `outputStyle` or permissions; a plugin's own
+`settings.json` takes only `agent` and `subagentStatusLine`, and there is no plugin level in the
+settings precedence order. `max` is not accepted in `effortLevel` or `modelSettings`. What a
+plugin *can* do to the voice is `force-for-plugin: true` in an output style, which applies the
+style whenever the plugin is enabled and overrides the user's own `outputStyle`; disabling the
+plugin is the way off.
+
+**In plan mode a subagent inherits the write restriction.** Observed 2026-09-09: a researcher
+dispatched from plan mode could write only to a sibling of the plan file, its return-check hook
+then blocked it repeatedly, and the ledger filed four returns and bumped the attempt count each
+time. From plan mode, dispatch only read-only tasks whose packet says "return the findings
+inline, write nothing", or name the plan file's own sibling as the output path.
+
+**`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`** is the host's mechanical form of "only the
+orchestrator dispatches", alongside `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`. Whether the count
+includes the manager's own level is unverified, so nothing here sets it; one dispatch under a
+known value settles it.
 
 **One browser pane** per session; browser tasks run one at a time.
 
