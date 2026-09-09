@@ -32,23 +32,6 @@ hooks:
     - hooks:
         - type: command
           command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/turn-check.mjs"'
-        - type: prompt
-          model: sonnet
-          timeout: 30
-          prompt: |
-            You are checking one reply from a coding assistant. The hook input JSON below carries it
-            as last_assistant_message. Answer {"ok": true} unless the reply clearly does one of these:
-            (1) it says a task, fix, test, build or check is done, passing, fixed or verified without
-            naming the evidence: a command and its result, a file path, a diff, a screenshot, or a
-            saved return; (2) it recommends or states a model, version, price, setting, default, plan
-            detail or best practice as a current fact without saying what that rests on: a source it
-            fetched, a command it ran, a file it read, or the plain words that it is from memory and
-            not checked. Status updates, questions back to the user, code, error text, refusals,
-            plans, and replies that already name their basis are ok. If stop_hook_active is true,
-            answer ok. When not ok, answer {"ok": false, "reason": "reply check: <one sentence naming
-            the claim and the one thing to add: the evidence, the source, or 'from memory, not
-            checked'>"}. Ask only for the basis, never for more work or more checking.
-            $ARGUMENTS
 ---
 
 # Orchestrate
@@ -66,14 +49,12 @@ and return schema, worked example), `evaluation.md` (grading, failure
 classes), `lanes.md` (workflows, `/batch`, fork, teams, `/goal`, waiting),
 `hosts.md` (what the Agent tool can and cannot do).
 
-Four hooks hold what is mechanical, so you need not: `guard-agent.mjs`
+Three hooks hold what is mechanical, so you need not: `guard-agent.mjs`
 (credentials never travel in a packet, every dispatch is recorded, and each one
 arrives with a price on it), `ledger.mjs` (the RUN.md row, the saved return and
-what it cost), `turn-check.mjs` (the Pickup line, and the floor under a
-set-shaped recommendation answered from too few sources), and a reply check that
-reads each reply and sends the turn back once when a claim names no evidence.
-Nothing mechanical decides which model a task deserves; that is yours, and §0
-says how.
+what it cost), and `turn-check.mjs` (the Pickup line, and the floor under a
+set-shaped recommendation answered from too few sources). Nothing mechanical
+decides which model a task deserves; that is yours, and §0 says how.
 
 ## 0. Profile
 

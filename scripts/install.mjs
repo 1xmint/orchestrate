@@ -5,7 +5,6 @@
 //   node scripts/install.mjs                     ~/.claude/skills/orchestrate, ~/.agents/..., role agents
 //   node scripts/install.mjs --with-router        + the per-message router in ~/.claude/settings.json
 //   node scripts/install.mjs --with-hook          + the Agent money guard and the SubagentStop ledger
-//   node scripts/install.mjs --with-reply-check   + the reply evaluator on Stop, globally (off by default)
 //   node scripts/install.mjs --no-codex           skip ~/.agents
 //   node scripts/install.mjs --no-agents          skip the role agents
 //   node scripts/install.mjs --project <repo>     drop the project kit into one repo (see below)
@@ -84,23 +83,10 @@ if (existsSync(STYLE_SRC)) {
 const wantRouter = has('--with-router');
 const wantGuard = has('--with-hook');
 
-// The reply evaluator, globally rather than only in orchestrate sessions. Off
-// by default: a false block re-reads the whole conversation, and nobody has
-// measured the rate outside this skill yet. SKILL.md's own frontmatter carries
-// the same prompt for sessions where the skill is in play, which is the scope
-// it ships in until a measured week says otherwise.
-const wantReplyCheck = has('--with-reply-check');
-const REPLY_CHECK_SRC = join(SRC, 'assets', 'reply-check.txt');
-let replyCheck = null;
-if (wantReplyCheck) {
-  try { replyCheck = readFileSync(REPLY_CHECK_SRC, 'utf8').replace(/\n+$/, ''); } catch {}
-  if (!replyCheck) { console.error(`cannot read ${toPosix(REPLY_CHECK_SRC)}`); process.exit(1); }
-}
-
-if (wantRouter || wantGuard || replyCheck) {
+if (wantRouter || wantGuard) {
   const settingsPath = join(HOME, '.claude', 'settings.json');
   const scriptsDir = join(CLAUDE_SKILL, 'scripts');
-  const entries = registrations(scriptsDir, { router: wantRouter, guard: wantGuard, replyCheck });
+  const entries = registrations(scriptsDir, { router: wantRouter, guard: wantGuard });
   const settings = readSettings(settingsPath);
   const before = JSON.stringify(settings);
   const report = applyRegistrations(settings, entries);
@@ -109,8 +95,7 @@ if (wantRouter || wantGuard || replyCheck) {
     if (backup) say(`backed up settings -> ${toPosix(backup)}`);
     writeSettings(settingsPath, settings);
   }
-  const named = [...report.basenames, ...(replyCheck ? ['reply check (prompt hook, sonnet)'] : [])];
-  say(`settings ${toPosix(settingsPath)}: ${report.removed} stale orchestrate entr${report.removed === 1 ? 'y' : 'ies'} removed, ${report.added} registered (${named.join(', ')})`);
+  say(`settings ${toPosix(settingsPath)}: ${report.removed} stale orchestrate entr${report.removed === 1 ? 'y' : 'ies'} removed, ${report.added} registered (${report.basenames.join(', ')})`);
   say('takes effect in new sessions');
   if (dryRun && before === JSON.stringify(settings)) say('no change needed');
 }
@@ -138,13 +123,3 @@ if (existsSync(STYLE_SRC)) {
   console.log('anybody selecting it, and disabling the plugin is the way off.');
 }
 
-if (!wantReplyCheck) {
-  console.log('');
-  console.log('The reply check is on inside orchestrate sessions and off everywhere else.');
-  console.log('It is one Sonnet call per turn that reads only your last reply, and sends the');
-  console.log('turn back once when a claim names no evidence. To run it in every session:');
-  console.log('');
-  console.log('  node scripts/install.mjs --with-reply-check');
-  console.log('');
-  console.log('See it working with: node skills/orchestrate/scripts/measure.mjs --latest');
-}

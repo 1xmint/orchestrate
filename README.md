@@ -11,18 +11,30 @@ building and testing it.
 
 ## Install
 
-This repo is a Claude Code plugin. That is the short path:
+This repo is a Claude Code plugin. That is the short path.
+
+**In a terminal**, type these into Claude Code:
 
 ```
 /plugin marketplace add 1xmint/orchestrate
-/plugin install orchestrate
+/plugin install orchestrate@orchestrate
 ```
 
-It brings the skill, the six role agents, the output style and the three global
-hooks in one step. **It needs `node` on your PATH**, because the hooks shell out
-to Node; if you launched the desktop app from the dock or Start menu and your
-Node came from nvm, fnm or Homebrew, it may not be there. If the hooks seem
-inert, use the script below instead, which writes Node's absolute path in.
+**In the desktop app** there is no `/plugin` command. Either use the plugin
+browser — the **+** button next to the prompt box, then **Plugins**, then **Add
+plugin** — or run these in any terminal and restart Claude:
+
+```bash
+claude plugin marketplace add 1xmint/orchestrate
+claude plugin install orchestrate@orchestrate --scope user
+```
+
+Either way it brings the skill, the six role agents, the output style and the
+three global hooks in one step. **It needs `node` on your PATH**, because the
+hooks call Node by name; if you launched the desktop app from the dock or Start
+menu and your Node came from nvm, fnm or Homebrew, it may not be there. If the
+hooks seem inert, use the script below instead, which writes Node's absolute
+path in.
 
 The script path, which also works with no plugin support and pins the
 interpreter:
@@ -54,7 +66,6 @@ stacking them. `--dry-run` says what would happen and changes nothing.
 | `ledger.mjs` | when a subagent stops | saves the full return under the run folder, sums its token usage, and moves its row in `RUN.md` to review, partial or blocked |
 | `return-check.mjs` | each role agent's own stop | refuses a return that is missing RESTATED, STATUS or EVIDENCE, or runs past 60 lines. Twice, then it gives up |
 | `turn-check.mjs` | when a turn ends | two rules. It blocks once when `RUN.md`'s Pickup line has not moved since the last dispatch, so a session that dies is still resumable; and once when a recommendation spanning a set of cases was answered from fewer than two sources. On last week's real transcripts the second rule would have fired once in seven days |
-| the reply check | when a turn ends | one Sonnet call reading only the last reply; sends the turn back once when a claim names no evidence. On inside orchestrate sessions, `--with-reply-check` for everywhere |
 
 Only the router and the guard are global. `return-check.mjs` is declared in
 each agent file, and the ledger and turn check also come from the skill's own
@@ -74,8 +85,9 @@ turns auto-update on for Anthropic's own marketplaces and leaves it off for
 third-party ones, which is what `1xmint/orchestrate` is. So turning it on is one
 thing you do once:
 
-1. Run `/plugin` and go to the **Marketplaces** tab
-2. Select `orchestrate`
+1. Open the plugin manager: `/plugin` in a terminal, or the **+** button then
+   **Plugins** in the desktop app
+2. Go to **Marketplaces** and select `orchestrate`
 3. Choose **Enable auto-update**
 
 After that, Claude Code refreshes the marketplace and updates the plugin in the
@@ -167,30 +179,6 @@ that leads with the result and drops the narration. Try that first. The six
 rules that matter most live in `SKILL.md` §9 for the times the style is off, and
 for hosts like Codex that have no output styles at all.
 
-## The reply check
-
-Inside an orchestrate session, a second model reads each reply just before the
-turn ends. If the reply says something is done, passing or fixed without naming
-the evidence, or states a version, price, setting or best practice without
-saying what it rests on, the turn is sent back once with a one-line reason. It
-asks only for the basis, never for more work.
-
-It is one Sonnet call per turn, reading only the reply and a few fields — a few
-thousand input tokens, about half a cent at list price. It is the same machinery
-Claude Code's own `/goal` uses. What it buys is a check the writing model cannot
-talk itself out of, because the reader never saw the reasoning that produced the
-reply.
-
-To run it in every session rather than only orchestrate ones:
-
-```bash
-node scripts/install.mjs --with-reply-check
-```
-
-To see whether it is firing, and how often, `measure.mjs` counts it. To turn it
-off, remove the `Stop` entry it added from `~/.claude/settings.json`, or stop
-invoking the skill.
-
 ## What one goal costs
 
 Every dispatch arrives with a price on it, in list-price dollars — the same unit
@@ -259,8 +247,8 @@ node ~/.claude/skills/orchestrate/scripts/measure.mjs --latest
 
 Reads the transcript Claude Code already wrote and prints what the turns cost
 (fresh input, cache read, cache write, output), how many dispatches went to
-which models, how long the packets and returns were, how often the reply check
-and the research floor sent a turn back, and what the router's own injections
+which models, how long the packets and returns were, how often the research
+floor sent a turn back, and what the router's own injections
 cost once and cumulatively. Add `--dollars` for the list-price figure and what
 share of a week it is. No quota, no network. The efficiency claims in this repo
 stay estimates until you run this on a real orchestration; the script exists so

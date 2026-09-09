@@ -195,19 +195,24 @@ test('max is refused in both keys', () => {
   assert.equal(s.effortLevel, undefined, 'one key at a time is fine');
 });
 
-test('a prompt hook registers once and a re-run replaces rather than stacks it', () => {
-  const PROMPT = 'You are checking one reply from a coding assistant.\nRules follow.';
-  const s = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "C:/theirs/other.mjs"' }] }] } };
-  const entries = registrations(SCRIPTS, { router: true, guard: true, replyCheck: PROMPT });
-  applyRegistrations(s, entries);
-  const stops = s.hooks.Stop.flatMap(g => g.hooks);
-  const prompts = stops.filter(h => h.type === 'prompt');
-  assert.equal(prompts.length, 1);
-  assert.equal(prompts[0].model, 'sonnet');
-  assert.equal(prompts[0].timeout, 30);
-  assert.ok(stops.some(h => h.command === 'node "C:/theirs/other.mjs"'), 'theirs survives');
+// v0.7.x put a `type: "prompt"` Stop hook in this file that had a second model
+// read every reply. It is gone. Anyone who installed it still has it, so the
+// installer has to take it back out, and leave everything else in the file
+// exactly where it was.
+test('a reply check somebody already has is removed by the next install', () => {
+  const OLD = 'You are checking one reply from a coding assistant.\nRules follow.';
+  const s = { hooks: { Stop: [
+    { hooks: [{ type: 'prompt', prompt: OLD, model: 'sonnet', timeout: 30 }] },
+    { hooks: [{ type: 'command', command: 'node "C:/theirs/other.mjs"' }] },
+  ] } };
 
+  const entries = registrations(SCRIPTS, { router: true, guard: true });
   applyRegistrations(s, entries);
-  const again = s.hooks.Stop.flatMap(g => g.hooks).filter(h => h.type === 'prompt');
-  assert.equal(again.length, 1, 'a second install replaces it');
+
+  const stops = s.hooks.Stop.flatMap(g => g.hooks);
+  assert.equal(stops.filter(h => h.type === 'prompt').length, 0, 'the old reply check is gone');
+  assert.ok(stops.some(h => h.command === 'node "C:/theirs/other.mjs"'), 'their own hook survives');
+
+  // And nothing registers one again.
+  assert.equal(entries.filter(e => e.type === 'prompt').length, 0);
 });

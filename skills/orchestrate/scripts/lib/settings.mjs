@@ -42,10 +42,11 @@ export function commandBasename(command) {
 // Remove every hook whose command names one of `basenames`, from every event
 // array. Groups left with no hooks are dropped; untouched groups keep their
 // object identity so a diff of the file shows only our lines.
-// A prompt hook carries no script name, so a re-run of the installer would have
-// stacked a second copy of it beside the first. It is recognised by the first
-// line of its prompt instead, which is why `assets/reply-check.txt` starts with
-// a line no other text would start with.
+// v0.7.x registered a `type: "prompt"` Stop hook that had a second model read
+// every reply. It is gone (0 fires in ~1,800 turns, and a model policing a model
+// is the most expensive way to enforce anything). This still recognises a prompt
+// hook by the first line of its prompt so that re-running the installer REMOVES
+// one somebody already has, rather than leaving it running forever.
 export function stripOurs(settings, basenames, promptFirstLines = []) {
   const names = new Set(basenames);
   const firsts = promptFirstLines.map(s => String(s).split('\n')[0].trim()).filter(Boolean);
@@ -93,7 +94,7 @@ export function addHook(settings, event, matcher, command, timeout, entry) {
 }
 
 // What each flag registers. `scriptsDir` is where the *installed* copy lives.
-export function registrations(scriptsDir, { router = false, guard = false, replyCheck = null } = {}) {
+export function registrations(scriptsDir, { router = false, guard = false } = {}) {
   const out = [];
   if (router) {
     const cmd = commandFor(join(scriptsDir, 'router.mjs'));
@@ -104,16 +105,18 @@ export function registrations(scriptsDir, { router = false, guard = false, reply
     out.push({ event: 'PreToolUse', matcher: 'Agent', command: commandFor(join(scriptsDir, 'guard-agent.mjs')), timeout: 10 });
     out.push({ event: 'SubagentStop', matcher: null, command: commandFor(join(scriptsDir, 'ledger.mjs')), timeout: 10 });
   }
-  if (replyCheck) {
-    out.push({ event: 'Stop', matcher: null, type: 'prompt', prompt: replyCheck, model: 'sonnet', timeout: 30 });
-  }
   return out;
 }
 
 // The whole merge, on a parsed settings object. Returns a report.
+// A hook this installer used to add and no longer does. Every install removes
+// it, so nobody is left running a retired check forever. Matched on the first
+// line of its prompt, which is what `stripOurs` compares.
+export const RETIRED_PROMPTS = ['You are checking one reply from a coding assistant.'];
+
 export function applyRegistrations(settings, entries) {
   const basenames = [...new Set(entries.map(e => commandBasename(e.command)).filter(Boolean))];
-  const prompts = entries.filter(e => e.type === 'prompt').map(e => e.prompt);
+  const prompts = [...entries.filter(e => e.type === 'prompt').map(e => e.prompt), ...RETIRED_PROMPTS];
   const removed = stripOurs(settings, basenames, prompts);
   for (const e of entries) addHook(settings, e.event, e.matcher, e.command, e.timeout, e);
   return { removed, added: entries.length, basenames };
