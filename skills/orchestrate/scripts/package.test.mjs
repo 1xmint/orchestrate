@@ -17,7 +17,7 @@ test('the Claude Code source keeps what makes the rules mechanical', () => {
   assert.match(SKILL, /^hooks:$/m);
   assert.match(SKILL, /^when_to_use:/m);
   assert.match(SKILL, /^!`\{\{NODE\}\} "\$\{CLAUDE_SKILL_DIR\}\/scripts\/profile\.mjs" --brief`$/m);
-  assert.match(SKILL, /version: "0\.4\.0"/);
+  assert.match(SKILL, /version: "\d+\.\d+\.\d+"/);
 });
 
 test('the portable build drops hooks, when_to_use and the injection line', () => {
@@ -29,7 +29,8 @@ test('the portable build drops hooks, when_to_use and the injection line', () =>
   assert.doesNotMatch(s, /\$\{CLAUDE_SKILL_DIR\}/, 'a variable this host will not expand is replaced');
   assert.match(s, /^name: orchestrate$/m);
   assert.match(s, /^description: >-$/m);
-  assert.match(s, /version: "0\.4\.0"/);
+  // Whatever the version is, both builds carry the same one.
+  assert.equal(/version: "([\d.]+)"/.exec(s)[1], /version: "([\d.]+)"/.exec(SKILL)[1]);
 });
 
 test('the portable build does not promise enforcement it cannot deliver', () => {
