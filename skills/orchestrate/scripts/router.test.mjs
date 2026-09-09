@@ -236,3 +236,45 @@ test('at or below the author, or on a risky change, a reviewer is dispatched', (
   assert.match(risky, /orch-reviewer/);
   assert.doesNotMatch(risky, /review the diff yourself/, 'a risky change always gets an independent reviewer');
 });
+
+// Importing router.mjs used to hang: its main block read stdin at load time, so
+// every test here had to spawn a child. It is guarded now, which is what makes
+// the next three tests possible at all.
+import { managerAdvice, MANAGER_SETUP } from './router.mjs';
+
+test('the manager is told its own setup is wrong, once, and only when it is', () => {
+  // The user picks the conversation's model and effort before the skill exists,
+  // so this is the one setting the skill cannot fix for them.
+  assert.match(managerAdvice('max5', { model: 'opus', effort: 'medium' }), /high effort rather than medium/);
+  assert.match(managerAdvice('max5', { model: 'sonnet', effort: 'low' }), /opus rather than sonnet and high effort rather than low/);
+  assert.match(managerAdvice('pro', { model: 'opus', effort: 'high' }), /sonnet rather than opus/);
+  assert.equal(managerAdvice('max5', { model: 'opus', effort: 'high' }), '', 'silence when it is already right');
+  assert.equal(managerAdvice('max20', { model: 'opus', effort: 'high' }), '');
+});
+
+test('it never nags about an unknown model, and calls out only real overkill', () => {
+  assert.equal(managerAdvice('max5', null), '', 'cannot tell, so says nothing');
+  assert.equal(managerAdvice('max5', { model: 'opus' }), '', 'no effort reported, no effort advice');
+  assert.equal(managerAdvice('unknown', { model: 'sonnet', effort: 'low' }), '', 'no tier, no recommendation');
+  // xhigh is one step up and left alone; max is two and is the worker profile.
+  assert.equal(managerAdvice('max5', { model: 'opus', effort: 'xhigh' }), '');
+  assert.match(managerAdvice('max5', { model: 'opus', effort: 'max' }), /worker profile/);
+});
+
+test('every tier has a manager setup, and none of them is Fable', () => {
+  for (const [tier, want] of Object.entries(MANAGER_SETUP)) {
+    assert.ok(want.model && want.effort, tier);
+    assert.notEqual(want.model, 'fable', `${tier}: Fable is the deep single-shot role, never the manager`);
+    assert.equal(want.effort, 'high', `${tier}: high everywhere; depth is spent on the dispatched roles`);
+  }
+});
+
+test('the advice reaches the user with the card, and does not repeat', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const transcript = join(repo, 'ts.jsonl');
+  writeFileSync(transcript, JSON.stringify({ type: 'assistant', effort: 'medium', message: { model: 'claude-opus-5' } }) + '\n');
+  const first = prompt(home, repo, 'Add a --since flag with a test, then run the gate and review it.', { transcript_path: transcript });
+  assert.match(first, /\[orch-router · your setup\] on max5, a manager belongs on high effort/);
+  const second = prompt(home, repo, 'Add another flag with a test, then run the gate and review it.', { transcript_path: transcript });
+  assert.doesNotMatch(second, /your setup/, 'said once, with the card, and not again');
+});

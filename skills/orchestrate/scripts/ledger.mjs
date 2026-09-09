@@ -178,13 +178,15 @@ function main() {
   const text = String(input.last_assistant_message || '');
   if (!text.trim()) return;
 
-  // Only a subagent's stop is a return. A payload with no agent identity is
-  // some other stop, and treating it as a return files the orchestrator's own
-  // last message under returns/ and lets it move a row. Two such files landed
-  // in this repo's first real run before this check existed.
-  const identity = input.agent_type || input.subagent_type || input.agent_id;
-  if (!identity) return;
-  const agent = String(input.agent_type || input.subagent_type || 'agent').replace(/[^A-Za-z0-9_-]/g, '_');
+  // Only a subagent's stop is a return, and only `agent_type` proves it is one.
+  // `agent_id` does not: stops that are not subagent returns arrive carrying an
+  // id and no type, and accepting those filed twenty-one of the orchestrator's
+  // own messages under returns/ in one session, each one also posting a "grade
+  // this Failed" note back into the conversation. An unnamed return is not a
+  // return.
+  const agentType = input.agent_type || input.subagent_type;
+  if (!agentType) return;
+  const agent = String(agentType).replace(/[^A-Za-z0-9_-]/g, '_');
 
   // The recommended install registers this hook twice: once globally in
   // settings.json, and once from SKILL.md's frontmatter while the skill is in

@@ -503,3 +503,24 @@ test('guard: a dispatch that names no model is recorded as inherited', () => {
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'inh.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit', 'the meter says inherited rather than guessing');
 });
+
+test('ledger: a stop carrying only an agent_id is not a return', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  // This filed twenty-one of the orchestrator's own messages into one run
+  // before the check tightened. agent_id alone does not prove a subagent
+  // returned; only agent_type does.
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'idonly', cwd: repo.dir,
+    agent_id: 'abc123', last_assistant_message: 'Still waiting on the three researchers.',
+  }, home);
+  assert.equal(out.stdout.trim(), '');
+  assert.equal(existsSync(join(repo.runDir, 'returns')), false);
+
+  // A real return, with a type, still lands.
+  run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'idonly2', cwd: repo.dir,
+    agent_id: 'abc124', agent_type: 'orch-researcher', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.deepEqual(readdirSync(join(repo.runDir, 'returns')), ['001-orch-researcher.md']);
+});

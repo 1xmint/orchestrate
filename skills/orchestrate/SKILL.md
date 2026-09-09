@@ -43,6 +43,7 @@ never carries a prompt or a result between models; that is your job now. The
 line above is this machine's profile, injected at no cost.
 
 Open a reference only when a step needs it: `ladder.md` (which move, by cost),
+`models.md` (what each model is good and bad at, effort, never going overkill),
 `routing.md` (model by plan, who reviews, escalation), `contracts.md` (packet
 and return schema, worked example), `evaluation.md` (grading, failure
 classes), `lanes.md` (workflows, `/batch`, fork, teams, `/goal`, waiting),
@@ -62,6 +63,10 @@ guess: a wrong guess on Pro spends real money. Agents missing:
 `node "${CLAUDE_SKILL_DIR}/scripts/install-agents.mjs"`; new files take a
 minute to appear, until then `Explore` for read-only roles and
 `general-purpose` for writing roles, with the role note from `contracts.md`.
+
+You cannot set your own model or effort: the user picked both before you
+existed. The router names them in its state line and says so once if they are
+wrong for the plan; `models.md` has the table. Do not raise it again.
 
 The profile line names the plan. Nothing caps or rewrites your model choice, so
 it is yours to make and yours to justify: pick the model the task needs, then

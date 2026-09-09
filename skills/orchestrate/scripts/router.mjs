@@ -194,6 +194,34 @@ function rungLabel(r) {
   return ({ 1: 'answer', 2: 'inline', 3: 'script', 3.5: 'research', 4: 'skill', 5: 'explore', 6: 'agent', 6.5: 'multi-step', 7: 'fork', 8: 'workflow', 9: 'batch', 10: 'team', 11: 'resume' })[r] || 'note';
 }
 
+// ---- the manager's own setup ------------------------------------------------
+// The user picks the conversation's model and effort before the manager exists,
+// so the manager cannot set them. It can notice they are wrong and say the fix
+// once. references/models.md has the reasoning; this is the check.
+export const MANAGER_SETUP = {
+  pro: { model: 'sonnet', effort: 'high' },
+  max5: { model: 'opus', effort: 'high' },
+  max20: { model: 'opus', effort: 'high' },
+  team: { model: 'sonnet', effort: 'high' },
+  api: { model: 'opus', effort: 'high' },
+};
+const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+export function managerAdvice(tier, self) {
+  const want = MANAGER_SETUP[tier];
+  if (!want || !self || !self.model) return '';
+  const parts = [];
+  if (self.model !== want.model) parts.push(`${want.model} rather than ${self.model}`);
+  const have = EFFORT_ORDER.indexOf(String(self.effort || '').toLowerCase());
+  const need = EFFORT_ORDER.indexOf(want.effort);
+  if (self.effort && have >= 0) {
+    if (have < need) parts.push(`${want.effort} effort rather than ${self.effort}`);
+    else if (have > need + 1) parts.push(`${want.effort} effort rather than ${self.effort}, which is the worker profile`);
+  }
+  if (!parts.length) return '';
+  return `[orch-router · your setup] on ${tier}, a manager belongs on ${parts.join(' and ')}. Many short turns, so depth is spent on the dispatched roles instead. Set it now, not mid-run: changing either rebuilds the whole prompt cache. See references/models.md.`;
+}
+
 // ---- state line -------------------------------------------------------------
 function stateLine(ctx, prefix) {
   const run = ctx.openRun && ctx.openRun.open ? `open run: ${ctx.openRun.runId}` : 'open run: none in this repo';
@@ -280,6 +308,10 @@ function handlePrompt(input) {
   if (!state.cardSent && substantive) {
     out.push(stateLine(ctx, '[orch-router · once per session]'));
     out.push(cardBody());
+    // Once, with the card: the one setting the user has to get right, and only
+    // when they have it wrong. Silence when it is already correct.
+    const advice = managerAdvice(ctx.tier, ctx.self);
+    if (advice) out.push(advice);
     state.cardSent = true;
     state.lastStateHash = stateHash(ctx);
     if (worthy) {
@@ -364,20 +396,25 @@ async function cost(path) {
 }
 
 // ---- main -------------------------------------------------------------------
-const args = process.argv.slice(2);
-try {
-  if (args[0] === '--explain') explain(args.slice(1).join(' '));
-  else if (args[0] === '--cost' && args[1]) await cost(args[1]);
-  else if (args[0] === '--prune') console.log(`pruned ${pruneSessions(7)} session file(s)`);
-  else {
-    let payload = '';
-    try { payload = readFileSync(0, 'utf8'); } catch {}
-    let input = null;
-    try { input = JSON.parse(payload); } catch { input = null; }
-    if (input && typeof input === 'object') {
-      if (input.hook_event_name === 'UserPromptSubmit') handlePrompt(input);
-      else if (input.hook_event_name === 'SessionStart') handleSessionStart(input);
+// Guarded, so importing this file for a test does not run the hook. Without the
+// guard the `else` branch below reads stdin at import time and hangs forever,
+// which is why every test of this file had to spawn it as a child process.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const args = process.argv.slice(2);
+  try {
+    if (args[0] === '--explain') explain(args.slice(1).join(' '));
+    else if (args[0] === '--cost' && args[1]) await cost(args[1]);
+    else if (args[0] === '--prune') console.log(`pruned ${pruneSessions(7)} session file(s)`);
+    else {
+      let payload = '';
+      try { payload = readFileSync(0, 'utf8'); } catch {}
+      let input = null;
+      try { input = JSON.parse(payload); } catch { input = null; }
+      if (input && typeof input === 'object') {
+        if (input.hook_event_name === 'UserPromptSubmit') handlePrompt(input);
+        else if (input.hook_event_name === 'SessionStart') handleSessionStart(input);
+      }
     }
-  }
-} catch {}
-process.exit(0);
+  } catch {}
+  process.exit(0);
+}

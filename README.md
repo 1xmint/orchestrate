@@ -50,6 +50,34 @@ cannot, it asks once and remembers:
 node ~/.claude/skills/orchestrate/scripts/profile.mjs --set tier=max5
 ```
 
+## Set your model and effort once
+
+You pick the conversation's model and effort before this skill exists, so it
+cannot set them for you. Set them once at the start of a session and leave them:
+
+| Your plan | Model | Effort |
+|---|---|---|
+| Pro, $20 | Sonnet | high |
+| Max 5x, $100 | Opus | high |
+| Max 20x, $200 | Opus | high |
+
+In the desktop app, click the model name next to the send button, then the
+effort next to it. In a terminal, start with `claude --model opus --effort high`.
+
+If you get it wrong, the skill tells you once at the top of the session and names
+the fix, so this table is a convenience rather than homework.
+
+Why `high` and not higher, on every plan: the conversation takes many short
+turns, and effort multiplies across all of them, while a worker takes one long
+turn and stops. So depth is spent on the dispatched agents instead, where the
+planner and debugger already run at `xhigh`. And why to set it once: changing the
+model or effort mid-run makes Claude re-read the whole conversation on the next
+turn, which costs more than the setting saves.
+
+`skills/orchestrate/references/models.md` has the rest: what each of the four
+models is good and bad at, why Haiku's context window is a fifth of the others,
+and the four tests for never reaching for a bigger model than the job needs.
+
 ## Make it talk like a person
 
 The install copies an output style called **Plain** to
