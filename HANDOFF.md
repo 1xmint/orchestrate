@@ -1,6 +1,8 @@
 # Handoff
 
-`orchestrate` v0.4.0 is built, tested, installed and tagged. Repo:
+`orchestrate` v0.4.1 is built, tested, installed and tagged. The v0.4 plan is
+complete, and so is the fresh-context Fable audit it deferred: the audit ran,
+returned ship-with-fixes with twelve findings, and every one is resolved. Repo:
 `C:\Users\Josh\Desktop\GitHub\orchestrate` (public, github.com/1xmint/orchestrate,
 branch main). There is no unfinished build step. `STATE.md` is the record of
 what shipped and what is deliberately not in it.
@@ -18,7 +20,7 @@ Then run the tests, which need no quota and no network:
 node --test "skills/orchestrate/scripts/**/*.test.mjs"
 ```
 
-98 pass. Anything red is a regression, not a starting point.
+136 pass. Anything red is a regression, not a starting point.
 
 ## What is installed on this machine
 
@@ -27,9 +29,12 @@ node --test "skills/orchestrate/scripts/**/*.test.mjs"
 - Six `orch-*` agents in `~/.claude/agents`, each with its own return-check
   Stop hook.
 - `~/.claude/settings.json`: `router.mjs` on UserPromptSubmit and SessionStart,
-  `guard-agent.mjs` on PreToolUse(Agent), `ledger.mjs` on SubagentStop. The
-  pre-existing `memory-write-gate.mjs` entry is untouched; a backup of the
-  previous file is in `~/.claude/orchestrate/`.
+  `guard-agent.mjs` on PreToolUse(Agent), `ledger.mjs` on SubagentStop, each
+  naming the interpreter by absolute path. The pre-existing
+  `memory-write-gate.mjs` entry is untouched; backups of every previous version
+  are in `~/.claude/orchestrate/`.
+- `~/.claude/orchestrate/active-run.json`, which points the hooks at the open
+  run. Without it a session started above the repo sees no run at all.
 
 To undo it all: restore that backup over `~/.claude/settings.json`, delete
 `~/.claude/skills/orchestrate`, `~/.agents/skills/orchestrate` and the six
@@ -45,6 +50,8 @@ session does not have. None of them blocks anything.
    efficiency estimates into measurements for free.
 3. Whether `subagent_type: fork` exists here (one one-line haiku dispatch).
 4. Whether the Workflow tool has appeared after a desktop update.
+
+Two Fable dispatches remain today; the audit used one.
 
 ## Non-negotiables, if you change anything
 

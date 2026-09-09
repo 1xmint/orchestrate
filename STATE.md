@@ -31,7 +31,7 @@ Proof, all at zero model quota:
 - `install.mjs --project --dry-run` on the real notelocus checkout: it reports
   the pytest and ruff gate and the missing `CLAUDE.md`, and writes nothing.
 
-## The fresh-context Fable audit — 2026-09-09
+## v0.4.1 — the fresh-context Fable audit, 2026-09-09
 
 The one step the v0.3 plan reserved and the v0.4 plan deferred: run
 `references/audit-prompt.md` as a Fable subagent against the built skill, apply
@@ -45,8 +45,10 @@ That dispatch is also the first real end-to-end proof of the hooks. The guard
 counted it and wrote the session state; the return check, the resume injection
 and the deny path were exercised live against the installed copy.
 
-Six defects were found and fixed while the audit ran, each proved on disk
-before it was fixed, each with the test that would have caught it:
+### Six defects found while the audit ran
+
+Each proved on disk before it was fixed, each with the test that would have
+caught it:
 
 | # | Defect | Why it mattered |
 |---|---|---|
@@ -57,7 +59,36 @@ before it was fixed, each with the test that would have caught it:
 | E | `evals/evals.json` was not valid JSON | the eval loop could never have loaded it; "never run" had a second cause |
 | F | `router.mjs --cost` had its own transcript parser and counted tool results | it reported six router injections where the meter correctly reported none |
 
-Tests went from 98 to 124, and the two scripts that had no coverage at all,
+### The audit's own twelve, all resolved
+
+Verdict: **ship-with-fixes**. Its first finding was the one that mattered and
+neither of us had seen it: every hook resolved the run from the session's cwd,
+and Josh's sessions start in the folder that *contains* his repos, so the whole
+mechanical layer was silently inert there. `run-init` now records the run under
+`~/.claude/orchestrate` and every reader falls back to that pointer; a repo with
+its own runs is never overridden. Proved live from the parent directory.
+
+| # | Finding | Resolution |
+|---|---|---|
+| 1 | hooks blind when cwd is above the repo | active-run pointer, tested both ways |
+| 2 | the return check's budget keyed on the role, not the invocation | keys on `agent_id`, old keys pruned |
+| 3 | the reviewer's instructions and its own Stop hook demanded different shapes | one schema everywhere, `VERDICT` carries pass or fail |
+| 4 | four credential shapes unknown; Fable spent by inheritance; the deny message handed over the opt-in command | all three fixed |
+| 5 | attempts bumped per stop; `updateRow` split on every pipe | cells addressed from the ends; identity required |
+| 6 | `risky` drove both "ask first" and "needs a reviewer" | split into two regexes |
+| 7 | bare filenames not counted as paths; "continue" dropped before the resume rule | both fixed |
+| 8 | `when_to_use` hijacked release notes and dev servers | rewritten |
+| 9 | bare `node` fails in a GUI-launched app | the installer writes the interpreter's absolute path |
+| 10 | no `PARALLEL` field; a false claim about where a downgrade is visible | field added; the ledger records the model actually used |
+| 11 | every dispatch pulled 11 KB of `contracts.md` to copy a 4 KB template | `assets/packet.md` |
+| 12 | the SubagentStop payload was documented, never observed | observed and recorded in `hosts.md` |
+
+One claim of its own was wrong: it said this very return would never be saved.
+The ledger saved it and moved the row, because the stop's `cwd` was the repo
+even though the session's was not. Its line numbers had also moved, because the
+checkout advanced while it read.
+
+Tests went from 98 to 136, and the two scripts that had no coverage at all,
 `run-init.mjs` and `install-agents.mjs`, now have theirs. `smoke.mjs` stays
 untested on purpose: it exists to spend a little provider quota, so a test
 would spend quota on every run.
@@ -99,8 +130,7 @@ Deliberately not applied then: a per-run absolute Fable cap (a per-day cap in
 the hook replaced it), moving the task table out of RUN.md, and marking every
 host assumption unverified line by line.
 
-Pickup prompt: v0.4.0 is tagged and the Fable audit pass is under way; six
-own findings are applied and pushed, the auditor's return is still to be
-triaged, then tag the point release.
+Pickup prompt: v0.4.1 is tagged; the plan and the audit it deferred are both
+complete, and the only things left need a fresh session or a real goal.
 Pickup confidence: high
 Resume risk: none

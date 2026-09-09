@@ -25,6 +25,13 @@ later as a task notification in a user turn, not as the tool result. Hooks that 
 text hang off `SubagentStop` (`last_assistant_message`, `agent_transcript_path`, `agent_type`,
 `agent_id`), not `PostToolUse`. Only the final text comes back; long output belongs in files.
 
+Observed 2026-09-09 on a real background dispatch, not read from the docs: the payload carried
+`last_assistant_message`, `agent_type` and `agent_transcript_path`, and `cwd` was the repo rather
+than the session's own working directory. Two other stops in the same session arrived with a
+`last_assistant_message` and **no** agent field at all, so `ledger.mjs` requires an agent identity
+before it treats a stop as a return; without that check the orchestrator's own messages were being
+filed under `returns/`.
+
 **Nesting** is allowed to three layers below the main conversation
 (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`); `Agent` is removed only at the depth limit. This skill's
 rule that only the orchestrator dispatches is *policy*, kept because nested dispatch hides cost
