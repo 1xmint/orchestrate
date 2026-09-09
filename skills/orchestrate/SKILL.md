@@ -8,9 +8,11 @@ description: >-
   single edit, a question, or work one agent finishes in one pass.
 when_to_use: >-
   "plan and build X", "set up X and finish Y and Z", "research the best approach then
-  do it", a release, a migration, getting something working end to end, several steps
-  with tests and a review, resuming a run that is already open, or whenever the user
-  would otherwise hand prompts between models by hand.
+  do it", a migration, several steps that need tests and a review, work that needs
+  more than one agent or more than one sitting, "fix it properly" on something that
+  already resisted one attempt, porting or rewriting a component, resuming a run that
+  is already open, or whenever the user would otherwise hand prompts between models by
+  hand. Not for one command, one file, or a question.
 license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
@@ -124,12 +126,14 @@ repo work, `run_in_background: true` unless the next step needs the result,
 `prompt` the packet. Effort is fixed in the agent file. Risk picks a reviewer;
 only a verified failure picks a bigger author.
 
-The packet is the whole context the agent will ever have. Send every field in
-`contracts.md`, every time, "none" rather than omitted, including the GATE
-block from `.orchestrator/gate.json` and, where one applies, `SKILLS TO USE`
-(invoke `/x` through the Skill tool for this step). To continue an agent that
-already holds the right context, `SendMessage` a packet delta; start fresh
-when the model must change or the earlier attempt would bias it.
+The packet is the whole context the agent will ever have. `assets/packet.md` is
+the template, 4 KB: read that to dispatch, and `contracts.md` only when you need
+why a field exists or a worked example. Every field, every time, "none" rather
+than omitted, including the GATE block from `.orchestrator/gate.json`,
+`PARALLEL` when another task is running, and `SKILLS TO USE` when an installed
+skill already does a step. To continue an agent that already holds the right
+context, `SendMessage` a packet delta; start fresh when the model must change or
+the earlier attempt would bias it.
 
 ## 6. Evaluate like a reviewer, not a recipient
 

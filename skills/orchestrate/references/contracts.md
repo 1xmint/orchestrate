@@ -17,6 +17,10 @@ under `<run dir>/returns/` and writes the task row into `RUN.md`, keyed by the
 
 ## The packet
 
+The bare template lives in `assets/packet.md` (4 KB). Read that to dispatch;
+read this file when you need to know why a field is there, or want the worked
+good-and-bad example below. Both are the same fields.
+
 Send every field. Write "none" rather than omitting a field, so a gap is
 visible to you and to the agent.
 
