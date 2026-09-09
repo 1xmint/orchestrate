@@ -31,6 +31,61 @@ Proof, all at zero model quota:
 - `install.mjs --project --dry-run` on the real notelocus checkout: it reports
   the pytest and ruff gate and the missing `CLAUDE.md`, and writes nothing.
 
+## v0.6.0 — a plugin, model intelligence, and the question that started it, 2026-09-09
+
+Three Fable rounds ran, and Josh was right that it should have been one. Their
+findings, applied. The token cost was 668,057 across the three.
+
+**The verdict on the product.** Not the best drop-in for a vibe coder today, and
+the reason was the install: a terminal, git, Node and a hand-edited settings.json
+against a competitor installed from the desktop plugin browser in one click. The
+repo is a Claude Code plugin now and needed no files moved. One token,
+`${CLAUDE_PLUGIN_ROOT}/skills/orchestrate`, serves both paths: a plugin host
+expands it, `install.mjs` replaces it. The plugin path runs plain `node` and so
+needs it on PATH; the script path still pins the interpreter, and the README
+says which to use when.
+
+**Model intelligence, which was missing entirely.** `routing.md` had a lookup
+table, not reasoning. `references/models.md` now carries what each of the four
+models is for, the five effort levels and what lower effort does to output
+shape, four ordered tests for never going overkill, and context sweet spots. Two
+facts in it were written down nowhere and change behaviour: Haiku's window is
+200K, a fifth of the others, so a sweep that fits anywhere else can overflow it
+silently; and effort does not work on Haiku at all, so it is the one model that
+cannot be asked to think harder.
+
+**The manager's own setup.** It cannot set its own model or effort, because the
+user picks both before the conversation exists. So the router compares them
+against the plan and says the fix once, then never again: silent when right,
+silent when it cannot tell, and `xhigh` tolerated while `max` is called the
+worker profile. Pro is Sonnet at high; both Max tiers are Opus at high. Not
+`xhigh`, which is documented for long single agentic tasks, and never Fable,
+whose cost multiplied across a hundred manager turns buys nothing.
+
+**Why the manager answered too fast.** Root cause was compliance with detection
+dead three ways: the question arrived mid-turn and the router never saw it; the
+prompt-id guard would have dropped it anyway; and "also is there…" has no
+question mark, so it read as a statement. All three fixed, and a research
+question that spans a set of cases is now its own rung whose hint says dispatch,
+because "fetch one source if it settles it" hands the depth call to the model,
+which is the judgment models are worst at. `ladder.md` carries the three-part
+test. A Stop-time gate was designed and not built: its false-positive rate is
+unmeasured, and a gate that fires on ordinary questions trains you to ignore it.
+
+**Over-verification**, which the audit caught: SKILL.md sent every gate run to a
+subagent while `evaluation.md` said filter first, and the subagent version also
+contradicts Anthropic's Opus 5 guidance. The manager runs the gate itself now
+and delegates when the output is long or the suite is slow. Two reviewers became
+one, with a second only when the first verdict is itself in doubt.
+
+Also fixed, both found by using the thing: the ledger filed twenty-one of the
+orchestrator's own messages as agent returns, because `agent_id` alone was
+accepted as proof a subagent had returned; and `router.mjs` read stdin at import
+time, so importing it hung and every test of it had to spawn a child.
+
+148 tests. `docs/research/0001`, `0002` and `0003` hold the full findings with
+every URL dated.
+
 ## v0.5.1 — how to talk, moved where it binds, 2026-09-09
 
 Josh, on the section v0.5.0 added: it could be better, especially "never call
@@ -201,8 +256,8 @@ Deliberately not applied then: a per-run absolute Fable cap (a per-day cap in
 the hook replaced it), moving the task table out of RUN.md, and marking every
 host assumption unverified line by line.
 
-Pickup prompt: v0.5.1 is tagged. Nothing is open. The one thing Josh may want
-to do is add "outputStyle": "Plain" to his settings and see whether the next
-few sessions read better.
+Pickup prompt: v0.6.0 is tagged. Nothing is open. Two things are unverified
+because they need a fresh session: whether the plugin actually installs from
+the marketplace, and whether the router card appears on a first prompt.
 Pickup confidence: high
 Resume risk: none
