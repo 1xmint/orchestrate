@@ -68,66 +68,16 @@ EVIDENCE: pytest -q -> 41 passed
 NOT VERIFIED: Windows path handling
 QUESTIONS: none`;
 
-// ---------------------------------------------------------------- guard v2 --
+// ------------------------------------------------------------------- guard --
 
 test('guard: a credential in the packet is denied whatever the model', () => {
-  const d = decide({ tool_input: { model: 'sonnet', prompt: 'use ghp_abcdefghijklmnopqrstuvwxyz012345 to push' } }, { tier: 'max5', fableCount: 0, optedIn: false, skillDir: '/s' });
+  const d = decide({ tool_input: { model: 'sonnet', prompt: 'use ghp_abcdefghijklmnopqrstuvwxyz012345 to push' } });
   assert.equal(d.kind, 'deny');
   assert.match(d.reason, /credential/);
 });
 
-test('guard: a non-fable dispatch passes untouched', () => {
-  assert.equal(decide({ tool_input: { model: 'opus', prompt: 'TASK: 1' } }, { tier: 'max5', fableCount: 99, optedIn: false, skillDir: '/s' }).kind, 'pass');
-});
-
-test('guard: pro, api, team and unknown deny fable, and send the decision to the user', () => {
-  for (const tier of ['pro', 'api', 'team', 'unknown']) {
-    const d = decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier, fableCount: 0, optedIn: false, skillDir: '/s' });
-    assert.equal(d.kind, 'deny', tier);
-    assert.match(d.reason, /Ask the user/, tier);
-  }
-});
-
-test('guard: under the cap fable is counted, at the cap it is downgraded to opus, not denied', () => {
-  assert.equal(decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier: 'max5', fableCount: 2, optedIn: false, skillDir: '/s' }).kind, 'count');
-  const d = decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier: 'max5', fableCount: 3, optedIn: false, skillDir: '/s' });
-  assert.equal(d.kind, 'downgrade');
-  assert.equal(d.model, 'opus');
-  assert.match(d.reason, /cap 3/);
-  assert.equal(decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier: 'max20', fableCount: 5, optedIn: false, skillDir: '/s' }).kind, 'count');
-  assert.equal(decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier: 'max20', fableCount: 6, optedIn: false, skillDir: '/s' }).kind, 'downgrade');
-});
-
-test("guard: today's opt-in lifts the cap", () => {
-  assert.equal(decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier: 'pro', fableCount: 0, optedIn: true, skillDir: '/s' }).kind, 'pass');
-  assert.equal(decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier: 'max5', fableCount: 9, optedIn: true, skillDir: '/s' }).kind, 'pass');
-});
-
-test('guard: the downgrade is an allow with updatedInput, and it names the downgrade', () => {
-  const home = sandbox();
-  writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'max5' }));
-  const d = new Date();
-  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  writeFileSync(join(home, '.claude', 'orchestrate', `fable-count-${day}.json`), JSON.stringify({ count: 3, date: day }));
-
-  const out = run('guard-agent.mjs', {
-    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's1', cwd: home,
-    tool_input: { subagent_type: 'orch-planner', model: 'fable', prompt: 'TASK: 9-9-0007\nplan it' },
-  }, home);
-
-  const h = out.json.hookSpecificOutput;
-  assert.equal(h.permissionDecision, 'allow', 'allow, or updatedInput is ignored');
-  assert.equal(h.updatedInput.model, 'opus');
-  assert.equal(h.updatedInput.subagent_type, 'orch-planner', 'the rest of the input survives');
-  assert.match(h.additionalContext, /moved from fable to opus/);
-
-  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's1.json'), 'utf8'));
-  assert.equal(state.dispatches.length, 1);
-  assert.equal(state.dispatches[0].agent, 'orch-planner');
-  assert.equal(state.dispatches[0].model, 'opus');
-  assert.equal(state.dispatches[0].requested, 'fable');
-  assert.equal(state.dispatches[0].task, '9-9-0007');
-  assert.ok(state.lastDispatchAt);
+test('guard: an ordinary dispatch passes untouched', () => {
+  assert.equal(decide({ tool_input: { model: 'opus', prompt: 'TASK: 1' } }).kind, 'pass');
 });
 
 test('guard: a dispatch on an allowed model is recorded and prints nothing', () => {
@@ -502,8 +452,7 @@ test('return check: each invocation gets its own two chances, not each role', ()
 });
 
 test('guard: the credential list covers the shapes an audit fed it', () => {
-  const env = { tier: 'max5', fableCount: 0, optedIn: false, skillDir: '/s' };
-  const deny = p => decide({ tool_input: { model: 'sonnet', prompt: p } }, env).kind;
+  const deny = p => decide({ tool_input: { model: 'sonnet', prompt: p } }).kind;
   assert.equal(deny('use sk-proj-abcdefghijklmnopqrstuvwxyz0123456789'), 'deny', 'an OpenAI project key');
   assert.equal(deny('AIzaSyA1bcDefGhIjKlMnOpQrStUvWxYz0123456'), 'deny', 'a Google API key');
   assert.equal(deny('Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop'), 'deny', 'a JWT');
@@ -515,21 +464,42 @@ test('guard: the credential list covers the shapes an audit fed it', () => {
   assert.equal(deny('the password field on the login form'), 'pass');
 });
 
-test('guard: a dispatch that names no model inherits the session\'s, and is counted', () => {
-  const env = { tier: 'max5', fableCount: 0, optedIn: false, skillDir: '/s' };
-  const bare = { tool_input: { subagent_type: 'Explore', prompt: 'sweep the repo' } };
-  // A Fable session used to spend Fable on every sweep with the counter frozen.
-  assert.equal(decide(bare, { ...env, sessionModel: 'fable' }).kind, 'count');
-  assert.equal(decide(bare, { ...env, sessionModel: 'fable', fableCount: 3 }).kind, 'downgrade');
-  assert.match(decide(bare, { ...env, sessionModel: 'fable', fableCount: 3 }).reason, /named no model/);
-  assert.equal(decide(bare, { ...env, sessionModel: 'opus', fableCount: 9 }).kind, 'pass');
-  // Unknown session model: do nothing rather than rewrite on a guess.
-  assert.equal(decide(bare, { ...env, fableCount: 9 }).kind, 'pass');
+test('guard: it never blocks or rewrites a dispatch over its model, on any plan', () => {
+  // The cap and the silent downgrade to Opus are gone. A count answers "how
+  // many have you done" when the only question worth asking is "is this task
+  // worth it", and a cap reads as an allowance. Model choice is the manager's
+  // judgment now, with the user asked whenever the model is not included in
+  // their plan. This test exists so that cannot creep back.
+  for (const tier of ['pro', 'max5', 'max20', 'team', 'api', 'unknown']) {
+    for (const model of ['fable', 'opus', 'sonnet', 'haiku', '', undefined]) {
+      const d = decide({ tool_input: { subagent_type: 'orch-planner', model, prompt: 'TASK: 9-9-0001\nplan it' } }, { tier });
+      assert.equal(d.kind, 'pass', `${tier}/${model}`);
+      assert.equal(d.model, undefined, 'it never names a replacement model');
+    }
+  }
 });
 
-test('guard: the deny reason asks the user rather than handing the model the opt-in command', () => {
-  const d = decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier: 'pro', fableCount: 0, optedIn: false, skillDir: '/s' });
-  assert.equal(d.kind, 'deny');
-  assert.match(d.reason, /Ask the user/);
-  assert.doesNotMatch(d.reason, /node "/, 'a runnable command here is a rule the model can lift itself over');
+test('guard: a Fable dispatch on Pro prints nothing at all', () => {
+  const home = sandbox();
+  writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro' }));
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'pro1', cwd: home,
+    tool_input: { subagent_type: 'orch-planner', model: 'fable', prompt: 'TASK: 9-9-0007\nplan it' },
+  }, home);
+  assert.equal(out.stdout.trim(), '', 'whether to spend on Fable here is the user\'s call, not a hook\'s');
+  assert.equal(out.status, 0);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'pro1.json'), 'utf8'));
+  assert.equal(state.dispatches[0].model, 'fable', 'but it is still recorded');
+  assert.equal(state.dispatches[0].task, '9-9-0007');
+});
+
+test('guard: a dispatch that names no model is recorded as inherited', () => {
+  const home = sandbox();
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'inh', cwd: home,
+    tool_input: { subagent_type: 'Explore', prompt: 'sweep the repo' },
+  }, home);
+  assert.equal(out.stdout.trim(), '');
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'inh.json'), 'utf8'));
+  assert.equal(state.dispatches[0].model, 'inherit', 'the meter says inherited rather than guessing');
 });

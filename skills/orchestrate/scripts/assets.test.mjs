@@ -108,3 +108,45 @@ test('assets/packet.md carries every field contracts.md documents', () => {
   assert.ok(packet.includes('VERDICT: PASS|FAIL'), 'with the one schema');
   assert.ok(packet.length < 6000, `packet.md is ${packet.length} bytes; it exists to be small`);
 });
+
+// The Fable cap was removed because a count answers the wrong question and
+// reads as an allowance. Prose is where it would creep back, so prose is where
+// this checks.
+test('no shipped file states a numeric Fable allowance', () => {
+  const files = [
+    join(SKILL, 'SKILL.md'),
+    ...readdirSync(join(SKILL, 'references')).map(f => join(SKILL, 'references', f)),
+    ...readdirSync(AGENTS).map(f => join(AGENTS, f)),
+    join(SKILL, 'assets', 'packet.md'),
+  ].filter(p => p.endsWith('.md'));
+
+  for (const p of files) {
+    const text = readFileSync(p, 'utf8');
+    const name = p.split(/[\/]/).pop();
+    for (const line of text.split('\n')) {
+      if (!/fable/i.test(line)) continue;
+      // A line saying the cap is gone is the opposite of the drift, not it.
+      if (/was removed|used to|no longer|there used to be/i.test(line)) continue;
+      assert.doesNotMatch(line, /\bcap(ped|s)?\b/i, `${name}: ${line.trim().slice(0, 90)}`);
+      assert.doesNotMatch(line, /\d+\s*(a day|per day|\/day|dispatches a day)/i, `${name}: ${line.trim().slice(0, 90)}`);
+      assert.doesNotMatch(line, /fable-optin|opts? in for the day/i, `${name}: ${line.trim().slice(0, 90)}`);
+    }
+  }
+});
+
+test('the skill tells the manager to ask when a model is not in the plan', () => {
+  const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  const routing = readFileSync(join(SKILL, 'references', 'routing.md'), 'utf8');
+  assert.match(skill, /Never downgrade quietly to avoid asking, and never spend quietly/);
+  assert.match(routing, /the choice is theirs, not yours/);
+  assert.match(routing, /When Fable earns its cost/);
+});
+
+test('SKILL.md carries the plain-speech rules, not just the wish', () => {
+  const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  assert.match(skill, /How to talk to the user/);
+  assert.match(skill, /someone who is fifteen/);
+  assert.match(skill, /Answer the question that was asked/);
+  assert.match(skill, /Never call something remaining work unless the user has to do something/);
+  assert.match(skill, /A number the user cannot act on does not go in the report/);
+});

@@ -12,7 +12,6 @@ export const DIR = join(HOME, '.claude', 'orchestrate');
 export const SESSIONS_DIR = join(DIR, 'sessions');
 export const PROFILE_PATH = join(DIR, 'profile.json');
 export const TIERS = ['pro', 'max5', 'max20', 'team', 'api', 'unknown'];
-export const FABLE_CAPS = { max5: 3, max20: 6 };
 export const AGENT_NAMES = ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger'];
 export const OPEN_GLYPHS = /📋|🔨|🔍|◐|⛔/;
 
@@ -75,16 +74,6 @@ export function routerSettings() {
   const p = readJson(PROFILE_PATH);
   const r = (p && p.router) || {};
   return { enabled: r.enabled !== false, haiku: r.haiku === true };
-}
-
-export function fableCountToday() {
-  const c = readJson(join(DIR, `fable-count-${today()}.json`));
-  return c && Number.isFinite(c.count) ? c.count : 0;
-}
-
-export function optedInToday() {
-  const o = readJson(join(DIR, 'fable-optin.json'));
-  return Boolean(o && o.date === today());
 }
 
 export function agentsInstalled() {

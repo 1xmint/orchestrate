@@ -16,7 +16,7 @@ Prose about live availability is evidence, not authority.
 | Max 20x ($200/mo) | same | same 50% rule on a four-times-larger allowance | Opus 5 |
 | Team standard seat | like Pro | usage credits | Sonnet 5 |
 | Team premium, Enterprise premium | like Max | 50% rule | Opus 5 |
-| API key / Console | all | pay per token; Fable is the most expensive tier by a wide margin, so it is treated like Pro here (off without opt-in). Current prices: the pricing page below | Opus 5 |
+| API key / Console | all | pay per token; Fable is the most expensive tier by a wide margin, so it is treated like Pro here: recommend it and let the user decide. Current prices: the pricing page below | Opus 5 |
 
 Limits on Pro and Max: a rolling five-hour window plus a weekly window, shared
 across the Claude app, Cowork and Claude Code. Every subagent this skill
@@ -41,25 +41,67 @@ to `pro | max5 | max20 | team | unknown`, unless the user saved an override with
 `--set tier=…`. A missing signal is `unknown`, never a guess, because a guess
 of a paid tier on a Pro account spends money on Fable. On `unknown`, ask once
 with the four choices and save the answer. An API-key session is `api`:
-dollars rather than a window; use the Pro column, and dispatch to Fable only
-after the user opts in for the day (`profile.mjs --fable-optin`).
+dollars rather than a window, so use the Pro column and treat every Fable
+dispatch as the user's decision to make.
 
-The two Fable rules are held by a hook, not by this text: SKILL.md's
-frontmatter registers `guard-agent.mjs` on the Agent tool when the skill is
-invoked (`install.mjs --with-hook` does the same globally). It denies a
-`model: fable` dispatch on pro/api/team/unknown without today's opt-in and
-denies any packet carrying a credential. On Max 5x and Max 20x it caps Fable at
-3 and 6 dispatches a day; past the cap it does not stall the run: it rewrites
-the call to `opus` (`updatedInput`) and says so in a one-line context note. That
-note, at dispatch time, is where you see the downgrade: the agent echoes the
-model the packet named, not the one it ran on, so a return can say `fable` for
-work an `opus` agent did. `ledger.mjs` writes the model the guard actually used
-into the row's evidence cell from the session's dispatch record, and that cell
-is the honest answer. Without the hook the same numbers are the rule.
+## Choosing the model, and when the choice is the user's
 
-The router (`scripts/router.mjs`, global) reads the same counter and shows
-`fable n/3 today` in its hints; it also records a model-family limit seen in
-the transcript today and moves that family one step down in every hint.
+No hook decides this. `guard-agent.mjs` denies a packet carrying a credential
+and records every dispatch, and that is all it does. There used to be a daily
+Fable cap; it was removed because a count answers "how many have you done" when
+the only question worth asking is "is this task worth it", and because a cap
+reads as an allowance and invites spending up to it.
+
+So you decide, every time, in two steps.
+
+**Step one: which model does the task need?** The routing table below answers
+it. Pick the model whose chance of a first-time-right result clears the task's
+bar, then minimise total quota including rework, then wall clock.
+
+**Step two: is that model included in this user's plan?** The facts table above
+answers it, and the profile line at the top of the skill names the plan. If the
+model is included, dispatch and say nothing. If it is not, it costs the user
+real money, and the choice is theirs, not yours.
+
+When the choice is theirs, ask once, and put the recommendation first:
+
+> This is a cross-module migration with no tests to lean on, so I would send the
+> plan to Fable. You are on the $20 plan, where Fable is not included and bills
+> usage credits on top of your subscription. Three ways to go:
+>
+> 1. **Fable** (what I would pick): best chance of getting the plan right the
+>    first time. Costs credits, roughly the price of a coffee for a plan this
+>    size.
+> 2. **Opus**: included in your plan, no extra cost. Likely fine here, and if it
+>    misses I will say so rather than paper over it.
+> 3. **Split it smaller and use Sonnet**: cheapest, slowest, and I would have to
+>    come back to you more often.
+
+Two failures to avoid, and they are the same failure wearing different clothes:
+never quietly downgrade to dodge asking, and never quietly spend the user's
+money to dodge asking. Say what you would do and why, then let them pick.
+
+Effort is not a per-call lever. It is fixed in each agent file, so recommending
+a change to it means recommending an edit to that file, or a change to the
+user's own session with `/model`. Never imply you can set it per dispatch.
+
+### When Fable earns its cost
+
+It earns it when the work is hard to check and expensive to get wrong: an
+adversarial audit of a whole system, a plan that is ambiguous and crosses
+modules, a failure that survived one good attempt on Opus, or sources that
+disagree and must be reconciled.
+
+It does not earn it when the task is bounded and something else can check the
+answer: a tight packet with strong tests or types, a sweep, an extraction, a
+mechanical change, or a class of task Opus already handled well today. Spending
+Fable there buys nothing you could measure.
+
+The router (`scripts/router.mjs`, global) shows the plan and your own model in
+its state line, and records a model-family limit seen in the transcript today,
+moving that family one step down in every hint. It shows no spend total, on
+purpose: a running count is the cap in another costume, and the honest number
+is the one `measure.mjs` reports about a finished run.
 
 ## Effort (for whoever edits the agent files; not a per-run choice)
 
@@ -88,7 +130,7 @@ in ten minutes.
 | Browser operator (`orch-browser`) | sonnet | sonnet | opus |
 | Independent reviewer (`orch-reviewer`) | opus | opus | fable for security, release, public surfaces or money; otherwise opus |
 | Debug escalation (`orch-debugger`) | opus | fable | fable |
-| Fable dispatches | **none unless the user opts in for the day** | at most 3 a day | at most 6 a day |
+| Fable dispatches | **the user's call each time**: recommend, price it, let them choose | included; judge each one on its merits | included; judge each one on its merits |
 
 Pass the model on the `Agent` call (`model: sonnet | opus | haiku | fable`).
 Dispatch counts are a poor proxy for tokens: a Fable planner or debugger runs

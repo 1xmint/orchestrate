@@ -59,7 +59,7 @@ function prompt(home, cwd, text, extra = {}) {
 test('first substantive prompt gets the card once; a one-line fix gets no rung line', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const out = prompt(home, repo, "Fix the typo in README.md: 'recieve' → 'receive'.");
-  assert.match(out, /^\[orch-router · once per session\] you: unknown model · tier max5 · orch-agents 6\/6 · fable 0\/3 today · open run: none in this repo · limits today: none/);
+  assert.match(out, /^\[orch-router · once per session\] you: unknown model · tier max5 · orch-agents 6\/6 · open run: none in this repo · limits today: none/);
   assert.match(out, /cheapest rung/);
   assert.doesNotMatch(out, /\n\[orch-router\] /, 'no hint for an inline fix');
   assert.ok(out.length < 2200, `card too long: ${out.length} chars`);
@@ -146,7 +146,7 @@ test('an open run: the card names it and resume words hint the resume path; Sess
   assert.match(out, /open run: 20260908-tidy-finish/);
   assert.match(out, /\[orch-router\] resume: open run 20260908-tidy-finish \+ resume words → \/orchestrate resume: read RUN.md once, continue from Pickup \("dispatch 9-8-0002 once 0001 lands"\), do not re-plan/);
   const resumed = run(home, { hook_event_name: 'SessionStart', source: 'resume', session_id: 'sess-c', cwd: repo });
-  assert.match(resumed, /\[orch-router · resumed\] open run .*RUN\.md — Pickup: "dispatch 9-8-0002 once 0001 lands" \(confidence high, risk mild\) · tier max5 · fable 0\/3 today/);
+  assert.match(resumed, /\[orch-router · resumed\] open run .*RUN\.md — Pickup: "dispatch 9-8-0002 once 0001 lands" \(confidence high, risk mild\) · tier max5/);
   const compacted = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 'sess-c', cwd: repo });
   assert.match(compacted, /compacted\]/);
   assert.match(compacted, /\nladder: context → inline/);
@@ -164,13 +164,16 @@ test('"router off" mutes the session; "router on" restores it; clear resets the 
   assert.equal(existsSync(join(home, '.claude', 'orchestrate', 'sessions', 'sess-a.json')), false);
 });
 
-test('pro tier never shows a Fable count; a family limit in the transcript moves the reviewer down', () => {
+test('the card carries no spend total; a family limit in the transcript moves the reviewer down', () => {
   const home = makeHome(); const repo = makeRepo(false);
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro', tierSource: 'user' }));
   const transcript = join(repo, 't.jsonl');
   writeFileSync(transcript, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: "You've hit your Opus limit until 14:00" }] } }) + '\n');
   const out = prompt(home, repo, 'Add X with tests, then run the gate and review it', { transcript_path: transcript });
-  assert.match(out, /fable off \(opt-in only\)/);
+  // A running total reads as an allowance and invites spending it. The tier is
+  // what the manager reasons from; measure.mjs reports what a finished run cost.
+  assert.doesNotMatch(out, /fable \d|\bcap\b|opt-in/i);
+  assert.match(out, /tier pro/);
   assert.match(out, /limits today: opus/);
   assert.match(out, /orch-reviewer sonnet/);
 });

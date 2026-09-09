@@ -34,7 +34,7 @@ stacking them. `--dry-run` says what would happen and changes nothing.
 | Hook | When | What it holds |
 |---|---|---|
 | `router.mjs` | every prompt, and on resume or compact | once a session, the cost-ordered ladder of moves plus the local state the model cannot see: plan tier, your own model, an open run, agents installed, a family limit hit today. After that, silence unless something changed. Turn it off for a session by typing `router off` |
-| `guard-agent.mjs` | before every Agent dispatch | blocks a Fable dispatch on Pro, API, Team or unknown plans unless you opt in for the day; past 3 Fable dispatches a day on Max 5x (6 on Max 20x) it moves the dispatch to Opus and says so, instead of stalling the run; blocks any brief containing something shaped like a credential |
+| `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It has no opinion about which model a task deserves: that is the manager's judgment, and when the right model is not included in your plan it asks you rather than spending or downgrading quietly |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run folder, sums its token usage, and moves its row in `RUN.md` to review, partial or blocked |
 | `return-check.mjs` | each role agent's own stop | refuses a return that is missing RESTATED, STATUS or EVIDENCE, or runs past 60 lines. Twice, then it gives up |
 | `turn-check.mjs` | when a turn ends with a run open | blocks once when `RUN.md`'s Pickup line has not moved since the last dispatch, so a session that dies is still resumable |

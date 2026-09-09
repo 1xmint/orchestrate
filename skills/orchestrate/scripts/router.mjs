@@ -17,7 +17,7 @@ import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSyn
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  detectTier, routerSettings, fableCountToday, FABLE_CAPS, agentsInstalled, findRepoRoot,
+  detectTier, routerSettings, agentsInstalled, findRepoRoot,
   latestRun, loadSession, saveSession, sessionPath, pruneSessions, readTail, applyLimits, sanitizeId,
   selfModel, strongerThan,
 } from './lib/tier.mjs';
@@ -196,16 +196,14 @@ function rungLabel(r) {
 
 // ---- state line -------------------------------------------------------------
 function stateLine(ctx, prefix) {
-  const cap = FABLE_CAPS[ctx.tier];
-  const fable = cap ? `fable ${ctx.fableCount}/${cap} today` : 'fable off (opt-in only)';
   const run = ctx.openRun && ctx.openRun.open ? `open run: ${ctx.openRun.runId}` : 'open run: none in this repo';
   const limits = ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none';
   const you = ctx.self ? `you: ${ctx.self.model}${ctx.self.effort ? ` @ ${ctx.self.effort} effort` : ''}` : 'you: unknown model';
-  return `${prefix} ${you} · tier ${ctx.tier} · orch-agents ${ctx.agents}/6 · ${fable} · ${run} · ${limits}`;
+  return `${prefix} ${you} · tier ${ctx.tier} · orch-agents ${ctx.agents}/6 · ${run} · ${limits}`;
 }
 
 function stateHash(ctx) {
-  return [ctx.tier, ctx.agents, ctx.openRun && ctx.openRun.open ? ctx.openRun.runId : '', ctx.fableCount, ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : ''].join('|');
+  return [ctx.tier, ctx.agents, ctx.openRun && ctx.openRun.open ? ctx.openRun.runId : '', ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : ''].join('|');
 }
 
 // ---- local context ----------------------------------------------------------
@@ -233,7 +231,7 @@ function gatherContext(input, state) {
   if (self) state.self = self;
   return {
     tier: state.tier, agents: agentsInstalled().installed, repoRoot, openRun: run,
-    fableCount: fableCountToday(), limits, permission_mode: input.permission_mode || '',
+    limits, permission_mode: input.permission_mode || '',
     self: self || state.self || null,
   };
 }
@@ -319,7 +317,7 @@ function handleSessionStart(input) {
   if (ctx.openRun && ctx.openRun.open) {
     const p = ctx.openRun.pickup;
     const pick = p['Pickup prompt'] ? ` — Pickup: "${p['Pickup prompt']}" (confidence ${p['Pickup confidence'] || '?'}, risk ${p['Resume risk'] || '?'})` : ' — Pickup line not written yet';
-    out.push(`[orch-router · ${source === 'resume' ? 'resumed' : 'compacted'}] open run ${ctx.openRun.runMd}${pick} · tier ${ctx.tier} · ${FABLE_CAPS[ctx.tier] ? `fable ${ctx.fableCount}/${FABLE_CAPS[ctx.tier]} today` : 'fable off'}${ctx.limits.length ? ` · limits today: ${ctx.limits.join(', ')}` : ''}`);
+    out.push(`[orch-router · ${source === 'resume' ? 'resumed' : 'compacted'}] open run ${ctx.openRun.runMd}${pick} · tier ${ctx.tier}${ctx.limits.length ? ` · limits today: ${ctx.limits.join(', ')}` : ''}`);
     state.orchestrateActive = true;
   }
   if (source === 'compact') out.push(LADDER_LINE);
@@ -341,7 +339,7 @@ function maybePrune() {
 function explain(prompt) {
   const f = analyze(prompt);
   const state = { tier: detectTier().tier, limits: [] };
-  const ctx = { tier: state.tier, agents: agentsInstalled().installed, repoRoot: findRepoRoot(process.cwd()), openRun: latestRun(findRepoRoot(process.cwd()) || process.cwd()), fableCount: fableCountToday(), limits: [], permission_mode: '' };
+  const ctx = { tier: state.tier, agents: agentsInstalled().installed, repoRoot: findRepoRoot(process.cwd()), openRun: latestRun(findRepoRoot(process.cwd()) || process.cwd()), limits: [], permission_mode: '' };
   const c = classify(f, ctx);
   console.log(JSON.stringify({ features: f, rung: c.rung, label: rungLabel(c.rung), confident: c.confident, orth: c.orth, evidence: c.evidence, hint: hintFor(c, f, ctx) || '(silent)' }, null, 2));
 }

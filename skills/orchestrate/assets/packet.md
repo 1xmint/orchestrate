@@ -9,7 +9,8 @@ references/contracts.md — read that once, then dispatch from this file.
 
 ```
 TASK: <id, M-D-NNNN>  ROLE: <planner|implementer|researcher|browser|reviewer|debugger>
-MODEL: <sonnet|opus|haiku|fable> because <one line from routing.md>
+MODEL: <sonnet|opus|haiku|fable> because <one line: what the task needs, and
+  that the plan includes it, or that the user chose it>
 
 OBJECTIVE
 <what must be true when you are done, in one or two sentences>

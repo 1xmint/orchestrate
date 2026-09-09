@@ -30,15 +30,6 @@ function readJson(path) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
 }
 
-// The Fable counter file is named by the LOCAL calendar date, because that is
-// what the guard writes. Using toISOString() here would read tomorrow's file
-// for the last hours of every evening west of UTC and report "0/3 today" while
-// the cap was already spent.
-function localDate(d = new Date()) {
-  const pad = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
 // ---- overrides --------------------------------------------------------------
 const setIdx = args.findIndex(a => a === '--set' || a.startsWith('--set='));
 if (setIdx >= 0) {
@@ -51,14 +42,6 @@ if (setIdx >= 0) {
   mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
   writeFileSync(OVERRIDE_PATH, JSON.stringify({ tier: m[1], tierSource: 'user', setAt: new Date().toISOString() }, null, 2) + '\n');
   console.log(`tier override saved: ${m[1]} (${OVERRIDE_PATH})`);
-  process.exit(0);
-}
-if (args.includes('--fable-optin')) {
-  const d = new Date();
-  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
-  writeFileSync(join(dirname(OVERRIDE_PATH), 'fable-optin.json'), JSON.stringify({ date: today }) + '\n');
-  console.log(`Fable opt-in recorded for ${today} (guard-agent.mjs will allow Fable dispatches today)`);
   process.exit(0);
 }
 if (args.includes('--clear')) {
@@ -276,10 +259,13 @@ if (brief) {
     const prov = p
       ? Object.entries(p).filter(([, v]) => v.installed).map(([n, v]) => `${n} ${v.auth}`).join(', ') || 'none on PATH'
       : 'not probed today (run profile.mjs for the full picture)';
-    const cap = { max5: 3, max20: 6 }[tier.tier];
-    const fable = readJson(join(HOME, '.claude', 'orchestrate', `fable-count-${localDate()}.json`));
+    // No spend counter here on purpose. A running total reads as an allowance
+    // and invites spending it; the tier is what the model actually reasons
+    // from, and measure.mjs reports what a finished run cost.
+    const included = { max5: 'Opus, Sonnet, Haiku and Fable', max20: 'Opus, Sonnet, Haiku and Fable', pro: 'Opus, Sonnet and Haiku; Fable costs credits, so ask first', team: 'Opus, Sonnet and Haiku; Fable costs credits, so ask first', api: 'all, billed per token; ask before Fable' }[tier.tier] || 'unknown, ask the user once';
     console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')})` : ''}`);
-    console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''} · fable ${cap ? `${(fable && fable.count) || 0}/${cap} today` : 'off unless the user opts in'}`);
+    console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''}`);
+    console.log(`this plan includes: ${included}`);
     console.log(`providers: ${prov}`);
     console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none'}`);
   } catch {}
@@ -303,5 +289,5 @@ if (wantJson) {
   console.log(`runs: ${runs.count} under ${runs.dir}${runs.latest ? ' — latest: ' + runs.latest : ''}`);
   console.log(`skills: ${skills.length ? skills.join(', ') : 'none installed'}`);
   if (tier.tier === 'unknown') console.log('next: ask the user which plan (Pro $20 / Max 5x $100 / Max 20x $200 / API-Team-other), then: node scripts/profile.mjs --set tier=<pro|max5|max20|team|api>');
-  if (tier.tier === 'pro') console.log('note: on Pro, Fable bills usage credits; never dispatch to fable without the user opting in for this run');
+  if (tier.tier === 'pro' || tier.tier === 'team' || tier.tier === 'api') console.log(`note: on ${tier.tier}, Fable is not included and costs the user real money. Recommend it when a task warrants it, say what it would cost and what the alternatives are, and let the user choose.`);
 }

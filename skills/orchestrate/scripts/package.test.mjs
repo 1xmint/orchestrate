@@ -37,7 +37,7 @@ test('the portable build does not promise enforcement it cannot deliver', () => 
   const s = toSpec(SKILL);
   assert.doesNotMatch(s, /Three hooks hold the mechanical rules/);
   assert.match(s, /This host does not run the skill's hooks/);
-  assert.match(s, /Fable is off on Pro, API, Team and unknown/, 'the money rule survives as prose');
+  assert.match(s, /it spends the user's own money, so recommend it, price it/, 'the money rule survives as prose');
   assert.match(s, /Never review your own edits/, 'so does the review rule');
 });
 
