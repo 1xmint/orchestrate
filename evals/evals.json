@@ -1,0 +1,26 @@
+{
+  "skill_name": "orchestrate",
+  "evals": [
+    {
+      "id": 1,
+      "name": "rust-json-flag-with-review",
+      "prompt": "In the Rust crate at {{FIXTURE_RUST}}, add a `--json` flag to the `status` subcommand so it prints the same data as the text output as one JSON object on stdout, with tests. Then get the change reviewed for panics and unwraps before you call it done. Keep the human output unchanged.",
+      "expected_output": "A plan with tasks and rubrics in a RUN.md ledger before any dispatch; an implementer agent in a worktree producing the flag, a test, and passing cargo test/clippy/fmt; an independent read-only review with PASS or numbered findings that were acted on; a final report that leads with the outcome and states what was and was not verified.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "python-notelocus-since-flag",
+      "prompt": "In the notelocus repo at C:\Users\Josh\Desktop\GitHub\notelocus, add `notelocus tidy --since <date>` so only notes modified on or after that date are filed, with a test that proves nothing is lost and that older notes stay put. The repo's never-delete rule is not negotiable. Pass the three CI checks it names.",
+      "expected_output": "Grounding against the repo's AGENTS.md and code rather than memory; a ledger; a bounded implementer dispatch with allowed files, verification commands (pytest, ruff check, ruff format --check) and a stop condition; evidence checked by the orchestrator; a reviewer on the data-safety rule; a plain final report.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "typescript-research-then-implement",
+      "prompt": "In the TypeScript package at {{FIXTURE_TS}}, find out the currently recommended way to read a `.env` file in Node 22 without a third-party dependency, then implement `loadConfig()` that way with a test, and verify it. Cite where the recommendation comes from.",
+      "expected_output": "A researcher dispatch with a source obligation returning dated, sourced findings (Node's built-in --env-file / process.loadEnvFile); an implementer dispatch using those facts verbatim in the packet; tests run and evidence inspected; a final report with the source cited and any disagreement between sources stated.",
+      "files": []
+    }
+  ]
+}

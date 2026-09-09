@@ -1,0 +1,6 @@
+{
+  "tier": "max5",
+  "tierSource": "user",
+  "setAt": "2026-09-08T00:00:00.000Z",
+  "note": "Written by scripts/profile.mjs --set tier=<pro|max5|max20|team|api>. Delete this file to fall back to automatic detection."
+}
