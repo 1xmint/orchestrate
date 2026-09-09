@@ -14,20 +14,31 @@ inspected artifacts and commands it ran or had run on its behalf.
 
 ## 2. Verify
 
-Run the packet's verification commands yourself in the real worktree, or have
-an `Explore` agent (it has Bash but cannot edit) run them and return the tail.
-Then `git diff --stat` and `git diff --name-only` against the base. Compare
-what the agent claimed with what the tree shows.
+Filter first, delegate second. Run the packet's verification commands in the
+real worktree with the output cut to what decides the result: `… 2>&1 | tail
+-20`, or a failures-only filter (`grep -A 5 -E '(FAIL|ERROR|error:)' | head
+-100`). That costs a few hundred tokens in this conversation. Only when the
+filtered output is still long, or the suite is slow, hand the run to `Explore`
+on haiku (it has Bash and cannot edit) and take back the last 20 lines. Then
+`git diff --stat` and `git diff --name-only` against the base. Compare what the
+agent claimed with what the tree shows. The ledger hook has already saved the
+agent's full return under `<run dir>/returns/`; read that file, not the
+conversation, when you need the whole thing.
 
-Find the repo's gate rather than inventing one, in this order: the repo's
-`AGENTS.md` or `CLAUDE.md` build-and-test section; a `justfile` or `Makefile`;
-`package.json` scripts; `Cargo.toml` (then `cargo test`, `cargo clippy
---all-targets`, `cargo fmt --check`); `pyproject.toml` (then the configured
-test and lint runners); the CI workflow under `.github/workflows`. Run exactly
-those. If a repo has no gate, propose the smallest one, record it in the
-ledger, and use it for the rest of the run.
+The gate comes from `<repo>/.orchestrator/gate.json`, written by
+`scripts/gate.mjs` when the ledger is created (sources, in order: the repo's
+`AGENTS.md` or `CLAUDE.md` build-and-test lines; a `justfile` or `Makefile`;
+`package.json` scripts; `Cargo.toml`; `pyproject.toml`; the CI workflow under
+`.github/workflows`). Run exactly those commands. If the script found no gate,
+propose the smallest one, record it in the ledger, and use it for the rest of
+the run.
 
 ## 3. Grade
+
+The ledger hook pre-fills the row when a return lands: phase 🔍 for a `DONE`
+claim, ◐ for `PARTIAL`, ⛔ for `BLOCKED`, the attempt count, the path of the
+saved return, and the agent's token usage. It never writes ✅. You do, after
+the check below; a `DONE` claim is a claim.
 
 Every task lands in exactly one state:
 
@@ -71,7 +82,13 @@ is reported and the gate stays open; it is never silently skipped. Your own
 read is a third check, not a substitute.
 
 Reviewers judge two axes: does it meet the objective; does it meet the repo's
-standards. Findings are numbered so a fix packet can be scoped to them.
+standards. Findings are numbered so a fix packet can be scoped to them. A
+reviewer asked to find gaps will find some; only correctness and the stated
+requirements count, the rest is optional and is reported as such.
+
+When a research or audit result must be cross-checked at scale (many files,
+many sources), a dynamic workflow does the cross-check without any of it
+entering this conversation; hand the user the one-line prompt from `lanes.md`.
 
 ## 6. When it is not right: name the failure, then act
 

@@ -47,9 +47,16 @@ after the user opts in for the day (`profile.mjs --fable-optin`).
 The two Fable rules are held by a hook, not by this text: SKILL.md's
 frontmatter registers `guard-agent.mjs` on the Agent tool when the skill is
 invoked (`install.mjs --with-hook` does the same globally). It denies a
-`model: fable` dispatch on pro/api/team/unknown without today's opt-in, caps
-Fable at 3 dispatches a day on Max 5x and 6 on Max 20x, and denies any packet
-carrying a credential. Without the hook the same numbers are the rule.
+`model: fable` dispatch on pro/api/team/unknown without today's opt-in and
+denies any packet carrying a credential. On Max 5x and Max 20x it caps Fable at
+3 and 6 dispatches a day; past the cap it does not stall the run: it rewrites
+the call to `opus` (`updatedInput`) and says so in a one-line context note, so
+the orchestrator sees the downgrade in the return's `MODEL` line and the ledger.
+Without the hook the same numbers are the rule.
+
+The router (`scripts/router.mjs`, global) reads the same counter and shows
+`fable n/3 today` in its hints; it also records a model-family limit seen in
+the transcript today and moves that family one step down in every hint.
 
 ## Effort (for whoever edits the agent files; not a per-run choice)
 
@@ -82,9 +89,23 @@ in ten minutes.
 
 Pass the model on the `Agent` call (`model: sonnet | opus | haiku | fable`).
 Dispatch counts are a poor proxy for tokens: a Fable planner or debugger runs
-long, and the main conversation may itself be on Fable. If the session model
-is Fable on Max 5x, suggest `/model opus` for the orchestrator before a run
-that will dispatch to Fable.
+long, and the main conversation may itself be on Fable.
+
+**The orchestrator's own model is chosen at session start, not mid-run.** On
+Max 5x the orchestrator belongs on Opus (the plan default) and Fable is spent
+on the planner, reviewer and debugger dispatches; on Max 20x either works; on
+Pro the session default (Sonnet) orchestrates and Opus does the judgment roles.
+A `/model` switch mid-session rebuilds the whole prompt cache, so when the
+session is already on Fable, say so once in the first progress note and let the
+user decide at a natural break; do not suggest a switch in the middle of a run.
+Changing effort on Fable 5.1 keeps the cache (2.1.260+); switching models never does.
+
+Subagent requests get a 5-minute cache TTL by default even on a subscription,
+against one hour for the main conversation. A long agent that waits on a build
+re-reads its prefix after five idle minutes. `subagentPromptCacheTtl: "1h"`
+(2.1.242+) in `~/.claude/settings.json` extends it; the API bills 1-hour cache
+writes at a higher rate, and how that lands on plan usage is not documented, so
+this skill leaves the default and names the lever here.
 
 ## Escalation triggers (fixed list)
 

@@ -1,11 +1,19 @@
 # Contracts: what an agent receives and what it returns
 
-A subagent starts with no memory of this conversation. It sees its agent file
-and the packet you write, and usually the repo's `CLAUDE.md`/`AGENTS.md`;
-do not rely on the latter, put the gate in the packet. Everything it needs to
-be right the first time has to be in the packet.
-Vague packets are the main cause of first-attempt failure; a tight packet lets
-a smaller model succeed.
+A subagent starts with no memory of this conversation. It sees its agent file,
+the packet you write, and the repo's `CLAUDE.md` levels. It does **not** see
+`AGENTS.md` (Claude Code reads only `CLAUDE.md`), the conversation, files you
+already read, or your auto memory. So the gate and the repo's never-do rules go
+in the packet even when a file in the repo states them. Everything it needs to
+be right the first time has to be in the packet. Vague packets are the main
+cause of first-attempt failure; a tight packet lets a smaller model succeed.
+
+Two hooks hold the contract mechanically. Each role agent's own `Stop` hook
+(`scripts/return-check.mjs`) refuses to let the agent finish while its return
+lacks `RESTATED`, `STATUS` or `EVIDENCE` or runs past 60 lines, at most twice.
+The session's `SubagentStop` hook (`scripts/ledger.mjs`) saves every return
+under `<run dir>/returns/` and writes the task row into `RUN.md`, keyed by the
+`TASK:` line, with the agent's token usage read from its transcript.
 
 ## The packet
 
@@ -29,6 +37,10 @@ NOT IN SCOPE
 FACTS (verified; use as given, do not re-derive)
 - <fact with its source: path:line, URL, command output>
 - ...
+
+GATE (from <repo>/.orchestrator/gate.json, detected <date>; run exactly these)
+- <command>  # <where it came from: justfile, package.json, Cargo.toml, CI>
+- <repo rules that bind you, quoted from AGENTS.md or CLAUDE.md, which you do not see>
 
 VERIFY LIVE BEFORE ACTING
 - <anything about an external service, CLI, library version or price that the
@@ -66,6 +78,7 @@ file's maxTurns, which the agent cannot see>; if you are past it, stop and
 report PARTIAL.
 
 RETURN (at most 40 lines; put long logs in <run dir>/<id>.md and cite the path)
+TASK: <the id above, verbatim; the ledger keys on it>
 RESTATED: <the objective in your own words, two lines>
 STATUS: DONE | PARTIAL | BLOCKED
 BRANCH: <name>   WORKTREE: <absolute path>
@@ -92,8 +105,9 @@ ALLOWED FILES THE AUTHOR HAD: <globs>
 DIFF: `git diff <base>..<sha>` in that worktree
 EVIDENCE: <the author's EVIDENCE section and any log paths>
 REPO STANDARDS: <path to AGENTS.md / CLAUDE.md>
-RETURN: PASS or FAIL on the first line, then numbered findings with file:line
-  and the exact edit; under 60 lines.
+RETURN: `TASK: <id>` then PASS or FAIL, then numbered findings with file:line
+  and the exact edit; under 60 lines. Flag only gaps that affect correctness or
+  the stated requirements; a reviewer asked for gaps will always find some.
 ```
 
 The `RESTATED` line is the cheapest check that the agent understood the task.
@@ -157,8 +171,12 @@ DURABILITY: commit per unit, prefix "9-8-0003:", push.
 STOP AND REPORT: if StatusReport holds a non-serialisable field; if a
 forbidden file needs a change.
 BUDGET: 60 turns.
-RETURN: as in the schema.
+RETURN: as in the schema, first line `TASK: 9-8-0003`.
 ```
+
+The GATE block in the good packet came from `gate.json`, not from the model
+reading Cargo.toml and the CI file: `run-init.mjs` runs `scripts/gate.mjs` when
+the ledger is created and pastes the result under Facts.
 
 ## Role notes
 
