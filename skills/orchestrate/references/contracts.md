@@ -60,6 +60,10 @@ PRIOR ATTEMPTS
 PATTERNS TO FOLLOW
 - <path to an existing example of the shape wanted>
 
+SKILLS TO USE
+- <none, or: invoke `/name` through the Skill tool for step N, because it
+  already does that procedure; the skill names come from the profile line>
+
 VERIFICATION COMMANDS (run these; paste the tail)
 - <exact command>
 
@@ -90,6 +94,14 @@ QUESTIONS: <only ones that block>
 
 The run dir is always the absolute path in the main checkout. A relative
 `.orchestrator/…` inside an isolated worktree disappears with the worktree.
+
+Skills are a toolkit for the packet. A subagent can invoke any installed skill,
+so a step an existing skill already performs is routed to it rather than
+re-derived in prose: name the skill and the step under SKILLS TO USE, and never
+paste its body. The installed names come from the profile line at the top of
+the skill. Preloading one through an agent file's `skills:` key is only for a
+skill that *every* run of that role needs, which is rare, because a preloaded
+skill costs its body on every dispatch whether it is used or not.
 
 ## The reviewer packet
 

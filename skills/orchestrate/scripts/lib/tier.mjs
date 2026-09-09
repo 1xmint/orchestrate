@@ -175,7 +175,43 @@ export function readTail(path, bytes = 65536) {
   } catch { return ''; }
 }
 
+// Which model and effort the *manager* is running on. The orchestrator cannot
+// see its own model, and the routing rule for who reviews a diff depends on it:
+// a manager strictly above the author can review the diff itself instead of
+// paying for a reviewer dispatch. Read from the last assistant record in the
+// transcript tail; unknown is a normal answer.
+export function selfModel(transcriptPath) {
+  const tail = readTail(transcriptPath, 65536);
+  if (!tail) return null;
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].trim();
+    if (!l || l[0] !== '{') continue;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    const model = o && o.message && typeof o.message.model === 'string' ? o.message.model : null;
+    if (!model) continue;
+    return { model: shortModel(model), effort: typeof o.effort === 'string' ? o.effort : null };
+  }
+  return null;
+}
+
+// `claude-opus-5` and `claude-sonnet-5-20260101` are both "opus"/"sonnet" here;
+// the family is what the routing rule turns on.
+export function shortModel(id) {
+  const s = String(id).toLowerCase();
+  for (const f of ['fable', 'opus', 'sonnet', 'haiku']) if (s.includes(f)) return f;
+  return s.slice(0, 24);
+}
+
 export const FAMILY_ORDER = ['fable', 'opus', 'sonnet', 'haiku'];
+
+// Strictly stronger, by the ladder the routing rules use.
+export function strongerThan(a, b) {
+  const ia = FAMILY_ORDER.indexOf(String(a || '').toLowerCase());
+  const ib = FAMILY_ORDER.indexOf(String(b || '').toLowerCase());
+  if (ia < 0 || ib < 0) return false;
+  return ia < ib;
+}
 
 // One step down the family ladder for every family named in `limits`.
 export function applyLimits(model, limits) {

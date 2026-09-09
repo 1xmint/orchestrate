@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, fableCountToday, FABLE_CAPS, agentsInstalled, findRepoRoot,
   latestRun, loadSession, saveSession, sessionPath, pruneSessions, readTail, applyLimits, sanitizeId,
+  selfModel, strongerThan,
 } from './lib/tier.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -134,6 +135,20 @@ function modelsFor(tier, limits) {
   return { impl: fix(impl), rev: fix(rev), plan: fix(plan) };
 }
 
+// Who reviews. A manager strictly above the author already holds the goal and
+// the packet, so reading the diff itself is cheaper than a reviewer dispatch
+// and no less independent of the author. At or below the author, or on a risky
+// change, that stops being true and a reviewer is dispatched on a model no
+// weaker than the author's. The manager never reviews its own edits.
+export function reviewClause(m, f, ctx) {
+  const author = (m.impl || '').split(' or ')[0];
+  const self = ctx.self && ctx.self.model;
+  if (!f.risky && self && strongerThan(self, author)) {
+    return `review the diff yourself (${self} over ${author}, not risky); dispatch orch-reviewer only if you wrote any of it`;
+  }
+  return `orch-reviewer ${m.rev}${f.risky ? ' (required: risky change)' : ''}${self && !strongerThan(self, author) ? `, at or above ${author}` : ''}`;
+}
+
 function hintFor(c, f, ctx) {
   const m = modelsFor(ctx.tier, ctx.limits);
   const parts = [];
@@ -143,8 +158,8 @@ function hintFor(c, f, ctx) {
     case 9: parts.push('→ /batch (user-typed): one mechanical change, a PR per unit'); break;
     case 8: parts.push('→ dynamic workflow: give the user the one-line prompt "use a workflow to …"; results stay out of context'); break;
     case 7: parts.push('→ fork (needs this conversation; reads the parent cache); documented, unverified here'); break;
-    case 6.5: parts.push(`→ /orchestrate; ${ctx.tier}: orch-implementer ${m.impl}, orch-reviewer ${m.rev}${f.risky ? ' (required: risky change)' : ''}`); break;
-    case 6: parts.push(`→ orch-implementer ${m.impl} in a worktree, packet per contracts.md${ctx.repoRoot ? '' : ' (no .git above cwd: no worktree isolation)'}`); break;
+    case 6.5: parts.push(`→ /orchestrate; ${ctx.tier}: orch-implementer ${m.impl}, ${reviewClause(m, f, ctx)}`); break;
+    case 6: parts.push(`→ orch-implementer ${m.impl} in a worktree, packet per contracts.md${ctx.repoRoot ? '' : ' (no .git above cwd: no worktree isolation)'}; ${reviewClause(m, f, ctx)}`); break;
     case 5: parts.push('→ Explore on haiku, return ≤ 20 lines'); break;
     case 3.5: parts.push(`→ fetch the primary source inline if one settles it; orch-researcher ${applyLimits('sonnet', ctx.limits)} if sources may conflict. Not from memory.`); break;
     case 3: parts.push('→ rg | head, git, --json | filter; Explore(haiku) only past ~3 files'); break;
@@ -169,11 +184,12 @@ function stateLine(ctx, prefix) {
   const fable = cap ? `fable ${ctx.fableCount}/${cap} today` : 'fable off (opt-in only)';
   const run = ctx.openRun && ctx.openRun.open ? `open run: ${ctx.openRun.runId}` : 'open run: none in this repo';
   const limits = ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none';
-  return `${prefix} tier ${ctx.tier} · orch-agents ${ctx.agents}/6 · ${fable} · ${run} · ${limits}`;
+  const you = ctx.self ? `you: ${ctx.self.model}${ctx.self.effort ? ` @ ${ctx.self.effort} effort` : ''}` : 'you: unknown model';
+  return `${prefix} ${you} · tier ${ctx.tier} · orch-agents ${ctx.agents}/6 · ${fable} · ${run} · ${limits}`;
 }
 
 function stateHash(ctx) {
-  return [ctx.tier, ctx.agents, ctx.openRun && ctx.openRun.open ? ctx.openRun.runId : '', ctx.fableCount, ctx.limits.join(',')].join('|');
+  return [ctx.tier, ctx.agents, ctx.openRun && ctx.openRun.open ? ctx.openRun.runId : '', ctx.fableCount, ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : ''].join('|');
 }
 
 // ---- local context ----------------------------------------------------------
@@ -197,9 +213,12 @@ function gatherContext(input, state) {
   const run = latestRun(repoRoot || input.cwd);
   const limits = scanLimits(input.transcript_path, state);
   state.limits = limits;
+  const self = selfModel(input.transcript_path);
+  if (self) state.self = self;
   return {
     tier: state.tier, agents: agentsInstalled().installed, repoRoot, openRun: run,
     fableCount: fableCountToday(), limits, permission_mode: input.permission_mode || '',
+    self: self || state.self || null,
   };
 }
 

@@ -176,6 +176,52 @@ function detectProviders() {
   return out;
 }
 
+// Probing five CLIs costs up to 40 s of wall clock, so the answer is cached for
+// a day. `--brief` only ever reads the cache; it must never block the skill.
+const PROVIDER_CACHE = join(HOME, '.claude', 'orchestrate', 'providers.json');
+const CACHE_MS = 24 * 60 * 60 * 1000;
+
+function cachedProviders() {
+  const c = readJson(PROVIDER_CACHE);
+  if (!c || !c.at || Date.now() - Date.parse(c.at) > CACHE_MS) return null;
+  return c.providers || null;
+}
+
+function cacheProviders(providers) {
+  try {
+    mkdirSync(dirname(PROVIDER_CACHE), { recursive: true });
+    writeFileSync(PROVIDER_CACHE, JSON.stringify({ at: new Date().toISOString(), providers }, null, 2) + '\n');
+  } catch {}
+}
+
+// ---- skills as a toolkit ----------------------------------------------------
+// A step that an installed skill already does should be routed to it rather
+// than re-derived, so the plan needs to know their names. Names only: a skill's
+// body is loaded by invoking it, not by listing it.
+function detectSkills(repoRoot) {
+  const names = new Set();
+  const scan = dir => {
+    try {
+      for (const n of readdirSync(dir)) {
+        if (n.startsWith('.')) continue;
+        if (existsSync(join(dir, n, 'SKILL.md'))) names.add(n);
+      }
+    } catch {}
+  };
+  scan(join(HOME, '.claude', 'skills'));
+  if (repoRoot) scan(join(repoRoot, '.claude', 'skills'));
+  // Installed plugins only. `plugins/marketplaces` is a catalogue of what could
+  // be installed, so listing it would offer the model skills it cannot invoke.
+  try {
+    const plugins = join(HOME, '.claude', 'plugins');
+    for (const p of readdirSync(plugins)) {
+      if (p === 'marketplaces' || p.endsWith('.json')) continue;
+      scan(join(plugins, p, 'skills'));
+    }
+  } catch {}
+  return [...names].sort();
+}
+
 // ---- agents installed -------------------------------------------------------
 function detectAgents() {
   const dir = join(HOME, '.claude', 'agents');
@@ -203,15 +249,38 @@ function detectRuns(root) {
 }
 
 // ---- output -----------------------------------------------------------------
+const brief = args.includes('--brief');
 const skillDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const host = detectHost();
 const tier = detectTier();
-const providers = detectProviders();
 const agents = detectAgents();
 const repo = findRepoRoot(process.cwd());
 const runs = detectRuns(repo);
+const skills = detectSkills(repo);
 
-const result = { host, tier: tier.tier, tierSource: tier.source, providers, agents, repo, runs, skillDir, node: process.version, platform: process.platform };
+// --brief is injected into SKILL.md with `!`…``, where a slow or failing
+// command would abort the invocation. So: cache only, no probes, no network,
+// and every path exits 0.
+if (brief) {
+  try {
+    const p = cachedProviders();
+    const prov = p
+      ? Object.entries(p).filter(([, v]) => v.installed).map(([n, v]) => `${n} ${v.auth}`).join(', ') || 'none on PATH'
+      : 'not probed today (run profile.mjs for the full picture)';
+    const cap = { max5: 3, max20: 6 }[tier.tier];
+    const fable = readJson(join(HOME, '.claude', 'orchestrate', `fable-count-${new Date().toISOString().slice(0, 10)}.json`));
+    console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')})` : ''}`);
+    console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''} · fable ${cap ? `${(fable && fable.count) || 0}/${cap} today` : 'off unless the user opts in'}`);
+    console.log(`providers: ${prov}`);
+    console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none'}`);
+  } catch {}
+  process.exit(0);
+}
+
+const providers = detectProviders();
+cacheProviders(providers);
+
+const result = { host, tier: tier.tier, tierSource: tier.source, providers, agents, repo, runs, skills, skillDir, node: process.version, platform: process.platform };
 
 if (wantJson) {
   console.log(JSON.stringify(result, null, 2));
@@ -223,6 +292,7 @@ if (wantJson) {
   console.log(`agents: ${agents.installed}/${agents.expected} orch-* files in ${agents.dir}${agents.missing.length ? ' — missing: ' + agents.missing.join(', ') + ' (run scripts/install-agents.mjs)' : ' (a running session lists newly installed ones after a short delay)'}`);
   console.log(`repo: ${repo || 'not in a git repo (worktree isolation unavailable)'}`);
   console.log(`runs: ${runs.count} under ${runs.dir}${runs.latest ? ' — latest: ' + runs.latest : ''}`);
+  console.log(`skills: ${skills.length ? skills.join(', ') : 'none installed'}`);
   if (tier.tier === 'unknown') console.log('next: ask the user which plan (Pro $20 / Max 5x $100 / Max 20x $200 / API-Team-other), then: node scripts/profile.mjs --set tier=<pro|max5|max20|team|api>');
   if (tier.tier === 'pro') console.log('note: on Pro, Fable bills usage credits; never dispatch to fable without the user opting in for this run');
 }

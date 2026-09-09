@@ -12,6 +12,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } fr
 import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { detect, block } from './gate.mjs';
 
 const args = process.argv.slice(2);
 const positional = [];
@@ -64,8 +65,22 @@ const body = template
   .replaceAll('{{PROVIDERS}}', opts.providers || 'unknown')
   .replaceAll('{{ID_PREFIX}}', idPrefix);
 
+// The gate is the same four commands on every run of this repo, so it is
+// detected once and pasted under Facts, ready for the first packet.
+let gateBlock = '';
+try {
+  const g = detect(root);
+  mkdirSync(join(root, '.orchestrator'), { recursive: true });
+  writeFileSync(join(root, '.orchestrator', 'gate.json'), JSON.stringify(g, null, 2) + '\n');
+  gateBlock = block(g);
+} catch {}
+
+const withGate = gateBlock
+  ? body.replace('## Facts learned while grounding\n', `## Facts learned while grounding\n\n\`\`\`\n${gateBlock}\n\`\`\`\n`)
+  : body;
+
 mkdirSync(dir, { recursive: true });
-writeFileSync(target, body);
+writeFileSync(target, withGate);
 
 // keep it out of git without touching tracked files. Inside a worktree or a
 // submodule `.git` is a file, so ask git where the exclude file really is.

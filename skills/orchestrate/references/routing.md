@@ -107,6 +107,27 @@ re-reads its prefix after five idle minutes. `subagentPromptCacheTtl: "1h"`
 writes at a higher rate, and how that lands on plan usage is not documented, so
 this skill leaves the default and names the lever here.
 
+## Who reviews
+
+The router's state line names the model *you* are running on (`you: opus @
+high effort`), read from the transcript. It is a routing fact, not trivia:
+
+- **You are strictly above the author** (you Opus, the author Sonnet) **and the
+  class is not risky** → review the diff yourself. You already hold the goal,
+  the packet and the rubric, so a reviewer dispatch buys no independence the
+  author did not already lack, and costs a spin-up plus a return.
+- **You are at or below the author, or the class is risky** (the list under
+  trigger 2 below) → dispatch `orch-reviewer` on a model no weaker than the
+  author's. A weaker reviewer produces a PASS you cannot bank.
+- **You wrote any of the diff** → always dispatch. Never review your own edits;
+  the point of the reviewer is that it did not decide what to write.
+- **You cannot tell what you are running on** (`you: unknown model`) → dispatch.
+
+The objective order behind this rule is: first-time-right, then total quota
+including rework, then wall clock. Skipping a review that later costs a rework
+loop is more expensive than the dispatch it saved, which is why the risky list
+is not negotiable and the cheap path applies only above the author.
+
 ## Escalation triggers (fixed list)
 
 A bigger *author* is chosen only after evidence; risk selects a *reviewer*.

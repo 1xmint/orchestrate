@@ -59,7 +59,7 @@ function prompt(home, cwd, text, extra = {}) {
 test('first substantive prompt gets the card once; a one-line fix gets no rung line', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const out = prompt(home, repo, "Fix the typo in README.md: 'recieve' → 'receive'.");
-  assert.match(out, /^\[orch-router · once per session\] tier max5 · orch-agents 6\/6 · fable 0\/3 today · open run: none in this repo · limits today: none/);
+  assert.match(out, /^\[orch-router · once per session\] you: unknown model · tier max5 · orch-agents 6\/6 · fable 0\/3 today · open run: none in this repo · limits today: none/);
   assert.match(out, /cheapest rung/);
   assert.doesNotMatch(out, /\n\[orch-router\] /, 'no hint for an inline fix');
   assert.ok(out.length < 2200, `card too long: ${out.length} chars`);
@@ -191,4 +191,45 @@ test('--explain reports features without writing state', () => {
   assert.equal(j.rung, 6.5);
   assert.equal(j.features.heads, 3);
   assert.equal(existsSync(join(home, '.claude', 'orchestrate', 'sessions')), false);
+});
+
+// A transcript tail whose last assistant record names the manager's own model.
+function transcriptOn(model, effort) {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-tr-'));
+  const p = join(dir, 'transcript.jsonl');
+  writeFileSync(p, [
+    JSON.stringify({ type: 'user', message: { content: 'hi' } }),
+    JSON.stringify({ type: 'assistant', effort, message: { model, usage: { input_tokens: 5 } } }),
+  ].join('\n') + '\n');
+  return p;
+}
+
+test('discussing an idea is rung 1: the router stays silent', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  // The card is spent on the first substantive prompt, so open with one that
+  // earns it, then ask the two shapes of "what do you think".
+  prompt(home, repo, 'Fix the typo in README.md.');
+  assert.equal(prompt(home, repo, 'What do you think of this idea: one ledger file per run instead of a folder?'), '');
+  assert.equal(prompt(home, repo, 'Do you think moving the ledger to SQLite is a good idea? I keep going back and forth on it, because the Markdown file is readable by a human and by an agent, but it is not queryable, and the runs are starting to pile up in a way that makes me want to ask questions across them rather than read them one at a time.'), '');
+  assert.equal(prompt(home, repo, 'thoughts on the router card length?'), '');
+});
+
+test('the manager knows its own model: above the author it reviews the diff itself', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = prompt(home, repo, 'Add a --since flag to the tidy command with a test that proves older notes stay put.', { transcript_path: transcriptOn('claude-opus-5', 'high') });
+  assert.match(out, /you: opus @ high effort/, 'the state line names the manager');
+  assert.match(out, /review the diff yourself \(opus over sonnet/);
+});
+
+test('at or below the author, or on a risky change, a reviewer is dispatched', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const asSonnet = prompt(home, repo, 'Add a --since flag to the tidy command with a test that proves older notes stay put.', { transcript_path: transcriptOn('claude-sonnet-5', 'high') });
+  assert.match(asSonnet, /you: sonnet/);
+  assert.match(asSonnet, /orch-reviewer opus/);
+  assert.doesNotMatch(asSonnet, /review the diff yourself/);
+
+  const home2 = makeHome(); const repo2 = makeRepo(false);
+  const risky = prompt(home2, repo2, 'Add the release step and publish it to production, with a test.', { transcript_path: transcriptOn('claude-opus-5', 'high') });
+  assert.match(risky, /orch-reviewer/);
+  assert.doesNotMatch(risky, /review the diff yourself/, 'a risky change always gets an independent reviewer');
 });
