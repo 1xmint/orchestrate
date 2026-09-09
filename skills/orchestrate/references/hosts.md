@@ -28,7 +28,13 @@ and cannot spawn `Agent` themselves. Nested orchestration does not happen in
 the background; the orchestrator is the only layer that dispatches.
 
 **Worktrees** need a git repo. For work outside a repo, dispatch without
-isolation and give explicit allowed paths.
+isolation and give explicit allowed paths. The worktree is removed when the
+agent made no changes (as documented; whether an excluded `.orchestrator`
+write counts as a change is unverified), so packets name an absolute run dir
+in the main checkout and a branch to create.
+
+Newly installed agent files appear in a running session's Agent tool after a
+delay of a minute or two, not instantly (observed 2026-09-08).
 
 **One browser pane** per session. Two browser agents at once will fight over
 it. Serialise browser tasks.
@@ -60,8 +66,9 @@ app, or automatically when the description matches. Only the spec frontmatter
 fields are read (`name`, `description`, `license`, `compatibility`,
 `metadata`, `allowed-tools`), which is why this skill uses no others.
 
-Dispatch there uses Codex's own subagent feature (`multi_agent`, present in
-Codex 0.151) or `codex exec` runs launched from a shell. The packet, the
+Dispatch there uses Codex's own subagent feature or `codex exec` runs
+launched from a shell (check `codex features list` for what the installed
+version offers). The packet, the
 return schema, the ledger and the evaluation rules apply unchanged. The role
 agent files are Claude Code-specific; on Codex, paste the role notes from
 `contracts.md` into the packet instead. This path has not been exercised.

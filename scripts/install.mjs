@@ -26,6 +26,25 @@ for (const t of targets) {
   cpSync(SRC, t, { recursive: true });
   console.log(`installed -> ${t}`);
 }
+if (process.argv.includes('--with-hook')) {
+  // Register guard-agent.mjs as a PreToolUse hook on Agent in ~/.claude/settings.json.
+  // Merges; never removes other hooks.
+  const { readFileSync, writeFileSync } = await import('node:fs');
+  const settingsPath = join(HOME, '.claude', 'settings.json');
+  let settings = {};
+  try { settings = JSON.parse(readFileSync(settingsPath, 'utf8')); } catch {}
+  const cmd = `node "${join(HOME, '.claude', 'skills', 'orchestrate', 'scripts', 'guard-agent.mjs').replace(/\\/g, '/')}"`;
+  settings.hooks = settings.hooks || {};
+  settings.hooks.PreToolUse = settings.hooks.PreToolUse || [];
+  const already = settings.hooks.PreToolUse.some(h => JSON.stringify(h).includes('guard-agent.mjs'));
+  if (!already) {
+    settings.hooks.PreToolUse.push({ matcher: 'Agent', hooks: [{ type: 'command', command: cmd }] });
+    writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    console.log(`hook registered in ${settingsPath} (takes effect in new sessions)`);
+  } else {
+    console.log('hook already registered');
+  }
+}
 if (!process.argv.includes('--no-agents')) {
   const r = spawnSync(process.execPath, [join(SRC, 'scripts', 'install-agents.mjs')], { stdio: 'inherit' });
   process.exit(r.status ?? 1);

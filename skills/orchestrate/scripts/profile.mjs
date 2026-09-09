@@ -44,6 +44,14 @@ if (setIdx >= 0) {
   console.log(`tier override saved: ${m[1]} (${OVERRIDE_PATH})`);
   process.exit(0);
 }
+if (args.includes('--fable-optin')) {
+  const d = new Date();
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
+  writeFileSync(join(dirname(OVERRIDE_PATH), 'fable-optin.json'), JSON.stringify({ date: today }) + '\n');
+  console.log(`Fable opt-in recorded for ${today} (guard-agent.mjs will allow Fable dispatches today)`);
+  process.exit(0);
+}
 if (args.includes('--clear')) {
   mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
   writeFileSync(OVERRIDE_PATH, JSON.stringify({ tier: 'unknown', tierSource: 'cleared', setAt: new Date().toISOString() }, null, 2) + '\n');
@@ -56,8 +64,7 @@ function detectHost() {
   const keys = Object.keys(process.env);
   if (keys.some(k => /^CLAUDE(CODE|_CODE_|_SESSION|_PROJECT|_EFFORT)/.test(k))) return 'claude-code';
   if (keys.some(k => /^CODEX_/.test(k))) return 'codex';
-  if (existsSync(join(HOME, '.claude.json'))) return 'claude-code?';
-  return 'unknown';
+  return 'claude-code (assumed: no host env vars found)';
 }
 
 // ---- tier -------------------------------------------------------------------
@@ -90,12 +97,11 @@ function detectTier() {
   }
   const cfg = readJson(join(HOME, '.claude.json'));
   if (cfg) {
-    const found = findKeys(cfg, ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier', 'billingType', 'apiProvider']);
+    const found = findKeys(cfg, ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']);
     for (const key of ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']) {
       const t = mapTier(found[key]);
       if (t) return { tier: t, source: `~/.claude.json ${key}="${found[key]}"` };
     }
-    if (found.billingType === 'api' || found.apiProvider === 'console') return { tier: 'api', source: '~/.claude.json billingType' };
   }
   if (process.env.ANTHROPIC_API_KEY) return { tier: 'api', source: 'ANTHROPIC_API_KEY is set' };
   return { tier: 'unknown', source: 'no signal; ask the user once, then --set tier=...' };
@@ -130,7 +136,8 @@ function run(cmd, cmdArgs, timeoutMs) {
     const r = needsShell
       ? spawnSync(`"${p}" ${cmdArgs.map(q).join(' ')}`, { ...opts, shell: true })
       : spawnSync(p, cmdArgs, { ...opts, shell: false });
-    return { status: r.status, out: (r.stdout || '') + (r.stderr || ''), timedOut: Boolean(r.error && r.error.code === 'ETIMEDOUT') };
+    const out = ((r.stdout || '') + (r.stderr || '')).replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+    return { status: r.status, out, timedOut: Boolean(r.error && r.error.code === 'ETIMEDOUT') };
   } catch (e) { return { status: null, out: String(e), timedOut: false }; }
 }
 
@@ -152,8 +159,8 @@ function probeAuth(name) {
     case 'opencode': {
       const r = run('opencode', ['auth', 'list'], 8000);
       if (r.timedOut) return 'auth: timed out';
-      const lines = r.out.split('\n').filter(l => /\S/.test(l) && !/no credentials|^\s*(auth|credentials)\b/i.test(l));
-      return r.status === 0 && lines.length > 0 ? `credentials listed (${lines.length})` : 'no credentials';
+      const lines = r.out.split('\n').map(l => l.trim()).filter(l => l && !/no credentials|^(auth|credentials|stored|┌|└|─)/i.test(l));
+      return r.status === 0 && lines.length > 0 ? 'credentials listed' : 'no credentials';
     }
     default:
       return 'installed';

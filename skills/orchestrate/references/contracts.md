@@ -1,8 +1,9 @@
 # Contracts: what an agent receives and what it returns
 
-A subagent starts with no memory of this conversation. It sees its agent file,
-the repo's `CLAUDE.md`/`AGENTS.md`, a git status snapshot, and the packet you
-write. Everything it needs to be right the first time has to be in the packet.
+A subagent starts with no memory of this conversation. It sees its agent file
+and the packet you write, and usually the repo's `CLAUDE.md`/`AGENTS.md`;
+do not rely on the latter, put the gate in the packet. Everything it needs to
+be right the first time has to be in the packet.
 Vague packets are the main cause of first-attempt failure; a tight packet lets
 a smaller model succeed.
 
@@ -38,7 +39,11 @@ DECISIONS ALREADY MADE
 
 WHERE
 repo: <path>   base: <branch @ short sha>   worktree: <yes: isolation handles it | no>
+branch to create: <agent/<id>-<slug>>   run dir: <absolute path in the main checkout>
 allowed files: <globs>   forbidden files: <globs>
+
+PRIOR ATTEMPTS
+<none, or: what was tried, what failed, the literal error, what not to repeat>
 
 PATTERNS TO FOLLOW
 - <path to an existing example of the shape wanted>
@@ -56,16 +61,22 @@ STOP AND REPORT (do not guess past these)
 - two attempts at the same failure
 
 BUDGET
-<max turns or minutes>; if you are past it, stop and report PARTIAL.
+<units of work, e.g. "one change plus its test"; the hard cap is the agent
+file's maxTurns, which the agent cannot see>; if you are past it, stop and
+report PARTIAL.
 
 RETURN (at most 40 lines; put long logs in <run dir>/<id>.md and cite the path)
 RESTATED: <the objective in your own words, two lines>
 STATUS: DONE | PARTIAL | BLOCKED
-CHANGED: <files, commits, and the branch name and worktree path you worked in>
+BRANCH: <name>   WORKTREE: <absolute path>
+CHANGED: <files, commits>
 EVIDENCE: <commands run and result tails, or paths to them>
 NOT VERIFIED: <what you could not check and why>
 QUESTIONS: <only ones that block>
 ```
+
+The run dir is always the absolute path in the main checkout. A relative
+`.orchestrator/…` inside an isolated worktree disappears with the worktree.
 
 ## The reviewer packet
 

@@ -9,6 +9,7 @@
 // path. Refuses to overwrite an existing RUN.md.
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -50,7 +51,7 @@ const ymd = localDate.replace(/-/g, '');
 const runId = `${ymd}-${slug}`;
 const dir = join(root, '.orchestrator', 'runs', runId);
 const target = join(dir, 'RUN.md');
-if (existsSync(target)) { console.error(`exists: ${target}`); process.exit(1); }
+if (existsSync(target)) { console.error(`exists: ${target}\nresume it (read its Pickup section) or pick another slug, e.g. ${slug}-2`); process.exit(1); }
 
 const template = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'RUN.md'), 'utf8');
 const idPrefix = `${now.getMonth() + 1}-${now.getDate()}`;
@@ -66,17 +67,22 @@ const body = template
 mkdirSync(dir, { recursive: true });
 writeFileSync(target, body);
 
-// keep it out of git without touching tracked files
-const gitDir = join(root, '.git');
-if (existsSync(gitDir)) {
-  const excl = join(gitDir, 'info', 'exclude');
+// keep it out of git without touching tracked files. Inside a worktree or a
+// submodule `.git` is a file, so ask git where the exclude file really is.
+if (existsSync(join(root, '.git'))) {
+  const r = spawnSync('git', ['-C', root, 'rev-parse', '--git-path', 'info/exclude'], { encoding: 'utf8', windowsHide: true });
+  const rel = (r.stdout || '').trim();
+  const excl = rel ? resolve(root, rel) : null;
   try {
+    if (!excl) throw new Error('git rev-parse failed');
     mkdirSync(dirname(excl), { recursive: true });
     const cur = existsSync(excl) ? readFileSync(excl, 'utf8') : '';
     if (!/^\.orchestrator\/?$/m.test(cur)) {
       appendFileSync(excl, (cur === '' || cur.endsWith('\n') ? '' : '\n') + '.orchestrator/\n');
     }
-  } catch {}
+  } catch (e) {
+    console.error(`warning: could not exclude .orchestrator/ from git (${e.message}); add it to .git/info/exclude by hand so agents do not commit the ledger`);
+  }
 }
 console.log(target);
 console.log(`task id prefix: ${idPrefix}-NNNN`);

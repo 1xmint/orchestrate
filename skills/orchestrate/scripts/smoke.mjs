@@ -25,7 +25,7 @@ function onPath(cmd) {
 const PROMPT = 'Reply with exactly the two letters OK and nothing else.';
 const shapes = {
   claude:   { cmd: 'claude',   args: ['-p', PROMPT, '--model', 'haiku', '--output-format', 'text'] },
-  codex:    { cmd: 'codex',    args: ['exec', PROMPT] },
+  codex:    { cmd: 'codex',    args: ['exec', '--skip-git-repo-check', PROMPT] },
   opencode: { cmd: 'opencode', args: ['run', PROMPT] },
 };
 if (!shapes[name]) { console.error('usage: smoke.mjs <claude|codex|opencode>'); process.exit(2); }
@@ -46,7 +46,7 @@ const ok = r.status === 0 && /\bOK\b/.test(out);
 const timedOut = Boolean(r.error && r.error.code === 'ETIMEDOUT');
 console.log(`exit: ${r.status}  time: ${(ms / 1000).toFixed(1)}s${timedOut ? '  TIMED OUT (treat as hung, not slow)' : ''}`);
 console.log(`tail: ${out.split('\n').slice(-3).join(' | ').slice(0, 300)}`);
-if (/usage limit|rate limit|try again|quota|not logged in|unauthori[sz]ed|login/i.test(out)) {
+if (/usage limit|rate limit|try again|quota|not logged in|not signed in|unauthori[sz]ed|please (log|sign) in/i.test(out)) {
   console.log('signal: quota or auth problem; drop this provider for the run');
 }
 console.log(ok ? 'result: usable' : 'result: NOT usable');

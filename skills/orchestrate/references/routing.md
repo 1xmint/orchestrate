@@ -16,7 +16,7 @@ Prose about live availability is evidence, not authority.
 | Max 20x ($200/mo) | same | same 50% rule on a four-times-larger allowance | Opus 5 |
 | Team standard seat | like Pro | usage credits | Sonnet 5 |
 | Team premium, Enterprise premium | like Max | 50% rule | Opus 5 |
-| API key / Console | all | pay per token. List prices on 2026-06-24 per million tokens in/out: Fable 5.1 $10/$50, Opus 5 $5/$25, Sonnet 5 $2/$10, Haiku 4.5 $1/$5 | Opus 5 |
+| API key / Console | all | pay per token; Fable is the most expensive tier by a wide margin, so it is treated like Pro here (off without opt-in). Current prices: the pricing page below | Opus 5 |
 
 Limits on Pro and Max: a rolling five-hour window plus a weekly window, shared
 across the Claude app, Cowork and Claude Code. Every subagent this skill
@@ -41,8 +41,14 @@ to `pro | max5 | max20 | team | unknown`, unless the user saved an override with
 `--set tier=…`. A missing signal is `unknown`, never a guess, because a guess
 of a paid tier on a Pro account spends money on Fable. On `unknown`, ask once
 with the four choices and save the answer. An API-key session is `api`:
-dollars rather than a window; use the Max 5x column and tell the user what a
-Fable dispatch costs before making one.
+dollars rather than a window; use the Pro column, and dispatch to Fable only
+after the user opts in for the day (`profile.mjs --fable-optin`).
+
+The two Fable rules are held by a hook, not by this text, once the user runs
+`node scripts/install.mjs --with-hook`: `guard-agent.mjs` denies a
+`model: fable` dispatch on pro/api/team/unknown without today's opt-in, caps
+Fable at 3 dispatches a day on Max 5x and 6 on Max 20x, and denies any packet
+carrying a credential. Without the hook the same numbers are the rule.
 
 ## Effort (for whoever edits the agent files; not a per-run choice)
 
@@ -71,24 +77,32 @@ in ten minutes.
 | Browser operator (`orch-browser`) | sonnet | sonnet | opus |
 | Independent reviewer (`orch-reviewer`) | opus | opus | fable for security, release, public surfaces or money; otherwise opus |
 | Debug escalation (`orch-debugger`) | opus | fable | fable |
-| Fable ceiling per run | **none unless the user opts in for this run** | at most a third of dispatches | at most half |
+| Fable dispatches | **none unless the user opts in for the day** | at most 3 a day | at most 6 a day |
 
-Pass the model on the `Agent` call (`model: sonnet | opus | haiku | fable`). The
-Fable ceiling counts rows in the ledger's model column; the main conversation
-may itself be on Fable, which is why Max 5x stops at a third.
+Pass the model on the `Agent` call (`model: sonnet | opus | haiku | fable`).
+Dispatch counts are a poor proxy for tokens: a Fable planner or debugger runs
+long, and the main conversation may itself be on Fable. If the session model
+is Fable on Max 5x, suggest `/model opus` for the orchestrator before a run
+that will dispatch to Fable.
 
 ## Escalation triggers (fixed list)
 
-Escalate one step (sonnet → opus → fable) only when one of these holds, and
-write which one in the ledger:
+A bigger *author* is chosen only after evidence; risk selects a *reviewer*.
+Escalate the author one step (sonnet → opus → fable), and write which trigger
+fired in the ledger, when:
 
 1. one attempt failed on a packet that was complete (not a context gap);
-2. security, auth, payments, a public surface, a schema or default change, or
-   anything irreversible;
-3. the task crosses module boundaries or changes an architecture;
 4. two competent results disagree;
 5. the agent reports a conceptual block rather than a missing fact;
 6. the user asks.
+
+These add an independent reviewer at dispatch time, not a bigger author:
+
+2. security, auth, payments, a public surface, a schema or default change,
+   data that moves or is rewritten, anything irreversible;
+3. the task crosses module boundaries or changes an architecture (in a
+   multi-crate or monorepo workspace that is most tasks; it is a review cue,
+   not an opus cue).
 
 De-escalate below the table only by naming the oracle that makes it safe: a
 strong deterministic test, a type-checked interface, an exact spec.
