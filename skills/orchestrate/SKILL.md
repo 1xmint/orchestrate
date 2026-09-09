@@ -126,12 +126,12 @@ file becomes a merge conflict after both are done. Browser tasks one at a time.
 ## 4. Take the cheapest rung that clears the bar
 
 `ladder.md` is the ordered list, and the router card names it at the top of
-the session. One file, a few minutes, short output: do it yourself. A step an
+the session. A question gets the depth call in `ladder.md` before it gets an
+answer; a big or ambiguous goal gets the interview in §1; a bounded task gets
+the ladder. One file, a few minutes, short output: do it yourself. A step an
 installed skill already does goes to that skill. A mechanical question goes to
 a script with filtered output, not to an agent. Everything larger is
-dispatched; your context is the scarce resource. Before anything new is built
-ask, in order: does it need to exist, is it already here, is it in the
-standard library, is it one line.
+dispatched; your context is the scarce resource.
 
 ## 5. Dispatch: role agent plus packet
 

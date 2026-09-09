@@ -207,12 +207,19 @@ function transcriptOn(model, effort) {
   return p;
 }
 
-test('discussing an idea is rung 1: the router stays silent', () => {
+// This used to assert silence. Silence was the wrong answer: "what do you
+// think" is the shape that most often comes back as a table of options with no
+// recommendation in it, which is not what anyone asking meant. The rung says
+// what the answer should contain, not that the answer needs a dispatch.
+test('discussing an idea gets the shape of the answer, not a dispatch', () => {
   const home = makeHome(); const repo = makeRepo(false);
   // The card is spent on the first substantive prompt, so open with one that
-  // earns it, then ask the two shapes of "what do you think".
+  // earns it, then ask the shapes of "what do you think".
   prompt(home, repo, 'Fix the typo in README.md.');
-  assert.equal(prompt(home, repo, 'What do you think of this idea: one ledger file per run instead of a folder?'), '');
+  const a = prompt(home, repo, 'What do you think of this idea: one ledger file per run instead of a folder?');
+  assert.match(a, /design judgment/);
+  assert.doesNotMatch(a, /orch-\w+ \w+ in a worktree|dispatch orch-/, 'no worker is needed to hold an opinion');
+  // The same key within the cooldown says it once, not three times.
   assert.equal(prompt(home, repo, 'Do you think moving the ledger to SQLite is a good idea? I keep going back and forth on it, because the Markdown file is readable by a human and by an agent, but it is not queryable, and the runs are starting to pile up in a way that makes me want to ask questions across them rather than read them one at a time.'), '');
   assert.equal(prompt(home, repo, 'thoughts on the router card length?'), '');
 });
@@ -363,4 +370,44 @@ test('the set shape is about inherited defaults, not about the word "each"', () 
   assert.doesNotMatch(work, /research across a set/);
   const chat = prompt(home, repo, 'also can you bump the version');
   assert.equal(chat, '', 'a request is not a research question');
+});
+
+
+// ---- the depth call ---------------------------------------------------------
+
+test('the card body stays inside the cap it names', () => {
+  const md = readFileSync(join(HERE, '..', 'references', 'ladder.md'), 'utf8');
+  const m = /```card\s*\n([\s\S]*?)\n```/.exec(md);
+  assert.ok(m, 'ladder.md still holds the card');
+  const body = m[1].trim();
+  assert.ok(body.length <= 1550, `card body is ${body.length} chars, cap 1550`);
+  assert.match(body, /Questions: settled/, 'the depth call is on the card');
+  assert.match(md, /Keep it under 1,550 characters/, 'the file names the same cap the test asserts');
+});
+
+test('a design judgment gets the shape of an answer, not a dispatch', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'Fix the typo in README.md.');
+  const out = prompt(home, repo, 'is this a good idea: we drop the ledger and keep everything in memory instead');
+  assert.match(out, /design judgment/);
+  assert.match(out, /name the goal as you read it, the two or three things that decide it, then recommend/);
+  assert.match(out, /what would change it/);
+  assert.doesNotMatch(out, /orch-researcher/, 'a judgment is not research');
+});
+
+// The regex on its own matches this, and unguarded it stole a build request.
+// It is a change with a file and a verb, so it must stay on the change rungs;
+// rung 2 rather than 6 because it is one small edit to one file.
+test('a build request that contains a judgment phrase is still a build request', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'Fix the typo in README.md.');
+  const out = prompt(home, repo, 'add a retry to client.rs, or should we use the existing helper?');
+  assert.doesNotMatch(out, /design judgment/);
+});
+
+test('the other four rows of the depth call are unchanged', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'Fix the typo in README.md.');
+  assert.match(prompt(home, repo, 'what is the recommended manager model and effort for each subscription tier'), /research across a set/);
+  assert.equal(prompt(home, repo, 'what does RESTATED mean'), '', 'a short question is answered, silently');
 });

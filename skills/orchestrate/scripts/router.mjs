@@ -85,6 +85,10 @@ const RX = {
   // The shape that turns a research question into a dispatch: an answer that
   // covers a set of cases, or becomes a default, gets written down and
   // inherited by everyone after. One search never settles one of those.
+  // "Is this a good idea" is not a research question and not a request. It is
+  // the one shape where a table of options reads as work and is not: the
+  // deliverable is a recommendation with the two or three things that decide it.
+  judgment: /\b(is (this|it|that) (a )?good|good idea|should (we|i)|worth (it|doing)|better to|which is better|makes sense to|thoughts on|what do you think|is it worth)\b/i,
   setShape: /\b(for each|per (tier|plan|level|option|case|model|environment)|every (tier|plan|level|option|case|model)|all (three|four|five|\d+)|\d+ (tiers|plans|options|levels|models)|each (tier|plan|level|option|subscription)|defaults?|which .{0,30}should (i|we|you) use)\b/i,
 };
 
@@ -108,6 +112,7 @@ export function analyze(text) {
     resume: RX.resume.test(t), testReview: RX.testReview.test(t), parallel: RX.parallel.test(t),
     perUnit: RX.perUnit.test(t), change: RX.change.test(t), slash: /^\s*\//.test(t),
     setShape: RX.setShape.test(t),
+    judgment: RX.judgment.test(t),
     lookup: RX.lookup.test(t),
   };
   f.riskyWord = (RX.risky.exec(t) || [''])[0];
@@ -142,6 +147,10 @@ export function classify(f, ctx) {
   // A research question whose answer covers a set of cases is not the same as
   // one that covers a case. The answer becomes a default others inherit, no test
   // can prove it wrong, and one search never settles it. That is a dispatch.
+  // Gated on heads === 0 on purpose. "add a retry to client.rs, or should we use
+  // the existing helper?" is a build request that happens to contain a judgment
+  // phrase; it belongs on rung 6, and without the gate it landed here.
+  if (f.question && f.heads === 0 && f.judgment) return { rung: 3.7, confident: true, orth, evidence: 'a design judgment' };
   if (f.question && f.research && f.setShape) return { rung: 3.6, confident: true, orth, evidence: 'a recommendation across a set of cases' };
   if (f.question && f.research) return { rung: 3.5, confident: true, orth, evidence: 'research question, current + cite' };
   if (f.script && f.heads <= 1 && !f.testReview && !f.explore) return { rung: 3, confident: f.paths > 0 || f.lookup, orth, evidence: 'mechanical lookup' };
@@ -191,6 +200,7 @@ function hintFor(c, f, ctx) {
     case 6.5: parts.push(`→ /orchestrate; ${ctx.tier}: orch-implementer ${m.impl}, ${reviewClause(m, f, ctx)}`); break;
     case 6: parts.push(`→ orch-implementer ${m.impl} in a worktree, packet per contracts.md${ctx.repoRoot ? '' : ' (no .git above cwd: no worktree isolation)'}; ${reviewClause(m, f, ctx)}`); break;
     case 5: parts.push('→ Explore on haiku, return ≤ 20 lines'); break;
+    case 3.7: parts.push('→ name the goal as you read it, the two or three things that decide it, then recommend; say what you checked and what would change it. Ask only if two readings differ materially.'); break;
     case 3.6: parts.push(`→ dispatch orch-researcher ${applyLimits('sonnet', ctx.limits)}. A table from one search is never an answer: this one gets written down and inherited, and no test can prove it wrong.`); break;
     case 3.5: parts.push(`→ fetch the primary source inline if one settles it, cite it, and say what it does not settle; orch-researcher ${applyLimits('sonnet', ctx.limits)} if sources may conflict. Not from memory.`); break;
     case 3: parts.push('→ rg | head, git, --json | filter; Explore(haiku) only past ~3 files'); break;
@@ -206,7 +216,7 @@ function hintFor(c, f, ctx) {
 }
 
 function rungLabel(r) {
-  return ({ 1: 'answer', 2: 'inline', 3: 'script', 3.5: 'research', 3.6: 'research across a set', 4: 'skill', 5: 'explore', 6: 'agent', 6.5: 'multi-step', 7: 'fork', 8: 'workflow', 9: 'batch', 10: 'team', 11: 'resume' })[r] || 'note';
+  return ({ 1: 'answer', 2: 'inline', 3: 'script', 3.5: 'research', 3.6: 'research across a set', 3.7: 'design judgment', 4: 'skill', 5: 'explore', 6: 'agent', 6.5: 'multi-step', 7: 'fork', 8: 'workflow', 9: 'batch', 10: 'team', 11: 'resume' })[r] || 'note';
 }
 
 // ---- the manager's own setup ------------------------------------------------

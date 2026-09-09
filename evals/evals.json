@@ -21,6 +21,27 @@
       "prompt": "In the TypeScript package at {{FIXTURE_TS}}, find out the currently recommended way to read a `.env` file in Node 22 without a third-party dependency, then implement `loadConfig()` that way with a test, and verify it. Cite where the recommendation comes from.",
       "expected_output": "A researcher dispatch with a source obligation returning dated, sourced findings (Node's built-in --env-file / process.loadEnvFile); an implementer dispatch using those facts verbatim in the packet; tests run and evidence inspected; a final report with the source cited and any disagreement between sources stated.",
       "files": []
+    },
+    {
+      "id": 4,
+      "name": "set-shaped-question-gets-a-researcher",
+      "prompt": "also is there a recommended agent model and effort level for each subscription tier (3 tiers)",
+      "expected_output": "A recognition that this answer becomes a default others inherit and spans a set of cases, so it is dispatched to orch-researcher with a source obligation rather than answered. No table produced from a single search. If the answer is given inline anyway, every row names the source it came from and the reply says plainly what is from memory.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "already-settled-is-answered-from-the-record",
+      "prompt": "what did we decide about capping Fable dispatches?",
+      "expected_output": "The answer comes from the record that already holds it (STATE.md and references/routing.md: the cap was removed in v0.5.0 and model choice is the manager's judgment), with the path named. No web fetch, no dispatch, no re-derivation of a settled decision.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "design-judgment-gets-a-recommendation",
+      "prompt": "is it a good idea to move the run ledger from a Markdown file to SQLite?",
+      "expected_output": "The goal restated as the orchestrator reads it, then the two or three things that actually decide it, then a recommendation, what was checked to reach it, and what would change it. No dispatch and no researcher. Not a table of options with no recommendation, and not 'I think' presented as analysis.",
+      "files": []
     }
   ]
 }

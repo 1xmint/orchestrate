@@ -33,18 +33,40 @@ Orthogonal moves, at any rung:
 - **Memory**: auto memory for durable learnings; `RUN.md` for run state; the ledger before
   `/compact` or `/clear`.
 
+## Questions: the depth call
+
+The ladder above is for tasks. A question needs its own decision first, and the
+decision is made on what can be observed about the question, not on how sure you
+feel about the answer. Confidence is the thing that fails here: the manager that
+answered "recommended for each tier" from one search felt certain.
+
+| The question is | The move |
+|---|---|
+| already settled in this conversation, the run's Facts or Decisions, `STATE.md`, or a file you read | answer from it and say where; do not re-derive it and do not re-verify it |
+| a current fact one source settles: a version, a price, a flag, a line of a doc | fetch that source, cite it, and add one line saying what it does not settle. A name you recognise is not a fact you know: search it as the user wrote it |
+| a recommendation others will inherit (a default, a config value, a table, a README line), or one that spans a set of cases, and no command or test can prove it wrong | dispatch `orch-researcher` with a source obligation. A table from one search is never an answer |
+| a design judgment ("is this a good idea", "should we", "which is better") | state the goal as you read it, then the two or three things that decide it, then the recommendation, what you checked, and what would change it. Ask one question only if two readings lead to materially different work |
+| checkable by a command (does it build, does the test pass, how many files) | run the command with filtered output. Never reason about what a command can answer |
+
+A design judgment is the row people skip. The failure mode is a table of
+options with no recommendation, or "I think" dressed up as analysis. Neither is
+what a senior engineer gives you. The recommendation is the deliverable; the
+deciders are why it is the recommendation; what would change it is how the
+reader disagrees with you honestly.
+
 ## Router card
 
 `scripts/router.mjs` extracts the fenced `card` block below, prepends one dynamic state line
 (tier, agents installed, Fable count today, open run, limits hit today), and injects the result
-on the first substantive prompt of a session. Keep it under 1,400 characters; every character is
-paid on every later turn of that session.
+on the first substantive prompt of a session. Keep it under 1,550 characters; every character is
+paid on every later turn of that session. `router.test.mjs` asserts the cap.
 
 ```card
 Take the cheapest rung that clears the bar; climb only on evidence, never on habit:
-1 answer from context · 2 inline edit (one file, minutes) · 3 script/CLI with filtered output (rg|head, --json|jq, tail -20) · 4 skill · 5 Explore(haiku) sweep when >3 files · 6 orch-* role agent in a worktree, background, packet per contracts.md · 6+ several of those with a ledger = /orchestrate · 7 fork only when the task needs this conversation · 8 dynamic workflow when many parallel agents or results must stay out of context (tell the user the one-line prompt) · 9 /batch for one mechanical change across many files, PR each · 10 agent team: experimental, ~7x tokens, off.
+1 answer from context · 2 inline edit (one file, minutes) · 3 script/CLI with filtered output (rg|head, --json|jq, tail -20) · 4 skill · 5 Explore(haiku) sweep when >3 files · 6 orch-* role agent in a worktree, background, packet per contracts.md · 6+ several of those with a ledger = /orchestrate · 7 fork only when the task needs this conversation · 8 dynamic workflow when many parallel agents or results must stay out of context · 9 /batch for one mechanical change across many files, PR each · 10 agent team: experimental, ~7x tokens, off.
+Questions: settled → answer and cite where · one current fact → fetch that source · inherited or across cases → orch-researcher · design judgment → the goal, the two or three deciders, a recommendation, what would change it.
 Orthogonal: ask ONE question, only for money, public surfaces, credentials, destructive or irreversible actions, or a strategic fork, always with a recommendation · plan mode first when the approach is open or crosses modules · "keep going until green" = /goal or a Stop hook, not repeated prompts · waiting = Monitor / ScheduleWakeup / CronCreate / /loop, never a sleep loop · browser tasks one at a time (one pane) · MCP only where no CLI exists.
-Money: pick the model the task needs, then check the plan. If it is not included, that is the user's money and their call: recommend it, price it, give them the alternatives. Nothing caps or rewrites your choice. A wrong model costs quota; a wrong rung costs your context. Mute: type "router off".
+Money: pick the model the task needs, then check the plan; not included means the user's money and their call: recommend it, price it, offer the alternatives. A wrong model costs quota; a wrong rung costs your context. Mute: type "router off".
 ```
 
 ## When a question is a dispatch, not an answer
