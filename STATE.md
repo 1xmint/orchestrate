@@ -16,6 +16,11 @@ with someone else's evidence in it. Both returns have been moved to
 `20260909-v07-senior-engineer/returns/` and both rows restored from that run's
 own return files.
 
+There were **three** copies of the run sort: `lib/tier.mjs`, and its own in
+`profile.mjs`, which kept naming the closed run in the profile line even after
+the first fix landed. `profile.mjs` asks `lib/tier.mjs` now, the same way it
+already does for the agent count.
+
 Two sorts were tried and both were wrong. By name reproduces the bug. By
 modified time hands back whichever run was written last, which is the *same*
 wrong run, because the bug itself had just written to it. The fix is the one

@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (hey-vera)
-  version: "0.7.3"
+  version: "0.7.4"
 hooks:
   PreToolUse:
     - matcher: "Agent"

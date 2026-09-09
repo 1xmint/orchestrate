@@ -307,7 +307,7 @@ function detectSkills(repoRoot) {
 // One copy of this rule, in lib/tier.mjs, because it has to know about both
 // install paths: loose files in ~/.claude/agents, and a plugin that registers
 // them from its own folder without copying anything.
-import { agentsInstalled as detectAgents } from './lib/tier.mjs';
+import { agentsInstalled as detectAgents, latestRun } from './lib/tier.mjs';
 
 // ---- repo + runs ------------------------------------------------------------
 function findRepoRoot(start) {
@@ -321,11 +321,15 @@ function findRepoRoot(start) {
   return null;
 }
 
+// `latest` is asked of lib/tier.mjs, not worked out again here. This file kept
+// its own name sort, which is the bug that filed a subagent's return into a
+// closed run: two runs opened on the same day were ordered by slug.
 function detectRuns(root) {
   const base = join(root || process.cwd(), '.orchestrator', 'runs');
   if (!existsSync(base)) return { dir: base, count: 0, latest: null };
-  const runs = readdirSync(base).filter(n => existsSync(join(base, n, 'RUN.md'))).sort();
-  return { dir: base, count: runs.length, latest: runs.length ? runs[runs.length - 1] : null };
+  const count = readdirSync(base).filter(n => existsSync(join(base, n, 'RUN.md'))).length;
+  const run = latestRun(root || process.cwd());
+  return { dir: base, count, latest: run ? run.runId : null };
 }
 
 // ---- prices -----------------------------------------------------------------

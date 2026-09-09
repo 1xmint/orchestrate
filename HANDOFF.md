@@ -1,6 +1,6 @@
 # Handoff
 
-`orchestrate` v0.7.3 is built, tested, packaged and tagged. v0.6.0 gave the
+`orchestrate` v0.7.4 is built, tested, packaged and tagged. v0.6.0 gave the
 conversation a team; v0.7.0 puts a senior engineer in front of it. The setup
 question now actually gets asked, a question gets a depth call before it gets an
 answer, every claim has to name what it rests on with two independent checks
