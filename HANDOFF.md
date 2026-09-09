@@ -24,7 +24,7 @@ node --test "skills/orchestrate/scripts/**/*.test.mjs"
 
 ## What is installed on this machine
 
-- `~/.claude/skills/orchestrate` and `~/.agents/skills/orchestrate`, v0.4.0,
+- `~/.claude/skills/orchestrate` and `~/.agents/skills/orchestrate`, v0.4.1,
   with `{{SKILL_DIR}}` already substituted.
 - Six `orch-*` agents in `~/.claude/agents`, each with its own return-check
   Stop hook.
