@@ -31,6 +31,39 @@ Proof, all at zero model quota:
 - `install.mjs --project --dry-run` on the real notelocus checkout: it reports
   the pytest and ruff gate and the missing `CLAUDE.md`, and writes nothing.
 
+## v0.5.1 — how to talk, moved where it binds, 2026-09-09
+
+Josh, on the section v0.5.0 added: it could be better, especially "never call
+something remaining work", "don't print a number you can't act on" and "say it
+once". He was right. Those were prohibitions with no test inside them, so they
+read as agreeable and change nothing.
+
+A research round moved the whole thing. Claude Code has **output styles**: a
+markdown file with frontmatter that is added to the system prompt itself and
+re-stated during the conversation, applying to every turn of every session
+rather than only while a skill is loaded. It also ships a built-in **Concise**
+style (v2.1.237+) that leads with the result and drops the narration, which is
+most of Josh's complaint, free, and worth trying first.
+
+`assets/output-styles/plain.md` now carries the rules, is copied to
+`~/.claude/output-styles/` by the installer, and is deliberately left switched
+off: selecting a style changes every session the user has, so it is theirs to
+turn on. `keep-coding-instructions: true` keeps Claude Code's engineering
+instructions, so it changes how Josh is spoken to and nothing about how the work
+is done. `SKILL.md` §9 states the same rules for when the style is off and for
+hosts like Codex that have none; a test asserts the two agree.
+
+Every rule now contains its own test. Three came from the research rather than
+from taste: name a technical term once and reuse it, because stripping it out
+leaves the reader unable to read anyone else on the subject; draw comparisons
+from everyday life rather than from other technology; and carry the proof with
+every claim, because the 2025 study of professional agent users found that
+developers reject narrative summaries and verify instead. Brevity never applies
+to an error, a warning, or a confirmation before something irreversible.
+
+Sources: code.claude.com/docs/en/output-styles, nngroup.com on plain language
+for experts, arxiv 2512.14012 on professional agent use.
+
 ## v0.5.0 — the manager judges the model, 2026-09-09
 
 Josh: "a hard cap on fable helpers doesnt make any sense... id rather have the
@@ -168,8 +201,8 @@ Deliberately not applied then: a per-run absolute Fable cap (a per-day cap in
 the hook replaced it), moving the task table out of RUN.md, and marking every
 host assumption unverified line by line.
 
-Pickup prompt: v0.5.0 is tagged; the Fable cap is gone and choosing the model
-is the manager's judgment. Nothing is open. The next signal comes from Josh
-using it on his own work.
+Pickup prompt: v0.5.1 is tagged. Nothing is open. The one thing Josh may want
+to do is add "outputStyle": "Plain" to his settings and see whether the next
+few sessions read better.
 Pickup confidence: high
 Resume risk: none
