@@ -11,7 +11,7 @@
     {
       "id": 2,
       "name": "python-notelocus-since-flag",
-      "prompt": "In the notelocus repo at C:\Users\Josh\Desktop\GitHub\notelocus, add `notelocus tidy --since <date>` so only notes modified on or after that date are filed, with a test that proves nothing is lost and that older notes stay put. The repo's never-delete rule is not negotiable. Pass the three CI checks it names.",
+      "prompt": "In the Python project at {{FIXTURE_PYTHON}}, add `notelocus tidy --since <date>` so only notes modified on or after that date are filed, with a test that proves nothing is lost and that older notes stay put. The repo's never-delete rule is not negotiable. Pass the three CI checks it names.",
       "expected_output": "Grounding against the repo's AGENTS.md and code rather than memory; a ledger; a bounded implementer dispatch with allowed files, verification commands (pytest, ruff check, ruff format --check) and a stop condition; evidence checked by the orchestrator; a reviewer on the data-safety rule; a plain final report.",
       "files": []
     },

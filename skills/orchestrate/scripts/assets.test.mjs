@@ -64,3 +64,27 @@ test('the placeholder is only ever {{SKILL_DIR}}, never a machine path', () => {
     assert.doesNotMatch(text, /C:\\Users|\/Users\/[a-z]+\/|\/home\/[a-z]+\//i, `${f} carries no machine path`);
   }
 });
+
+// The eval file is the input to the skill-creator loop. It was never run, and
+// it turned out it could not be: the Windows path in eval 2 was written with
+// unescaped backslashes, so the file was not valid JSON at all.
+test('evals.json parses, and every eval carries the fields the loop needs', () => {
+  const p = join(SKILL, '..', '..', 'evals', 'evals.json');
+  const raw = readFileSync(p, 'utf8');
+  const doc = JSON.parse(raw); // this threw before the fix
+  assert.equal(doc.skill_name, 'orchestrate');
+  assert.ok(Array.isArray(doc.evals) && doc.evals.length >= 3);
+  const ids = new Set();
+  for (const e of doc.evals) {
+    for (const k of ['id', 'name', 'prompt', 'expected_output']) assert.ok(e[k], `eval ${e.id} has ${k}`);
+    assert.ok(!ids.has(e.id), `eval id ${e.id} is unique`);
+    ids.add(e.id);
+    assert.match(e.name, /^[a-z0-9-]+$/);
+  }
+});
+
+test('no eval hard-codes one machine, so the file runs on any checkout', () => {
+  const raw = readFileSync(join(SKILL, '..', '..', 'evals', 'evals.json'), 'utf8');
+  assert.doesNotMatch(raw, /C:\\Users|\/Users\/[a-z]+\/|\/home\/[a-z]+\//i);
+  assert.match(raw, /\{\{FIXTURE_[A-Z]+\}\}/, 'fixtures are named by placeholder');
+});
