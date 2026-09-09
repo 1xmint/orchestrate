@@ -129,6 +129,30 @@ Nobody has published a measurement of effort on a multi-turn orchestrator. The
 model rows are the plan defaults; the `high` row is reasoning, and it is marked
 as reasoning on purpose.
 
+**Saying it, and saying it once.** The router raises this on the first prompt
+where it can actually see the model, which on a fresh session is prompt 2: the
+first prompt is sent before any assistant record exists. Say it to the user in
+one paragraph with the exact click, and give them two outs: switch now, or keep
+it and say why. Then record the answer — `profile.mjs --set manager=accept` when
+they take the recommendation, `--set manager=<model>/<effort> --why "…"` when
+they keep what they have — and the router goes quiet for that plan. A tier
+change re-opens it, because the recommendation changes with the tier. If they
+want it permanent, `profile.mjs --set-default model=opus effort=high` writes the
+default for *new* sessions into `~/.claude/settings.json`; the running
+conversation still changes only with the picker.
+
+**Cost is not a reason to stay low.** A manager turn is mostly cached re-reads
+of a long conversation, so Opus at high costs little more per turn than Sonnet
+does. The thing that actually costs money is a shallow grade that sends a task
+round again. A nearly-spent window or a deliberately cheap session is a real
+reason; agree with it, and say what you will do differently — a manager below
+the table plans by dispatching `orch-planner` rather than inline, and dispatches
+a reviewer whenever it is at or below the author.
+
+**Effort does not reach everything.** `Explore` and `general-purpose` inherit
+the session's effort; the six `orch-*` role files set their own and ignore it.
+Haiku ignores effort entirely.
+
 ## Sources
 
 Model IDs, windows, prices and effort behaviour: the bundled `claude-api`

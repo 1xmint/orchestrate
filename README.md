@@ -66,10 +66,13 @@ cannot, it asks once and remembers:
 node ~/.claude/skills/orchestrate/scripts/profile.mjs --set tier=max5
 ```
 
-## Set your model and effort once
+## It asks you once
 
 You pick the conversation's model and effort before this skill exists, so it
-cannot set them for you. Set them once at the start of a session and leave them:
+cannot set them for you. It does not need you to remember this table, either: on
+the first message where it can see what it is running on, it says what you are
+on, what your plan deserves, and the exact click. You switch, or you say why you
+are keeping it, and it records your answer and never asks again on that plan.
 
 | Your plan | Model | Effort |
 |---|---|---|
@@ -80,8 +83,15 @@ cannot set them for you. Set them once at the start of a session and leave them:
 In the desktop app, click the model name next to the send button, then the
 effort next to it. In a terminal, start with `claude --model opus --effort high`.
 
-If you get it wrong, the skill tells you once at the top of the session and names
-the fix, so this table is a convenience rather than homework.
+To make it the default for every new session:
+
+```
+node skills/orchestrate/scripts/profile.mjs --set-default model=opus effort=high
+```
+
+That writes two keys into `~/.claude/settings.json` and backs up the file first.
+It changes what new sessions start on; the conversation you are in still changes
+only with the picker.
 
 Why `high` and not higher, on every plan: the conversation takes many short
 turns, and effort multiplies across all of them, while a worker takes one long

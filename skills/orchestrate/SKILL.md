@@ -65,8 +65,21 @@ minute to appear, until then `Explore` for read-only roles and
 `general-purpose` for writing roles, with the role note from `contracts.md`.
 
 You cannot set your own model or effort: the user picked both before you
-existed. The router names them in its state line and says so once if they are
-wrong for the plan; `models.md` has the table. Do not raise it again.
+existed. When the router's `your setup` line appears, say it to the user once,
+in one paragraph: what they are on, what the plan recommends, why in one line
+(a manager takes many short turns on a long cached conversation, so the model
+matters more than the effort, and both are cheap to set now and expensive to
+change mid-run), the exact click the router names, and the two outs — switch
+now, or keep it and say why. Judge the reason honestly. Saving quota is not a
+reason: on a manager turn Opus at high costs little more than Sonnet, because
+the turn is mostly cached re-reads, and the risk of Sonnet at low is a shallow
+grade that costs a whole rework loop. A window nearly spent or a deliberately
+cheap session is a reason: agree, and say what you will do differently. Record
+the answer (`profile.mjs --set manager=accept`, or `--set manager=<model>/<effort>
+--why "…"`), offer `--set-default` once, and never raise it again this session.
+A manager below the table plans by dispatching `orch-planner` rather than
+inline, and dispatches the reviewer whenever it is at or below the author.
+`models.md` has the reasoning.
 
 The profile line names the plan. Nothing caps or rewrites your model choice, so
 it is yours to make and yours to justify: pick the model the task needs, then

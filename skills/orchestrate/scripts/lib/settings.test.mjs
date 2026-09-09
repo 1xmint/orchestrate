@@ -9,7 +9,7 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import {
   registrations, applyRegistrations, readSettings, writeSettings, backupSettings,
-  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor,
+  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys,
 } from './settings.mjs';
 
 // A settings file shaped like Josh's: an unrelated PreToolUse hook that must
@@ -159,4 +159,47 @@ test('node version and path helpers', () => {
   assert.equal(toPosix('C:\\a\\b'), 'C:/a/b');
   assert.equal(commandBasename('node "C:/x/y/router.mjs"'), 'router.mjs');
   assert.equal(commandBasename('echo hi'), '');
+});
+
+
+test('the default model and effort merge in without disturbing anything else', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-setkeys-'));
+  const p = join(dir, 'settings.json');
+  const before = { model: 'sonnet', effortLevel: 'low', permissions: { allow: ['Bash(git status:*)'] }, hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node theirs.mjs' }] }] } };
+  writeSettings(p, before);
+  const s = readSettings(p);
+  setKeys(s, { model: 'opus', effortLevel: 'high' });
+  writeSettings(p, s);
+  const after = readSettings(p);
+  assert.equal(after.model, 'opus');
+  assert.equal(after.effortLevel, 'high');
+  assert.deepEqual(after.permissions, before.permissions, 'their permissions are untouched');
+  assert.deepEqual(after.hooks, before.hooks, 'their hooks are untouched');
+});
+
+// `max` is not accepted in either key. Writing it would leave every new session
+// refusing to start, which is worse than the file saying nothing at all.
+test('max is refused in both keys', () => {
+  assert.throws(() => setKeys({}, { effortLevel: 'max' }), /max is not accepted/);
+  assert.throws(() => setKeys({}, { model: 'max' }), /max is not accepted/);
+  const s = {};
+  setKeys(s, { model: 'opus' });
+  assert.equal(s.effortLevel, undefined, 'one key at a time is fine');
+});
+
+test('a prompt hook registers once and a re-run replaces rather than stacks it', () => {
+  const PROMPT = 'You are checking one reply from a coding assistant.\nRules follow.';
+  const s = { hooks: { Stop: [{ hooks: [{ type: 'command', command: 'node "C:/theirs/other.mjs"' }] }] } };
+  const entries = registrations(SCRIPTS, { router: true, guard: true, replyCheck: PROMPT });
+  applyRegistrations(s, entries);
+  const stops = s.hooks.Stop.flatMap(g => g.hooks);
+  const prompts = stops.filter(h => h.type === 'prompt');
+  assert.equal(prompts.length, 1);
+  assert.equal(prompts[0].model, 'sonnet');
+  assert.equal(prompts[0].timeout, 30);
+  assert.ok(stops.some(h => h.command === 'node "C:/theirs/other.mjs"'), 'theirs survives');
+
+  applyRegistrations(s, entries);
+  const again = s.hooks.Stop.flatMap(g => g.hooks).filter(h => h.type === 'prompt');
+  assert.equal(again.length, 1, 'a second install replaces it');
 });

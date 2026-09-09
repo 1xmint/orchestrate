@@ -31,16 +31,102 @@ function readJson(path) {
 }
 
 // ---- overrides --------------------------------------------------------------
-const setIdx = args.findIndex(a => a === '--set' || a.startsWith('--set='));
-if (setIdx >= 0) {
-  const kv = args[setIdx].startsWith('--set=') ? args[setIdx].slice('--set='.length) : (args[setIdx + 1] ?? '');
-  const m = /^tier=(\w+)$/.exec(kv.trim());
-  if (!m || !TIERS.has(m[1])) {
-    console.error(`usage: --set tier=<${[...TIERS].join('|')}>`);
+function loadProfile() {
+  return readJson(OVERRIDE_PATH) || {};
+}
+
+function saveProfile(patch) {
+  const merged = { ...loadProfile(), ...patch };
+  mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
+  writeFileSync(OVERRIDE_PATH, JSON.stringify(merged, null, 2) + '\n');
+  return merged;
+}
+
+// --set-default model=<alias> effort=<level>: the only thing here that writes
+// outside orchestrate's own folder. It is the *default for new sessions*, which
+// is what settings.json means; the running conversation still changes only with
+// the picker. Every other key in the file survives byte for byte.
+const defIdx = args.findIndex(a => a === '--set-default');
+if (defIdx >= 0) {
+  const kvd = {};
+  for (const a of args.slice(defIdx + 1)) {
+    const m = /^(model|effort)=(\S+)$/.exec(a);
+    if (m) kvd[m[1]] = m[2].toLowerCase();
+  }
+  if (!kvd.model && !kvd.effort) {
+    console.error('usage: --set-default model=<opus|sonnet|haiku|fable> [effort=<low|medium|high|xhigh>]');
     process.exit(2);
   }
-  mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
-  writeFileSync(OVERRIDE_PATH, JSON.stringify({ tier: m[1], tierSource: 'user', setAt: new Date().toISOString() }, null, 2) + '\n');
+  // `max` is not accepted in either key by the host, so writing it would leave
+  // every new session refusing to start rather than starting deep.
+  if (kvd.effort === 'max') {
+    console.error('effort=max is not accepted in settings.json; use the picker for a single session');
+    process.exit(2);
+  }
+  const { setKeys, readSettings, backupSettings, writeSettings } = await import('./lib/settings.mjs');
+  const settingsPath = join(HOME, '.claude', 'settings.json');
+  const s = readSettings(settingsPath);
+  const backup = backupSettings(settingsPath, join(HOME, '.claude', 'orchestrate'));
+  setKeys(s, { model: kvd.model, effortLevel: kvd.effort });
+  writeSettings(settingsPath, s);
+  const said = [kvd.model ? `model ${kvd.model}` : null, kvd.effort ? `effort ${kvd.effort}` : null].filter(Boolean).join(', ');
+  console.log(`saved as the default for new sessions: ${said} (${settingsPath}${backup ? `; backup ${backup}` : ''})`);
+  console.log('this conversation changes only with the picker.');
+  process.exit(0);
+}
+
+const setIdx = args.findIndex(a => a === '--set' || a.startsWith('--set='));
+if (setIdx >= 0) {
+  const kv = (args[setIdx].startsWith('--set=') ? args[setIdx].slice('--set='.length) : (args[setIdx + 1] ?? '')).trim();
+
+  // The manager setup question, answered once. `accept` records that the user
+  // took the recommendation, a pair records what they chose instead, and `ask`
+  // clears it. A tier change re-opens the question on its own, because the
+  // recommendation changes with the tier.
+  const mgr = /^manager=(.+)$/.exec(kv);
+  if (mgr) {
+    const v = mgr[1].trim().toLowerCase();
+    const whyIdx = args.findIndex(a => a === '--why');
+    const why = whyIdx >= 0 ? String(args[whyIdx + 1] || '').slice(0, 300) : null;
+    if (v === 'ask') {
+      const prof = loadProfile();
+      delete prof.manager;
+      mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
+      writeFileSync(OVERRIDE_PATH, JSON.stringify(prof, null, 2) + '\n');
+      console.log('manager setup choice cleared; the router will raise it once more');
+      process.exit(0);
+    }
+    const tierNow = detectTier().tier;
+    if (v === 'accept') {
+      saveProfile({ manager: { accepted: true, tier: tierNow, setAt: new Date().toISOString(), why } });
+      console.log(`recorded: the recommendation was taken, on ${tierNow}. The router will not raise it again on this tier.`);
+      process.exit(0);
+    }
+    const pair = /^(fable|opus|sonnet|haiku)(?:\/(low|medium|high|xhigh|max))?$/.exec(v);
+    if (!pair) {
+      console.error('usage: --set manager=<model>[/<effort>] | accept | ask   [--why "<text>"]');
+      process.exit(2);
+    }
+    saveProfile({ manager: { model: pair[1], effort: pair[2] || null, tier: tierNow, setAt: new Date().toISOString(), why } });
+    console.log(`manager setup recorded: ${pair[1]}${pair[2] ? '/' + pair[2] : ''} on ${tierNow}${why ? ` — ${why}` : ''}`);
+    process.exit(0);
+  }
+
+  // The week anchor, in list-price dollars, so a price tag can say what share
+  // of a week a dispatch is on this user's plan.
+  const wk = /^week=(\d+(?:\.\d+)?)$/.exec(kv);
+  if (wk) {
+    saveProfile({ weekDollars: Number(wk[1]), weekSetAt: new Date().toISOString() });
+    console.log(`week anchor saved: $${wk[1]} of list-price spend per week`);
+    process.exit(0);
+  }
+
+  const m = /^tier=(\w+)$/.exec(kv);
+  if (!m || !TIERS.has(m[1])) {
+    console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask | week=<dollars>`);
+    process.exit(2);
+  }
+  saveProfile({ tier: m[1], tierSource: 'user', setAt: new Date().toISOString() });
   console.log(`tier override saved: ${m[1]} (${OVERRIDE_PATH})`);
   process.exit(0);
 }

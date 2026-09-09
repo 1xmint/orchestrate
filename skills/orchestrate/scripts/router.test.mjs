@@ -240,7 +240,7 @@ test('at or below the author, or on a risky change, a reviewer is dispatched', (
 // Importing router.mjs used to hang: its main block read stdin at load time, so
 // every test here had to spawn a child. It is guarded now, which is what makes
 // the next three tests possible at all.
-import { managerAdvice, MANAGER_SETUP } from './router.mjs';
+import { managerAdvice, MANAGER_SETUP, setupClick, choiceSettles } from './router.mjs';
 
 test('the manager is told its own setup is wrong, once, and only when it is', () => {
   // The user picks the conversation's model and effort before the skill exists,
@@ -277,6 +277,61 @@ test('the advice reaches the user with the card, and does not repeat', () => {
   assert.match(first, /\[orch-router · your setup\] on max5, a manager belongs on high effort/);
   const second = prompt(home, repo, 'Add another flag with a test, then run the gate and review it.', { transcript_path: transcript });
   assert.doesNotMatch(second, /your setup/, 'said once, with the card, and not again');
+});
+
+// The defect this fixes: on a fresh session the card goes out on prompt 1,
+// before any assistant record exists, so `self` was null, the advice could not
+// be computed, and it was never computed again. The one setting the user has to
+// get right was never mentioned to anybody.
+test('a fresh session says the setup on the prompt where the model is first known', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const transcript = join(repo, 'fresh.jsonl');
+  writeFileSync(transcript, '');
+
+  const one = prompt(home, repo, 'Add a --since flag with a test, then run the gate and review it.', { transcript_path: transcript });
+  assert.match(one, /you: unknown model/, 'prompt 1 cannot see its own model');
+  assert.doesNotMatch(one, /your setup/, 'and so cannot advise on it');
+
+  writeFileSync(transcript, JSON.stringify({ type: 'assistant', effort: 'low', entrypoint: 'claude-desktop', message: { model: 'claude-sonnet-5' } }) + '\n');
+  const two = prompt(home, repo, 'Now add a --until flag with a test, run the gate and review it.', { transcript_path: transcript });
+  assert.match(two, /\[orch-router · your setup\] on max5, a manager belongs on opus rather than sonnet and high effort rather than low/);
+  assert.match(two, /click the model name next to the send button/, 'the desktop click, not a slash command');
+
+  const three = prompt(home, repo, 'And a --between flag with a test, run the gate and review it.', { transcript_path: transcript });
+  assert.doesNotMatch(three, /your setup/, 'exactly once');
+});
+
+test('the click named is the host\'s own', () => {
+  assert.match(setupClick('claude-desktop'), /click the model name next to the send button, pick Opus, then Effort → High/);
+  assert.match(setupClick('cli'), /\/model opus/);
+  assert.match(setupClick(null), /\/effort high/);
+});
+
+test('an answer recorded on disk ends the question, and a tier change re-opens it', () => {
+  const self = { model: 'sonnet', effort: 'low', entrypoint: 'cli' };
+  assert.match(managerAdvice('max5', self, null), /opus rather than sonnet/);
+  // They chose Sonnet at low deliberately and said so: silence.
+  assert.equal(managerAdvice('max5', self, { model: 'sonnet', effort: 'low', tier: 'max5' }), '');
+  // The same choice recorded on a different tier does not settle this one.
+  assert.match(managerAdvice('max5', self, { model: 'sonnet', effort: 'low', tier: 'pro' }), /opus rather than sonnet/);
+  // `accept` settles it only while the session actually matches the table.
+  assert.equal(managerAdvice('max5', { model: 'opus', effort: 'high' }, { accepted: true, tier: 'max5' }), '');
+  assert.match(managerAdvice('max5', self, { accepted: true, tier: 'max5' }), /opus rather than sonnet/,
+    'accepted, then drifted back: worth saying again');
+  assert.equal(choiceSettles(null, 'max5', self), false);
+});
+
+test('the router reads the recorded answer and stays quiet', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const profile = join(home, '.claude', 'orchestrate', 'profile.json');
+  writeFileSync(profile, JSON.stringify({
+    tier: 'max5', tierSource: 'user', setAt: '2026-09-08T00:00:00Z',
+    manager: { model: 'sonnet', effort: 'low', tier: 'max5', setAt: '2026-09-09T00:00:00Z', why: 'saving quota today' },
+  }));
+  const transcript = join(repo, 'kept.jsonl');
+  writeFileSync(transcript, JSON.stringify({ type: 'assistant', effort: 'low', entrypoint: 'claude-desktop', message: { model: 'claude-sonnet-5' } }) + '\n');
+  const out = prompt(home, repo, 'Add a --since flag with a test, then run the gate and review it.', { transcript_path: transcript });
+  assert.doesNotMatch(out, /your setup/, 'the user already answered');
 });
 
 // The question that caused all of this, verbatim as it was typed.

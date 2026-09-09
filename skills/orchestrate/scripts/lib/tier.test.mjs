@@ -66,10 +66,10 @@ test('the manager\'s own model comes from the last assistant record in the tail'
   writeFileSync(p, [
     JSON.stringify({ type: 'assistant', effort: 'low', message: { model: 'claude-sonnet-5' } }),
     JSON.stringify({ type: 'user', message: { content: 'hi' } }),
-    JSON.stringify({ type: 'assistant', effort: 'high', message: { model: 'claude-opus-5' } }),
+    JSON.stringify({ type: 'assistant', effort: 'high', entrypoint: 'claude-desktop', message: { model: 'claude-opus-5' } }),
     JSON.stringify({ type: 'queue-operation', operation: 'enqueue' }),
   ].join('\n') + '\n');
-  assert.deepEqual(selfModel(p), { model: 'opus', effort: 'high' }, 'the newest record wins');
+  assert.deepEqual(selfModel(p), { model: 'opus', effort: 'high', entrypoint: 'claude-desktop' }, 'the newest record wins, host and all');
   assert.equal(selfModel(join(dir, 'absent.jsonl')), null);
   assert.equal(selfModel(''), null);
 

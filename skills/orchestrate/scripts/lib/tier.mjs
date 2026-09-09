@@ -218,7 +218,13 @@ export function selfModel(transcriptPath) {
     let o; try { o = JSON.parse(l); } catch { continue; }
     const model = o && o.message && typeof o.message.model === 'string' ? o.message.model : null;
     if (!model) continue;
-    return { model: shortModel(model), effort: typeof o.effort === 'string' ? o.effort : null };
+    return {
+      model: shortModel(model),
+      effort: typeof o.effort === 'string' ? o.effort : null,
+      // Which host this is, so the advice can name the actual click rather than
+      // a slash command the desktop app does not have.
+      entrypoint: typeof o.entrypoint === 'string' ? o.entrypoint : null,
+    };
   }
   return null;
 }
@@ -250,5 +256,18 @@ export function applyLimits(model, limits) {
     m = FAMILY_ORDER[Math.min(idx + 1, FAMILY_ORDER.length - 1)];
     if (idx === FAMILY_ORDER.length - 1) break;
   }
+  return m;
+}
+
+// The manager model and effort the user settled on, once, for a tier. The
+// router asks the question at most once per tier and then remembers the answer
+// here, so an answered question never comes back. Shape:
+//   manager: { model, effort, tier, setAt, why, accepted }
+// `accepted: true` means the user took the recommendation rather than naming a
+// pair; a tier change re-opens the question either way.
+export function managerChoice() {
+  const p = readJson(PROFILE_PATH);
+  const m = p && p.manager;
+  if (!m || typeof m !== 'object') return null;
   return m;
 }

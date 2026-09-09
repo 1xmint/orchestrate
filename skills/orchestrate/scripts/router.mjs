@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot,
   latestRun, loadSession, saveSession, sessionPath, pruneSessions, readTail, applyLimits, sanitizeId,
-  selfModel, strongerThan,
+  selfModel, strongerThan, managerChoice,
 } from './lib/tier.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -222,9 +222,34 @@ export const MANAGER_SETUP = {
 };
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
-export function managerAdvice(tier, self) {
+// The exact click, per host. A slash command the desktop app does not have is
+// worse than no instruction: the user tries it, nothing happens, and the advice
+// reads as noise.
+export function setupClick(entrypoint) {
+  return String(entrypoint || '') === 'claude-desktop'
+    ? 'click the model name next to the send button, pick Opus, then Effort → High'
+    : 'type `/model opus` then `/effort high`';
+}
+
+// Silent when the user has already answered for this tier. Two shapes of
+// answer: a named pair they chose, and `accepted`, meaning they took the
+// recommendation. A tier change re-opens the question, because the
+// recommendation itself changes with the tier.
+export function choiceSettles(choice, tier, self) {
+  if (!choice || choice.tier !== tier || !self || !self.model) return false;
+  const eff = String(self.effort || '').toLowerCase();
+  if (choice.accepted) {
+    const want = MANAGER_SETUP[tier];
+    return Boolean(want) && self.model === want.model && (!eff || eff === want.effort);
+  }
+  if (!choice.model) return false;
+  return self.model === choice.model && (!choice.effort || !eff || eff === choice.effort);
+}
+
+export function managerAdvice(tier, self, choice) {
   const want = MANAGER_SETUP[tier];
   if (!want || !self || !self.model) return '';
+  if (choiceSettles(choice, tier, self)) return '';
   const parts = [];
   if (self.model !== want.model) parts.push(`${want.model} rather than ${self.model}`);
   const have = EFFORT_ORDER.indexOf(String(self.effort || '').toLowerCase());
@@ -234,7 +259,7 @@ export function managerAdvice(tier, self) {
     else if (have > need + 1) parts.push(`${want.effort} effort rather than ${self.effort}, which is the worker profile`);
   }
   if (!parts.length) return '';
-  return `[orch-router · your setup] on ${tier}, a manager belongs on ${parts.join(' and ')}. Many short turns, so depth is spent on the dispatched roles instead. Set it now, not mid-run: changing either rebuilds the whole prompt cache. See references/models.md.`;
+  return `[orch-router · your setup] on ${tier}, a manager belongs on ${parts.join(' and ')}. Many short turns, so depth is spent on the dispatched roles instead. Set it now, not mid-run: changing either rebuilds the whole prompt cache. To switch: ${setupClick(self.entrypoint)}. Say it to the user once with the two outs (switch, or keep it and say why), then record the answer with \`profile.mjs --set manager=accept\` and never raise it again. See references/models.md.`;
 }
 
 // ---- state line -------------------------------------------------------------
@@ -280,7 +305,7 @@ function gatherContext(input, state) {
 }
 
 function newState(input) {
-  return { v: 1, session_id: input.session_id || 'unknown', cwd: input.cwd || '', started: new Date().toISOString(), prompts: 0, cardSent: false, muted: false, lastPromptId: null, hints: [], lastStateHash: null, limits: [] };
+  return { v: 1, session_id: input.session_id || 'unknown', cwd: input.cwd || '', started: new Date().toISOString(), prompts: 0, cardSent: false, adviceSent: false, muted: false, lastPromptId: null, hints: [], lastStateHash: null, limits: [] };
 }
 
 // ---- hook handlers ----------------------------------------------------------
@@ -320,13 +345,21 @@ function handlePrompt(input) {
   const key = `${c.rung}:${c.orth.join(',')}`;
   const worthy = c.confident && (![1, 2].includes(c.rung) || c.orth.length > 0) && !(c.rung === 6.5 && state.orchestrateActive);
 
+  // The setup advice, exactly once, on the first substantive prompt where the
+  // model is actually known. On a fresh session that is prompt 2: prompt 1 is
+  // sent before any assistant record exists, so `self` is null and the advice
+  // could never fire from the card turn alone. It is its own flag for that
+  // reason, independent of the card.
+  const adviceNow = (!state.adviceSent && substantive)
+    ? managerAdvice(ctx.tier, ctx.self, managerChoice())
+    : '';
+
   if (!state.cardSent && substantive) {
     out.push(stateLine(ctx, '[orch-router · once per session]'));
     out.push(cardBody());
-    // Once, with the card: the one setting the user has to get right, and only
-    // when they have it wrong. Silence when it is already correct.
-    const advice = managerAdvice(ctx.tier, ctx.self);
-    if (advice) out.push(advice);
+    // A resumed session already knows its model, so the card and the advice go
+    // out together and prompt 2 stays silent.
+    if (adviceNow) { out.push(adviceNow); state.adviceSent = true; }
     state.cardSent = true;
     state.lastStateHash = stateHash(ctx);
     if (worthy) {
@@ -334,6 +367,7 @@ function handlePrompt(input) {
       if (h) { out.push(h); state.hints.push({ at: new Date().toISOString(), key, prompt: state.prompts }); }
     }
   } else if (substantive) {
+    if (adviceNow) { out.push(adviceNow); state.adviceSent = true; }
     const h = state.hints || [];
     const recent = h.some(x => x.key === key && state.prompts - x.prompt < COOLDOWN);
     if (worthy && !recent && h.length < HINT_CAP) {
