@@ -175,6 +175,11 @@ test('the run ledger asks why the run is not smaller', () => {
 // §9 is deliberately the short version, because a longer §9 competes with the
 // style rather than backing it up.
 const SPEECH_RULES = [
+  // The two that matter most to the person on the other end, and the two the
+  // skill did not say at all until a user pointed out that it was agreeing with
+  // him instead of engineering for him.
+  /Find out what they actually want/i,
+  /Agreement is not a deliverable/i,
   /Lead with the answer/i,
   /what is from memory/i,
   /Deliver what was asked, at the scope intended/i,
