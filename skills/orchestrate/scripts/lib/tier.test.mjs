@@ -154,3 +154,41 @@ test('the pointer never shows one repo the ledger of another', () => {
   assert.equal(out.b, '20260909-b', 'a repo with its own runs is never overridden by the pointer');
   assert.equal(out.a, '20260909-a');
 });
+
+// A plugin install registers the six role agents from the plugin's own folder
+// and copies nothing into ~/.claude/agents. Counting only the loose copies
+// reported "agents 0/6 (missing ...)" on a perfectly good plugin install, and
+// would have sent the model off to install a second set that then shadowed the
+// plugin's own.
+test('the six agents count whether they are loose files or inside a plugin', () => {
+  const names = ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger'];
+  const ask = home => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e',
+    `const { agentsInstalled } = await import(${JSON.stringify(TIER)}); console.log(JSON.stringify(agentsInstalled()));`,
+  ], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } }).stdout.trim());
+
+  const home = mkdtempSync(join(tmpdir(), 'orch-agentcount-'));
+  assert.equal(ask(home).installed, 0, 'nothing installed either way');
+
+  const pdir = join(home, '.claude', 'plugins', 'cache', 'orchestrate', 'orchestrate', '9.9.9', 'skills', 'orchestrate', 'assets', 'agents');
+  mkdirSync(pdir, { recursive: true });
+  for (const n of names) writeFileSync(join(pdir, `${n}.md`), `---
+name: ${n}
+---
+`);
+  const viaPlugin = ask(home);
+  assert.equal(viaPlugin.installed, 6, 'found inside the plugin');
+  assert.deepEqual(viaPlugin.missing, []);
+  assert.equal(viaPlugin.source, 'plugin');
+
+  // Loose files still win when all six are there, so a script install is
+  // unaffected and still reports its own directory.
+  const loose = join(home, '.claude', 'agents');
+  mkdirSync(loose, { recursive: true });
+  for (const n of names) writeFileSync(join(loose, `${n}.md`), `---
+name: ${n}
+---
+`);
+  const viaFiles = ask(home);
+  assert.equal(viaFiles.installed, 6);
+  assert.equal(viaFiles.source, 'files');
+});

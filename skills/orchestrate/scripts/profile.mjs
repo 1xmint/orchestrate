@@ -304,11 +304,10 @@ function detectSkills(repoRoot) {
 }
 
 // ---- agents installed -------------------------------------------------------
-function detectAgents() {
-  const dir = join(HOME, '.claude', 'agents');
-  const present = AGENT_NAMES.filter(n => existsSync(join(dir, n + '.md')));
-  return { installed: present.length, expected: AGENT_NAMES.length, missing: AGENT_NAMES.filter(n => !present.includes(n)), dir };
-}
+// One copy of this rule, in lib/tier.mjs, because it has to know about both
+// install paths: loose files in ~/.claude/agents, and a plugin that registers
+// them from its own folder without copying anything.
+import { agentsInstalled as detectAgents } from './lib/tier.mjs';
 
 // ---- repo + runs ------------------------------------------------------------
 function findRepoRoot(start) {

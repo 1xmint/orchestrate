@@ -76,10 +76,44 @@ export function routerSettings() {
   return { enabled: r.enabled !== false, haiku: r.haiku === true };
 }
 
+// A plugin install does not copy agent files into ~/.claude/agents; the host
+// registers them from the plugin's own folder. Counting only the loose copies
+// therefore reported "agents 0/6 (missing …)" on a working plugin install, and
+// sent the model off to run install-agents.mjs, which would have created a
+// second set that then shadowed the plugin's. Look in both places.
+function pluginAgentDir() {
+  const base = join(HOME, '.claude', 'plugins', 'cache');
+  try {
+    for (const market of readdirSync(base)) {
+      for (const plugin of readdirSync(join(base, market))) {
+        for (const version of readdirSync(join(base, market, plugin))) {
+          const d = join(base, market, plugin, version, 'skills', 'orchestrate', 'assets', 'agents');
+          if (existsSync(join(d, `${AGENT_NAMES[0]}.md`))) return d;
+        }
+      }
+    }
+  } catch {}
+  return null;
+}
+
 export function agentsInstalled() {
   const dir = join(HOME, '.claude', 'agents');
-  const present = AGENT_NAMES.filter(n => existsSync(join(dir, `${n}.md`)));
-  return { installed: present.length, expected: AGENT_NAMES.length, missing: AGENT_NAMES.filter(n => !present.includes(n)), dir };
+  const loose = AGENT_NAMES.filter(n => existsSync(join(dir, `${n}.md`)));
+  if (loose.length === AGENT_NAMES.length) {
+    return { installed: loose.length, expected: AGENT_NAMES.length, missing: [], dir, source: 'files' };
+  }
+  const pdir = pluginAgentDir();
+  if (pdir) {
+    const viaPlugin = AGENT_NAMES.filter(n => loose.includes(n) || existsSync(join(pdir, `${n}.md`)));
+    return {
+      installed: viaPlugin.length,
+      expected: AGENT_NAMES.length,
+      missing: AGENT_NAMES.filter(n => !viaPlugin.includes(n)),
+      dir: pdir,
+      source: 'plugin',
+    };
+  }
+  return { installed: loose.length, expected: AGENT_NAMES.length, missing: AGENT_NAMES.filter(n => !loose.includes(n)), dir, source: 'files' };
 }
 
 export function findRepoRoot(start) {

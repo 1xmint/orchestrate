@@ -1,6 +1,6 @@
 # Handoff
 
-`orchestrate` v0.7.1 is built, tested, packaged and tagged. v0.6.0 gave the
+`orchestrate` v0.7.2 is built, tested, packaged and tagged. v0.6.0 gave the
 conversation a team; v0.7.0 puts a senior engineer in front of it. The setup
 question now actually gets asked, a question gets a depth call before it gets an
 answer, every claim has to name what it rests on with two independent checks
@@ -22,7 +22,7 @@ Then run the tests, which need no quota and no network:
 node --test "skills/orchestrate/scripts/**/*.test.mjs"
 ```
 
-186 pass. Anything red is a regression, not a starting point.
+187 pass. Anything red is a regression, not a starting point.
 
 Two offline commands are worth knowing, because both answer questions people
 otherwise guess at:

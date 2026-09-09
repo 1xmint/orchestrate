@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (hey-vera)
-  version: "0.7.1"
+  version: "0.7.2"
 hooks:
   PreToolUse:
     - matcher: "Agent"
@@ -79,10 +79,12 @@ says how.
 
 Tier `unknown` above: ask once (Pro $20, Max 5x $100, Max 20x $200,
 API/Team/other) with a recommendation, then `profile.mjs --set tier=…`. Never
-guess: a wrong guess on Pro spends real money. Agents missing:
-`node "${CLAUDE_SKILL_DIR}/scripts/install-agents.mjs"`; new files take a
-minute to appear, until then `Explore` for read-only roles and
-`general-purpose` for writing roles, with the role note from `contracts.md`.
+guess: a wrong guess on Pro spends real money. Agents below 6/6 on a *script*
+install: `node "${CLAUDE_SKILL_DIR}/scripts/install-agents.mjs"`; new files take
+a minute to appear, and until then `Explore` for read-only roles and
+`general-purpose` for writing roles, with the role note from `contracts.md`. A
+plugin install already carries all six, so never run that installer there: it
+would create a second set that shadows the plugin's own.
 
 You cannot set your own model or effort: the user picked both before you
 existed. When the router's `your setup` line appears, say it once, in one

@@ -2,6 +2,50 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.7.2 — the plugin install, which had never worked, 2026-09-09
+
+Josh asked for automatic updates so he would never fall behind. Answering that
+meant actually installing the plugin, and the moment anyone did, three defects
+surfaced that no test could have caught because none of them exist until a real
+host reads the manifest.
+
+1. **There was no marketplace manifest.** The README had told people to run
+   `/plugin marketplace add 1xmint/orchestrate` since v0.6.0, and the repo had
+   no `.claude-plugin/marketplace.json`. That command could only ever fail. The
+   "one-command install" the README calls the short path had never worked for
+   anybody, which is also why auto-update was unreachable: there was no
+   marketplace to enable it on.
+2. **`plugin.json` declared `agents` as a directory string** where the schema
+   takes a list of files. `claude plugin validate` rejects the whole manifest
+   for it.
+3. **`plugin.json` declared `hooks: "./hooks/hooks.json"`.** That file loads
+   automatically, so naming it too is a duplicate load and the host refuses the
+   entire plugin: "Duplicate hooks file detected". Only a real install shows
+   this; validation passes either way.
+
+Then a fourth, caused by fixing the first three: **a plugin install reported
+`agents 0/6`.** The host registers the six role agents from the plugin's own
+folder and copies nothing into `~/.claude/agents`, and `agentsInstalled()`
+counted only loose files. It would have told the model to run
+`install-agents.mjs`, creating a second set that shadows the plugin's. It now
+looks in both places and says which one it found, and `profile.mjs` no longer
+keeps a second copy of that rule.
+
+`claude plugin validate . --strict` passes, the plugin installs and loads, and
+187 tests cover all four so none can come back. 0.7.0 and 0.7.1 are tagged but
+should not be installed; 0.7.2 is the first release whose plugin actually loads.
+
+### What this machine is on now
+
+The script install is gone: `~/.claude/skills/orchestrate`,
+`~/.agents/skills/orchestrate`, the six loose `orch-*.md`, and the four
+orchestrate hook entries in `settings.json` were all removed, leaving
+`memory-write-gate.mjs` untouched. There is one copy now, from the plugin cache.
+`extraKnownMarketplaces.orchestrate.autoUpdate` is set to `true` in user
+settings; the docs only document that key for managed settings, so whether the
+host honours it there is unverified — the `/plugin` Marketplaces tab is the
+path that is documented to work.
+
 ## v0.7.0 — the senior engineer in the chair, 2026-09-09
 
 Plan: `C:\Users\Josh\.claude\plans\you-are-the-senior-kind-mango.md`, grounded
