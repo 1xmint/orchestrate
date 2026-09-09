@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // run-init.mjs — create the ledger for one goal.
 //
-//   node run-init.mjs <slug> [--goal "text"] [--tier max5] [--host claude-code] [--providers "..."]
+//   node run-init.mjs <slug> [--repo <path>] [--goal "text"] [--tier max5] [--host claude-code] [--providers "..."]
 //
 // Creates .orchestrator/runs/<yyyymmdd>-<slug>/RUN.md from assets/RUN.md,
 // fills the placeholders it can, keeps .orchestrator/ out of git through
@@ -36,7 +36,11 @@ function findRepoRoot(start) {
   return null;
 }
 
-const root = findRepoRoot(process.cwd()) || process.cwd();
+// --repo names the repo the goal is about; without it, the ledger lands in the
+// repo containing the current directory, which is often the wrong one.
+const start = opts.repo ? resolve(opts.repo) : process.cwd();
+if (opts.repo && !existsSync(start)) { console.error(`--repo not found: ${start}`); process.exit(2); }
+const root = findRepoRoot(start) || start;
 const now = new Date();
 // Local calendar date everywhere, so the run id, the "started" line and the
 // task id prefix agree even late in the evening.

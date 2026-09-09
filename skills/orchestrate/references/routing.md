@@ -44,20 +44,14 @@ with the four choices and save the answer. An API-key session is `api`:
 dollars rather than a window; use the Max 5x column and tell the user what a
 Fable dispatch costs before making one.
 
-## Effort
+## Effort (for whoever edits the agent files; not a per-run choice)
 
-`low | medium | high | xhigh | max`. Default is `high`.
-
-- `low`: mechanical or tightly scoped work, cheap subagents.
-- `medium`: where quality holds and cost matters.
-- `high`: the floor for anything needing judgment.
-- `xhigh`: coding and long agentic tasks on Opus 5, Sonnet 5 and Fable. It
-  usually lowers total tokens by avoiding rework.
-- `max`: correctness over time; can over-think routine work.
-
-A subagent's effort comes from its agent file (`effort:`) and cannot be set per
-call, so each role agent carries the effort that fits its role. The model can
-be set per call and overrides the file.
+A subagent's effort comes from its agent file (`effort:`) and cannot be set
+per call. The six role agents already carry what fits: planner and debugger
+`xhigh`, the rest `high`. Change a file only with a reason: `low`/`medium`
+suit mechanical work; `xhigh` lowers total tokens on coding and long agentic
+work by avoiding rework; `max` over-thinks routine tasks. The model is the
+per-call lever and overrides the file.
 
 ## Routing table
 
@@ -107,8 +101,10 @@ fixed list plus independent verification guards both.
 
 Codex, opencode, gemini and aider are separate quota pools and, for review, a
 different vendor's blind spots. Use one only when `profile.mjs` shows it
-installed **and** authenticated. Before relying on it for real work, run
-`scripts/smoke.mjs <provider>` once; it spends a tiny amount of that quota.
+installed **and** authenticated ("signed in", or for opencode "credentials
+listed"). Most runs never need one; do not smoke-test a provider you have no
+dispatch planned for. When a dispatch to it is planned, run
+`scripts/smoke.mjs <provider>` once first; it spends a tiny amount of that quota.
 On any quota, auth or "try again at" error, drop the provider for the rest of
 the run and do not retry it. Never write a key or token anywhere.
 

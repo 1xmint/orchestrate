@@ -29,7 +29,8 @@ Open a reference only when its step needs it: `references/routing.md` (model
 and effort by plan, escalation triggers), `references/contracts.md` (the
 packet and return schema with a worked example), `references/evaluation.md`
 (grading, failure classes, review rules), `references/hosts.md` (what the
-Agent tool can do here).
+Agent tool can do here). `borrowed.md` and `audit-prompt.md` are for whoever
+maintains the skill; a run never needs them.
 
 ## 0. Profile, every run
 
@@ -44,44 +45,54 @@ state. Then:
   and save the answer with `--set tier=…`. Do not guess: a wrong guess on Pro
   spends real money on Fable.
 - Agents missing: run `node "${CLAUDE_SKILL_DIR}/scripts/install-agents.mjs"`.
-  Agent files are read when a session starts, so the `orch-*` types are not
-  callable until the next session. For this session use `general-purpose`
-  (or `Explore` for read-only work) with the role notes from
-  `references/contracts.md` pasted into the packet, and say so to the user.
+  Newly installed agent files take a little while to show up in the Agent
+  tool's list. Until they do, use `general-purpose` (or `Explore` for
+  read-only work) with the role notes from `references/contracts.md` pasted
+  into the packet, and say so to the user.
 - Tier `pro`: Fable is off for this run unless the user opts in.
 
-## 1. Understand
+## 1. Open the ledger, then understand
 
-Write into the ledger: the objective in one or two sentences; the done-when
-evidence (a command and its expected result, a file that exists, a page
-state); non-goals; the decisions the user has already made. If two readings
-of the goal lead to materially different work, ask one question and attach a
-recommendation. Otherwise choose, say what you chose, and go on. Questions
-are for decisions the user owns; the rest are yours.
+Create the ledger first, in the repo the goal is about:
+`node "${CLAUDE_SKILL_DIR}/scripts/run-init.mjs" <slug> --repo <path to that repo> --goal "…" --tier <t> --host <h> --providers "…"`.
+It creates `<repo>/.orchestrator/runs/<date>-<slug>/RUN.md` from
+`assets/RUN.md`, whose sections are: Goal, Done when, Profile, Facts, Tasks
+(a table), Decisions, Open questions, Pickup, Verified vs inherited. Keep
+those headings; a resuming session looks for them. Outside a repo, omit
+`--repo` and the ledger lands under the current directory.
+
+Then fill Goal and Done when: the objective in one or two sentences; the
+evidence that would prove it (a command and its expected result, a file that
+exists, a page state); non-goals; the decisions the user has already made.
+If two readings of the goal lead to materially different work, ask one
+question and attach a recommendation. Otherwise choose, write the choice
+under Decisions, and go on. Questions are for decisions the user owns; the
+rest are yours.
+
+When resuming, read the latest `RUN.md` first and continue from its pickup
+line rather than re-deriving anything.
 
 ## 2. Ground before planning
 
 Facts about the world come from the world, not from memory: the repo's own
 rules and gate (`AGENTS.md`, `CLAUDE.md`, a justfile, package scripts,
-`Cargo.toml`, `pyproject.toml`, CI), the current docs of any service or
-library, the `--help` of any CLI, the live state of any page. Read small
-things yourself. Send big reads to an `Explore` agent with `model: haiku`.
-Write what you learn into the ledger's facts section verbatim with its
-source; those lines are what subagents will receive, and they see nothing of
-this conversation.
-
-Start the ledger before the first dispatch:
-`node "${CLAUDE_SKILL_DIR}/scripts/run-init.mjs" <slug> --goal "…" --tier <t> --host <h> --providers "…"`.
-It creates `.orchestrator/runs/<date>-<slug>/RUN.md` and keeps the folder out
-of git. When resuming, read the latest `RUN.md` first and continue from its
-pickup line rather than re-deriving anything.
+`Cargo.toml`, `pyproject.toml`, CI), whether it has a remote and whether
+`gh` is signed in, the current docs of any service or library, the `--help`
+of any CLI, the live state of any page. Read the rules, the gate and the
+files the goal names yourself; that is grounding, not a subsystem read. Send
+anything wider (more than about three source files to understand how a part
+works) to an `Explore` agent with `model: haiku`. Write what you learn into
+the ledger's Facts section verbatim with its source; those lines are what
+subagents will receive, and they see nothing of this conversation.
 
 ## 3. Plan as tracer bullets
 
 The thinnest slice that works end to end first, then the slices that widen
-it. Each task row in the ledger carries an id (`M-D-NNNN`), the owner role,
-what it blocks on, allowed and forbidden files, the verification command, a
-rubric written now that names the measurement, and a stop-and-ask condition.
+it. Each task row in the ledger carries an id, the owner role, what it
+blocks on, allowed and forbidden files, the verification command, a rubric
+written now that names the measurement, and a stop-and-ask condition. Ids
+are `M-D-NNNN`: month and day unpadded, then a four-digit counter that
+starts at 0001 for each run (`9-8-0001`); an id never changes once given.
 
 Plan inline when the goal is clear and fits one sitting. Send planning to
 `orch-planner` when the goal is ambiguous, crosses modules, or is bigger than
@@ -117,7 +128,14 @@ solution, never about the reading.
 Call the Agent tool with `subagent_type` set to the role, `model` set from
 the table, `isolation: "worktree"` for repo work, `run_in_background: true`
 unless the very next step needs the result, and `prompt` set to the packet.
-Effort comes from the agent file and cannot be set per call.
+Effort comes from the agent file and cannot be set per call. If the host
+rejects an `orch-*` type (just installed, not yet listed), use
+`general-purpose` for writing roles and `Explore` for read-only ones, paste
+the matching role note from `references/contracts.md` at the top of the
+packet, and retry the real type on the next dispatch.
+
+Fable counting: only dispatches count, rounded down, so a run of one or two
+dispatches uses Fable at most once and only on an escalation trigger.
 
 The packet is the whole context the agent will ever have. Every field, every
 time; write "none" rather than leaving one out. The fields: task id and role;
@@ -138,9 +156,11 @@ when the model must change or the earlier attempt would bias the next one.
 
 On every return, in order: the schema is complete; RESTATED matches the
 objective (if not, the packet was unclear, so fix the packet); CHANGED touches
-only allowed files. Then verify the evidence yourself: run the verification
-commands in the real worktree, or have `Explore` run them and return the
-tail; `git diff --stat` against the base; compare the claims with the tree.
+only allowed files and names the branch and worktree path (`git worktree
+list` shows them if it did not). Then verify the evidence yourself: run the
+verification commands in that worktree, or have `Explore` run them and
+return the tail; `git diff --stat` against the base; compare the claims with
+the tree.
 Then the drift check: no refactor, default change, added dependency, or
 weakened test that the packet did not ask for.
 
@@ -151,7 +171,9 @@ return with no evidence section is Failed.
 Independent review by `orch-reviewer`, whose tools are read-only, is
 required for security, auth, payments, public surfaces, schema or default
 changes, anything irreversible, cross-module changes, and whenever two
-competent results disagree. For the highest-risk class use two reviewers
+competent results disagree. A change that moves or rewrites user data
+counts as irreversible even when an undo exists. When unsure whether a
+review is required, it is. For the highest-risk class use two reviewers
 with fresh context; both must PASS on the same commit; a conditional pass is
 a FAIL with the edit named; an unavailable reviewer is reported, never
 skipped. Your own read is a third check, not a substitute.
@@ -175,9 +197,10 @@ reset time reported. Do not quietly shrink the plan of work to fit.
 ## 8. Integrate and finish
 
 Merge in dependency order, focused gates per branch, the full repo gate at
-the merge point, `gh pr merge --auto` where branch protection exists rather
-than watching CI. Done means the user's done-when evidence exists and you
-have seen it, not that every agent said DONE.
+the merge point. With a remote and branch protection, open a PR and use
+`gh pr merge --auto` rather than watching CI; with no remote, merge locally
+and say so. Done means the user's done-when evidence exists and you have
+seen it, not that every agent said DONE.
 
 ## 9. Keep the ledger current
 

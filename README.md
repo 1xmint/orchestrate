@@ -19,10 +19,10 @@ node scripts/install.mjs
 
 That copies the skill to `~/.claude/skills/orchestrate/` (and to
 `~/.agents/skills/orchestrate/` for Codex, skip with `--no-codex`) and
-installs six role agents into `~/.claude/agents/`. Then **start a new
-session**: the skill is picked up live, but agent files are only read at
-session start. Type `/orchestrate <your goal>`, or just describe a multi-part
-goal; the skill triggers on its own.
+installs six role agents into `~/.claude/agents/`. Both are picked up by a
+running session within a minute or so; a new session sees them at once.
+Type `/orchestrate <your goal>`, or just describe a multi-part goal; the
+skill triggers on its own.
 
 First run: the skill reads your plan tier from your local Claude config. If it
 cannot, it asks once and remembers:

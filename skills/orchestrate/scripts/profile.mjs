@@ -213,7 +213,7 @@ if (wantJson) {
   console.log(`host: ${host}`);
   console.log(`tier: ${tier.tier}  (${tier.source})`);
   console.log(`providers: ${provLine}`);
-  console.log(`agents: ${agents.installed}/${agents.expected} orch-* installed in ${agents.dir}${agents.missing.length ? ' — missing: ' + agents.missing.join(', ') + ' (run scripts/install-agents.mjs)' : ''}`);
+  console.log(`agents: ${agents.installed}/${agents.expected} orch-* files in ${agents.dir}${agents.missing.length ? ' — missing: ' + agents.missing.join(', ') + ' (run scripts/install-agents.mjs)' : ' (a running session lists newly installed ones after a short delay)'}`);
   console.log(`repo: ${repo || 'not in a git repo (worktree isolation unavailable)'}`);
   console.log(`runs: ${runs.count} under ${runs.dir}${runs.latest ? ' — latest: ' + runs.latest : ''}`);
   if (tier.tier === 'unknown') console.log('next: ask the user which plan (Pro $20 / Max 5x $100 / Max 20x $200 / API-Team-other), then: node scripts/profile.mjs --set tier=<pro|max5|max20|team|api>');

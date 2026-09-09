@@ -26,6 +26,7 @@ tier: {{TIER}} · host: {{HOST}} · providers: {{PROVIDERS}}
 | {{ID_PREFIX}}-0001 | 📋 planned | planner · opus | <task> | <the measurement that decides it> | 0 | — |
 
 Phases: 📋 planned · 🔨 running · 🔍 review · ✅ done · 🧱 built-unverified · ◐ partial · ⛔ blocked · ✖ failed
+Ids: `{{ID_PREFIX}}-NNNN`, counter from 0001 for this run, never reused or changed.
 
 ## Decisions
 

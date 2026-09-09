@@ -61,10 +61,28 @@ BUDGET
 RETURN (at most 40 lines; put long logs in <run dir>/<id>.md and cite the path)
 RESTATED: <the objective in your own words, two lines>
 STATUS: DONE | PARTIAL | BLOCKED
-CHANGED: <files, commits>
+CHANGED: <files, commits, and the branch name and worktree path you worked in>
 EVIDENCE: <commands run and result tails, or paths to them>
 NOT VERIFIED: <what you could not check and why>
 QUESTIONS: <only ones that block>
+```
+
+## The reviewer packet
+
+A reviewer gets a shorter packet with different fields. Do not paste the
+author's FACTS block; point at the diff and the evidence instead.
+
+```
+TASK: <id>  ROLE: reviewer   MODEL: <opus|fable> because <one line>
+REVIEW OF: <task id> on <branch> @ <sha>, worktree <path>
+OBJECTIVE THE AUTHOR HAD: <the author's OBJECTIVE, NOT IN SCOPE and DECISIONS
+  ALREADY MADE sections, verbatim>
+ALLOWED FILES THE AUTHOR HAD: <globs>
+DIFF: `git diff <base>..<sha>` in that worktree
+EVIDENCE: <the author's EVIDENCE section and any log paths>
+REPO STANDARDS: <path to AGENTS.md / CLAUDE.md>
+RETURN: PASS or FAIL on the first line, then numbered findings with file:line
+  and the exact edit; under 60 lines.
 ```
 
 The `RESTATED` line is the cheapest check that the agent understood the task.
