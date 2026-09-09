@@ -20,7 +20,7 @@ Step numbers below are its section 8.
 
 Proof, all at zero model quota:
 
-- 98 unit tests, `node --test "skills/orchestrate/scripts/**/*.test.mjs"`.
+- The unit suite, `node --test "skills/orchestrate/scripts/**/*.test.mjs"`, green at every commit (98 at the v0.4.0 tag, 124 after the audit pass).
 - The installer's merge run against a copy of the real `~/.claude/settings.json`
   in the test suite, and then for real: the `memory-write-gate.mjs` entry is
   untouched, every non-hook key is identical, and a backup exists under
@@ -30,6 +30,44 @@ Proof, all at zero model quota:
 - `measure.mjs` run on a real transcript of this build session.
 - `install.mjs --project --dry-run` on the real notelocus checkout: it reports
   the pytest and ruff gate and the missing `CLAUDE.md`, and writes nothing.
+
+## The fresh-context Fable audit — 2026-09-09
+
+The one step the v0.3 plan reserved and the v0.4 plan deferred: run
+`references/audit-prompt.md` as a Fable subagent against the built skill, apply
+what survives. The prompt was refreshed for v0.4 first, because it still
+described v0.3 and would have sent the auditor after the wrong artifact.
+
+Dispatch: `orch-reviewer` on Fable, one of three Fable dispatches allowed today,
+recorded by the guard and by `.orchestrator/runs/20260909-fable-audit/RUN.md`.
+
+That dispatch is also the first real end-to-end proof of the hooks. The guard
+counted it and wrote the session state; the return check, the resume injection
+and the deny path were exercised live against the installed copy.
+
+Six defects were found and fixed while the audit ran, each proved on disk
+before it was fixed, each with the test that would have caught it:
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| A | `ledger.mjs` had no dedupe, and the recommended install registers it twice | one dispatch wrote two return files and counted as two attempts |
+| B | `profile.mjs` read the Fable counter by UTC date; the guard writes it by local date | "fable 0/3 today" for four hours every evening while the cap was spent |
+| C | `install-project.mjs` recursed with an unchanged argument to reach its line budget | unreachable today, a non-terminating loop the moment the fixed part grows |
+| D | a half-filled Pickup leaked the template into the resume line | "confidence high \| medium \| low" injected into a resumed session |
+| E | `evals/evals.json` was not valid JSON | the eval loop could never have loaded it; "never run" had a second cause |
+| F | `router.mjs --cost` had its own transcript parser and counted tool results | it reported six router injections where the meter correctly reported none |
+
+Tests went from 98 to 124, and the two scripts that had no coverage at all,
+`run-init.mjs` and `install-agents.mjs`, now have theirs. `smoke.mjs` stays
+untested on purpose: it exists to spend a little provider quota, so a test
+would spend quota on every run.
+
+One plan item is declined rather than built: the optional PreToolUse(Bash)
+filter that would append a failures-only tail to test runners. Appending a pipe
+replaces the runner's exit status with the filter's, so a failing gate would
+read as passing; rewriting a user's shell command to save a few hundred tokens
+is not worth that failure mode. `evaluation.md` §2 already has the orchestrator
+write the filter itself, in the command it runs.
 
 ### Left for Josh
 
@@ -61,7 +99,8 @@ Deliberately not applied then: a per-run absolute Fable cap (a per-day cap in
 the hook replaced it), moving the task table out of RUN.md, and marking every
 host assumption unverified line by line.
 
-Pickup prompt: v0.4.0 is complete and tagged; the next move is Josh running
-the five loading checks and then using the skill on a real goal.
+Pickup prompt: v0.4.0 is tagged and the Fable audit pass is under way; six
+own findings are applied and pushed, the auditor's return is still to be
+triaged, then tag the point release.
 Pickup confidence: high
 Resume risk: none
