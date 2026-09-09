@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,4 +110,24 @@ test('the CLI reads a file, and --json round-trips', () => {
   const none = spawnSync(process.execPath, [script], { encoding: 'utf8' });
   assert.equal(none.status, 2);
   assert.match(none.stderr, /usage:/);
+});
+
+test('router --cost and measure agree on the same file, because there is one parser', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-agree-'));
+  const p = join(dir, 't.jsonl');
+  // One real injection, plus a tool result that merely quotes one. The router's
+  // own --cost used to count both and disagree with the meter.
+  writeFileSync(p, [
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: '[orch-router · once per session] tier max5' }] } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'grep hit: [orch-router · once per session] in a test fixture' }] } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: usage(1, 1, 10, 0) } }),
+  ].join('\n'));
+
+  const r = measure(readFileSync(p, 'utf8'));
+  assert.equal(r.routerInjections, 1);
+
+  const out = spawnSync(process.execPath, [join(HERE, 'router.mjs'), '--cost', p], { encoding: 'utf8' });
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /^router injections: 1$/m);
+  assert.match(out.stdout, new RegExp(`^bytes injected once: ${r.routerBytes} `, 'm'));
 });

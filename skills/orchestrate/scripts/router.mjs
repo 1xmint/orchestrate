@@ -330,41 +330,30 @@ function explain(prompt) {
   console.log(JSON.stringify({ features: f, rung: c.rung, label: rungLabel(c.rung), confident: c.confident, orth: c.orth, evidence: c.evidence, hint: hintFor(c, f, ctx) || '(silent)' }, null, 2));
 }
 
-function collectStrings(v, out = []) {
-  if (typeof v === 'string') out.push(v);
-  else if (Array.isArray(v)) v.forEach(x => collectStrings(x, out));
-  else if (v && typeof v === 'object') Object.values(v).forEach(x => collectStrings(x, out));
-  return out;
-}
-
-function cost(path) {
-  const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
-  let injected = 0, injections = 0, reread = 0, assistantAfter = 0;
-  const marks = [];
-  lines.forEach((l, i) => {
-    let o; try { o = JSON.parse(l); } catch { return; }
-    if (o.type === 'assistant') { assistantAfter++; for (const m of marks) m.after++; }
-    if (o.type === 'user') {
-      for (const s of collectStrings(o.message && o.message.content)) {
-        const at = s.indexOf('[orch-router');
-        if (at < 0) continue;
-        const bytes = s.length - at;
-        injected += bytes; injections++; marks.push({ at: i, bytes, after: 0 });
-      }
-    }
-  });
-  for (const m of marks) reread += m.bytes * m.after;
-  console.log(`router injections: ${injections}`);
-  console.log(`bytes injected once: ${injected} (≈ ${Math.round(injected / 4)} tokens)`);
-  console.log(`bytes re-read over later assistant turns: ${reread} (≈ ${Math.round(reread / 4)} cache-read tokens, cumulative)`);
-  console.log(`assistant records in file: ${assistantAfter}`);
+// The router's share of a session is one number, and it must not depend on
+// which script you ask. This mode used to parse the transcript itself and
+// counted any string containing "[orch-router" — including a tool result that
+// merely quoted one — so a session that read its own fixtures reported six
+// injections where there had been none. measure.mjs owns the parsing now,
+// including the rule that a tool result is not an injection.
+async function cost(path) {
+  const { measure } = await import('./measure.mjs');
+  const r = measure(readFileSync(path, 'utf8'));
+  const read = r.input + r.cacheRead + r.cacheWrite;
+  const tok = n => Math.round(n / 4);
+  console.log(`router injections: ${r.routerInjections}`);
+  console.log(`bytes injected once: ${r.routerBytes} (≈ ${tok(r.routerBytes)} tokens)`);
+  console.log(`bytes re-read over later assistant turns: ${r.routerReread} (≈ ${tok(r.routerReread)} cache-read tokens, cumulative)`);
+  console.log(`assistant turns with usage: ${r.turns}`);
+  if (read) console.log(`share of everything the session read: ${((tok(r.routerBytes) + tok(r.routerReread)) / read * 100).toFixed(2)}%`);
+  console.log('(measure.mjs on the same file gives the full report)');
 }
 
 // ---- main -------------------------------------------------------------------
 const args = process.argv.slice(2);
 try {
   if (args[0] === '--explain') explain(args.slice(1).join(' '));
-  else if (args[0] === '--cost' && args[1]) cost(args[1]);
+  else if (args[0] === '--cost' && args[1]) await cost(args[1]);
   else if (args[0] === '--prune') console.log(`pruned ${pruneSessions(7)} session file(s)`);
   else {
     let payload = '';
