@@ -9,7 +9,7 @@ color: green
 hooks:
   Stop:
     - type: command
-      command: '{{NODE}} "{{SKILL_DIR}}/scripts/return-check.mjs"'
+      command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/return-check.mjs"'
 ---
 
 You implement one task from a packet. Start by restating the objective in two

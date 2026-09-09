@@ -9,10 +9,26 @@ when something is off, verifies independently, and reports in plain words.
 The skill lives in `skills/orchestrate/`. Everything else in this repo is for
 building and testing it.
 
-## Install (Claude Code, desktop app or CLI)
+## Install
+
+This repo is a Claude Code plugin. That is the short path:
+
+```
+/plugin marketplace add 1xmint/orchestrate
+/plugin install orchestrate
+```
+
+It brings the skill, the six role agents, the output style and the three global
+hooks in one step. **It needs `node` on your PATH**, because the hooks shell out
+to Node; if you launched the desktop app from the dock or Start menu and your
+Node came from nvm, fnm or Homebrew, it may not be there. If the hooks seem
+inert, use the script below instead, which writes Node's absolute path in.
+
+The script path, which also works with no plugin support and pins the
+interpreter:
 
 ```bash
-git clone <this repo> orchestrate
+git clone https://github.com/1xmint/orchestrate
 cd orchestrate
 node scripts/install.mjs --with-router --with-hook
 ```
@@ -193,6 +209,8 @@ skills/orchestrate/
   scripts/              router, guard, ledger, return-check, turn-check, gate,
                         profile, run-init, measure, install-agents, install-project
   assets/               RUN.md template, packet template, six role agents, the Plain output style
+.claude-plugin/          plugin manifest, so /plugin install works
+hooks/hooks.json         the three global hooks, for the plugin path
 evals/                  test prompts for the skill-creator loop
 scripts/install.mjs     installs the skill, agents and hooks
 scripts/package.mjs     builds the two .skill zips

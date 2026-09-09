@@ -1,0 +1,17 @@
+{
+  "name": "orchestrate",
+  "displayName": "Orchestrate",
+  "version": "0.6.0",
+  "description": "Run a goal as an autonomous technical project manager: plan it, split it, route each task to the right agent and model for your plan, judge what comes back, verify, and report plainly.",
+  "author": {
+    "name": "Josh",
+    "url": "https://github.com/1xmint"
+  },
+  "homepage": "https://github.com/1xmint/orchestrate",
+  "repository": "https://github.com/1xmint/orchestrate",
+  "license": "MIT",
+  "keywords": ["orchestration", "subagents", "planning", "code-review", "vibe-coding"],
+  "agents": "./skills/orchestrate/assets/agents/",
+  "outputStyles": "./skills/orchestrate/assets/output-styles/",
+  "hooks": "./hooks/hooks.json"
+}

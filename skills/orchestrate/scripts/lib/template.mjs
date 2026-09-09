@@ -6,10 +6,19 @@
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const PLACEHOLDER = /\{\{SKILL_DIR\}\}/g;
+// One token, understood by both install paths. As a Claude Code plugin,
+// `${CLAUDE_PLUGIN_ROOT}` is expanded by the host and the file needs no
+// substitution at all. Installed standalone by install.mjs, the whole prefix is
+// replaced with the directory the skill actually landed in. Two mechanisms, one
+// string in the source, so the agent files and SKILL.md have no build step.
+export const PLUGIN_PREFIX = '${CLAUDE_PLUGIN_ROOT}/skills/orchestrate';
+export const PLACEHOLDER = /\{\{SKILL_DIR\}\}|\$\{CLAUDE_PLUGIN_ROOT\}/g;
 
 export function applyTemplate(text, vars) {
   let out = String(text);
+  // The plugin prefix first, so `{{SKILL_DIR}}` (kept for older copies) cannot
+  // half-substitute a path that already resolved.
+  if (vars.SKILL_DIR) out = out.split(PLUGIN_PREFIX).join(String(vars.SKILL_DIR).replace(/\\/g, '/'));
   for (const [k, v] of Object.entries(vars)) {
     out = out.replace(new RegExp(`\\{\\{${k}\\}\\}`, 'g'), String(v).replace(/\\/g, '/'));
   }

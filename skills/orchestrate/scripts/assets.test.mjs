@@ -32,9 +32,10 @@ test('every role agent carries the return check as its own Stop hook', () => {
     const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
     assert.match(fm, /^hooks:$/m, f);
     assert.match(fm, /^ {2}Stop:$/m, f);
-    // A single-quoted YAML scalar, so the interpreter path the installer
-    // substitutes can carry its own quotes and its own spaces.
-    assert.match(fm, /command: '\{\{NODE\}\} "\{\{SKILL_DIR\}\}\/scripts\/return-check\.mjs"'/, f);
+    // One token both install paths understand: a plugin expands
+    // ${CLAUDE_PLUGIN_ROOT} itself, and install.mjs replaces the whole prefix
+    // with wherever the skill landed. No build step either way.
+    assert.match(fm, /command: 'node "\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/orchestrate\/scripts\/return-check\.mjs"'/, f);
     assert.ok(existsSync(join(SKILL, 'scripts', 'return-check.mjs')), 'the script the hook names exists');
   }
 });
@@ -191,4 +192,46 @@ test('the installer copies the output style but never selects it', () => {
   // has. That is their call, so the installer prints the line and stops.
   assert.doesNotMatch(installer, /writeSettings\([^)]*outputStyle|settings\.outputStyle\s*=/);
   assert.match(installer, /"outputStyle": "Plain"/, 'it shows them the one line to add');
+});
+
+// The plugin manifest is the one-command install path. If it points at a
+// directory that moved, the plugin installs and quietly does nothing.
+test('the plugin manifest points at files that exist, and agrees with the skill', () => {
+  const root = join(SKILL, '..', '..');
+  const manifest = JSON.parse(readFileSync(join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
+  assert.equal(manifest.name, 'orchestrate', 'kebab-case, no spaces; it is the install id');
+  assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
+
+  for (const key of ['agents', 'outputStyles', 'hooks']) {
+    const rel = manifest[key];
+    assert.ok(rel, `manifest declares ${key}`);
+    assert.ok(existsSync(join(root, rel)), `${key} -> ${rel} exists`);
+  }
+  // skills/ is scanned by default, so the skill needs no entry, but it does
+  // need to be where a plugin host looks for it.
+  assert.ok(existsSync(join(root, 'skills', 'orchestrate', 'SKILL.md')));
+  assert.equal(manifest.skills, undefined, 'the default skills/ scan already finds it');
+});
+
+test('every plugin hook names a script that exists, through the plugin root', () => {
+  const root = join(SKILL, '..', '..');
+  const hooks = JSON.parse(readFileSync(join(root, 'hooks', 'hooks.json'), 'utf8')).hooks;
+  const events = Object.keys(hooks);
+  assert.deepEqual(events.sort(), ['PreToolUse', 'SessionStart', 'SubagentStop', 'UserPromptSubmit']);
+
+  for (const groups of Object.values(hooks)) {
+    for (const g of groups) {
+      for (const h of g.hooks) {
+        const m = /\$\{CLAUDE_PLUGIN_ROOT\}\/(\S+?\.mjs)/.exec(h.command);
+        assert.ok(m, `hook command uses the plugin root: ${h.command}`);
+        assert.ok(existsSync(join(root, m[1])), `${m[1]} exists`);
+        assert.ok(h.timeout > 0, 'every hook has a timeout');
+      }
+    }
+  }
+  // turn-check and return-check are deliberately absent: they come from the
+  // skill's own frontmatter and each agent file, so they are live only when the
+  // skill is, rather than on every turn of every session.
+  const all = JSON.stringify(hooks);
+  assert.doesNotMatch(all, /turn-check|return-check/);
 });

@@ -10,7 +10,7 @@ memory: user
 hooks:
   Stop:
     - type: command
-      command: '{{NODE}} "{{SKILL_DIR}}/scripts/return-check.mjs"'
+      command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/return-check.mjs"'
 ---
 
 You review. You do not fix, and you cannot: your tools are read-only.

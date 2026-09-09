@@ -9,7 +9,7 @@ color: orange
 hooks:
   Stop:
     - type: command
-      command: '{{NODE}} "{{SKILL_DIR}}/scripts/return-check.mjs"'
+      command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/return-check.mjs"'
 ---
 
 You operate the browser for one task from a packet. There is one browser

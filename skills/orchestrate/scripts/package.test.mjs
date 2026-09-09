@@ -16,7 +16,7 @@ const AGENT = readFileSync(join(ROOT, 'skills', 'orchestrate', 'assets', 'agents
 test('the Claude Code source keeps what makes the rules mechanical', () => {
   assert.match(SKILL, /^hooks:$/m);
   assert.match(SKILL, /^when_to_use:/m);
-  assert.match(SKILL, /^!`\{\{NODE\}\} "\$\{CLAUDE_SKILL_DIR\}\/scripts\/profile\.mjs" --brief`$/m);
+  assert.match(SKILL, /^!`node "\$\{CLAUDE_SKILL_DIR\}\/scripts\/profile\.mjs" --brief`$/m);
   assert.match(SKILL, /version: "\d+\.\d+\.\d+"/);
 });
 
@@ -74,9 +74,10 @@ test('both packaged artifacts exist and the tests are not in them', () => {
   }
 });
 
-test('the portable build falls back to plain node, since no installer runs there', () => {
-  const s = toSpec(SKILL);
-  assert.doesNotMatch(s, /\{\{NODE\}\}/);
-  const a = toSpec(AGENT);
-  assert.doesNotMatch(a, /\{\{NODE\}\}/);
+test('the portable build leaves no unresolved path, since nothing resolves one there', () => {
+  // No plugin host and no installer on claude.ai or Codex, so any token that
+  // one of those two would have expanded has to be gone before it ships.
+  for (const t of [toSpec(SKILL), toSpec(AGENT)]) {
+    assert.doesNotMatch(t, /\{\{NODE\}\}|\{\{SKILL_DIR\}\}/);
+  }
 });

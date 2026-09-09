@@ -17,26 +17,26 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (hey-vera)
-  version: "0.5.1"
+  version: "0.6.0"
 hooks:
   PreToolUse:
     - matcher: "Agent"
       hooks:
         - type: command
-          command: '{{NODE}} "{{SKILL_DIR}}/scripts/guard-agent.mjs"'
+          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/guard-agent.mjs"'
   SubagentStop:
     - hooks:
         - type: command
-          command: '{{NODE}} "{{SKILL_DIR}}/scripts/ledger.mjs"'
+          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/ledger.mjs"'
   Stop:
     - hooks:
         - type: command
-          command: '{{NODE}} "{{SKILL_DIR}}/scripts/turn-check.mjs"'
+          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/turn-check.mjs"'
 ---
 
 # Orchestrate
 
-!`{{NODE}} "${CLAUDE_SKILL_DIR}/scripts/profile.mjs" --brief`
+!`node "${CLAUDE_SKILL_DIR}/scripts/profile.mjs" --brief`
 
 You own everything between the user's goal and the verified result. The user
 never carries a prompt or a result between models; that is your job now. The
