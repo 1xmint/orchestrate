@@ -192,3 +192,57 @@ name: ${n}
   assert.equal(viaFiles.installed, 6);
   assert.equal(viaFiles.source, 'files');
 });
+
+
+// Run folders are `<YYYYMMDD>-<slug>`, so a name sort only orders runs from
+// different days. Two opened on the same day fell back to comparing slugs, and
+// on 2026-09-09 the newer run lost to an older one for a whole session. That is
+// not just a wrong label: the ledger writes whichever run it is handed, so a
+// subagent's return was filed into a closed run and flipped two finished rows
+// back to review.
+test('the run opened last wins, even when an older one was written more recently', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'orch-samedate-'));
+  const rows = glyph => [
+    '# Run', '', '## Tasks', '',
+    '| id | phase | role · model | task | rubric | attempts | evidence |',
+    '|---|---|---|---|---|---|---|',
+    '| 9-9-0001 | ' + glyph + ' | implementer · sonnet | x | y | 0 | — |', '',
+    '## Pickup', '', 'Pickup prompt: which run am I', '',
+  ].join('\n');
+
+  // Alphabetically "vibe" sorts after "v07", which is how the real pair was
+  // named, and the older one is also the one written most recently, because the
+  // ledger rewrites RUN.md on every return. So neither a name sort nor a
+  // modified-time sort gets this right. What run-init recorded does.
+  const older = join(repo, '.orchestrator', 'runs', '20260909-vibe-coder-audit');
+  const newer = join(repo, '.orchestrator', 'runs', '20260909-v07-senior-engineer');
+  for (const d of [older, newer]) mkdirSync(d, { recursive: true });
+  writeFileSync(join(newer, 'RUN.md'), rows('🔨 running'));
+  writeFileSync(join(older, 'RUN.md'), rows('✅ done'));
+
+  const out = JSON.parse(inFakeHome(`
+    const { latestRun, rememberActiveRun } = await import(${JSON.stringify(TIER)});
+    rememberActiveRun(${JSON.stringify(repo)}, ${JSON.stringify(join(newer, 'RUN.md'))});
+    console.log(JSON.stringify(latestRun(${JSON.stringify(repo)})));
+  `));
+
+  assert.equal(out.runId, '20260909-v07-senior-engineer', 'the run opened last is the current one');
+  assert.equal(out.open, true, 'and its own state is reported, not the closed run\'s');
+});
+
+test('the ordinary case is unchanged: runs made on later days still win', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'orch-days-'));
+  const body = [
+    '# Run', '', '## Tasks', '',
+    '| id | phase | role · model | task | rubric | attempts | evidence |',
+    '|---|---|---|---|---|---|---|',
+    '| 9-9-0001 | 🔨 running | implementer · sonnet | x | y | 0 | — |', '',
+  ].join('\n');
+  // Created in the order they would really be created: earlier day first.
+  for (const id of ['20260908-aaa-earlier-day', '20260910-zzz-later-day']) {
+    const d = join(repo, '.orchestrator', 'runs', id);
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, 'RUN.md'), body);
+  }
+  assert.equal(latestRun(repo).runId, '20260910-zzz-later-day');
+});

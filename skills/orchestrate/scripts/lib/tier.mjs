@@ -170,13 +170,46 @@ export function latestRun(root) {
   return remembered && remembered !== root ? latestRunUnder(remembered) : null;
 }
 
+// The run id `run-init` recorded for this root, when that run still exists.
+// This is the one signal written at the moment a run is opened, so it is the
+// only one that cannot be moved by anything that happens afterwards.
+function pointedRunId(base, root) {
+  const p = readJson(ACTIVE_RUN_PATH);
+  if (!p || !p.root || !p.runMd) return null;
+  const same = String(p.root).toLowerCase() === String(root || '').toLowerCase();
+  if (!same) return null;
+  const id = String(p.runMd).replace(/[\\/]RUN\.md$/i, '').split(/[\\/]/).pop();
+  return id && existsSync(join(base, id, 'RUN.md')) ? id : null;
+}
+
 function latestRunUnder(root) {
   try {
     const base = join(root || process.cwd(), '.orchestrator', 'runs');
     if (!existsSync(base)) return null;
-    const runs = readdirSync(base).filter(n => existsSync(join(base, n, 'RUN.md'))).sort();
+    // Newest by when the run was opened, not last alphabetically.
+    // Run folders are `<YYYYMMDD>-<slug>`, so a name sort only orders runs from
+    // different days; two opened on the same day fell back to comparing slugs.
+    // Observed 2026-09-09: `20260909-v07-senior-engineer` was created after
+    // `20260909-vibe-coder-audit` and lost to it, so every hook pointed at the
+    // older run all session. That is not only a wrong label — the ledger writes
+    // the run it is given, so a subagent's return was filed into a *closed*
+    // run and flipped two finished rows back to review.
+    const runs = readdirSync(base)
+      .filter(n => existsSync(join(base, n, 'RUN.md')))
+      .map(n => {
+        // When the run was *opened*, not when its file was last touched. The
+        // ledger rewrites RUN.md on every return, so a modified time makes
+        // whichever run was written last win -- including the wrong one this
+        // bug was already writing to. A run folder is created once.
+        try { const s = statSync(join(base, n)); return { n, m: s.birthtimeMs || s.mtimeMs }; } catch { return { n, m: 0 }; }
+      })
+      .sort((a, b) => (a.m - b.m) || (a.n < b.n ? -1 : a.n > b.n ? 1 : 0))
+      .map(x => x.n);
     if (!runs.length) return null;
-    const runId = runs[runs.length - 1];
+    // The pointer first, then creation order. Two runs opened on the same day
+    // can be created in the same millisecond in a test, and a name tie-break is
+    // exactly the bug this replaced.
+    const runId = pointedRunId(base, root) || runs[runs.length - 1];
     const runMd = join(base, runId, 'RUN.md');
     const st = statSync(runMd);
     const text = readFileSync(runMd, 'utf8');

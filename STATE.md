@@ -2,6 +2,28 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.7.3 — the wrong-run bug was corrupting ledgers, 2026-09-09
+
+`latestRun` sorted run folders by name. Folders are `<YYYYMMDD>-<slug>`, so that
+only orders runs from different days; two opened on the same day fell back to
+comparing slugs. It was filed as a small labelling bug. It was not.
+
+Because the ledger writes whichever run it is handed, the reviewer's two returns
+for this build were filed into the *closed* `20260909-vibe-coder-audit` run, and
+its rows 9-9-0001 and 9-9-0003 were flipped from ✅ done back to 🔍 review with
+their attempt counts and evidence overwritten. A closed run silently reopened
+with someone else's evidence in it. Both returns have been moved to
+`20260909-v07-senior-engineer/returns/` and both rows restored from that run's
+own return files.
+
+Two sorts were tried and both were wrong. By name reproduces the bug. By
+modified time hands back whichever run was written last, which is the *same*
+wrong run, because the bug itself had just written to it. The fix is the one
+signal recorded when a run is opened and never moved afterwards: the
+`active-run.json` pointer `run-init` already writes. It wins when it names a run
+under the repo being asked about; creation time, then name, breaks any remaining
+tie.
+
 ## v0.7.2 — the plugin install, which had never worked, 2026-09-09
 
 Josh asked for automatic updates so he would never fall behind. Answering that
