@@ -44,9 +44,8 @@ line above is this machine's profile, injected at no cost.
 
 Open a reference only when a step needs it: `ladder.md` (which move, by cost),
 `models.md` (what each model is good and bad at, effort, never going overkill),
-`routing.md` (model by plan, who reviews, escalation), `contracts.md` (packet
-and return schema, worked example), `evaluation.md` (grading, failure
-classes), `lanes.md` (workflows, `/batch`, fork, teams, `/goal`, waiting),
+`routing.md` (model by plan, who reviews, escalation), `evaluation.md`
+(grading, failure classes), `lanes.md` (workflows, `/batch`, fork, teams, `/goal`, waiting),
 `hosts.md` (what the Agent tool can and cannot do).
 
 Three hooks hold what is mechanical, so you need not: `guard-agent.mjs`
@@ -63,7 +62,7 @@ API/Team/other) with a recommendation, then `profile.mjs --set tier=…`. Never
 guess: a wrong guess on Pro spends real money. Agents below 6/6 on a *script*
 install: `node "${CLAUDE_SKILL_DIR}/scripts/install-agents.mjs"`; new files take
 a minute to appear, and until then `Explore` for read-only roles and
-`general-purpose` for writing roles, with the role note from `contracts.md`. A
+`general-purpose` for writing roles. A
 plugin install already carries all six, so never run that installer there: it
 would create a second set that shadows the plugin's own.
 
@@ -175,9 +174,8 @@ read-only tasks whose packet says "return the findings inline, write nothing",
 or name the plan file's own sibling as the output path.
 
 The packet is the whole context the agent will ever have. `assets/packet.md` is
-the template, 4 KB: read that to dispatch, and `contracts.md` only when you need
-why a field exists or a worked example. Every field, every time, "none" rather
-than omitted, including the GATE block from `.orchestrator/gate.json`,
+the template and the only thing you need to dispatch. Every field, every time,
+"none" rather than omitted, including the GATE block from `.orchestrator/gate.json`,
 `PARALLEL` when another task is running, and `SKILLS TO USE` when an installed
 skill already does a step. To continue an agent that already holds the right
 context, `SendMessage` a packet delta; start fresh when the model must change or

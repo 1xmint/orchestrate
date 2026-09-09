@@ -153,7 +153,7 @@ Skills load from `~/.agents/skills/<name>/` (user) and `.agents/skills/` in a re
 frontmatter is read (`name`, `description`, `license`, `compatibility`, `metadata`,
 `allowed-tools`); `package.mjs --spec` writes a zip with only those fields and without the
 injection line. Dispatch there uses Codex's own subagents or `codex exec`; the packet, return
-schema, ledger and evaluation rules apply unchanged; paste the role notes from `contracts.md`
+schema, ledger and evaluation rules apply unchanged; paste the role note from the matching `assets/agents/orch-*.md`
 into the packet. Not exercised.
 
 ## claude.ai and Cowork

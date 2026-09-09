@@ -92,22 +92,24 @@ test('no eval hard-codes one machine, so the file runs on any checkout', () => {
   assert.match(raw, /\{\{FIXTURE_[A-Z]+\}\}/, 'fixtures are named by placeholder');
 });
 
-// The packet template is what a dispatch actually reads; contracts.md is the
-// 11 KB explanation behind it. They must not drift apart.
-test('assets/packet.md carries every field contracts.md documents', () => {
+// packet.md is the only thing a dispatch reads. There used to be an 11 KB
+// contracts.md explaining this 4 KB template field by field; it was deleted,
+// because the six agent files already carry their own role rules and said them
+// better. The four things it had that the template did not now live here.
+test('assets/packet.md carries every field a dispatch needs', () => {
   const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');
-  const contracts = readFileSync(join(SKILL, 'references', 'contracts.md'), 'utf8');
+  assert.ok(!existsSync(join(SKILL, 'references', 'contracts.md')), 'contracts.md stays deleted');
   const fields = ['TASK:', 'OBJECTIVE', 'DONE WHEN', 'NOT IN SCOPE', 'FACTS', 'GATE',
     'VERIFY LIVE BEFORE ACTING', 'DECISIONS ALREADY MADE', 'WHERE', 'PARALLEL',
     'PRIOR ATTEMPTS', 'PATTERNS TO FOLLOW', 'SKILLS TO USE', 'VERIFICATION COMMANDS',
     'DURABILITY', 'STOP AND REPORT', 'BUDGET', 'RETURN', 'RESTATED:', 'STATUS:', 'EVIDENCE:'];
-  for (const f of fields) {
-    assert.ok(packet.includes(f), `packet.md has ${f}`);
-    assert.ok(contracts.includes(f), `contracts.md has ${f}`);
-  }
+  for (const f of fields) assert.ok(packet.includes(f), `packet.md has ${f}`);
+  // The bits contracts.md is gone but was right about.
+  assert.match(packet, /Never put in a packet/);
+  assert.match(packet, /gate\.json/);
   assert.ok(packet.includes('ROLE: reviewer'), 'the reviewer packet is here too');
   assert.ok(packet.includes('VERDICT: PASS|FAIL'), 'with the one schema');
-  assert.ok(packet.length < 6000, `packet.md is ${packet.length} bytes; it exists to be small`);
+  assert.ok(packet.length < 6500, `packet.md is ${packet.length} bytes; it exists to be small`);
 });
 
 // The Fable cap was removed because a count answers the wrong question and
