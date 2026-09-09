@@ -14,11 +14,13 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { applyTemplate } from './lib/template.mjs';
 
 const HOME = homedir();
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'agents');
 const DST = join(HOME, '.claude', 'agents');
 const RECORD = join(HOME, '.claude', 'orchestrate', 'agents.installed.json');
+const SKILL_DIR = process.env.ORCH_SKILL_DIR || join(HOME, '.claude', 'skills', 'orchestrate');
 const force = process.argv.includes('--force');
 const dryRun = process.argv.includes('--dry-run');
 
@@ -32,7 +34,7 @@ if (!dryRun) { mkdirSync(DST, { recursive: true }); mkdirSync(dirname(RECORD), {
 const files = readdirSync(SRC).filter(f => f.endsWith('.md'));
 let installed = 0, refreshed = 0, kept = 0, unchanged = 0;
 for (const f of files) {
-  const src = readFileSync(join(SRC, f), 'utf8');
+  const src = applyTemplate(readFileSync(join(SRC, f), 'utf8'), { SKILL_DIR });
   const srcHash = sha(src);
   const dstPath = join(DST, f);
   if (!existsSync(dstPath)) {
