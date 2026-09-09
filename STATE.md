@@ -35,6 +35,21 @@ keeps a second copy of that rule.
 187 tests cover all four so none can come back. 0.7.0 and 0.7.1 are tagged but
 should not be installed; 0.7.2 is the first release whose plugin actually loads.
 
+### The folder rename could not be done from inside Claude
+
+The worktree failure was diagnosed to its root: the folder on disk is
+`C:\Users\Josh\Desktop\Github` with a lowercase h, every Claude session uses
+`GitHub`, Windows accepts both, git reports the real one, and the Agent tool
+compares the two strings and refuses the worktree. Not a bug in git or in this
+skill, and nothing in the skill can fix it.
+
+The rename is blocked while Claude runs: its own filesystem MCP servers are
+rooted at that folder (`mcp-server-filesystem C:\Users\Josh\Desktop\GitHub`,
+four of them) and hold it open. An attempt was made and failed at step one,
+changing nothing. A guarded two-step script for a moment when Claude is closed
+is in this session's scratchpad as `fix-github-casing.ps1`; it puts the original
+name back if the second step fails.
+
 ### What this machine is on now
 
 The script install is gone: `~/.claude/skills/orchestrate`,
