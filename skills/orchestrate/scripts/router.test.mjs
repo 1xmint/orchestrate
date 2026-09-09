@@ -422,3 +422,28 @@ test('a queued message sharing the running turn\'s prompt id is not discarded', 
   // The same id and the same text is a genuine repeat, and stays dropped.
   assert.equal(prompt(home, repo, 'what is the recommended manager model for each subscription tier', { prompt_id: 'p-same' }), '');
 });
+
+
+// Rung 3.7 was tested before 3.6 and 3.5, so a judgment word — the commonest
+// way to *phrase* a research question — stole both. "which model should we use
+// for each tier?" is literally the clause setShape was written to catch, and it
+// came back as an opinion instead of a dispatch. This release's own rule,
+// inverted. The order below is the fix, and each row is a probe from the review.
+test('a judgment word does not steal a question that needs sources', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'Fix the typo in README.md.');
+  const set = prompt(home, repo, 'which model should we use for each tier?');
+  assert.match(set, /research across a set/, 'a default everyone inherits, so: a researcher');
+  assert.match(set, /dispatch orch-researcher/);
+
+  const one = prompt(home, repo, 'should we upgrade to the latest Node LTS?');
+  assert.match(one, /\[orch-router\] research:/, 'one source settles it');
+  assert.match(one, /Not from memory/);
+});
+
+test('the set shape still needs more than the word "default"', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'Fix the typo in README.md.');
+  // One fact, not a set. It must not become a research dispatch.
+  assert.equal(prompt(home, repo, 'what is the default timeout'), '');
+});

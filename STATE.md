@@ -7,7 +7,7 @@ Resume point for building the `orchestrate` skill.
 Plan: `C:\Users\Josh\.claude\plans\you-are-the-senior-kind-mango.md`, grounded
 2026-09-09 against `main @ 019bd5e` and the live docs for the desktop app's
 2.1.260. Seven reflexes, each with a mechanism rather than more prose. 148 tests
-became 183, green at every commit.
+became 185, green at every commit.
 
 ### What changed
 
@@ -26,8 +26,9 @@ not accept in either key.
 **A question gets a depth call before an answer.** Five rows in `ladder.md`,
 keyed on what can be observed about the question rather than on how sure the
 model feels: settled, one current fact, inherited across a set, design judgment,
-checkable by a command. Rung 3.7 is new in the router, gated on `heads === 0` so
-a build request carrying "or should we use the helper" stays a build request.
+checkable by a command. Rung 3.7 is new in the router, tested last of the
+question rungs and gated on `heads === 0`, so neither a research question nor a
+build request carrying "or should we use the helper" is taken for a judgment.
 The card gained one line and its cap moved from 1,400 to 1,550; the body is 1,546.
 
 **Every claim carries its basis, and two checks say so when it does not.**
@@ -69,7 +70,7 @@ into `evaluation.md` §6 and §9, `lanes.md` and `models.md`.
 | the card body | 1,546 chars | asserted at 1,550 |
 | the Plain style | 3,846 bytes | asserted at 4,500 |
 | this build session | $42.56 at list price, ~28% of a Max 5x week | `measure.mjs --latest --dollars` |
-| tests | 183 | `node --test "skills/orchestrate/scripts/**/*.test.mjs"` |
+| tests | 185 | `node --test "skills/orchestrate/scripts/**/*.test.mjs"` |
 
 The floor's narrowing is worth recording because the first version would have
 been unshippable. `research && setShape` alone fired on pasted plans and handoff
@@ -119,6 +120,36 @@ skill was already clean of the pattern; the audit is recorded so nobody re-runs 
   orchestrate was not the best drop-in a vibe coder could install that day. The
   plugin path closed one of its two gaps in v0.6.0; the other was "has never run
   its own loop", and this build is one session of one person, not a customer's run.
+
+### What the review caught (task 9-9-0003, Opus, FAIL)
+
+Three code findings, all applied. Worth recording because the first was the
+release's own rule turned into its opposite, and no test I wrote had caught it:
+
+1. **Rung 3.7 was tested before 3.6 and 3.5**, so a judgment word — the
+   commonest way to *phrase* a research question — stole both. "which model
+   should we use for each tier?" came back as an opinion instead of a
+   researcher dispatch, and that clause is literally what the `setShape` regex
+   was written to catch. The root cause went one level deeper than the order:
+   rung 3.6 required a *research* word as well as the set shape, so that
+   question could never have reached it. 3.6 now takes a research word **or** a
+   judgment word, 3.7 is tested last, and the floor uses the same test so the
+   hint and the block cannot disagree. Re-measured after widening: still 0.14
+   fires a day.
+2. **The week share printed a bare percentage.** `weekDollars` carried the "one
+   observation" label but nothing printed it, so the guard's price tag and
+   `measure.mjs` both showed a hard percentage against an anecdote —
+   confident-and-unfounded, which is the shape this release exists to stop.
+   `weekShare` now carries the basis every time it prints.
+3. **`--set-default model=max` threw a raw stack trace** after writing a stray
+   backup. Both keys are checked before the backup is taken.
+
+A fourth finding was recorded and not treated as a blocker: the evaluator sees
+only the reply, so a correct short answer drawn from a file read earlier in the
+same turn ("what's our retry limit?" → "Three.") has no basis in its own text
+and would be sent back. Inside orchestrate the Plain style forces a basis line
+and covers it. Globally it does not, which is the reason the global
+registration ships off by default until a week of it has been measured.
 
 ### Found while building, not fixed here
 

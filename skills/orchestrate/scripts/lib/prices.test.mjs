@@ -27,6 +27,13 @@ test('a share needs an anchor, and says nothing without one', () => {
   assert.equal(share(15, 'api', null), null, 'per-token billing has no week');
   assert.match(weekShare(15, 'max5', null), /about 10% of a max5 week/);
   assert.equal(weekShare(15, 'api', null), '', 'no anchor, no percentage');
+  // A percentage travels with what its denominator rests on. Printing a share
+  // of a week against a number nobody measured, unlabelled, is the exact shape
+  // of confident-and-unfounded this release exists to stop.
+  assert.match(weekShare(15, 'max5', null), /one observation.*--set week=/,
+    'the default anchor names itself as one observation, wherever it is printed');
+  assert.match(weekShare(15, 'max5', { weekDollars: 200 }), /your own figure/);
+  assert.doesNotMatch(weekShare(15, 'max5', { weekDollars: 200 }), /one observation/);
   // The user's own measurement beats the one observation behind the default.
   const w = weekDollars('max5', { weekDollars: 400, weekSetAt: '2026-09-09T00:00:00Z' });
   assert.equal(w.value, 400);

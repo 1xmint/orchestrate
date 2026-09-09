@@ -22,7 +22,7 @@ Then run the tests, which need no quota and no network:
 node --test "skills/orchestrate/scripts/**/*.test.mjs"
 ```
 
-183 pass. Anything red is a regression, not a starting point.
+185 pass. Anything red is a regression, not a starting point.
 
 Two offline commands are worth knowing, because both answer questions people
 otherwise guess at:

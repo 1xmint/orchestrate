@@ -97,7 +97,11 @@ export function floorDecision({ text, sourceCalls, reply, prev = {} }) {
   if (/^\s*<(task-notification|system-reminder|local-command)/.test(String(text || ''))) {
     return { block: false, why: 'the host talking, not the user' };
   }
-  if (!f.research || !f.setShape) return { block: false, why: 'not a recommendation across a set of cases' };
+  // The same test the router's rung 3.6 uses, so the hint and the floor cannot
+  // disagree about what a set-shaped recommendation is. A judgment word counts
+  // as well as a research word: "which model should we use for each tier?"
+  // carries no research word and is exactly this shape.
+  if (!(f.research || f.judgment) || !f.setShape) return { block: false, why: 'not a recommendation across a set of cases' };
   if (Number(sourceCalls) >= 2) return { block: false, why: `answered from ${sourceCalls} sources` };
   if (!hasRecommendation(reply)) return { block: false, why: 'the reply recommends nothing' };
   if (prev.blocked) return { block: false, why: 'already blocked once for this question' };

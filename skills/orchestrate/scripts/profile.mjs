@@ -58,9 +58,12 @@ if (defIdx >= 0) {
     process.exit(2);
   }
   // `max` is not accepted in either key by the host, so writing it would leave
-  // every new session refusing to start rather than starting deep.
-  if (kvd.effort === 'max') {
-    console.error('effort=max is not accepted in settings.json; use the picker for a single session');
+  // every new session refusing to start rather than starting deep. Checked for
+  // both keys before the backup is taken: `setKeys` throws on either, and
+  // catching it here is the difference between one clear line and a raw stack
+  // trace beside a stray backup file.
+  if (kvd.effort === 'max' || kvd.model === 'max') {
+    console.error('max is not accepted in model or effortLevel in settings.json; use the picker for a single session');
     process.exit(2);
   }
   const { setKeys, readSettings, backupSettings, writeSettings } = await import('./lib/settings.mjs');

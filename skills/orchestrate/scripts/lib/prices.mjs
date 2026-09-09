@@ -61,9 +61,16 @@ export function share(amount, tier, profile) {
   return (Number(amount) / w.value) * 100;
 }
 
+// The percentage always travels with what its denominator rests on. Printing a
+// share of a week against a number nobody measured, with no label, is the exact
+// shape of confident-and-unfounded this release exists to stop — and the label
+// lived only in `weekDollars`, which nothing printed.
 export function weekShare(amount, tier, profile) {
   const s = share(amount, tier, profile);
-  return s == null ? '' : `, about ${s < 1 ? '<1' : s.toFixed(0)}% of a ${tier} week`;
+  if (s == null) return '';
+  const w = weekDollars(tier, profile);
+  const basis = /^set by the user/.test(w.source) ? 'your own figure' : 'one observation; `--set week=<dollars>` to correct it';
+  return `, about ${s < 1 ? '<1' : s.toFixed(0)}% of a ${tier} week (${basis})`;
 }
 
 // The starting table, for a role and model nobody has measured here yet. Every

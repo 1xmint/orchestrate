@@ -148,12 +148,23 @@ export function classify(f, ctx) {
   // A research question whose answer covers a set of cases is not the same as
   // one that covers a case. The answer becomes a default others inherit, no test
   // can prove it wrong, and one search never settles it. That is a dispatch.
-  // Gated on heads === 0 on purpose. "add a retry to client.rs, or should we use
-  // the existing helper?" is a build request that happens to contain a judgment
-  // phrase; it belongs on rung 6, and without the gate it landed here.
-  if (f.question && f.heads === 0 && f.judgment) return { rung: 3.7, confident: true, orth, evidence: 'a design judgment' };
-  if (f.question && f.research && f.setShape) return { rung: 3.6, confident: true, orth, evidence: 'a recommendation across a set of cases' };
+  // A judgment word counts here as well as a research word. "which model should
+  // we use for each tier?" carries no research word at all, yet it is the exact
+  // clause `setShape` was written to catch, and its answer becomes a default
+  // everyone inherits. Requiring `research` meant it could never reach this
+  // rung. `setShape` alone is too wide — "what is the default timeout?" is one
+  // fact, not a set — so it takes one of the two.
+  if (f.question && (f.research || f.judgment) && f.setShape) return { rung: 3.6, confident: true, orth, evidence: 'a recommendation across a set of cases' };
   if (f.question && f.research) return { rung: 3.5, confident: true, orth, evidence: 'research question, current + cite' };
+  // Last of the question rungs, not first. A judgment word is the commonest way
+  // to *phrase* a research question — "which model should we use for each
+  // tier?" is the very clause setShape was written to catch, and "should we
+  // upgrade to the latest Node LTS?" is a one-source fact. Tested ahead of 3.6
+  // and 3.5 it stole both, and turned this release's own rule into its
+  // opposite: a question that needed sources got an opinion instead.
+  // `heads === 0` still keeps a build request carrying "or should we use the
+  // helper" on the change rungs.
+  if (f.question && f.heads === 0 && f.judgment) return { rung: 3.7, confident: true, orth, evidence: 'a design judgment' };
   if (f.script && f.heads <= 1 && !f.testReview && !f.explore) return { rung: 3, confident: f.paths > 0 || f.lookup, orth, evidence: 'mechanical lookup' };
   if (f.question && f.words <= 40 && !f.urls && !f.research) return { rung: 1, confident: true, orth, evidence: 'short question' };
   if (f.explore) return { rung: 5, confident: true, orth, evidence: 'read-only understanding' };

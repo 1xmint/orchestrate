@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   registrations, applyRegistrations, readSettings, writeSettings, backupSettings,
   commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys,
@@ -182,6 +183,13 @@ test('the default model and effort merge in without disturbing anything else', (
 test('max is refused in both keys', () => {
   assert.throws(() => setKeys({}, { effortLevel: 'max' }), /max is not accepted/);
   assert.throws(() => setKeys({}, { model: 'max' }), /max is not accepted/);
+  // profile.mjs must catch both BEFORE it takes a backup, or the user gets a
+  // raw stack trace next to a stray backup file for a typo.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const cli = readFileSync(join(here, '..', 'profile.mjs'), 'utf8');
+  assert.match(cli, /kvd\.effort === 'max' \|\| kvd\.model === 'max'/);
+  assert.ok(cli.indexOf("kvd.model === 'max'") < cli.indexOf('backupSettings(settingsPath'),
+    'the refusal comes before the backup');
   const s = {};
   setKeys(s, { model: 'opus' });
   assert.equal(s.effortLevel, undefined, 'one key at a time is fine');
