@@ -320,4 +320,4 @@ regression.
 ## Provenance
 
 The ideas are borrowed and credited in
-`skills/orchestrate/references/borrowed.md`.
+`docs/borrowed.md`.

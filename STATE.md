@@ -418,7 +418,7 @@ still tells the manager to ask. 136 pass.
 ## v0.4.1 — the fresh-context Fable audit, 2026-09-09
 
 The one step the v0.3 plan reserved and the v0.4 plan deferred: run
-`references/audit-prompt.md` as a Fable subagent against the built skill, apply
+`docs/audit-prompt.md` as a Fable subagent against the built skill, apply
 what survives. The prompt was refreshed for v0.4 first, because it still
 described v0.3 and would have sent the auditor after the wrong artifact.
 

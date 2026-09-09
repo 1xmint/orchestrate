@@ -68,21 +68,7 @@ paces a `/loop`. `CronCreate` schedules a one-off or recurring prompt in this se
 on resume). Routines (`RemoteTrigger`) run in the cloud with no session open. A Bash sleep loop
 spends a turn per check and is never the answer.
 
-## Filter before you delegate
-
-Anthropic's documented pattern: a PreToolUse hook on Bash that appends a failures-only tail to a
-test command (`… 2>&1 | grep -A 5 -E '(FAIL|ERROR|error:)' | head -100`) keeps verification in
-the main context at a few hundred tokens. Delegate the gate to `Explore` only when the filtered
-output is still long or the suite is slow. The project kit can enable such a filter per repo.
-
 ## Side questions
 
 `/btw <question>` (user-typed) answers without entering the conversation history. Point the user
 at it for "what does X mean" questions during a run.
-
-## Not built: a Haiku pre-classifier for the router
-
-A `type: prompt` hook on `UserPromptSubmit` can only return `ok`/`reason`, and `ok: false`
-blocks the user's prompt, so it cannot add a hint. The only shape would be spawning
-`claude -p --model haiku` from the router (2–6 s cold start, needs a CLI login). The main model
-already sees the card and is the better judge; silence beats a paid guess. Decided 2026-09-08.
