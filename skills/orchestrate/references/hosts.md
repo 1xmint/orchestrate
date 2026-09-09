@@ -65,6 +65,13 @@ downgrade the model), `SubagentStop` (ledger; and the return check from each age
 prompt cache is not broken. Command hooks cannot run tools or slash commands; a `type: prompt`
 hook (Haiku) returns only `ok`/`reason`.
 
+**A hook registered in two places runs twice.** `settings.json` and a skill's frontmatter are
+separate registrations, and both fire on the same event; the platform does not deduplicate them.
+Any hook with a side effect therefore has to be idempotent itself. `guard-agent.mjs` and
+`ledger.mjs` each key on a signature of the payload within a few seconds and act once, which is
+why the same install can register them globally and from the skill without double-counting a
+Fable dispatch or writing a return file twice.
+
 **Auto mode** (the default on Pro/Max/Team): a classifier reviews each subagent's task at spawn,
 its actions, and its return; `permissionMode` in agent files is ignored; PreToolUse denies still
 apply; a hook that returns `allow` approves the call.
