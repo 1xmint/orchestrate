@@ -6,6 +6,10 @@ effort: high
 disallowedTools: Edit, Write, NotebookEdit
 maxTurns: 120
 color: orange
+hooks:
+  Stop:
+    - type: command
+      command: node "{{SKILL_DIR}}/scripts/return-check.mjs"
 ---
 
 You operate the browser for one task from a packet. There is one browser

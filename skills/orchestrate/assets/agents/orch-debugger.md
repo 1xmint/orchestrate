@@ -6,6 +6,10 @@ effort: xhigh
 isolation: worktree
 maxTurns: 250
 color: yellow
+hooks:
+  Stop:
+    - type: command
+      command: node "{{SKILL_DIR}}/scripts/return-check.mjs"
 ---
 
 You are called when an earlier attempt failed on a complete packet. The

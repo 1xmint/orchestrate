@@ -1,98 +1,140 @@
 #!/usr/bin/env node
-// guard-agent.mjs — a PreToolUse hook for the Agent tool that holds the two
-// money rules mechanically, and keeps secrets out of packets.
+// guard-agent.mjs — a PreToolUse hook on the Agent tool. It holds the money
+// rules mechanically, keeps credentials out of packets, and records every
+// dispatch so the ledger and the router can see what this session spent.
+//
+// v2 changes the expensive case. Past the daily Fable cap the hook used to
+// deny, which stalled a run mid-plan and cost a human turn to unstick. Now it
+// *allows* the dispatch with `updatedInput` rewriting the model to opus, and
+// says so in `additionalContext`, so the run continues on the cheaper model and
+// the downgrade is visible rather than silent.
 //
 // Rules:
-//   - tier pro or api: model "fable" is denied unless ~/.claude/orchestrate/fable-optin.json
-//     has {"date": "<today, local>"}; write it with `node profile.mjs --fable-optin`.
-//   - tier max5 / max20: at most 3 / 6 fable dispatches per local day (counter file);
-//     the same opt-in file lifts the cap for the day.
-//   - any model: a packet containing something that looks like a credential is denied.
+//   - any model: a packet that looks like it carries a credential is denied.
+//   - pro / api / team / unknown tier: model "fable" is denied without an
+//     opt-in for today (`node profile.mjs --fable-optin`). There is no safe
+//     rewrite here: the user has to decide to spend.
+//   - max5 / max20: at most 3 / 6 fable dispatches a day, then rewrite to opus.
 //
-// Install (once), in ~/.claude/settings.json:
-//   "hooks": { "PreToolUse": [ { "matcher": "Agent", "hooks": [
-//     { "type": "command", "command": "node \"~/.claude/skills/orchestrate/scripts/guard-agent.mjs\"" } ] } ] }
-// `node scripts/install.mjs --with-hook` writes that entry for you.
-//
-// Reads the hook payload from stdin; prints a deny decision or nothing.
+// Registered by `node scripts/install.mjs --with-hook`. Reads the hook payload
+// on stdin, prints one JSON object or nothing, always exits 0.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { join, dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import {
+  DIR, FABLE_CAPS, readJson, today, detectTier, optedInToday, loadSession, saveSession,
+} from './lib/tier.mjs';
 
-const DIR = join(homedir(), '.claude', 'orchestrate');
-const today = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
-const readJson = p => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; } };
+const CRED = /\b(sk-ant-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/;
 
-let payload = '';
-try { payload = readFileSync(0, 'utf8'); } catch {}
-let input = null;
-try { input = JSON.parse(payload); } catch { process.exit(0); }
-if (!input || input.tool_name !== 'Agent') process.exit(0);
-const ti = input.tool_input || {};
-const model = String(ti.model || '').toLowerCase();
-const prompt = String(ti.prompt || '');
+export function decide(input, env) {
+  const ti = (input && input.tool_input) || {};
+  const model = String(ti.model || '').toLowerCase();
+  const prompt = String(ti.prompt || '');
 
-function deny(reason) {
-  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate guard: ${reason}` } }));
+  if (CRED.test(prompt)) {
+    return { kind: 'deny', reason: 'the packet contains something that looks like a credential; remove it and refer to it by name instead' };
+  }
+  if (!/fable/.test(model)) return { kind: 'pass' };
+  if (env.optedIn) return { kind: 'pass' };
+
+  const tier = env.tier;
+  if (tier === 'pro' || tier === 'api' || tier === 'team' || tier === 'unknown') {
+    return { kind: 'deny', reason: `tier is ${tier}: Fable bills usage credits (or the tier is unknown). Ask the user; if they opt in for today run: node "${env.skillDir}/scripts/profile.mjs" --fable-optin` };
+  }
+  const cap = FABLE_CAPS[tier];
+  if (cap && env.fableCount >= cap) {
+    return {
+      kind: 'downgrade',
+      model: 'opus',
+      reason: `${env.fableCount} Fable dispatches already today on ${tier} (cap ${cap}). Dispatching on opus instead. If Fable is the right call here, opt in for today: node "${env.skillDir}/scripts/profile.mjs" --fable-optin`,
+    };
+  }
+  return { kind: 'count' };
+}
+
+function emit(obj) {
+  process.stdout.write(JSON.stringify(obj));
+}
+
+function main() {
+  let payload = '';
+  try { payload = readFileSync(0, 'utf8'); } catch {}
+  let input = null;
+  try { input = JSON.parse(payload); } catch { return; }
+  if (!input || input.tool_name !== 'Agent') return;
+
+  const ti = input.tool_input || {};
+  const model = String(ti.model || '').toLowerCase();
+  const prompt = String(ti.prompt || '');
+  const SKILL_DIR = resolvePath(dirname(fileURLToPath(import.meta.url)), '..').split('\\').join('/');
+
+  // The hook can be registered twice (skill frontmatter plus settings.json).
+  // The same payload within a few seconds is the same dispatch: act once.
+  const sig = `${input.session_id || ''}|${ti.subagent_type || ''}|${model}|${prompt.length}|${prompt.slice(0, 200)}`;
+  try {
+    const seenPath = join(DIR, 'last-dispatch.json');
+    const seen = readJson(seenPath);
+    const now = Date.now();
+    if (seen && seen.sig === sig && now - seen.ts < 5000) return;
+    mkdirSync(DIR, { recursive: true });
+    writeFileSync(seenPath, JSON.stringify({ sig, ts: now }) + '\n');
+  } catch {}
+
+  const tier = detectTier().tier;
+  const counterPath = join(DIR, `fable-count-${today()}.json`);
+  const counter = readJson(counterPath) || { count: 0 };
+  const env = { tier, fableCount: Number(counter.count) || 0, optedIn: optedInToday(), skillDir: SKILL_DIR };
+  const d = decide(input, env);
+
+  recordDispatch(input, ti, d);
+
+  if (d.kind === 'deny') {
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate guard: ${d.reason}` } });
+    return;
+  }
+  if (d.kind === 'downgrade') {
+    emit({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: `orchestrate guard: ${d.reason}`,
+        updatedInput: { ...ti, model: d.model },
+        additionalContext: `orchestrate guard: this dispatch was moved from fable to ${d.model}. ${d.reason} Record the downgrade in the ledger row; judge the return on its evidence, not on the model.`,
+      },
+    });
+    return;
+  }
+  if (d.kind === 'count') {
+    try { mkdirSync(DIR, { recursive: true }); writeFileSync(counterPath, JSON.stringify({ count: env.fableCount + 1, date: today() }) + '\n'); } catch {}
+  }
+}
+
+// One line per dispatch in the session state, for the ledger and the meter.
+// Never throws; a missing session file just means no router ran here.
+function recordDispatch(input, ti, d) {
+  try {
+    const id = input.session_id;
+    if (!id) return;
+    const state = loadSession(id) || { v: 1, session_id: id, cwd: input.cwd || '', started: new Date().toISOString(), prompts: 0, cardSent: false, muted: false, hints: [], limits: [] };
+    state.dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
+    if (state.dispatches.length > 200) state.dispatches = state.dispatches.slice(-200);
+    state.dispatches.push({
+      at: new Date().toISOString(),
+      agent: String(ti.subagent_type || 'claude'),
+      model: d.kind === 'downgrade' ? d.model : String(ti.model || 'inherit'),
+      requested: String(ti.model || 'inherit'),
+      task: (/^\s*TASK:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
+      decision: d.kind,
+    });
+    state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;
+    saveSession(state);
+  } catch {}
+}
+
+// Only when run as a hook, not when a test imports the pure functions above.
+if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try { main(); } catch {}
   process.exit(0);
 }
-
-// secrets never travel in a packet
-if (/\b(sk-ant-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/.test(prompt)) {
-  deny('the packet contains something that looks like a credential; remove it and refer to it by name instead');
-}
-
-if (!/fable/.test(model)) process.exit(0);
-
-// The hook can be registered twice (skill frontmatter plus settings.json).
-// The same payload within a few seconds is the same dispatch: count it once.
-try {
-  const sig = `${input.session_id || ''}|${ti.subagent_type || ''}|${model}|${prompt.length}|${prompt.slice(0, 200)}`;
-  const seenPath = join(DIR, 'last-dispatch.json');
-  const seen = readJson(seenPath);
-  const now = Date.now();
-  if (seen && seen.sig === sig && now - seen.ts < 5000) process.exit(0);
-  mkdirSync(DIR, { recursive: true });
-  writeFileSync(seenPath, JSON.stringify({ sig, ts: now }) + '\n');
-} catch {}
-
-// tier: the profile override, else what profile.mjs would detect
-let tier = 'unknown';
-const override = readJson(join(DIR, 'profile.json'));
-if (override && override.tier && override.tier !== 'unknown') tier = override.tier;
-else {
-  const cfg = readJson(join(homedir(), '.claude.json'));
-  const walk = (o, depth = 0) => {
-    if (!o || typeof o !== 'object' || depth > 6) return null;
-    for (const [k, v] of Object.entries(o)) {
-      if (/RateLimitTier|seatTier/.test(k) && typeof v === 'string') return v;
-      if (v && typeof v === 'object') { const r = walk(v, depth + 1); if (r) return r; }
-    }
-    return null;
-  };
-  const raw = (walk(cfg) || '').toLowerCase();
-  if (/max[_-]?20x|max20/.test(raw)) tier = 'max20';
-  else if (/max[_-]?5x|max5|\bmax\b/.test(raw)) tier = 'max5';
-  else if (/team|enterprise/.test(raw)) tier = 'team';
-  else if (/\bpro\b|claude_pro|_pro_/.test(raw)) tier = 'pro';
-  else if (process.env.ANTHROPIC_API_KEY) tier = 'api';
-}
-
-const optin = readJson(join(DIR, 'fable-optin.json'));
-const optedInToday = Boolean(optin && optin.date === today);
-
-if ((tier === 'pro' || tier === 'api' || tier === 'team' || tier === 'unknown') && !optedInToday) {
-  deny(`tier is ${tier}: Fable bills usage credits (or is unknown). Ask the user; if they opt in for today run: node ~/.claude/skills/orchestrate/scripts/profile.mjs --fable-optin`);
-}
-
-const caps = { max5: 3, max20: 6 };
-if (caps[tier] && !optedInToday) {
-  const counterPath = join(DIR, `fable-count-${today}.json`);
-  const c = readJson(counterPath) || { count: 0 };
-  if (c.count >= caps[tier]) {
-    deny(`${c.count} Fable dispatches already today on ${tier} (cap ${caps[tier]}, half the weekly limit is shared with the app). Use opus, or opt in for today: node ~/.claude/skills/orchestrate/scripts/profile.mjs --fable-optin`);
-  }
-  try { mkdirSync(DIR, { recursive: true }); writeFileSync(counterPath, JSON.stringify({ count: c.count + 1, date: today }) + '\n'); } catch {}
-}
-process.exit(0);

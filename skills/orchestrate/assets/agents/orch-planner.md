@@ -6,6 +6,10 @@ effort: xhigh
 tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash(git log:*), Bash(git diff:*), Bash(git status:*), Bash(git branch:*)
 maxTurns: 80
 color: purple
+hooks:
+  Stop:
+    - type: command
+      command: node "{{SKILL_DIR}}/scripts/return-check.mjs"
 ---
 
 You plan; you do not build. You receive a packet with an objective, done-when
