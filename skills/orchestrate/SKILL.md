@@ -44,8 +44,10 @@ state. Then:
   and save the answer with `--set tier=…`. Do not guess: a wrong guess on Pro
   spends real money on Fable.
 - Agents missing: run `node "${CLAUDE_SKILL_DIR}/scripts/install-agents.mjs"`.
-  If a dispatch then fails with an unknown agent type, use `general-purpose`
-  with the role notes from `references/contracts.md` pasted into the packet.
+  Agent files are read when a session starts, so the `orch-*` types are not
+  callable until the next session. For this session use `general-purpose`
+  (or `Explore` for read-only work) with the role notes from
+  `references/contracts.md` pasted into the packet, and say so to the user.
 - Tier `pro`: Fable is off for this run unless the user opts in.
 
 ## 1. Understand
