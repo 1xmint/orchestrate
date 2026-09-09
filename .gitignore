@@ -3,3 +3,4 @@ orchestrate-workspace/
 *.skill
 *.zip
 node_modules/
+.claude/worktrees/

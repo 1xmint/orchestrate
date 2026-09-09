@@ -22,6 +22,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { findRepoRoot, latestRun, readJson, loadSession, DIR } from './lib/tier.mjs';
+import { dollars, family } from './lib/prices.mjs';
 
 export const PHASE = { DONE: '🔍 review', PARTIAL: '◐ partial', BLOCKED: '⛔ blocked' };
 
@@ -70,6 +71,44 @@ export function sumUsage(transcriptPath) {
     }
   } catch {}
   return totals;
+}
+
+// Every finished dispatch, priced, one line each. This is the only place a
+// price becomes a measurement rather than a guess: the guard's tag before a
+// dispatch is a forecast, and it reads its averages from this file.
+//
+// Capped at 500 lines. It is a rolling record of what things cost here, not an
+// archive, and an unbounded append in a hook is a slow leak.
+export const COSTS_PATH = join(DIR, 'costs.jsonl');
+export const COSTS_MAX = 500;
+
+export function costLine(role, model, usage) {
+  const fam = family(model);
+  return {
+    at: new Date().toISOString(),
+    role: String(role || 'claude'),
+    model: fam,
+    input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite,
+    dollars: Number(dollars(usage, fam).toFixed(4)),
+  };
+}
+
+export function appendCost(row, path = COSTS_PATH) {
+  try {
+    mkdirSync(DIR, { recursive: true });
+    let lines = [];
+    try { lines = readFileSync(path, 'utf8').split('\n').filter(Boolean); } catch {}
+    lines.push(JSON.stringify(row));
+    if (lines.length > COSTS_MAX) lines = lines.slice(-COSTS_MAX);
+    writeFileSync(path, lines.join('\n') + '\n');
+  } catch {}
+  return row;
+}
+
+export function readCosts(path = COSTS_PATH) {
+  try {
+    return readFileSync(path, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch { return []; }
 }
 
 export function formatUsage(u) {
@@ -196,6 +235,8 @@ function main() {
   if (alreadyHandled(input, agent, text)) return;
   const r = parseReturn(text);
   const usage = sumUsage(input.agent_transcript_path);
+  const ranModel = dispatchedModel(input.session_id, r.task) || agent;
+  const cost = appendCost(costLine(agent, ranModel, usage));
 
   const root = findRepoRoot(input.cwd) || input.cwd || process.cwd();
   const run = latestRun(root);
@@ -217,7 +258,7 @@ function main() {
         // one the packet named: past the daily cap the guard rewrites fable to
         // opus, and the agent's own return still echoes the packet.
         const ran = dispatchedModel(input.session_id, r.task);
-        const evidence = `${r.verdict ? `${r.verdict} · ` : ''}${ran ? `${ran} · ` : ''}${formatUsage(usage)} · returns/${file.split(/[\\/]/).pop()}`;
+        const evidence = `${r.verdict ? `${r.verdict} · ` : ''}${ran ? `${ran} · ` : ''}${formatUsage(usage)} · $${cost.dollars.toFixed(2)} · returns/${file.split(/[\\/]/).pop()}`;
         const next = updateRow(md, r.task, { phase, attempts: bumpAttempts(md, r.task), evidence });
         if (next) { writeFileSync(run.runMd, next); notes.push(`RUN.md row ${r.task} → ${phase}`); }
         else notes.push(`no RUN.md row for ${r.task}: write the row before the next dispatch`);

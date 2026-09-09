@@ -10,6 +10,7 @@
 //   node measure.mjs <transcript.jsonl>            a report
 //   node measure.mjs <transcript.jsonl> --json     the same as JSON
 //   node measure.mjs --latest [--project <dir>]    the newest transcript for a project
+//   node measure.mjs <t> --dollars               the same, priced at list price
 //
 // Transcripts live under ~/.claude/projects/<slugged cwd>/<session id>.jsonl.
 // Fields read: message.usage.{input_tokens, cache_creation_input_tokens,
@@ -21,6 +22,8 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { dollars, family, weekShare } from './lib/prices.mjs';
+import { detectTier, readJson, PROFILE_PATH } from './lib/tier.mjs';
 
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
@@ -30,6 +33,7 @@ export function measure(text) {
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
     dispatches: [], routerInjections: 0, routerBytes: 0, routerReread: 0,
     hookContext: 0, returns: [], started: null, ended: null, records: 0, skipped: 0,
+    replyChecks: 0, floorBlocks: 0,
   };
   const marks = [];
 
@@ -66,14 +70,23 @@ export function measure(text) {
       }
     }
 
-    // Hook output and skill injections arrive as plain user-role text. Tool
-    // results are skipped: a session that greps its own fixtures would
-    // otherwise count them as injections and inflate every number here.
-    if (o.type === 'user') {
-      for (const s of strings(withoutToolResults(msg.content))) {
+    // Hook output arrives in two shapes, and for a while this only read one of
+    // them. Injected context is an `attachment` record carrying `hookEvent` and
+    // a content array; everything else the host feeds back is plain user-role
+    // text. Reading only the second reported "0 router injections" on a
+    // transcript that plainly held four. Tool results stay skipped: a session
+    // that greps its own fixtures would otherwise count them as injections.
+    if (o.type === 'user' || o.type === 'attachment') {
+      const source = o.type === 'attachment' ? (o.attachment && o.attachment.content) : withoutToolResults(msg.content);
+      for (const s of strings(source)) {
         const at = s.indexOf('[orch-router');
         if (at >= 0) { const bytes = s.length - at; r.routerInjections++; r.routerBytes += bytes; marks.push({ bytes, after: 0 }); }
         if (/orchestrate (guard|ledger):/.test(s)) r.hookContext += s.length;
+        // The two checks that can send a turn back, counted by the fixed prefix
+        // each one writes. The prefix is the contract: neither the evaluator's
+        // wording nor the floor's is stable enough to match on anything else.
+        if (s.includes('reply check:')) r.replyChecks++;
+        if (/orchestrate: a recommendation across a set of cases/.test(s)) r.floorBlocks++;
         const m = /^\s*TASK:\s*(\S+)/m.exec(s);
         if (m && /^\s*(RESTATED|STATUS):/m.test(s)) r.returns.push({ task: m[1], lines: s.trim().split('\n').length });
       }
@@ -123,8 +136,29 @@ export function report(r) {
   L.push(`router: ${r.routerInjections} injections, ${r.routerBytes} bytes (≈ ${Math.round(r.routerBytes / 4)} tokens once)`);
   L.push(`  re-read over later turns: ≈ ${Math.round(r.routerReread / 4)} cache-read tokens, cumulative`);
   L.push(`hook context from the guard and the ledger: ${r.hookContext} bytes (≈ ${Math.round(r.hookContext / 4)} tokens)`);
+  L.push(`reply check: ${r.replyChecks} blocks in ${r.turns} turns; floor: ${r.floorBlocks}`);
   const share = r.input + r.cacheRead + r.cacheWrite;
   if (share) L.push(`  the router is ${((r.routerBytes / 4 + r.routerReread / 4) / share * 100).toFixed(2)}% of everything this session read`);
+  return L.join('\n');
+}
+
+// What the session cost at list price, and what share of a week that is. List
+// price is the host's own unit: the Session block of `/usage` computes its
+// dollar figure the same way, locally from token counts.
+export function dollarReport(r, tier, profile) {
+  const L = [];
+  const fam = Object.keys(r.models).map(family);
+  const main = fam.length ? fam.sort((a, b) => fam.filter(x => x === b).length - fam.filter(x => x === a).length)[0] : 'sonnet';
+  const total = dollars({ input: r.input, output: r.output, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }, main);
+  L.push('');
+  L.push(`this session, at list price: $${total.toFixed(2)} on ${main}${weekShare(total, tier, profile)}`);
+  if (r.dispatches.length) {
+    const by = {};
+    for (const d of r.dispatches) { const k = `${d.agent} on ${d.model}`; by[k] = (by[k] || 0) + 1; }
+    L.push(`dispatches by model: ${Object.entries(by).map(([k, n]) => `${k} ×${n}`).join(', ')}`);
+    L.push('  what each one cost is in ~/.claude/orchestrate/costs.jsonl, written by the ledger');
+  }
+  L.push('list price is the unit /usage shows for a session; a plan is not billed this way');
   return L.join('\n');
 }
 
@@ -162,7 +196,9 @@ function main() {
   }
   if (!path) { console.error('usage: measure.mjs <transcript.jsonl> | --latest [--project <dir>]'); process.exit(2); }
   const r = measure(readFileSync(path, 'utf8'));
-  console.log(args.includes('--json') ? JSON.stringify(r, null, 2) : report(r));
+  if (args.includes('--json')) { console.log(JSON.stringify(r, null, 2)); return; }
+  console.log(report(r));
+  if (args.includes('--dollars')) console.log(dollarReport(r, detectTier().tier, readJson(PROFILE_PATH)));
 }
 
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {

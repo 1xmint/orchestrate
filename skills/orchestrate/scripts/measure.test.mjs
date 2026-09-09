@@ -131,3 +131,45 @@ test('router --cost and measure agree on the same file, because there is one par
   assert.match(out.stdout, /^router injections: 1$/m);
   assert.match(out.stdout, new RegExp(`^bytes injected once: ${r.routerBytes} `, 'm'));
 });
+
+
+// ---- what the checks did, and what the session cost --------------------------
+
+import { dollarReport } from './measure.mjs';
+
+// Hook output arrives as an `attachment` record, not as user-role text. Reading
+// only the second shape reported "0 router injections" on a transcript that
+// plainly held four.
+test('an injected hook attachment is counted, and a tool result quoting one is not', () => {
+  const lines = [
+    JSON.stringify({ type: 'attachment', attachment: { type: 'hook', hookEvent: 'UserPromptSubmit', content: ['[orch-router · once per session] you: opus @ high effort'] } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: { input_tokens: 10, output_tokens: 5 } } }),
+    JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'cat router.mjs -> [orch-router] ...' }] } }),
+  ].join('\n');
+  const r = measure(lines);
+  assert.equal(r.routerInjections, 1, 'the attachment counts, the tool result does not');
+});
+
+test('the two checks that can send a turn back are counted by their fixed prefix', () => {
+  const lines = [
+    JSON.stringify({ type: 'attachment', attachment: { hookEvent: 'Stop', content: ['reply check: "the tests pass" names no command or output; add the command and its result, or say it is from memory.'] } }),
+    JSON.stringify({ type: 'user', message: { content: 'orchestrate: a recommendation across a set of cases, answered from 1 source(s). Dispatch orch-researcher, or rewrite the answer.' } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: { input_tokens: 10, output_tokens: 5 } } }),
+  ].join('\n');
+  const r = measure(lines);
+  assert.equal(r.replyChecks, 1);
+  assert.equal(r.floorBlocks, 1);
+  assert.match(report(r), /reply check: 1 blocks in 1 turns; floor: 1/);
+});
+
+test('the dollar report prices the session and never invents a denominator', () => {
+  const r = measure([
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: { input_tokens: 1000000, output_tokens: 0 } } }),
+  ].join('\n'));
+  const withAnchor = dollarReport(r, 'max5', null);
+  assert.match(withAnchor, /at list price: \$5\.00 on opus/);
+  assert.match(withAnchor, /about 3% of a max5 week/);
+  assert.match(withAnchor, /a plan is not billed this way/);
+  const noAnchor = dollarReport(r, 'api', null);
+  assert.doesNotMatch(noAnchor, /% of a/, 'per-token billing has no week to divide by');
+});

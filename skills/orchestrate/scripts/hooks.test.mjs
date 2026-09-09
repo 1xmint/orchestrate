@@ -80,14 +80,18 @@ test('guard: an ordinary dispatch passes untouched', () => {
   assert.equal(decide({ tool_input: { model: 'opus', prompt: 'TASK: 1' } }).kind, 'pass');
 });
 
-test('guard: a dispatch on an allowed model is recorded and prints nothing', () => {
+test('guard: a dispatch is recorded and priced, and never approved', () => {
   const home = sandbox();
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'max5' }));
   const out = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's2', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\ndo it' },
   }, home);
-  assert.equal(out.stdout.trim(), '');
+  // It used to print nothing here. It now says what the dispatch costs, once,
+  // before the spend — and still carries no permission decision, so the user's
+  // own approval prompt is untouched.
+  assert.match(out.stdout, /price tag: orch-implementer on sonnet/);
+  assert.doesNotMatch(out.stdout, /permissionDecision/);
   assert.equal(out.status, 0);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's2.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'sonnet');
@@ -479,14 +483,17 @@ test('guard: it never blocks or rewrites a dispatch over its model, on any plan'
   }
 });
 
-test('guard: a Fable dispatch on Pro prints nothing at all', () => {
+test('guard: a Fable dispatch on Pro is priced, never blocked', () => {
   const home = sandbox();
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro' }));
   const out = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'pro1', cwd: home,
     tool_input: { subagent_type: 'orch-planner', model: 'fable', prompt: 'TASK: 9-9-0007\nplan it' },
   }, home);
-  assert.equal(out.stdout.trim(), '', 'whether to spend on Fable here is the user\'s call, not a hook\'s');
+  // Whether to spend on Fable here is the user's call, not a hook's. What the
+  // hook owes them is the number before they make it.
+  assert.doesNotMatch(out.stdout, /permissionDecision/, 'never denied over its model');
+  assert.match(out.stdout, /price tag: orch-planner on fable/);
   assert.equal(out.status, 0);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'pro1.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'fable', 'but it is still recorded');
@@ -499,7 +506,7 @@ test('guard: a dispatch that names no model is recorded as inherited', () => {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'inh', cwd: home,
     tool_input: { subagent_type: 'Explore', prompt: 'sweep the repo' },
   }, home);
-  assert.equal(out.stdout.trim(), '');
+  assert.doesNotMatch(out.stdout, /permissionDecision/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'inh.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit', 'the meter says inherited rather than guessing');
 });
@@ -523,4 +530,163 @@ test('ledger: a stop carrying only an agent_id is not a return', () => {
     agent_id: 'abc124', agent_type: 'orch-researcher', last_assistant_message: GOOD_RETURN,
   }, home);
   assert.deepEqual(readdirSync(join(repo.runDir, 'returns')), ['001-orch-researcher.md']);
+});
+
+
+// ---- the research floor -----------------------------------------------------
+// The one shape an evaluator that reads only the reply cannot catch: a table
+// with a Sources line naming pages that were never fetched. From the reply
+// alone it looks exactly like a well-sourced answer. Only the transcript shows
+// how many sources were actually read.
+
+import { floorDecision, hasRecommendation, humanText, turnFacts, replayFile } from './turn-check.mjs';
+
+// Typed exactly as Josh typed it, the day this rule became necessary.
+const THE_QUESTION = 'also is there recommended manager models and effort levels for each subscription tier (3 tiers)';
+const A_TABLE = '| Plan | Model | Effort |\n|---|---|---|\n| Pro | Sonnet | high |';
+
+test('the floor fires on the question that caused it, answered from one search', () => {
+  const d = floorDecision({ text: THE_QUESTION, sourceCalls: 1, reply: A_TABLE });
+  assert.equal(d.block, true);
+  assert.match(d.why, /answered from 1 source/);
+});
+
+test('the floor stays out of the way of everything else', () => {
+  const ok = (label, args) => assert.equal(floorDecision(args).block, false, label);
+  ok('a single current fact is not the set shape', { text: "what's the current node version", sourceCalls: 0, reply: 'You should use 22.' });
+  ok('two sources is the bar, and it was cleared', { text: THE_QUESTION, sourceCalls: 2, reply: A_TABLE });
+  ok('nothing was recommended', { text: THE_QUESTION, sourceCalls: 0, reply: 'Here is what I read, with the parts that disagree.' });
+  ok('once per question, not once per turn', { text: THE_QUESTION, sourceCalls: 1, reply: A_TABLE, prev: { blocked: true } });
+  // Measured: without this, a pasted plan containing "recommended" and "for
+  // each", answered with a "should", fired 5.57 times a day on real
+  // transcripts. Instructing is not asking.
+  ok('a pasted plan is an instruction, not a question', {
+    text: '# Plan 0008\n\nThis file sets the recommended defaults for each tier.\n' + 'x '.repeat(80),
+    sourceCalls: 0, reply: 'You should start with the first one.',
+  });
+  ok('a task notification is the host talking', { text: '<task-notification>\n' + THE_QUESTION, sourceCalls: 0, reply: A_TABLE });
+});
+
+test('a recommendation is a word or a table row', () => {
+  assert.equal(hasRecommendation('| a | b |\n|---|---|\n| Pro | Sonnet |'), true);
+  assert.equal(hasRecommendation('You should use the second one.'), true);
+  assert.equal(hasRecommendation('I read three pages and they disagree.'), false);
+});
+
+test('the user talking is told apart from a tool result and a hook', () => {
+  assert.equal(humanText({ type: 'user', message: { content: 'hello' } }), 'hello');
+  assert.equal(humanText({ type: 'user', message: { content: [{ type: 'text', text: 'hi' }] } }), 'hi');
+  assert.equal(humanText({ type: 'user', message: { content: [{ type: 'tool_result', content: 'x' }] } }), null);
+  assert.equal(humanText({ type: 'attachment', attachment: { hookName: 'UserPromptSubmit', content: ['[orch-router] …'] } }), null);
+  // A message typed mid-turn is still the user asking. Observed field: `prompt`.
+  assert.equal(humanText({ type: 'attachment', attachment: { type: 'queued_command', prompt: THE_QUESTION } }), THE_QUESTION);
+});
+
+test('sources are counted distinctly, and only after the question', () => {
+  const lines = [
+    JSON.stringify({ type: 'user', message: { content: 'earlier, unrelated' } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebFetch', input: { url: 'https://old' } }] } }),
+    JSON.stringify({ type: 'user', message: { content: THE_QUESTION } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'a' } }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'a' } }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } }),
+  ].join('\n');
+  const f = turnFacts(lines);
+  assert.equal(f.text, THE_QUESTION);
+  assert.equal(f.sourceCalls, 1, 'the same search twice is one source, and the earlier fetch belongs to the earlier turn');
+});
+
+test('replay reports what the floor would have done, and writes nothing', () => {
+  const lines = [
+    JSON.stringify({ type: 'user', message: { content: THE_QUESTION } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'tiers' } }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: A_TABLE }] } }),
+  ].join('\n');
+  const hits = replayFile(lines);
+  assert.equal(hits.length, 1);
+  assert.match(hits[0].prompt, /recommended manager models/);
+});
+
+test('the floor blocks the turn, and the Pickup rule is untouched by it', () => {
+  const home = sandbox();
+  const repo = fixtureRepo().dir;
+  const transcript = join(repo, 'floor.jsonl');
+  writeFileSync(transcript, [
+    JSON.stringify({ type: 'user', message: { content: THE_QUESTION } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'tiers' } }] } }),
+  ].join('\n') + '\n');
+
+  const payload = { hook_event_name: 'Stop', session_id: 'floor-sess', cwd: repo, transcript_path: transcript, last_assistant_message: A_TABLE };
+  const first = run('turn-check.mjs', payload, home);
+  assert.equal(first.json && first.json.decision, 'block');
+  assert.match(first.json.reason, /a recommendation across a set of cases, answered from 1 source/);
+  assert.match(first.json.reason, /Dispatch orch-researcher/);
+
+  // Once per question. A second Stop on the same question is quiet, which is
+  // what keeps the host's eight-block override from ever being reached.
+  const second = run('turn-check.mjs', payload, home);
+  assert.equal(second.json, null, 'blocked once, not every turn');
+
+  // And the store key is its own: the Pickup rule can still fire afterwards.
+  const store = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'turn-checks.json'), 'utf8'));
+  assert.ok(Object.keys(store).some(k => k.startsWith('floor_')), `floor key namespace: ${Object.keys(store)}`);
+});
+
+test('stop_hook_active silences the floor as well', () => {
+  const home = sandbox();
+  const repo = fixtureRepo().dir;
+  const transcript = join(repo, 'again.jsonl');
+  writeFileSync(transcript, JSON.stringify({ type: 'user', message: { content: THE_QUESTION } }) + '\n');
+  const out = run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's', cwd: repo, transcript_path: transcript, last_assistant_message: A_TABLE, stop_hook_active: true }, home);
+  assert.equal(out.json, null);
+});
+
+
+// ---- money ------------------------------------------------------------------
+
+import { costLine, appendCost, readCosts, COSTS_MAX } from './ledger.mjs';
+import { tagFor } from './guard-agent.mjs';
+
+test('a finished dispatch is priced and appended, and the file stays bounded', () => {
+  const home = sandbox();
+  const path = join(home, 'costs.jsonl');
+  const row = costLine('orch-researcher', 'claude-fable-5-1', { input: 1e6, output: 0, cacheRead: 0, cacheWrite: 0, turns: 3 });
+  assert.equal(row.role, 'orch-researcher');
+  assert.equal(row.model, 'fable', 'the family, not the full id');
+  assert.equal(row.dollars, 10, '1M fresh input on Fable is $10');
+
+  for (let i = 0; i < COSTS_MAX + 20; i++) appendCost({ ...row, i }, path);
+  const rows = readCosts(path);
+  assert.equal(rows.length, COSTS_MAX, 'the oldest are dropped rather than kept forever');
+  assert.equal(rows[rows.length - 1].i, COSTS_MAX + 19, 'the newest survive');
+});
+
+// The trap the reviewer caught: `additionalContext` is documented alongside
+// `permissionDecision: "allow"`, and emitting `allow` here would auto-approve
+// every dispatch and remove the user's permission prompt. The tag is
+// information, never a decision.
+test('the guard never approves a dispatch, whatever it has to say about the price', () => {
+  const home = sandbox();
+  const inputs = [
+    { subagent_type: 'orch-researcher', model: 'fable', prompt: 'TASK: 9-9-0001\nfind out X' },
+    { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0002\nbuild Y' },
+    { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'here is a key: sk-ant-abcdefghijklmnop' },
+    { prompt: 'no role, no model' },
+  ];
+  for (const [i, tool_input] of inputs.entries()) {
+    const out = run('guard-agent.mjs', { tool_name: 'Agent', session_id: `guard-${i}`, cwd: home, tool_input }, home);
+    const s = out.stdout || '';
+    assert.doesNotMatch(s, /"permissionDecision"\s*:\s*"allow"/, `input ${i} must never carry allow`);
+  }
+});
+
+test('the price tag reads the ledger, and says so when there is nothing to read', () => {
+  const fresh = tagFor({ subagent_type: 'orch-researcher', model: 'fable' });
+  assert.match(fresh, /price tag: orch-researcher on fable/);
+  assert.match(fresh, /\$\d/);
+  // Whatever this machine's costs.jsonl holds, the tag labels itself as one of
+  // exactly two things: measured here with a count, or reasoned.
+  const measured = /\(measured here, n=\d+\)/.test(fresh);
+  const reasoned = /\(reasoned, not yet measured here\)/.test(fresh);
+  assert.equal(measured !== reasoned, true, `exactly one label: ${fresh}`);
 });

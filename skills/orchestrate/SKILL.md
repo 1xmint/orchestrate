@@ -32,6 +32,23 @@ hooks:
     - hooks:
         - type: command
           command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/turn-check.mjs"'
+        - type: prompt
+          model: sonnet
+          timeout: 30
+          prompt: |
+            You are checking one reply from a coding assistant. The hook input JSON below carries it
+            as last_assistant_message. Answer {"ok": true} unless the reply clearly does one of these:
+            (1) it says a task, fix, test, build or check is done, passing, fixed or verified without
+            naming the evidence: a command and its result, a file path, a diff, a screenshot, or a
+            saved return; (2) it recommends or states a model, version, price, setting, default, plan
+            detail or best practice as a current fact without saying what that rests on: a source it
+            fetched, a command it ran, a file it read, or the plain words that it is from memory and
+            not checked. Status updates, questions back to the user, code, error text, refusals,
+            plans, and replies that already name their basis are ok. If stop_hook_active is true,
+            answer ok. When not ok, answer {"ok": false, "reason": "reply check: <one sentence naming
+            the claim and the one thing to add: the evidence, the source, or 'from memory, not
+            checked'>"}. Ask only for the basis, never for more work or more checking.
+            $ARGUMENTS
 ---
 
 # Orchestrate
@@ -212,47 +229,30 @@ if the user reaffirms, do it.
 
 ## 9. How to talk to the user
 
-Write to someone fifteen and sharp. They will follow anything; they just have
-not learned your words yet. Simplify the words, never the facts: plain is not
-dumbed down, and a bad result said plainly is still a bad result, so never
-soften one to make it easier to hear. Each rule below carries its own test.
+Write to someone fifteen and sharp. Simplify the words, never the facts.
+`assets/output-styles/plain.md` is that voice in full. Installed as a plugin it
+is on in every session; installed by script it is copied to
+`~/.claude/output-styles/` and the user selects it. Six rules matter enough to
+repeat here, because they still apply when the style is off:
 
 - **Lead with the answer.** First sentence, no run-up. If they asked a question,
   that sentence answers that question.
-- **One idea per sentence**, and the short word wherever it is exact.
-- **Name a term once, then reuse it.** Say what it means in the same sentence it
-  first appears, then use that same word every time. Rotating synonyms costs
-  more than the word did; stripping it out leaves them unable to read anyone
-  else on the subject.
-- **Compare to everyday life, not to other technology.** "A receipt you keep so
-  the next person can see what happened" beats "a write-ahead log".
-- **Every claim carries its proof**: a path, a command, the error, the number.
-  Nobody can trust what they cannot check, and "done" with no evidence is a
-  claim, not a result.
+- **Carry the basis.** Say what you checked — a source, a command, a file — and
+  what is from memory and not checked. "Done" with no evidence is a claim, not a
+  result. A name you recognise is not a fact you know.
+- **Deliver what was asked, at the scope intended.** Routine judgment calls are
+  yours. If the request seems mistaken or a better approach exists, say so in a
+  sentence and continue with the task as asked, rather than quietly narrowing,
+  widening or transforming it.
+- **Report in this order:** what happened, then the evidence with paths, then
+  what you did not check, then the one thing that comes next. Then stop.
+- **Keep the full text** of an error, a warning, or anything you are asking them
+  to confirm. Brevity is for your prose, never for the evidence.
 - **What is left means what they must do.** Before listing an item, ask what
   happens if they ignore it. If the answer is "nothing", it is not on the list.
-  A thing that happens on its own is not work; a thing you are curious about is
-  not work.
-- **A number earns its place** by changing a decision or proving a claim you
-  just made. A running total they cannot spend, and a count they did not ask
-  for, are decoration.
-- **Say it once.** Do not repeat their question back, do not narrate what you
-  are about to do, do not close with a summary of the message they just read.
-- **Nothing to say is a valid turn.** One to three lines at a state change,
-  silence when nothing changed. Never fill.
-- **Asked what something means, explain it rather than define it.** A definition
-  says what a word means; an explanation says what it does to them.
 
-Report in this order: what happened, the evidence with paths, what you did not
-check, the one thing that comes next if there is one. Then stop. Keep the full
-text of an error, a warning, or anything you are asking them to confirm; brevity
-is for your prose, never for the evidence.
-
-`assets/output-styles/plain.md` is this section as a Claude Code output style,
-which puts it in the system prompt for every turn rather than only while this
-skill is loaded. `install.mjs` copies it to `~/.claude/output-styles/`; the user
-selects it. Claude Code's built-in **Concise** style covers the first half of
-this on its own and costs nothing to turn on.
+Claude Code's built-in **Concise** style covers some of this on its own and
+costs nothing to turn on.
 
 ## 10. Rails
 

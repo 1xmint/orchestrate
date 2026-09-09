@@ -21,7 +21,9 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, loadSession, saveSession } from './lib/tier.mjs';
+import { DIR, readJson, loadSession, saveSession, detectTier, PROFILE_PATH } from './lib/tier.mjs';
+import { priceTag } from './lib/prices.mjs';
+import { readCosts } from './ledger.mjs';
 
 // Anything here means the packet is carrying a live secret. The list grew after
 // an audit fed it four shapes it did not know: an OpenAI project key, a Google
@@ -57,6 +59,22 @@ function emit(obj) {
   process.stdout.write(JSON.stringify(obj));
 }
 
+// A price, said once, before the spend. Measured from this machine's own past
+// runs when there are any; labelled reasoned when there are not.
+//
+// It carries NO `permissionDecision`. `allow` alongside `additionalContext` is
+// documented and would work, and it would also auto-approve every dispatch and
+// take away the user's permission prompt — a silent change to a default nobody
+// asked to change. The guard's answer stays deny-or-pass; the tag is only
+// information travelling next to a pass.
+export function tagFor(ti) {
+  try {
+    const role = String(ti.subagent_type || 'claude');
+    const model = String(ti.model || 'inherit');
+    return priceTag(role, model, readCosts(), detectTier().tier, readJson(PROFILE_PATH));
+  } catch { return ''; }
+}
+
 function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
@@ -85,7 +103,10 @@ function main() {
 
   if (d.kind === 'deny') {
     emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate guard: ${d.reason}` } });
+    return;
   }
+  const tag = tagFor(ti);
+  if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
 
 // One line per dispatch in the session state, for the ledger and the meter.

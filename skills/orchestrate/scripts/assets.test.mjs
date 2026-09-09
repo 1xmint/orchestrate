@@ -148,17 +148,17 @@ test('the skill tells the manager to ask when a model is not in the plan', () =>
 // is what actually changes an output.
 // Case-insensitive: the same rule opens a bullet in one file and a sentence in
 // the other. What has to match is the rule, not its capital letter.
+// The six rules that must survive with the style turned off, so SKILL.md §9 and
+// the style are checked against the same list. The style says more than this;
+// §9 is deliberately the short version, because a longer §9 competes with the
+// style rather than backing it up.
 const SPEECH_RULES = [
   /Lead with the answer/i,
-  /One idea per sentence/i,
-  /Name a term once, then reuse it/i,
-  /Compare to everyday life, not to other technology/i,
-  /Every claim carries its proof/i,
+  /what is from memory/i,
+  /Deliver what was asked, at the scope intended/i,
+  /what happened, then the evidence with paths/i,
+  /never for the evidence/i,
   /ask what\s+happens if they ignore it/i,
-  /A number earns its place/i,
-  /Say it once/i,
-  /Nothing to say is a valid turn/i,
-  /explain it rather than define it/i,
 ];
 
 test('SKILL.md carries the plain-speech rules, each with its own test', () => {
@@ -180,9 +180,27 @@ test('the Plain output style ships, is valid, and says the same thing as §9', (
   // Without this the style would drop Claude Code's engineering instructions,
   // which is right for a writing assistant and wrong for an orchestrator.
   assert.match(fm, /^keep-coding-instructions: true$/m);
+  // Josh's decision, 2026-09-09: installed as a plugin, the voice is on without
+  // anybody choosing it, and disabling the plugin is the way off.
+  assert.match(fm, /^force-for-plugin: true$/m);
 
   for (const r of SPEECH_RULES) assert.match(style, r, `the style and §9 agree on ${r}`);
-  assert.match(style, /never for the evidence/, 'brevity never applies to an error or a warning');
+
+  // Anthropic's own Opus 5 scope paragraph, verbatim. It is what stops a model
+  // that verifies its own work anyway from expanding the task while it does so.
+  // Compared with the line wrapping flattened, so reflowing the file is free.
+  const flat = style.replace(/\s+/g, ' ');
+  assert.match(flat, /Make routine judgment calls yourself, and check in only when different readings of the request would lead to materially different work\./);
+  assert.match(flat, /Finish the whole task, and stop short of actions that are clearly beyond what was asked\./);
+
+  // The two verification lines point opposite ways on purpose: one stops Opus 5
+  // re-proving what it already proved, the other stops a low-effort model
+  // answering a current fact from memory. Neither asks for more self-checking.
+  assert.match(style, /A name you recognise is not a fact you know/);
+  assert.doesNotMatch(style, /double-check|re-verify|verify (your|it) again/i,
+    'never an instruction to re-check its own work: that is the one thing both model guides forbid');
+
+  assert.ok(Buffer.byteLength(style) <= 4500, `the style is ${Buffer.byteLength(style)} bytes, cap 4500`);
 });
 
 test('the installer copies the output style but never selects it', () => {
