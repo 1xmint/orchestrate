@@ -151,11 +151,13 @@ STATE.md                build progress and resume point
 node --test "skills/orchestrate/scripts/**/*.test.mjs"
 ```
 
-98 tests, no quota, no network: the router's emission policy on fixture
-prompts, the guard's rewrite and deny paths, ledger parsing of good, broken and
-over-long returns, the two hooks' block counts, gate detection on three
-fixture repo layouts, the project kit, the installer's merge against a copy of
-a real `settings.json`, and both package builds.
+No quota, no network, no dependencies. They cover the router's emission policy
+on fixture prompts, the guard's rewrite and deny paths, the ledger's parsing
+and its dedupe against the double registration, the two stop hooks' block
+counts, gate detection on three fixture repo layouts, the project kit, the
+installer's merge against a copy of a real `settings.json`, both package
+builds, and the eval file's shape. The run prints the count; anything red is a
+regression.
 
 ## Provenance
 
