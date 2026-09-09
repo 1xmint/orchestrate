@@ -105,6 +105,18 @@ export function findRepoRoot(start) {
   return null;
 }
 
+// A Pickup value the orchestrator never replaced. Two shapes count as unwritten:
+// the angle-bracket placeholder, and the template's own list of alternatives
+// ("high | medium | low"), which otherwise leaks into the resume line as
+// "confidence high | medium | low" and reads as nonsense.
+export function isWritten(value) {
+  const v = String(value == null ? '' : value).trim();
+  if (!v) return false;
+  if (/^<.*>$/.test(v)) return false;
+  if (/^[^|]{1,20}(\s*\|\s*[^|]{1,20})+$/.test(v)) return false;
+  return true;
+}
+
 // The newest run under <root>/.orchestrator/runs that has a RUN.md. `open` is
 // true when a task row still carries a non-final glyph. Pickup lines come from
 // the "## Pickup" section; template placeholders count as empty.
@@ -125,7 +137,7 @@ export function latestRun(root) {
     if (m) {
       for (const line of m[1].split('\n')) {
         const kv = /^(Pickup prompt|Pickup confidence|Resume risk):\s*(.*)$/.exec(line.trim());
-        if (kv && !/^<.*>$/.test(kv[2].trim())) pickup[kv[1]] = kv[2].trim();
+        if (kv && isWritten(kv[2])) pickup[kv[1]] = kv[2].trim();
       }
     }
     return { runId, dir: join(base, runId), runMd, mtimeMs: st.mtimeMs, open, rows: rows.length, pickup };

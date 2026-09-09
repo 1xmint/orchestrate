@@ -30,6 +30,15 @@ function readJson(path) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
 }
 
+// The Fable counter file is named by the LOCAL calendar date, because that is
+// what the guard writes. Using toISOString() here would read tomorrow's file
+// for the last hours of every evening west of UTC and report "0/3 today" while
+// the cap was already spent.
+function localDate(d = new Date()) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 // ---- overrides --------------------------------------------------------------
 const setIdx = args.findIndex(a => a === '--set' || a.startsWith('--set='));
 if (setIdx >= 0) {
@@ -268,7 +277,7 @@ if (brief) {
       ? Object.entries(p).filter(([, v]) => v.installed).map(([n, v]) => `${n} ${v.auth}`).join(', ') || 'none on PATH'
       : 'not probed today (run profile.mjs for the full picture)';
     const cap = { max5: 3, max20: 6 }[tier.tier];
-    const fable = readJson(join(HOME, '.claude', 'orchestrate', `fable-count-${new Date().toISOString().slice(0, 10)}.json`));
+    const fable = readJson(join(HOME, '.claude', 'orchestrate', `fable-count-${localDate()}.json`));
     console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')})` : ''}`);
     console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''} · fable ${cap ? `${(fable && fable.count) || 0}/${cap} today` : 'off unless the user opts in'}`);
     console.log(`providers: ${prov}`);
