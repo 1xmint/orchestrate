@@ -31,6 +31,44 @@ Proof, all at zero model quota:
 - `install.mjs --project --dry-run` on the real notelocus checkout: it reports
   the pytest and ruff gate and the missing `CLAUDE.md`, and writes nothing.
 
+## v0.5.0 — the manager judges the model, 2026-09-09
+
+Josh: "a hard cap on fable helpers doesnt make any sense... id rather have the
+manager judge what is appropriate." He is right, and the repo already held the
+admission: `routing.md` said dispatch counts are a poor proxy for tokens while
+`guard-agent.mjs` counted dispatches anyway.
+
+**The cap is gone, not raised.** No number replaces it. The guard keeps two
+jobs, deny a credential and record a dispatch, and has no opinion about which
+model a task deserves. Deleted with the cap: the caps table, the daily counter
+file, the opt-in file and its flag, the `updatedInput` downgrade, and the spend
+total from both the router card and the profile line. A running total is the
+cap in another costume. `measure.mjs` reports what a finished run cost, which
+is a fact rather than a budget.
+
+**What replaces it is judgment with the facts in front of it.** `routing.md`
+gains "Choosing the model, and when the choice is the user's": pick the model
+the task needs, then check whether this plan includes it. Included, dispatch.
+Not included, it is the user's money and their call, so recommend it, price it,
+offer the alternatives, and let them choose. There is a worked example in the
+shape of the $20 case. Neither failure is allowed: no quiet downgrade to dodge
+asking, no quiet spending to dodge asking. "When Fable earns its cost" gives
+the judgment its criteria. The rule holds for a plan tier that does not exist
+yet.
+
+**SKILL.md §9, how to talk to the user.** Josh has had to ask for a plain
+explanation several times, including in the session that built v0.4.1, whose
+report listed four "open items" that were not work and a counter he could not
+act on. Every line of the new section is a rule somebody had to ask for out
+loud: answer the question first, one idea per sentence, nothing is "remaining
+work" unless the user must do something, no number they cannot act on, say it
+once, explain rather than define. Explaining to someone fifteen and sharp is
+the default, not a mode.
+
+Three tests hold the line: the guard returns only pass or deny on every tier
+and model, no shipped file states a numeric Fable allowance, and the skill
+still tells the manager to ask. 136 pass.
+
 ## v0.4.1 — the fresh-context Fable audit, 2026-09-09
 
 The one step the v0.3 plan reserved and the v0.4 plan deferred: run
@@ -130,7 +168,8 @@ Deliberately not applied then: a per-run absolute Fable cap (a per-day cap in
 the hook replaced it), moving the task table out of RUN.md, and marking every
 host assumption unverified line by line.
 
-Pickup prompt: v0.4.1 is tagged; the plan and the audit it deferred are both
-complete, and the only things left need a fresh session or a real goal.
+Pickup prompt: v0.5.0 is tagged; the Fable cap is gone and choosing the model
+is the manager's judgment. Nothing is open. The next signal comes from Josh
+using it on his own work.
 Pickup confidence: high
 Resume risk: none
