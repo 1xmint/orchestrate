@@ -55,14 +55,13 @@ export function rulesFile(g, never) {
   lines.push('A goal with several steps, or one that needs a review, goes through');
   lines.push('`/orchestrate` rather than being done turn by turn.');
   for (const n of never) lines.push(`- ${n}`);
-  const out = lines.join('\n') + '\n';
-  const count = out.trimEnd().split('\n').length;
-  if (count > MAX_RULE_LINES) {
-    // Drop the quoted never-do rules before anything else: they are in the
-    // repo's own files, which the session already loads.
-    return rulesFile(g, never.slice(0, Math.max(0, never.length - (count - MAX_RULE_LINES))));
-  }
-  return out;
+  // Drop the quoted never-do rules before anything else: they are in the
+  // repo's own files, which the session already loads. Truncate rather than
+  // recurse: a recursive call with an unchanged argument would not terminate
+  // if the fixed part ever grew past the budget on its own.
+  const over = lines.join('\n').split('\n').length - MAX_RULE_LINES;
+  const kept = over > 0 ? lines.slice(0, Math.max(0, lines.length - over)) : lines;
+  return kept.join('\n') + '\n';
 }
 
 function excludePath(root) {

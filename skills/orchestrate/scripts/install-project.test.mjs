@@ -136,3 +136,14 @@ test('a missing directory is an error the user can act on', () => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /no such directory/);
 });
+
+test('the twelve-line budget truncates and always terminates, even absurdly', () => {
+  const g = { at: '2026-09-09', gate: [], standards: [], agentsNotLoaded: false };
+  // The fixed part is well inside the budget today, so this can only be reached
+  // if someone grows it. It must truncate, not recurse forever.
+  const text = rulesFile(g, []);
+  assert.ok(text.trimEnd().split('\n').length <= 12);
+  const many = rulesFile({ ...g, gate: [{ kind: 'test', cmd: 'x' }] }, ['Never a.', 'Never b.', 'Never c.']);
+  assert.ok(many.trimEnd().split('\n').length <= 12);
+  assert.match(many, /`x`/, 'the gate survives truncation; the quoted rules are what gets cut');
+});
