@@ -44,6 +44,13 @@ cannot, it asks once and remembers:
 node ~/.claude/skills/orchestrate/scripts/profile.mjs --set tier=max5   # pro | max5 | max20 | team | api
 ```
 
+## Install from the .skill file (no git)
+
+`orchestrate.skill` is a zip. Unzip it so that
+`~/.claude/skills/orchestrate/SKILL.md` exists, then run
+`node ~/.claude/skills/orchestrate/scripts/install-agents.mjs` once for the
+role agents. Build it with `node scripts/package.mjs`.
+
 ## What it needs
 
 - Claude Code (desktop app or CLI) on a Pro, Max, Team or API account.
