@@ -67,6 +67,41 @@ cannot, it asks once and remembers:
 node ~/.claude/skills/orchestrate/scripts/profile.mjs --set tier=max5
 ```
 
+## Stay up to date
+
+Claude Code can update plugins for you, but **not by default for this one**. It
+turns auto-update on for Anthropic's own marketplaces and leaves it off for
+third-party ones, which is what `1xmint/orchestrate` is. So turning it on is one
+thing you do once:
+
+1. Run `/plugin` and go to the **Marketplaces** tab
+2. Select `orchestrate`
+3. Choose **Enable auto-update**
+
+After that, Claude Code refreshes the marketplace and updates the plugin in the
+background shortly after each session starts, with a random delay of up to ten
+minutes so the running session keeps the version it launched with. When
+something updates you get a notification to run `/reload-plugins`, or the new
+version simply loads next time you start.
+
+Two things worth knowing:
+
+- A new version only reaches you when the `version` field in `plugin.json` is
+  bumped, which is what a release here does.
+- `DISABLE_AUTOUPDATER` turns this off along with Claude Code's own updates. To
+  keep plugin updates while pinning Claude Code itself, set
+  `FORCE_AUTOUPDATE_PLUGINS=1` alongside it.
+
+**If you installed with the script instead of as a plugin, none of this
+applies.** A script install is a copy on your disk with nothing watching it, and
+this skill makes no network calls by design, so it cannot check for itself. Your
+options are to re-run the installer when you want the latest, or to switch to
+the plugin install above and let the host handle it. To see what you are on:
+
+```bash
+grep version ~/.claude/skills/orchestrate/SKILL.md
+```
+
 ## It asks you once
 
 You pick the conversation's model and effort before this skill exists, so it
