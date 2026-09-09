@@ -10,8 +10,21 @@
   "homepage": "https://github.com/1xmint/orchestrate",
   "repository": "https://github.com/1xmint/orchestrate",
   "license": "MIT",
-  "keywords": ["orchestration", "subagents", "planning", "code-review", "vibe-coding"],
-  "agents": "./skills/orchestrate/assets/agents/",
+  "keywords": [
+    "orchestration",
+    "subagents",
+    "planning",
+    "code-review",
+    "vibe-coding"
+  ],
+  "agents": [
+    "./skills/orchestrate/assets/agents/orch-planner.md",
+    "./skills/orchestrate/assets/agents/orch-implementer.md",
+    "./skills/orchestrate/assets/agents/orch-researcher.md",
+    "./skills/orchestrate/assets/agents/orch-browser.md",
+    "./skills/orchestrate/assets/agents/orch-reviewer.md",
+    "./skills/orchestrate/assets/agents/orch-debugger.md"
+  ],
   "outputStyles": "./skills/orchestrate/assets/output-styles/",
   "hooks": "./hooks/hooks.json"
 }

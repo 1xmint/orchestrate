@@ -242,15 +242,44 @@ test('the plugin manifest points at files that exist, and agrees with the skill'
   assert.equal(manifest.name, 'orchestrate', 'kebab-case, no spaces; it is the install id');
   assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
 
-  for (const key of ['agents', 'outputStyles', 'hooks']) {
+  // `agents` takes a list of files, not a directory. It held a directory string
+  // for three releases and `claude plugin validate` rejected the whole
+  // manifest, which is one of the two reasons the advertised one-command
+  // install had never worked for anybody.
+  assert.ok(Array.isArray(manifest.agents), 'agents is a list of files');
+  assert.equal(manifest.agents.length, AGENT_NAMES.length);
+  for (const rel of manifest.agents) assert.ok(existsSync(join(root, rel)), `${rel} exists`);
+  for (const key of ['outputStyles', 'hooks']) {
     const rel = manifest[key];
     assert.ok(rel, `manifest declares ${key}`);
-    assert.ok(existsSync(join(root, rel)), `${key} -> ${rel} exists`);
+    assert.ok(typeof rel === 'string' && existsSync(join(root, rel)), `${key} -> ${rel} exists`);
   }
   // skills/ is scanned by default, so the skill needs no entry, but it does
   // need to be where a plugin host looks for it.
   assert.ok(existsSync(join(root, 'skills', 'orchestrate', 'SKILL.md')));
   assert.equal(manifest.skills, undefined, 'the default skills/ scan already finds it');
+});
+
+// The other reason the one-command install never worked: the README told people
+// to add this repo as a marketplace and there was no marketplace manifest in it
+// at all, so the command they were given could only fail.
+test('the repo is a marketplace, and it points at itself', () => {
+  const root = join(SKILL, '..', '..');
+  const p = join(root, '.claude-plugin', 'marketplace.json');
+  assert.ok(existsSync(p), 'the README tells people to add this repo as a marketplace');
+  const m = JSON.parse(readFileSync(p, 'utf8'));
+  assert.equal(m.name, 'orchestrate');
+  assert.ok(m.owner && m.owner.name, 'a marketplace names its owner');
+  assert.ok(Array.isArray(m.plugins) && m.plugins.length === 1);
+
+  const entry = m.plugins[0];
+  assert.equal(entry.name, 'orchestrate', 'this is the install id users type');
+  assert.equal(entry.source, './', 'the plugin is the repository root');
+
+  // A version that disagrees with plugin.json decides who gets an update, so
+  // the two must move together.
+  const plugin = JSON.parse(readFileSync(join(root, '.claude-plugin', 'plugin.json'), 'utf8'));
+  assert.equal(entry.version, plugin.version, 'marketplace and plugin versions agree');
 });
 
 test('every plugin hook names a script that exists, through the plugin root', () => {
