@@ -54,6 +54,11 @@ repo: <path>   base: <branch @ short sha>   worktree: <yes: isolation handles it
 branch to create: <agent/<id>-<slug>>   run dir: <absolute path in the main checkout>
 allowed files: <globs>   forbidden files: <globs>
 
+PARALLEL
+<none, or: the other task ids running right now and the files each one owns;
+  "you own <globs>, nobody else is touching them" — an agent that cannot see
+  the other worktrees will otherwise edit a shared file and the merge fails>
+
 PRIOR ATTEMPTS
 <none, or: what was tried, what failed, the literal error, what not to repeat>
 
@@ -94,6 +99,13 @@ QUESTIONS: <only ones that block>
 
 The run dir is always the absolute path in the main checkout. A relative
 `.orchestrator/…` inside an isolated worktree disappears with the worktree.
+
+`PARALLEL` is not optional when two tasks run at once. Each agent works in its
+own worktree and can see none of the others, so two of them will both edit
+`src/lib.rs`, or both add a dependency to the same lockfile, and the conflict
+only appears at the merge point when both are already finished. Naming the
+files each one owns is the whole of the fix; a shared file means the tasks were
+not independent and should not have been parallel.
 
 Skills are a toolkit for the packet. A subagent can invoke any installed skill,
 so a step an existing skill already performs is routed to it rather than

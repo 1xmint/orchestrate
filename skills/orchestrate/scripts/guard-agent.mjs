@@ -26,7 +26,23 @@ import {
   DIR, FABLE_CAPS, readJson, today, detectTier, optedInToday, loadSession, saveSession,
 } from './lib/tier.mjs';
 
-const CRED = /\b(sk-ant-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/;
+// Anything here means the packet is carrying a live secret. The list grew after
+// an audit fed it four shapes it did not know: an OpenAI project key, a Google
+// API key, a JSON Web Token, and a password in a connection string.
+const CRED = new RegExp([
+  'sk-ant-[A-Za-z0-9_-]{8,}',
+  'sk-(?:proj|live|test)-[A-Za-z0-9_-]{16,}',
+  'ghp_[A-Za-z0-9]{20,}',
+  'github_pat_[A-Za-z0-9_]{20,}',
+  'gh[opsu]_[A-Za-z0-9]{20,}',
+  'AKIA[0-9A-Z]{16}',
+  'ASIA[0-9A-Z]{16}',
+  'AIza[0-9A-Za-z_-]{30,}',
+  'xox[baprs]-[A-Za-z0-9-]{10,}',
+  'eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}', // a JWT
+  '(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token)\\s*[=:]\\s*["\']?[^\\s"\'<>]{8,}',
+  '-----BEGIN [A-Z ]*PRIVATE KEY-----',
+].join('|'));
 
 export function decide(input, env) {
   const ti = (input && input.tool_input) || {};
@@ -36,22 +52,30 @@ export function decide(input, env) {
   if (CRED.test(prompt)) {
     return { kind: 'deny', reason: 'the packet contains something that looks like a credential; remove it and refer to it by name instead' };
   }
-  if (!/fable/.test(model)) return { kind: 'pass' };
+
+  // A dispatch with no `model` inherits the session's, so a session running on
+  // Fable spent Fable on every sweep without the counter ever moving. The
+  // session's own model comes from the router's state; when it is unknown, do
+  // nothing rather than rewrite a dispatch on a guess.
+  const effective = model || (env.sessionModel || '');
+  if (!/fable/.test(effective)) return { kind: 'pass' };
   if (env.optedIn) return { kind: 'pass' };
+  const inherited = !model;
 
   const tier = env.tier;
   if (tier === 'pro' || tier === 'api' || tier === 'team' || tier === 'unknown') {
-    return { kind: 'deny', reason: `tier is ${tier}: Fable bills usage credits (or the tier is unknown). Ask the user; if they opt in for today run: node "${env.skillDir}/scripts/profile.mjs" --fable-optin` };
+    return { kind: 'deny', reason: `tier is ${tier}: Fable bills usage credits (or the tier is unknown). Ask the user, with a recommendation, before any Fable dispatch; only they can opt in for the day` };
   }
   const cap = FABLE_CAPS[tier];
   if (cap && env.fableCount >= cap) {
     return {
       kind: 'downgrade',
       model: 'opus',
-      reason: `${env.fableCount} Fable dispatches already today on ${tier} (cap ${cap}). Dispatching on opus instead. If Fable is the right call here, opt in for today: node "${env.skillDir}/scripts/profile.mjs" --fable-optin`,
+      inherited,
+      reason: `${env.fableCount} Fable dispatches already today on ${tier} (cap ${cap})${inherited ? ', and this dispatch named no model so it would have inherited the session\'s Fable' : ''}. Dispatching on opus instead. If Fable is the right call here, ask the user, then: node "${env.skillDir}/scripts/profile.mjs" --fable-optin`,
     };
   }
-  return { kind: 'count' };
+  return { kind: 'count', inherited };
 }
 
 function emit(obj) {
@@ -85,7 +109,11 @@ function main() {
   const tier = detectTier().tier;
   const counterPath = join(DIR, `fable-count-${today()}.json`);
   const counter = readJson(counterPath) || { count: 0 };
-  const env = { tier, fableCount: Number(counter.count) || 0, optedIn: optedInToday(), skillDir: SKILL_DIR };
+  const state = loadSession(input.session_id);
+  const env = {
+    tier, fableCount: Number(counter.count) || 0, optedIn: optedInToday(), skillDir: SKILL_DIR,
+    sessionModel: (state && state.self && state.self.model) || '',
+  };
   const d = decide(input, env);
 
   recordDispatch(input, ti, d);

@@ -93,7 +93,9 @@ Thinnest end-to-end slice first, then the slices that widen it. Each row: id
 command, a rubric written now that names the measurement, a stop-and-ask
 condition. Plan inline when the goal is clear and fits one sitting; send it to
 `orch-planner` when it is ambiguous, crosses modules, or is bigger. Parallel
-only when independent, each on its own worktree. Browser tasks one at a time.
+only when independent, each on its own worktree, each packet's `PARALLEL` field
+naming the files it owns: an agent cannot see the other worktrees, so a shared
+file becomes a merge conflict after both are done. Browser tasks one at a time.
 
 ## 4. Take the cheapest rung that clears the bar
 
@@ -142,8 +144,10 @@ dependency or weakened test the packet did not ask for.
 Who reviews: when you are strictly above the author (you Opus, author Sonnet)
 and the class is not risky, read the diff yourself; you already hold the goal
 and the packet, and a reviewer dispatch buys nothing. At or below the author,
-or on a risky class, dispatch `orch-reviewer` on a model no weaker than the
-author's. Never review your own edits.
+on a review class (security, auth, payments, public surfaces, a schema or
+default change, data that moves, anything irreversible), or when you cannot
+tell what you are running on, dispatch `orch-reviewer` on a model no weaker
+than the author's. Never review your own edits.
 
 Grade into Done (verified by you or a reviewer, never only its author),
 Built-unverified, Partial, Blocked, Failed. No evidence means Failed. A

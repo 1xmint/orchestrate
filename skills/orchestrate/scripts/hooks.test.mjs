@@ -80,11 +80,11 @@ test('guard: a non-fable dispatch passes untouched', () => {
   assert.equal(decide({ tool_input: { model: 'opus', prompt: 'TASK: 1' } }, { tier: 'max5', fableCount: 99, optedIn: false, skillDir: '/s' }).kind, 'pass');
 });
 
-test('guard: pro, api, team and unknown deny fable; the reason names the opt-in', () => {
+test('guard: pro, api, team and unknown deny fable, and send the decision to the user', () => {
   for (const tier of ['pro', 'api', 'team', 'unknown']) {
     const d = decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier, fableCount: 0, optedIn: false, skillDir: '/s' });
     assert.equal(d.kind, 'deny', tier);
-    assert.match(d.reason, /--fable-optin/);
+    assert.match(d.reason, /Ask the user/, tier);
   }
 });
 
@@ -499,4 +499,37 @@ test('return check: each invocation gets its own two chances, not each role', ()
   assert.equal(run('return-check.mjs', { ...bad, agent_id: 'a2' }, home).json.decision, 'block');
   assert.equal(countKey({ session_id: 's', agent_id: 'a1' }), countKey({ session_id: 's', agent_id: 'a1' }));
   assert.notEqual(countKey({ session_id: 's', agent_id: 'a1' }), countKey({ session_id: 's', agent_id: 'a2' }));
+});
+
+test('guard: the credential list covers the shapes an audit fed it', () => {
+  const env = { tier: 'max5', fableCount: 0, optedIn: false, skillDir: '/s' };
+  const deny = p => decide({ tool_input: { model: 'sonnet', prompt: p } }, env).kind;
+  assert.equal(deny('use sk-proj-abcdefghijklmnopqrstuvwxyz0123456789'), 'deny', 'an OpenAI project key');
+  assert.equal(deny('AIzaSyA1bcDefGhIjKlMnOpQrStUvWxYz0123456'), 'deny', 'a Google API key');
+  assert.equal(deny('Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop'), 'deny', 'a JWT');
+  assert.equal(deny('connect with password=hunter2correcthorse'), 'deny', 'a password in a connection string');
+  assert.equal(deny('api_key: 9f8e7d6c5b4a39281706'), 'deny');
+  assert.equal(deny('-----BEGIN RSA PRIVATE KEY-----'), 'deny');
+  // A packet that merely talks about credentials is not carrying one.
+  assert.equal(deny('TASK: 9-9-0001 read the token from the environment, never inline it'), 'pass');
+  assert.equal(deny('the password field on the login form'), 'pass');
+});
+
+test('guard: a dispatch that names no model inherits the session\'s, and is counted', () => {
+  const env = { tier: 'max5', fableCount: 0, optedIn: false, skillDir: '/s' };
+  const bare = { tool_input: { subagent_type: 'Explore', prompt: 'sweep the repo' } };
+  // A Fable session used to spend Fable on every sweep with the counter frozen.
+  assert.equal(decide(bare, { ...env, sessionModel: 'fable' }).kind, 'count');
+  assert.equal(decide(bare, { ...env, sessionModel: 'fable', fableCount: 3 }).kind, 'downgrade');
+  assert.match(decide(bare, { ...env, sessionModel: 'fable', fableCount: 3 }).reason, /named no model/);
+  assert.equal(decide(bare, { ...env, sessionModel: 'opus', fableCount: 9 }).kind, 'pass');
+  // Unknown session model: do nothing rather than rewrite on a guess.
+  assert.equal(decide(bare, { ...env, fableCount: 9 }).kind, 'pass');
+});
+
+test('guard: the deny reason asks the user rather than handing the model the opt-in command', () => {
+  const d = decide({ tool_input: { model: 'fable', prompt: 'x' } }, { tier: 'pro', fableCount: 0, optedIn: false, skillDir: '/s' });
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /Ask the user/);
+  assert.doesNotMatch(d.reason, /node "/, 'a runnable command here is a rule the model can lift itself over');
 });
