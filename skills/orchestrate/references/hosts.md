@@ -111,8 +111,9 @@ there (code.claude.com/docs/en/hooks, "Hooks in skills and agents", read 2026-09
 hooks register on invocation and keep running for the rest of the session; a subagent's are
 removed when it finishes, and its `Stop` becomes `SubagentStop`. Claude Code overrides a Stop
 hook after eight consecutive blocks with no progress, so every Stop hook here blocks once per
-thing and honours `stop_hook_active`. Agent-type hooks are labelled experimental, which is why
-the reply check ships as a prompt hook.
+thing and honours `stop_hook_active`. Agent-type hooks are labelled experimental. This skill
+registers no prompt or agent hook at all: it had one, a second model reading every reply, and
+it was deleted in v0.8.0 after firing zero times in about 1,800 turns.
 
 **How hook output reaches the transcript.** Injected context is its own record:
 `{"type": "attachment", "attachment": {"hookEvent": "<Event>", "hookName": "<Event>",
