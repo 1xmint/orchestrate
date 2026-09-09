@@ -75,11 +75,15 @@ with read-only tools and, where the tier allows, a different model from the
 author. Give the reviewer the objective, the author's packet, the diff, and
 the evidence, not your summary of them.
 
-For the highest-risk class (security, auth, payments, public, irreversible),
-use two reviewers with fresh context. Both must `PASS` on the same commit. A
-conditional pass is a `FAIL` with the exact edit named. An unavailable reviewer
-is reported and the gate stays open; it is never silently skipped. Your own
-read is a third check, not a substitute.
+One reviewer, not two. A second reviewer is warranted only when the first one's
+verdict is itself in doubt: two competent results disagree, or the first review
+was thin on a change that is irreversible. Anthropic's own Opus 5 guidance is
+that instructions to double-check with more subagents cause over-verification
+and that removing them cuts tokens with no loss of quality, so a standing "two
+reviewers for this class" rule buys less than it costs. What does not move: a
+conditional pass is a `FAIL` with the exact edit named, an unavailable reviewer
+is reported and the gate stays open rather than being silently skipped, and your
+own read is a check in addition to the reviewer, never instead of it.
 
 Reviewers judge two axes: does it meet the objective; does it meet the repo's
 standards. Findings are numbered so a fix packet can be scoped to them. A

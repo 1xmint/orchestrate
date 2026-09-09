@@ -151,10 +151,13 @@ the earlier attempt would bias it.
 `ledger.mjs` saves every return and moves its row to 🔍 review; grading is
 yours. Per return, in order: schema complete; RESTATED matches the objective
 (else fix the packet); BRANCH and WORKTREE present; CHANGED only in allowed
-files. Then verify: have `Explore` run the verification commands in that
-worktree and return the last 20 lines plus `git diff --stat`; never run a
-suite in this conversation. Then the drift check: no refactor, default change,
-dependency or weakened test the packet did not ask for.
+files. Then verify: run the packet's verification commands in that worktree
+yourself with the output filtered to what decides it (`… 2>&1 | tail -20`), plus
+`git diff --stat`. Hand the run to `Explore` on haiku only when the filtered
+output is still long or the suite is slow. A dispatch to check a command that
+takes five seconds costs more than the command. Then the drift check: no
+refactor, default change, dependency or weakened test the packet did not ask
+for.
 
 Who reviews: when you are strictly above the author (you Opus, author Sonnet)
 and the class is not risky, read the diff yourself; you already hold the goal

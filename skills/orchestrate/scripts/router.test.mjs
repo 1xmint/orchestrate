@@ -278,3 +278,34 @@ test('the advice reaches the user with the card, and does not repeat', () => {
   const second = prompt(home, repo, 'Add another flag with a test, then run the gate and review it.', { transcript_path: transcript });
   assert.doesNotMatch(second, /your setup/, 'said once, with the card, and not again');
 });
+
+// The question that caused all of this, verbatim as it was typed.
+const THE_QUESTION = 'also is there recommended manager models and effort levels for each subscription tier (3 tiers)';
+
+test('a leading connective no longer hides a question', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'Fix the typo in README.md.');
+  const out = prompt(home, repo, THE_QUESTION);
+  // It has no question mark and does not open with a question word, so it read
+  // as a statement and the router said nothing at all.
+  assert.match(out, /research across a set/);
+  assert.match(out, /dispatch orch-researcher/);
+  assert.match(out, /A table from one search is never an answer/);
+});
+
+test('a research question about one case still allows one source, with its limits named', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = prompt(home, repo, 'What is the currently recommended way to read a .env file in Node 22? Cite the source.');
+  assert.match(out, /fetch the primary source inline if one settles it, cite it, and say what it does not settle/);
+  assert.doesNotMatch(out, /never an answer/, 'one case is not the set shape');
+});
+
+test('the set shape is about inherited defaults, not about the word "each"', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  // Ordinary work that happens to span files is not a research dispatch.
+  prompt(home, repo, 'Fix the typo in README.md.');
+  const work = prompt(home, repo, 'rename filed_at to filed_on in each module');
+  assert.doesNotMatch(work, /research across a set/);
+  const chat = prompt(home, repo, 'also can you bump the version');
+  assert.equal(chat, '', 'a request is not a research question');
+});

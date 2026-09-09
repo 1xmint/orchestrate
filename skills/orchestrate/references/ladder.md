@@ -46,3 +46,29 @@ Take the cheapest rung that clears the bar; climb only on evidence, never on hab
 Orthogonal: ask ONE question, only for money, public surfaces, credentials, destructive or irreversible actions, or a strategic fork, always with a recommendation · plan mode first when the approach is open or crosses modules · "keep going until green" = /goal or a Stop hook, not repeated prompts · waiting = Monitor / ScheduleWakeup / CronCreate / /loop, never a sleep loop · browser tasks one at a time (one pane) · MCP only where no CLI exists.
 Money: pick the model the task needs, then check the plan. If it is not included, that is the user's money and their call: recommend it, price it, give them the alternatives. Nothing caps or rewrites your choice. A wrong model costs quota; a wrong rung costs your context. Mute: type "router off".
 ```
+
+## When a question is a dispatch, not an answer
+
+Rung 3.5 says fetch a source rather than answering from memory. That is not
+enough on its own, and the gap has a name: a manager once answered "what is
+recommended for each tier" from a single search, with a confident table, while
+this file, `SKILL.md` §2 and the router all already said not to. It noticed, and
+judged one source sufficient. Restating the rule a fourth time would not have
+helped; research on instruction-following finds compliance collapses on exactly
+this shape, and that adding more instructions lowers adherence further.
+
+So the rule has a test in it now. **Dispatch `orch-researcher` instead of
+answering when all three hold:**
+
+1. it asks for a recommendation, a current fact, or a best practice; **and**
+2. the answer gets written down for others to inherit — a default, a table, a
+   config value, a line in a README — or it spans a set of cases ("for each",
+   "per tier", "all three", "N options"); **and**
+3. no command or test can prove the answer wrong. Only sources can.
+
+If only the first holds, fetch one primary source, cite it, and add one line
+saying what it does not settle.
+
+**A table from one search is never an answer.** The router classifies this shape
+as its own rung and says so, but the rung is a reminder, not a gate: the judgment
+is still yours, and this is the case where it is most often wrong.
