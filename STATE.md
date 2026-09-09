@@ -2,6 +2,95 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.8.0 — cut it down to judgment, 2026-09-09
+
+Josh: we are over-engineering; the manager should ask direct questions and find
+out what someone is actually trying to express instead of agreeing with them; it
+should feel like a real engineer who tells you what you need to hear; and we are
+not taking advantage of Claude's own reasoning, because a manager that saw the
+big picture would not need most of this scaffolding.
+
+He was right, and the repo's own research already said so. `docs/research/0003`
+found that compliance, not detection, was the failure — the rule existed and was
+ignored — and that **adding instructions lowers adherence further**. The response
+to that finding had been to add a reply checker, a research floor, a depth-call
+table and a money rule.
+
+### The principle
+
+**Keep information the manager cannot derive. Cut instruction that tells a
+capable model how to think.**
+
+Information stays: what a plan includes, what the limits mean, what each model
+costs, what the host can and cannot do, where the gate comes from, the
+failure-class table. Mechanisms stay: the credential guard, the ledger, the
+research floor. Instruction goes, and what survives of it is said once.
+
+### What went
+
+- **The reply check.** A second model read every reply and sent the turn back if
+  a claim named no evidence. **Zero fires across every session on this machine,
+  including 588 turns in one build**, at about half a cent a turn. Certain cost,
+  unmeasured benefit, and a model policing a model is the most expensive rung of
+  the enforcement ladder. `RETIRED_PROMPTS` in `lib/settings.mjs` removes it from
+  anyone who already installed it.
+- **`references/contracts.md`, 11.8KB** explaining a 4KB template field by field
+  and then restating what each of the six role agents does — while every agent
+  file carries its own role rules, where the agent actually reads them. The four
+  things it had that the template lacked moved into `assets/packet.md`.
+- **`references/borrowed.md` and `references/audit-prompt.md`** left the shipped
+  surface for `docs/`. One is attribution for a reader; the other is a
+  maintainer's tool that still said "Current for v0.4.0". Neither is instruction.
+- **The sermons.** `routing.md` said "pick the smallest model whose chance of a
+  first-time-right result clears the bar" three times and carried a 15-line
+  worked dialogue for a two-line rule. `evaluation.md` restated `models.md`'s
+  verification rule in full rather than pointing at it. `ladder.md` said the
+  depth call's third row twice. `SKILL.md` carried `routing.md`'s table.
+
+### What arrived
+
+None of the 105KB told the manager how to *be* with the user. Two rules, in the
+output style because that is in the system prompt on every turn:
+
+- **Find out what they actually want.** What they typed is a clue, not the whole
+  of it. Ask about the hard part, not the obvious part.
+- **Agreement is not a deliverable.** Say the weak thing is weak in the first
+  sentence, then say what you would do about it. Never flatter.
+
+Both are in `SPEECH_RULES`, so they are checked against `SKILL.md` and the style
+together.
+
+### The numbers
+
+| | before | after |
+|---|---|---|
+| shipped instruction text | 105,041 bytes | 67,222 bytes |
+| files | 11 | 9 |
+| tests | 189 | 188 |
+| per-turn model calls added by the skill | 1 | 0 |
+
+### What could not be measured, and why
+
+The plan opened with "build the instrument before cutting anything":
+`claude plugin eval --ablation with-without` runs the suite with and without the
+plugin and reports the delta, which would have answered whether 105KB of
+instructions beat plain Claude at all. **It is in early access and refuses on
+this account.** The fallback was a manual A/B, six real orchestration runs. Two
+things argued against paying for it: a cross-file overlap measurement showed only
+**3%** of the prose is duplication, so almost every cut is a judgment call that
+three prompts could not settle; and n=3 with a hand-built judge looks rigorous
+without being rigorous.
+
+So this cut is not validated by an experiment. It is validated by the principle,
+by 188 tests, and by whether the next real run feels better. `HANDOFF.md` already
+said the user's own use is the signal that matters more than any test here, and
+that is the honest position for this change too.
+
+**The plan's "under 40KB" target was not met, and should not have been.** It was
+set before the information-versus-instruction split was measured. Reaching it
+would mean deleting `hosts.md` (11KB of host facts a model cannot derive) and the
+price tables, which is the opposite of the principle the audit runs on.
+
 ## v0.7.3 — the wrong-run bug was corrupting ledgers, 2026-09-09
 
 `latestRun` sorted run folders by name. Folders are `<YYYYMMDD>-<slug>`, so that
