@@ -45,6 +45,18 @@ if (/\b(sk-ant-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20
 
 if (!/fable/.test(model)) process.exit(0);
 
+// The hook can be registered twice (skill frontmatter plus settings.json).
+// The same payload within a few seconds is the same dispatch: count it once.
+try {
+  const sig = `${input.session_id || ''}|${ti.subagent_type || ''}|${model}|${prompt.length}|${prompt.slice(0, 200)}`;
+  const seenPath = join(DIR, 'last-dispatch.json');
+  const seen = readJson(seenPath);
+  const now = Date.now();
+  if (seen && seen.sig === sig && now - seen.ts < 5000) process.exit(0);
+  mkdirSync(DIR, { recursive: true });
+  writeFileSync(seenPath, JSON.stringify({ sig, ts: now }) + '\n');
+} catch {}
+
 // tier: the profile override, else what profile.mjs would detect
 let tier = 'unknown';
 const override = readJson(join(DIR, 'profile.json'));

@@ -44,8 +44,9 @@ with the four choices and save the answer. An API-key session is `api`:
 dollars rather than a window; use the Pro column, and dispatch to Fable only
 after the user opts in for the day (`profile.mjs --fable-optin`).
 
-The two Fable rules are held by a hook, not by this text, once the user runs
-`node scripts/install.mjs --with-hook`: `guard-agent.mjs` denies a
+The two Fable rules are held by a hook, not by this text: SKILL.md's
+frontmatter registers `guard-agent.mjs` on the Agent tool when the skill is
+invoked (`install.mjs --with-hook` does the same globally). It denies a
 `model: fable` dispatch on pro/api/team/unknown without today's opt-in, caps
 Fable at 3 dispatches a day on Max 5x and 6 on Max 20x, and denies any packet
 carrying a credential. Without the hook the same numbers are the rule.

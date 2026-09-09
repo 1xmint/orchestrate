@@ -24,12 +24,18 @@ running session within a minute or so; a new session sees them at once.
 Type `/orchestrate <your goal>`, or just describe a multi-part goal; the
 skill triggers on its own.
 
-Recommended: `node scripts/install.mjs --with-hook` also registers a small
-pre-dispatch hook in `~/.claude/settings.json`. It blocks a Fable dispatch on
-Pro, API, Team or unknown plans unless you opt in for the day, caps Fable at
-3 dispatches a day on Max 5x (6 on Max 20x), and blocks any agent brief that
-contains something shaped like a credential. Without the hook those rules are
-only text.
+The money rules are automatic. When the skill is invoked it registers a small
+hook on the Agent tool for the rest of the session (declared in SKILL.md's
+frontmatter, nothing to configure). The hook blocks a Fable dispatch on Pro,
+API, Team or unknown plans unless you opt in for the day, caps Fable at 3
+dispatches a day on Max 5x (6 on Max 20x), and blocks any agent brief that
+contains something shaped like a credential. `node scripts/install.mjs
+--with-hook` registers the same hook globally instead, for sessions that
+never invoke the skill; you do not need both.
+
+Two consequences of the frontmatter hook: the `.skill` file will not upload
+to claude.ai (that field is Claude Code-only, and claude.ai has no subagents
+anyway), and Codex ignores it.
 
 First run: the skill reads your plan tier from your local Claude config. If it
 cannot, it asks once and remembers:

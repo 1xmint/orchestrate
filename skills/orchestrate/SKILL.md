@@ -13,7 +13,13 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (hey-vera)
-  version: "0.2.0"
+  version: "0.3.0"
+hooks:
+  PreToolUse:
+    - matcher: "Agent"
+      hooks:
+        - type: command
+          command: "node \"$HOME/.claude/skills/orchestrate/scripts/guard-agent.mjs\""
 ---
 
 # Orchestrate
@@ -47,8 +53,9 @@ whether the six `orch-*` role agents are installed, and the ledger state.
   full-tool agent.
 - Fable: off on Pro, API, Team and unknown tiers unless the user opts in for
   the day (`profile.mjs --fable-optin`); at most 3 dispatches a day on Max 5x,
-  6 on Max 20x. `scripts/guard-agent.mjs` enforces this when installed as a
-  hook; the numbers are the rule either way.
+  6 on Max 20x. `scripts/guard-agent.mjs` enforces this: this skill
+  registers it as a hook on the Agent tool the moment it is invoked. The
+  numbers are the rule even where hooks are unavailable.
 
 ## 1. Open the ledger, then understand
 
