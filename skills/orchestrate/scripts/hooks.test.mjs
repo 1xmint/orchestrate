@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseReturn, sumUsage, updateRow, PHASE } from './ledger.mjs';
+import { parseReturn, sumUsage, updateRow, PHASE, isRepeat } from './ledger.mjs';
 import { check as returnCheck, MAX_BLOCKS } from './return-check.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
 import { decide } from './guard-agent.mjs';
@@ -382,4 +382,51 @@ test('turn check: no dispatch, no open run, or a Pickup written after the dispat
   const bare = mkdtempSync(join(tmpdir(), 'orch-bare2-'));
   mkdirSync(join(bare, '.git'), { recursive: true });
   assert.equal(run('turn-check.mjs', { session_id: 'b', cwd: bare }, home).stdout.trim(), '');
+});
+
+// ---- the ledger fires twice on every stop, by design of the install --------
+
+test('ledger: the same stop delivered twice writes one return and one attempt', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  const payload = {
+    hook_event_name: 'SubagentStop', session_id: 'dbl', cwd: repo.dir,
+    agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  };
+  // The recommended install registers this hook globally AND from SKILL.md's
+  // frontmatter, so both copies see the same stop. Before the dedupe this left
+  // returns/001 and returns/002 and an attempt count of 2 for one dispatch.
+  run('ledger.mjs', payload, home);
+  const second = run('ledger.mjs', payload, home);
+
+  assert.deepEqual(readdirSync(join(repo.runDir, 'returns')), ['001-orch-implementer.md']);
+  assert.match(readFileSync(repo.runMd, 'utf8'), /\| 9-9-0001 \| 🔍 review \|.*\| 1 \|/);
+  assert.equal(second.stdout.trim(), '', 'the second copy says nothing');
+});
+
+test('ledger: a genuine second attempt is still recorded', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  const base = { hook_event_name: 'SubagentStop', session_id: 'retry', cwd: repo.dir, agent_type: 'orch-implementer' };
+  run('ledger.mjs', { ...base, last_assistant_message: GOOD_RETURN }, home);
+  run('ledger.mjs', { ...base, last_assistant_message: GOOD_RETURN.replace('41 passed', '42 passed') }, home);
+  assert.equal(readdirSync(join(repo.runDir, 'returns')).length, 2, 'a different return is a different stop');
+  assert.match(readFileSync(repo.runMd, 'utf8'), /\| 2 \|/);
+});
+
+test('ledger: two agents stopping together are not mistaken for one', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  const base = { hook_event_name: 'SubagentStop', session_id: 'par', cwd: repo.dir, last_assistant_message: GOOD_RETURN };
+  run('ledger.mjs', { ...base, agent_type: 'orch-implementer' }, home);
+  run('ledger.mjs', { ...base, agent_type: 'orch-reviewer' }, home);
+  assert.deepEqual(readdirSync(join(repo.runDir, 'returns')), ['001-orch-implementer.md', '002-orch-reviewer.md']);
+});
+
+test('ledger: the dedupe window is a window, not a permanent memory', () => {
+  const sig = 'abc';
+  assert.equal(isRepeat({ sig, ts: 1000 }, sig, 5000), true, 'four seconds later is the same stop');
+  assert.equal(isRepeat({ sig, ts: 1000 }, sig, 60000), false, 'a minute later is not');
+  assert.equal(isRepeat({ sig: 'other', ts: 1000 }, sig, 1500), false);
+  assert.equal(isRepeat(null, sig, 1000), false);
 });

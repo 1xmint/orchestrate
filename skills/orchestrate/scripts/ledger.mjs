@@ -20,7 +20,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { findRepoRoot, latestRun, readJson } from './lib/tier.mjs';
+import { createHash } from 'node:crypto';
+import { findRepoRoot, latestRun, readJson, DIR } from './lib/tier.mjs';
 
 export const PHASE = { DONE: '🔍 review', PARTIAL: '◐ partial', BLOCKED: '⛔ blocked' };
 
@@ -118,6 +119,27 @@ function emit(text) {
   if (text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStop', additionalContext: text } }));
 }
 
+export const DEDUPE_MS = 10000;
+
+// True when this exact stop was already recorded, by this hook, a moment ago.
+// Keyed on the return itself, so a genuine retry minutes later still counts.
+// Any failure here answers false: a duplicate row is better than a lost one.
+export function isRepeat(prev, sig, now, windowMs = DEDUPE_MS) {
+  return Boolean(prev && prev.sig === sig && now - Number(prev.ts) < windowMs);
+}
+
+function alreadyHandled(input, agent, text) {
+  try {
+    const sig = createHash('sha256').update(`${input.session_id || ''}|${agent}|${text}`).digest('hex').slice(0, 32);
+    const path = join(DIR, 'last-return.json');
+    const now = Date.now();
+    if (isRepeat(readJson(path), sig, now)) return true;
+    mkdirSync(DIR, { recursive: true });
+    writeFileSync(path, JSON.stringify({ sig, ts: now }) + '\n');
+  } catch {}
+  return false;
+}
+
 function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
@@ -128,6 +150,13 @@ function main() {
   const text = String(input.last_assistant_message || '');
   if (!text.trim()) return;
   const agent = String(input.agent_type || input.subagent_type || 'agent').replace(/[^A-Za-z0-9_-]/g, '_');
+
+  // The recommended install registers this hook twice: once globally in
+  // settings.json, and once from SKILL.md's frontmatter while the skill is in
+  // play. Both fire on the same stop. Without this, one dispatch writes two
+  // return files and counts as two attempts. Same payload within ten seconds
+  // is the same stop: act once.
+  if (alreadyHandled(input, agent, text)) return;
   const r = parseReturn(text);
   const usage = sumUsage(input.agent_transcript_path);
 
