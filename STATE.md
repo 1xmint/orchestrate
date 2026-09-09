@@ -7,7 +7,7 @@ Resume point for building the `orchestrate` skill.
 Plan: `C:\Users\Josh\.claude\plans\you-are-the-senior-kind-mango.md`, grounded
 2026-09-09 against `main @ 019bd5e` and the live docs for the desktop app's
 2.1.260. Seven reflexes, each with a mechanism rather than more prose. 148 tests
-became 182, green at every commit.
+became 183, green at every commit.
 
 ### What changed
 
@@ -69,7 +69,7 @@ into `evaluation.md` §6 and §9, `lanes.md` and `models.md`.
 | the card body | 1,546 chars | asserted at 1,550 |
 | the Plain style | 3,846 bytes | asserted at 4,500 |
 | this build session | $42.56 at list price, ~28% of a Max 5x week | `measure.mjs --latest --dollars` |
-| tests | 182 | `node --test "skills/orchestrate/scripts/**/*.test.mjs"` |
+| tests | 183 | `node --test "skills/orchestrate/scripts/**/*.test.mjs"` |
 
 The floor's narrowing is worth recording because the first version would have
 been unshippable. `research && setShape` alone fired on pasted plans and handoff
