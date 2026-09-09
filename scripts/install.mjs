@@ -68,6 +68,17 @@ for (const t of targets) {
   say(`installed -> ${t}`);
 }
 
+// ---- the output style -------------------------------------------------------
+// Copied, never selected. An output style rewrites the system prompt for every
+// turn of every session, so turning one on is the user's call, not an
+// installer's. `outputStyle` lives in their settings and they choose it.
+const STYLE_SRC = join(SRC, 'assets', 'output-styles', 'plain.md');
+const STYLE_DST = join(HOME, '.claude', 'output-styles', 'plain.md');
+if (existsSync(STYLE_SRC)) {
+  if (!dryRun) { mkdirSync(dirname(STYLE_DST), { recursive: true }); cpSync(STYLE_SRC, STYLE_DST); }
+  say(`output style -> ${toPosix(STYLE_DST)} (not selected; see below)`);
+}
+
 // ---- hooks in ~/.claude/settings.json --------------------------------------
 const wantRouter = has('--with-router');
 const wantGuard = has('--with-hook');
@@ -92,5 +103,18 @@ if (wantRouter || wantGuard) {
 if (!has('--no-agents')) {
   const args = [join(SRC, 'scripts', 'install-agents.mjs'), ...(dryRun ? ['--dry-run'] : [])];
   const r = spawnSync(process.execPath, args, { stdio: 'inherit', env: { ...process.env, ORCH_SKILL_DIR: CLAUDE_SKILL } });
-  process.exit(r.status ?? 1);
+  if (r.status) process.exit(r.status);
+}
+
+if (existsSync(STYLE_SRC)) {
+  console.log('');
+  console.log('The "Plain" output style is installed but off. It answers first, proves every');
+  console.log('claim, and explains rather than defines, on every turn of every session.');
+  console.log('Turn it on by adding this to ~/.claude/settings.json (or a project\'s');
+  console.log('.claude/settings.local.json), then starting a new session:');
+  console.log('');
+  console.log('  "outputStyle": "Plain"');
+  console.log('');
+  console.log('Claude Code also ships a built-in "Concise" style that leads with the result');
+  console.log('and drops the narration. Try that first if you only want shorter answers.');
 }

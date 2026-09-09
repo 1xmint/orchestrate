@@ -142,11 +142,53 @@ test('the skill tells the manager to ask when a model is not in the plan', () =>
   assert.match(routing, /When Fable earns its cost/);
 });
 
-test('SKILL.md carries the plain-speech rules, not just the wish', () => {
+// Each of these is a rule with a test inside it, not a wish. A wish ("be
+// clear") survives any rewrite; a test ("ask what happens if they ignore it")
+// is what actually changes an output.
+// Case-insensitive: the same rule opens a bullet in one file and a sentence in
+// the other. What has to match is the rule, not its capital letter.
+const SPEECH_RULES = [
+  /Lead with the answer/i,
+  /One idea per sentence/i,
+  /Name a term once, then reuse it/i,
+  /Compare to everyday life, not to other technology/i,
+  /Every claim carries its proof/i,
+  /ask what\s+happens if they ignore it/i,
+  /A number earns its place/i,
+  /Say it once/i,
+  /Nothing to say is a valid turn/i,
+  /explain it rather than define it/i,
+];
+
+test('SKILL.md carries the plain-speech rules, each with its own test', () => {
   const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
   assert.match(skill, /How to talk to the user/);
-  assert.match(skill, /someone who is fifteen/);
-  assert.match(skill, /Answer the question that was asked/);
-  assert.match(skill, /Never call something remaining work unless the user has to do something/);
-  assert.match(skill, /A number the user cannot act on does not go in the report/);
+  assert.match(skill, /fifteen and sharp/);
+  assert.match(skill, /Simplify the words, never the facts/, 'plain is not dumbed down');
+  for (const r of SPEECH_RULES) assert.match(skill, r, String(r));
+});
+
+test('the Plain output style ships, is valid, and says the same thing as §9', () => {
+  const p = join(SKILL, 'assets', 'output-styles', 'plain.md');
+  assert.ok(existsSync(p), 'assets/output-styles/plain.md ships with the skill');
+  const style = readFileSync(p, 'utf8');
+  const fm = frontmatter(style);
+
+  assert.match(fm, /^name: Plain$/m);
+  assert.match(fm, /^description: \S/m, 'the /config picker shows the description');
+  // Without this the style would drop Claude Code's engineering instructions,
+  // which is right for a writing assistant and wrong for an orchestrator.
+  assert.match(fm, /^keep-coding-instructions: true$/m);
+
+  for (const r of SPEECH_RULES) assert.match(style, r, `the style and §9 agree on ${r}`);
+  assert.match(style, /never for the evidence/, 'brevity never applies to an error or a warning');
+});
+
+test('the installer copies the output style but never selects it', () => {
+  const installer = readFileSync(join(SKILL, '..', '..', 'scripts', 'install.mjs'), 'utf8');
+  assert.match(installer, /output-styles/);
+  // Selecting a style rewrites the system prompt for every session the user
+  // has. That is their call, so the installer prints the line and stops.
+  assert.doesNotMatch(installer, /writeSettings\([^)]*outputStyle|settings\.outputStyle\s*=/);
+  assert.match(installer, /"outputStyle": "Plain"/, 'it shows them the one line to add');
 });

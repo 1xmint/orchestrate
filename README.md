@@ -50,6 +50,32 @@ cannot, it asks once and remembers:
 node ~/.claude/skills/orchestrate/scripts/profile.mjs --set tier=max5
 ```
 
+## Make it talk like a person
+
+The install copies an output style called **Plain** to
+`~/.claude/output-styles/plain.md` and leaves it switched off. An output style
+is the strongest place to put "how to talk": it edits the system prompt itself,
+so it applies to every turn of every session rather than only while a skill is
+loaded. Turning one on changes all your sessions, so that stays your call. Add
+this to `~/.claude/settings.json`, or to a project's
+`.claude/settings.local.json`, and start a new session:
+
+```json
+{ "outputStyle": "Plain" }
+```
+
+Plain answers first, proves every claim with a path or a command, names a
+technical word once and then reuses it, compares things to everyday life rather
+than to other technology, and explains rather than defines. It never shortens an
+error, a warning, or a confirmation. It keeps Claude Code's engineering
+instructions, so it changes how you are talked to and nothing about how the work
+is done.
+
+If you only want shorter answers, Claude Code ships a built-in **Concise** style
+that leads with the result and drops the narration. Try that first. The same
+rules live in `SKILL.md` §9 for the times the style is off, and for hosts like
+Codex that have no output styles at all.
+
 ## Drop it into one repo
 
 ```bash
@@ -138,7 +164,7 @@ skills/orchestrate/
   references/           ladder, routing, contracts, evaluation, lanes, hosts, provenance
   scripts/              router, guard, ledger, return-check, turn-check, gate,
                         profile, run-init, measure, install-agents, install-project
-  assets/               RUN.md ledger template, six role agents
+  assets/               RUN.md template, packet template, six role agents, the Plain output style
 evals/                  test prompts for the skill-creator loop
 scripts/install.mjs     installs the skill, agents and hooks
 scripts/package.mjs     builds the two .skill zips

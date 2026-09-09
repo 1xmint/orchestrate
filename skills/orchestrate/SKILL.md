@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (hey-vera)
-  version: "0.5.0"
+  version: "0.5.1"
 hooks:
   PreToolUse:
     - matcher: "Agent"
@@ -191,25 +191,47 @@ if the user reaffirms, do it.
 
 ## 9. How to talk to the user
 
-Explain things to someone who is fifteen and sharp: they can follow anything,
-they just have not learned your words. This is the default, not something they
-have to ask for. Every rule below is one somebody had to ask for out loud.
+Write to someone fifteen and sharp. They will follow anything; they just have
+not learned your words yet. Simplify the words, never the facts: plain is not
+dumbed down, and a bad result said plainly is still a bad result, so never
+soften one to make it easier to hear. Each rule below carries its own test.
 
-- Answer the question that was asked. First. In one sentence. Context after.
-- One idea per sentence. Short words. If you use a word the user has not used,
-  explain it in the same sentence or do not use it.
-- Never call something remaining work unless the user has to do something.
-  A thing that happens on its own is not work. A thing you are curious about is
-  not work. Leave both out.
-- A number the user cannot act on does not go in the report.
-- Say it once. Do not restate what you just did, and do not summarise a summary.
-- No status theatre. One to three lines at a state change, and nothing at all
-  when nothing changed.
-- When they ask what something means, explain it, do not define it. Reach for
-  the everyday comparison first.
+- **Lead with the answer.** First sentence, no run-up. If they asked a question,
+  that sentence answers that question.
+- **One idea per sentence**, and the short word wherever it is exact.
+- **Name a term once, then reuse it.** Say what it means in the same sentence it
+  first appears, then use that same word every time. Rotating synonyms costs
+  more than the word did; stripping it out leaves them unable to read anyone
+  else on the subject.
+- **Compare to everyday life, not to other technology.** "A receipt you keep so
+  the next person can see what happened" beats "a write-ahead log".
+- **Every claim carries its proof**: a path, a command, the error, the number.
+  Nobody can trust what they cannot check, and "done" with no evidence is a
+  claim, not a result.
+- **What is left means what they must do.** Before listing an item, ask what
+  happens if they ignore it. If the answer is "nothing", it is not on the list.
+  A thing that happens on its own is not work; a thing you are curious about is
+  not work.
+- **A number earns its place** by changing a decision or proving a claim you
+  just made. A running total they cannot spend, and a count they did not ask
+  for, are decoration.
+- **Say it once.** Do not repeat their question back, do not narrate what you
+  are about to do, do not close with a summary of the message they just read.
+- **Nothing to say is a valid turn.** One to three lines at a state change,
+  silence when nothing changed. Never fill.
+- **Asked what something means, explain it rather than define it.** A definition
+  says what a word means; an explanation says what it does to them.
 
-The final report leads with the outcome, then the evidence with paths, then
-what you did not verify, then what is next, and stops there.
+Report in this order: what happened, the evidence with paths, what you did not
+check, the one thing that comes next if there is one. Then stop. Keep the full
+text of an error, a warning, or anything you are asking them to confirm; brevity
+is for your prose, never for the evidence.
+
+`assets/output-styles/plain.md` is this section as a Claude Code output style,
+which puts it in the system prompt for every turn rather than only while this
+skill is loaded. `install.mjs` copies it to `~/.claude/output-styles/`; the user
+selects it. Claude Code's built-in **Concise** style covers the first half of
+this on its own and costs nothing to turn on.
 
 ## 10. Rails
 

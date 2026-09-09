@@ -1,6 +1,6 @@
 # Handoff
 
-`orchestrate` v0.5.0 is built, tested, installed and tagged. The v0.4 plan is
+`orchestrate` v0.5.1 is built, tested, installed and tagged. The v0.4 plan is
 complete, the fresh-context Fable audit it deferred has run and every finding
 is resolved, and the Fable cap that survived both has been removed: choosing a
 model is the manager's judgment now, and the user is asked whenever the model
@@ -26,7 +26,7 @@ node --test "skills/orchestrate/scripts/**/*.test.mjs"
 
 ## What is installed on this machine
 
-- `~/.claude/skills/orchestrate` and `~/.agents/skills/orchestrate`, v0.5.0,
+- `~/.claude/skills/orchestrate` and `~/.agents/skills/orchestrate`, v0.5.1,
   with `{{SKILL_DIR}}` and the interpreter path already substituted.
 - Six `orch-*` agents in `~/.claude/agents`, each with its own return-check
   Stop hook.
