@@ -326,6 +326,39 @@ function detectRuns(root) {
   return { dir: base, count: runs.length, latest: runs.length ? runs[runs.length - 1] : null };
 }
 
+// ---- prices -----------------------------------------------------------------
+// What things have actually cost on this machine, so a price tag before a
+// dispatch is a measurement rather than a table. Still no running total: a
+// counter reads as an allowance and invites spending up to it.
+function pricesLine(tier) {
+  try {
+    const costsPath = join(HOME, '.claude', 'orchestrate', 'costs.jsonl');
+    let rows = [];
+    try {
+      rows = readFileSync(costsPath, 'utf8').split('\n').filter(Boolean)
+        .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } catch {}
+    const by = new Map();
+    for (const r of rows) {
+      if (!r.role || !r.model || !Number.isFinite(Number(r.dollars))) continue;
+      const k = `${r.role.replace(/^orch-/, '')}/${r.model}`;
+      const v = by.get(k) || { n: 0, sum: 0 };
+      v.n++; v.sum += Number(r.dollars);
+      by.set(k, v);
+    }
+    const top = [...by.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 6)
+      .map(([k, v]) => `${k} $${(v.sum / v.n).toFixed(1)} (${v.n})`);
+    const profile = readJson(join(HOME, '.claude', 'orchestrate', 'profile.json')) || {};
+    const w = Number(profile.weekDollars);
+    const week = Number.isFinite(w) && w > 0
+      ? `a week here is about $${w} of list price (you set that)`
+      : { pro: 30, max5: 150, max20: 600, team: 30 }[tier]
+        ? `a week is roughly $${{ pro: 30, max5: 150, max20: 600, team: 30 }[tier]} of list price (one observation; --set week=<dollars> to correct it)`
+        : 'no week anchor for this plan';
+    return `prices measured here: ${top.length ? top.join(', ') : 'none yet; models.md has the starting table'} · ${week}`;
+  } catch { return 'prices measured here: unavailable'; }
+}
+
 // ---- output -----------------------------------------------------------------
 const brief = args.includes('--brief');
 const skillDir = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -354,6 +387,7 @@ if (brief) {
     console.log(`this plan includes: ${included}`);
     console.log(`providers: ${prov}`);
     console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none'}`);
+    console.log(pricesLine(tier.tier));
   } catch {}
   process.exit(0);
 }

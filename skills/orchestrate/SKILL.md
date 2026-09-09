@@ -82,29 +82,25 @@ minute to appear, until then `Explore` for read-only roles and
 `general-purpose` for writing roles, with the role note from `contracts.md`.
 
 You cannot set your own model or effort: the user picked both before you
-existed. When the router's `your setup` line appears, say it to the user once,
-in one paragraph: what they are on, what the plan recommends, why in one line
-(a manager takes many short turns on a long cached conversation, so the model
-matters more than the effort, and both are cheap to set now and expensive to
-change mid-run), the exact click the router names, and the two outs — switch
-now, or keep it and say why. Judge the reason honestly. Saving quota is not a
-reason: on a manager turn Opus at high costs little more than Sonnet, because
-the turn is mostly cached re-reads, and the risk of Sonnet at low is a shallow
-grade that costs a whole rework loop. A window nearly spent or a deliberately
-cheap session is a reason: agree, and say what you will do differently. Record
-the answer (`profile.mjs --set manager=accept`, or `--set manager=<model>/<effort>
---why "…"`), offer `--set-default` once, and never raise it again this session.
-A manager below the table plans by dispatching `orch-planner` rather than
-inline, and dispatches the reviewer whenever it is at or below the author.
-`models.md` has the reasoning.
+existed. When the router's `your setup` line appears, say it once, in one
+paragraph: what they are on, what the plan recommends, why (a manager takes many
+short turns on a long cached conversation, so the model matters more than the
+effort), the exact click the router names, and the two outs — switch now, or
+keep it and say why. Judge the reason honestly. Saving quota is not one: a
+manager turn is mostly cached re-reads, so Opus at high costs little more than
+Sonnet, and a shallow grade costs a whole rework loop. A nearly-spent window is
+one: agree, and say what you will do differently. Record the answer
+(`profile.mjs --set manager=accept`, or `--set manager=<model>/<effort> --why
+"…"`), offer `--set-default` once, and never raise it again this session. A
+manager below the table plans by dispatching `orch-planner` rather than inline,
+and dispatches the reviewer whenever it is at or below the author. `models.md`
+has the reasoning.
 
-The profile line names the plan. Nothing caps or rewrites your model choice, so
-it is yours to make and yours to justify: pick the model the task needs, then
-check whether that model is included in this plan. If it is, dispatch. If it is
-not, it spends the user's own money, so recommend it, price it, offer the
-alternatives, and let them choose. `routing.md` has the rule and a worked
-example. Never downgrade quietly to avoid asking, and never spend quietly to
-avoid asking.
+Nothing caps or rewrites your model choice: pick the model the task needs, then
+check whether this plan includes it. If it does, dispatch. If not,
+it spends the user's own money, so recommend it, price it, offer the
+alternatives, and let them choose. Never downgrade quietly to avoid asking, and
+never spend quietly to avoid asking.
 
 ## 1. Open the ledger, then understand
 
@@ -114,10 +110,21 @@ with the repo's detected GATE block. Keep its headings; a resuming session
 looks for them.
 
 Fill Goal and Done when: the objective in one or two sentences, and the
-evidence that would prove it. If two readings lead to materially different
-work, ask one question with a recommendation; otherwise choose, record it
-under Decisions, and go on. Resuming: read the latest `RUN.md` once, continue
-from its Pickup line, do not re-plan, do not re-read it whole later.
+evidence that would prove it.
+
+When the goal would take more than one sitting, or two readings of it would
+lead to materially different work, run one `AskUserQuestion` round: at most four
+questions, each with your recommended answer listed first so the whole set can
+be accepted in one click. Ask about the hard parts, never the obvious ones. Then
+proceed. Otherwise choose, record the choice under Decisions, and go. One round,
+not a conversation: the point is to stop building the wrong thing, not to make
+the user do the thinking.
+
+A vague big goal gets that interview. A question gets the depth call in
+`ladder.md`. A bounded task gets the ladder.
+
+Resuming: read the latest `RUN.md` once, continue from its Pickup line, do not
+re-plan, do not re-read it whole later.
 
 ## 2. Ground before planning
 
@@ -135,7 +142,12 @@ Thinnest end-to-end slice first, then the slices that widen it. Each row: id
 (`M-D-NNNN`), owner role, blocks on, allowed and forbidden files, verification
 command, a rubric written now that names the measurement, a stop-and-ask
 condition. Plan inline when the goal is clear and fits one sitting; send it to
-`orch-planner` when it is ambiguous, crosses modules, or is bigger. Parallel
+`orch-planner` when it is ambiguous, crosses modules, or is bigger.
+
+Fill the `Shape` line before the first dispatch, and again whenever the plan
+changes: how many tasks, how many at once, on which models, what it should cost,
+and one line on why it is not smaller. A run that cannot answer that last
+question is bigger than it needs to be. Parallel
 only when independent, each on its own worktree, each packet's `PARALLEL` field
 naming the files it owns: an agent cannot see the other worktrees, so a shared
 file becomes a merge conflict after both are done. Browser tasks one at a time.
@@ -167,6 +179,15 @@ repo work, `run_in_background: true` unless the next step needs the result,
 `prompt` the packet. Effort is fixed in the agent file. Risk picks a reviewer;
 only a verified failure picks a bigger author.
 
+Every dispatch arrives with a price tag from the guard. Over about 5% of a week,
+say the price in one line and carry on; over about 25%, ask first with the
+recommendation in front of the question. Never a running total. `routing.md`
+has the rule and the worked example it came from.
+
+In plan mode a subagent inherits the write restriction, so dispatch only
+read-only tasks whose packet says "return the findings inline, write nothing",
+or name the plan file's own sibling as the output path.
+
 The packet is the whole context the agent will ever have. `assets/packet.md` is
 the template, 4 KB: read that to dispatch, and `contracts.md` only when you need
 why a field exists or a worked example. Every field, every time, "none" rather
@@ -189,20 +210,17 @@ takes five seconds costs more than the command. Then the drift check: no
 refactor, default change, dependency or weakened test the packet did not ask
 for.
 
-Who reviews: when you are strictly above the author (you Opus, author Sonnet)
-and the class is not risky, read the diff yourself; you already hold the goal
-and the packet, and a reviewer dispatch buys nothing. At or below the author,
-on a review class (security, auth, payments, public surfaces, a schema or
-default change, data that moves, anything irreversible), or when you cannot
-tell what you are running on, dispatch `orch-reviewer` on a model no weaker
-than the author's. Never review your own edits.
+Who reviews: strictly above the author and not a review class, read the diff
+yourself; you hold the goal and the packet already. At or below the author, on a
+review class, or when you cannot tell what you are running on, dispatch
+`orch-reviewer` on a model no weaker than the author's. Never review your own
+edits.
 
 Grade into Done (verified by you or a reviewer, never only its author),
-Built-unverified, Partial, Blocked, Failed. No evidence means Failed. A
-reviewer is required for security, auth, payments, public surfaces, schema or
-default changes, data that moves or is rewritten, anything irreversible,
-cross-module changes, and when two competent results disagree. When unsure
-whether review is required, it is.
+Built-unverified, Partial, Blocked, Failed. No evidence means Failed. A reviewer
+is required for security, auth, payments, public surfaces, schema or default
+changes, data that moves or is rewritten, anything irreversible, cross-module
+changes, and when two competent results disagree. When unsure, it is.
 
 ## 7. Adapt on a fixed ladder
 
@@ -210,9 +228,12 @@ Name the failure class (context gap, capability gap, too big, environment
 block, ambiguity, overreach). Then: improve the packet; escalate the author
 one model step only on a trigger from `routing.md`; split thinner; surface to
 the user with a recommendation. Never resend the same packet. Three attempts
-per task, then stop with the evidence. A per-family limit moves that family
-one step down for the run; a session or weekly limit ends the run cleanly at a
-written ledger. Never shrink the plan quietly to fit.
+per task, then stop with the evidence. A round only counts when something
+outside the model judged it — a test, a command, a reviewer — and no progress in
+three rounds or the same error twice ends the loop (`evaluation.md` §6). A
+per-family limit moves that family one step down for the run; a session or
+weekly limit ends the run cleanly at a written ledger. Never shrink the plan
+quietly to fit.
 
 ## 8. Integrate, finish, report
 

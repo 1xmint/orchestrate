@@ -103,6 +103,34 @@ moving that family one step down in every hint. It shows no spend total, on
 purpose: a running count is the cap in another costume, and the honest number
 is the one `measure.mjs` reports about a finished run.
 
+## Say the price before you spend
+
+Knowing what a thing costs before spending on it is the difference between a
+professional and an enthusiast. The rule has one number in it and no counter.
+
+- **Under about 5% of a week**: go. No mention, no ceremony.
+- **Over about 5%**: say the price in one line and carry on. Not a question, a
+  sentence. "This is three researchers, about $30, roughly a fifth of your week."
+- **Over about 25%**: ask first, with the recommendation in front of the
+  question. The user's answer is the point; your view is what makes it answerable.
+
+The worked example is real. On 2026-09-09 three Fable researchers ran in
+parallel on one question and read about $36 of list price between them, roughly
+a quarter of a Max 5x week. Nobody was asked. One researcher would have answered
+the question; the other two were insurance against a return that never came
+back thin. That is the move a senior engineer prices before making, and it is
+the move this rule exists to catch.
+
+**Never a running total in the conversation.** A counter reads as an allowance
+and invites spending up to it, which is why the Fable cap was removed in v0.5.0.
+A price is a forecast, said once, before the spend. What a finished run actually
+cost is `measure.mjs --latest --dollars`, after the fact, when it can change a
+decision about the next run rather than nag about this one.
+
+The guard prints a price tag on every dispatch automatically, so the number is
+in front of you without asking for it. `models.md` has the table it comes from
+and the honest label on every figure in it.
+
 ## Effort (for whoever edits the agent files; not a per-run choice)
 
 A subagent's effort comes from its agent file (`effort:`) and cannot be set

@@ -11,6 +11,10 @@ is the resume point if this session ends.
 
 - <evidence that would prove it, one line each>
 
+## Shape
+
+tasks: <N> · parallel: <M> · models: <which roles on which models> · est. price: $<n> (~<n>% of a week) · why not smaller: <one line>
+
 ## Profile
 
 tier: {{TIER}} · host: {{HOST}} · providers: {{PROVIDERS}}

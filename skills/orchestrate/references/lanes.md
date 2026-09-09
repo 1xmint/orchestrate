@@ -54,6 +54,13 @@ negligible". The condition must be provable from output Claude can show: a test 
 code, a file count. User-typed; the orchestrator proposes the exact condition (the run's
 done-when evidence, plus "or stop after N turns") and the user types `/goal …`.
 
+An unattended loop beats this skill's own loop only when a done-when and a plan
+are written down first. Practitioner reports of Ralph-style unattended running
+agree on the shape of the failure: without a spec written up front they stop
+early on a premature "done", and they spend tokens prodigiously either way
+(`docs/research/0004-loops-and-stopping.md` (d)). So propose `/goal` when the
+condition is provable from output, and never as a substitute for the plan.
+
 ## Waiting without polling
 
 `Monitor` watches a process, log or WebSocket and wakes Claude on new lines. `ScheduleWakeup`

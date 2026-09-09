@@ -109,6 +109,49 @@ Never resend the same packet. Three attempts per task, then stop and report
 with the evidence and the failure class. When a failed attempt left useful
 work, repair from the diff rather than starting over.
 
+### When a loop is worth another round
+
+The evidence is in `docs/research/0004-loops-and-stopping.md`, read 2026-09-09.
+The short version, with what is proved marked apart from what is judgment:
+
+- **A refinement round exists only when something outside the model judges it**:
+  a test, a command, or a reviewer with its own criteria. Self-critique with no
+  external signal is unreliable and can make an answer worse (Huang et al.,
+  ICLR 2024). With an oracle the gain is real and named (Reflexion). Self-Refine
+  reports gains from self-feedback alone on open-ended generation, and that
+  disagreement is genuine and unresolved by task type; the rule here follows the
+  side that matches this work, which is code with a gate.
+- **A reviewer's FAIL that contradicts the author's return escalates the author,
+  it does not resend.** A confidently wrong model resists even correct external
+  feedback (Feedback Friction), so the same model given the same packet plus a
+  correction is the shape most likely to argue back.
+- **No progress in three rounds, or the same error twice, ends the loop** with
+  the evidence. No vendor publishes a diminishing-returns stopping rule; what
+  ships everywhere is counts (`--max-turns`, `--max-budget-usd`), Anthropic
+  closed loop-pattern detection as not planned, and the community circuit
+  breaker opens after three loops with no progress or five with the same error.
+  This rule is judgment, matched to what everyone else actually ships.
+- **A loop that makes no tool call for several turns is stopped**, the way
+  `/goal` stops one that answers its evaluator without doing anything.
+- **A second research wave needs something measurable that could change.** If
+  nothing could, stop. Judgment, with no external validation either way.
+- **The run is done when the done-when evidence exists and has been seen.** A
+  limit reached ends it cleanly at a written ledger, not mid-dispatch.
+
+### Verification is model-specific, and neither direction generalises
+
+Over-verification is proved twice: Anthropic's Opus 5 guidance, and a measured
+result that rechecks in reasoning traces are confirmatory rather than corrective
+and that suppressing them cuts tokens by up to 20.3% with no accuracy loss. So
+on Opus 5, never add "double-check" or "re-verify"; it already does.
+
+Fable 5.1 at low effort carries the opposite risk: it answers current facts from
+memory and under-verifies, and its own guidance says to tell it that recognising
+a name is not knowing its current state. Both instructions ship, pointed at
+different failures. Neither asks a model to re-check its own work, which is the
+one instruction both pages forbid. Never carry either across a model switch
+without checking which way that model fails.
+
 ## 7. Integrate
 
 Merge into the integration branch in dependency order. Run focused gates per
@@ -133,3 +176,10 @@ A research answer is graded by its source distance and its counterexample
 search, not by its confidence. `REFEREED`, `REFUTED`, `GAP` are valid grades.
 A renamed obstacle is not progress. Before a second research wave, name the
 measurable thing that could change; if nothing could, stop.
+
+A flat file on disk is enough state for this. Graph checkpointing earns its
+overhead only with genuinely independent parallel tracks, real branching, or a
+partial run worth recovering; below that it accumulates its own cost and buys
+nothing (`docs/research/0004-loops-and-stopping.md` (c)). `RUN.md` is the flat
+file, and the day it stops being enough will be visible as a recovery that
+cannot be done from it.

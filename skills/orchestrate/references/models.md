@@ -75,6 +75,15 @@ And the rule that settles arguments: **judge cost per finished task, not per
 request.** A cheap call that needs three retries is not cheap. This is why the
 skill escalates on evidence and never on habit.
 
+**Verification instructions are model-specific, and neither direction carries.**
+On Opus 5, never add "double-check" or "re-verify": it verifies its own work
+already, and the instruction costs tokens with no gain in quality. On Fable 5.1
+at low effort the risk runs the other way — it answers current facts from memory
+— so it is worth saying that recognising a name is not knowing its current
+state. Never move either instruction to a different model without checking which
+way that model fails. `docs/research/0004-loops-and-stopping.md` (e) has both
+measurements.
+
 ## Context sweet spots
 
 The window is not the constraint people think it is. A million tokens is only
@@ -152,6 +161,39 @@ a reviewer whenever it is at or below the author.
 **Effort does not reach everything.** `Explore` and `general-purpose` inherit
 the session's effort; the six `orch-*` role files set their own and ignore it.
 Haiku ignores effort entirely.
+
+## Price tags
+
+A dispatch should never be a surprise. Every one of them gets a price before it
+happens, in list-price dollars, which is the same unit `/usage` computes its
+Session figure in. The guard prints it, `lib/prices.mjs` works it out, and once
+the ledger has priced two runs of the same role and model the tag stops being a
+guess and says `measured here, n=2`.
+
+Until then, the starting table. **Every number here is reasoned, not measured**,
+from the per-million prices above and one observation of a real fan-out:
+
+| Role | Fable | Opus | Sonnet | Haiku |
+|---|---|---|---|---|
+| `orch-researcher` | $10 | $5 | $1.50 | — |
+| `orch-planner` | $8 | $4 | $1.20 | — |
+| `orch-debugger` | $8 | $4 | $1.50 | — |
+| `orch-reviewer` | $6 | $3 | $1 | — |
+| `orch-implementer` | — | $4 | $1.50 | — |
+| `orch-browser` | — | $3 | $1 | — |
+| `Explore` | — | — | $0.50 | $0.10 |
+
+A week of a plan, in the same unit, so a share can be worked out at all: Pro
+about $30, Max 5x about $150, Max 20x about $600. That rests on **one
+observation**, made 2026-09-09: three Fable researchers read 20.5M, 9.0M and
+7.3M mostly-cached input tokens, which prices at roughly $36, and Josh reported
+that fan-out as about a quarter of a Max 5x week. Everything else is that number
+scaled by what the plans cost. It is a starting point, not a measurement, and
+`profile.mjs --set week=<dollars>` replaces it with a real one.
+
+List price is not what a subscription is billed. It is the only unit in which a
+subscription dispatch can be priced at all, and it is the unit the host already
+shows the user, so it is the one used here. Say so whenever a figure is printed.
 
 ## Sources
 
