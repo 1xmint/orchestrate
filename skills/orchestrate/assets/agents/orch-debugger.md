@@ -26,6 +26,9 @@ The loop, in order; write each step's result into your return:
    commands, then the wider suite.
 
 Commit per unit with the id prefix and push. You do not dispatch other agents.
+Never sit and wait on an asynchronous check — CI, a sharded mutation run, a long
+remote build. Push, report the branch and commit, and stop; waiting is your whole
+context re-read every turn, and the lead reads the result cheaply.
 
 Return in the packet's schema — TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED
 — with two extra lines: ROOT CAUSE in one sentence, and RULED OUT listing what

@@ -91,21 +91,63 @@ export function ungradedPhrase(run) {
   return ` · ${n} return${n === 1 ? '' : 's'} to grade: ${trim(ungraded)}`;
 }
 
+const round1 = n => Math.round(Number(n) * 10) / 10;
+
+// How much of the run's stated budget the subagents have spent. Shown only when
+// a ceiling exists, so it is a progress-to-limit reading, never an open-ended
+// running total — the thing the plugin refuses because it reads as an allowance.
+// With a ceiling it is exactly the "how close to the wall" number the user asked
+// to see. The lead conversation's own cost is not in it; no hook sees that.
+export function budgetPhrase(run) {
+  const c = run && run.budget && run.budget.ceiling;
+  if (c == null) return '';
+  const spent = Number(run && run.spend) || 0;
+  return ` · subagent spend ~$${round1(spent)}/$${c}`;
+}
+
+export function progressPhrase(run) {
+  const total = Number(run && run.rows) || 0;
+  if (!total) return '';
+  return ` · ${Number(run.done) || 0}/${total} done`;
+}
+
+// The difference between "nothing is ready" and "I cannot see the edges". The
+// second is a fixable ledger problem — the task table has no `blocks on` column
+// — and saying so is what turns a silent, misleading empty into a one-line fix.
+export function edgesPhrase(run) {
+  return run && run.edgesMissing
+    ? ' · ⚠ task table has no "blocks on" column, so I cannot tell which tasks are ready to run in parallel — add it (see the template)'
+    : '';
+}
+
 function runPhrase(ctx) {
-  if (ctx.run) return `run: ${ctx.run.runId} (${ctx.runHow})${ungradedPhrase(ctx.run)}${readyPhrase(ctx.run)}`;
-  if (ctx.candidates.length === 1) return `run: none bound; one candidate, ${ctx.candidates[0].runMd}`;
+  // Show the run's management picture even when this session has not bound it.
+  // A session that starts above its repo never auto-binds, so the readiness and
+  // budget lines never rendered — the whole reason a run could sit with three
+  // unblocked tasks and nobody starting them. Displaying is read-only; a hook
+  // that writes still needs the binding, which is a separate thing.
+  const focus = ctx.run || (ctx.candidates.length === 1 ? ctx.candidates[0] : null);
+  if (focus) {
+    const how = ctx.run ? ctx.runHow : 'candidate, not bound — bind before a dispatch writes through it';
+    return `run: ${focus.runId} (${how})${budgetPhrase(focus)}${progressPhrase(focus)}${ungradedPhrase(focus)}${readyPhrase(focus)}${edgesPhrase(focus)}`;
+  }
   if (ctx.candidates.length > 1) return `run: none bound; ${ctx.candidates.length} candidates in this repo`;
   return 'run: none';
 }
 
 export function stateHash(ctx) {
+  // The focus run is what the line actually reports, bound or a lone candidate,
+  // so its readiness and progress are what should trigger a reprint.
+  const focus = ctx.run || (ctx.candidates.length === 1 ? ctx.candidates[0] : null);
   return [
-    ctx.tier, ctx.agents, ctx.run ? ctx.run.runId : '', ctx.candidates.length,
+    ctx.tier, ctx.agents, focus ? focus.runId : '', ctx.candidates.length,
     // A task becoming ready is the moment the line is worth reprinting, and the
-    // moment a waiting lead has something better to do. A return landing, or a
-    // row finally being set, is the same kind of moment.
-    ctx.run && ctx.run.ready ? ctx.run.ready.join(',') : '',
-    ctx.run && ctx.run.ungraded ? ctx.run.ungraded.join(',') : '',
+    // moment a waiting lead has something better to do. A return landing, a row
+    // finally being set, or a wave completing is the same kind of moment.
+    focus && focus.ready ? focus.ready.join(',') : '',
+    focus && focus.ungraded ? focus.ungraded.join(',') : '',
+    focus ? `${focus.done || 0}/${focus.rows || 0}` : '',
+    focus && focus.edgesMissing ? 'edges?' : '',
     ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : '',
   ].join('|');
 }

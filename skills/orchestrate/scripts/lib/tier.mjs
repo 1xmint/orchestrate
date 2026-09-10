@@ -248,6 +248,49 @@ export function ungradedReturns(rows, returned) {
   return out;
 }
 
+// True when the task table has a machine-readable `blocks on` column. When it
+// does not but there are planned rows, readiness cannot be computed, and the
+// caller should say so rather than report an empty (and misleading) "nothing
+// ready". That is the difference between "no task is ready" and "I cannot see
+// the edges": the second is a fixable ledger problem, not a state of the plan,
+// and the run that cost 20% of a plan hit exactly this — the model wrote the
+// edges as prose and the parser silently saw nothing.
+export function hasBlocksColumn(header) {
+  return String(header || '').split('|').map(s => s.trim().toLowerCase()).indexOf('blocks on') >= 0;
+}
+
+// What the run has spent on subagents so far, in list-price dollars, summed from
+// the returns the ledger has already priced (returns/returns.jsonl). The lead
+// conversation's own cost is not here — no hook sees it — so this is subagent
+// spend, which is what the dispatch-time gate needs. Null when nothing priced.
+export function runSpend(dir) {
+  let sum = null;
+  try {
+    const text = readFileSync(join(dir, 'returns', 'returns.jsonl'), 'utf8');
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      const d = o && Number(o.dollars);
+      if (Number.isFinite(d)) sum = (sum || 0) + d;
+    }
+  } catch {}
+  return sum;
+}
+
+// The budget of record, read from the run's "## Budget" section. `ceiling` is a
+// list-price dollar cap the dispatch gate enforces, or null for no dollar gate.
+// The user sets this once at run start; the gate never invents a tighter one, so
+// the guardrail is the user's threshold rather than the tool's mood.
+export function parseBudget(text) {
+  const m = /## Budget\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(text || ''));
+  const out = { ceiling: null, raw: null };
+  if (!m) return out;
+  out.raw = m[1].split('\n').filter(l => l.trim() && !/^<.*>$/.test(l.trim())).join('\n').trim() || null;
+  const c = /Ceiling:\s*\$?\s*([\d.]+)/i.exec(m[1]);
+  if (c) out.ceiling = Number(c[1]);
+  return out;
+}
+
 // One run, read from its RUN.md. `open` is true while a task row still carries
 // a non-final glyph. Pickup lines come from the "## Pickup" section; template
 // placeholders count as empty.
@@ -258,9 +301,15 @@ export function readRun(runMd, root) {
     const lines = text.split('\n');
     const rows = lines.filter(l => /^\|\s*\d+-\d+-\d{4}\s*\|/.test(l));
     const header = lines.find(l => /^\|\s*id\s*\|/i.test(l)) || '';
+    const dir = dirname(runMd);
     const ready = readyTasks(rows, header);
-    const ungraded = ungradedReturns(rows, returnedTasks(dirname(runMd)));
+    const ungraded = ungradedReturns(rows, returnedTasks(dir));
+    const plannedExist = rows.some(r => /📋/.test(cellAt(r, 2)));
+    const edgesMissing = plannedExist && !hasBlocksColumn(header);
+    const budget = parseBudget(text);
+    const spend = runSpend(dir);
     const open = rows.some(l => OPEN_GLYPHS.test(l));
+    const done = rows.filter(l => /✅/.test(l)).length;
     const pickup = {};
     const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
     if (m) {
@@ -269,8 +318,7 @@ export function readRun(runMd, root) {
         if (kv && isWritten(kv[2])) pickup[kv[1]] = kv[2].trim();
       }
     }
-    const dir = dirname(runMd);
-    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, open, rows: rows.length, ready, ungraded, pickup };
+    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, open, rows: rows.length, done, ready, ungraded, edgesMissing, budget, spend, pickup };
   } catch { return null; }
 }
 

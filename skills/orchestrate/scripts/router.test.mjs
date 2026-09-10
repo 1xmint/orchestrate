@@ -201,7 +201,10 @@ test('a session outside any repo is offered the run, never bound to it', () => {
   }));
   const outside = mkdtempSync(join(tmpdir(), 'orch-outside-'));
   const out = prompt(home, outside, 'pick up where we left off on the tidy work', { session_id: 's-outside' });
-  assert.match(out, /none bound; one candidate/);
+  // The run's picture is shown so a session above its repo can still see what is
+  // ready, but it is labelled a candidate and the session is not bound: display
+  // is read-only, and a hook that writes still needs the binding.
+  assert.match(out, /candidate, not bound/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-outside.json'), 'utf8'));
   assert.equal(state.run, undefined);
 });

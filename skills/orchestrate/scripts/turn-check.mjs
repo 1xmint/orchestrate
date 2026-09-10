@@ -1,17 +1,22 @@
 #!/usr/bin/env node
-// turn-check.mjs — the session's Stop hook, registered from SKILL.md's
-// frontmatter so it is live only while the skill is in play.
+// turn-check.mjs — the session's Stop hook and management heartbeat, registered
+// from SKILL.md's frontmatter so it is live only while the skill is in play, and
+// only for a coordinated run this session has explicitly bound.
 //
-// One rule, and only for a coordinated run this session has explicitly bound:
-// a run whose Pickup section is older than the last dispatch cannot be resumed,
-// so if this session ends there, the next one starts blind.
+// Three pulses, in priority order, at most one block per Stop:
+//   1. marathon — a long session re-reads its whole self every turn (the biggest
+//      cost of the run this design came from); past a turn threshold it says to
+//      write the Pickup line and hand off to a fresh session.
+//   2. idle — two or more tasks are unblocked and nothing new was dispatched;
+//      start them or say why you are waiting. Said once per unblocked set.
+//   3. pickup — a run whose Pickup is older than the last dispatch cannot be
+//      resumed, so the next session would start blind.
 //
-// It fires at most once per unchanged Pickup, and never for a session that is
-// not running a bound coordinated run. It never asks for more research, more
-// testing or a better answer: a Stop hook that demands improvement after the
-// work is finished is a loop with no exit condition, and the one that used to
-// live here (a source-count floor under set-shaped recommendations) fired on
-// two failed fetch requests as readily as on two real sources.
+// It never asks for more research, more testing or a better answer: a Stop hook
+// that demands improvement after the work is finished is a loop with no exit
+// condition, and the one that used to live here (a source-count floor under
+// set-shaped recommendations) fired on two failed fetches as readily as on two
+// real sources.
 
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -65,31 +70,80 @@ function emitBlock(reason) {
   }));
 }
 
-function checkPickup(input) {
+// Thresholds for the two management nudges. Turns are counted per session-run
+// here rather than read from the transcript, so this stays cheap on every Stop.
+export const MARATHON_FIRST = 150;
+export const MARATHON_EVERY = 200;
+export const IDLE_READY_MIN = 2;
+
+// The louder of the two nudges this Stop deserves, if any, computed before the
+// Pickup check. Pure but for advancing the turn counter it carries in `rec`, so
+// it can be tested without files. Priority is deliberate: hand off a marathon
+// before doing more work, and start unblocked work before nagging about Pickup.
+export function heartbeatDecision({ run, rec }) {
+  const prev = rec || {};
+  const turns = (Number(prev.turns) || 0) + 1;
+  const out = { ...prev, turns };
+
+  // A long conversation re-reads its whole self every turn — 84% of the cost of
+  // the run that prompted this design. The vendor's own remedy for a long
+  // session is to hand off and resume from disk, which the ledger makes cheap.
+  const marathonNext = Number(prev.marathonNext) || MARATHON_FIRST;
+  if (turns >= marathonNext) {
+    out.marathonNext = turns + MARATHON_EVERY;
+    return { rec: out, kind: 'marathon', why: `this session has run about ${turns} turns. A long conversation re-reads its entire self on every turn, and that re-read was the single largest cost of the run this design came from. This is a good stopping point: write the Pickup line, then hand off to a fresh session — it resumes from the ledger and starts with a small, cheap context.` };
+  }
+
+  // Unblocked tasks sitting while the lead waits on one is the "you're right, I
+  // had three things I could have been doing" failure, said once per ready set.
+  const ready = (run && run.ready) || [];
+  const readyKey = ready.slice().sort().join(',');
+  if (ready.length >= IDLE_READY_MIN && prev.readyBlockedFor !== readyKey) {
+    out.readyBlockedFor = readyKey;
+    const shown = ready.slice(0, 4).join(', ') + (ready.length > 4 ? ` +${ready.length - 4} more` : '');
+    return { rec: out, kind: 'idle', why: `${ready.length} tasks are unblocked (${shown}) and nothing new has been dispatched this turn. A background dispatch hands control straight back, so start the ones that can run at once — or say plainly why you are waiting.` };
+  }
+
+  return { rec: out, kind: null };
+}
+
+function checkHeartbeat(input) {
   // Only a run this session was explicitly bound to. An unbound session is a
-  // session doing direct work, and direct work has no ledger to keep current.
+  // session doing direct work, and direct work has no ledger to keep current;
+  // an open run this session never claimed is not its to be nagged about.
   const run = sessionRun(input.session_id);
   if (!run || !run.open) return;
-
-  const state = loadSession(input.session_id) || {};
-  const lastDispatchAt = state.lastDispatchAt || null;
-  if (!lastDispatchAt) return;
-
-  const text = readFileSync(run.runMd, 'utf8');
-  const hash = pickupHash(text);
-  const section = pickupSection(text);
 
   const path = STORE();
   const store = readJson(path) || {};
   const key = sanitizeId(`${input.session_id || 'nosession'}-${run.runId}`);
   const rec = store[key] || {};
 
+  // Marathon and idle first, advancing the turn counter either way.
+  const hb = heartbeatDecision({ run, rec });
+  let updated = { ...hb.rec, checkedAt: new Date().toISOString() };
+  if (hb.kind) {
+    store[key] = updated;
+    try { writeJsonAtomic(path, store); } catch {}
+    return emitBlock(`orchestrate: ${hb.why}`);
+  }
+
+  // Then Pickup honesty, only after a dispatch, only for the run this session
+  // drives, exactly as before.
+  const state = loadSession(input.session_id) || {};
+  const lastDispatchAt = state.lastDispatchAt || null;
+  if (!lastDispatchAt) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
+
+  const text = readFileSync(run.runMd, 'utf8');
+  const hash = pickupHash(text);
+  const section = pickupSection(text);
   const d = shouldBlock({ pickupHash: hash, section, lastDispatchAt, prev: rec });
-  store[key] = { ...rec, hash, checkedAt: new Date().toISOString() };
+  updated = { ...updated, hash };
 
-  if (!d.block) { try { writeJsonAtomic(path, store); } catch {} return; }
+  if (!d.block) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
 
-  store[key].blockedFor = hash;
+  updated.blockedFor = hash;
+  store[key] = updated;
   try { writeJsonAtomic(path, store); } catch {}
 
   emitBlock(`orchestrate: ${d.why}. Before this turn ends, update the Pickup section of ${run.runMd}: one sentence that continues from here, its confidence, and the resume risk. Also set the phase glyph on any row you graded. That section is the only thing the next session reads first.`);
@@ -103,7 +157,7 @@ function main() {
   if (!input || typeof input !== 'object') return;
   if (input.stop_hook_active === true) return;
 
-  checkPickup(input);
+  checkHeartbeat(input);
 }
 
 // Only when run as a hook, not when a test imports the pure functions above.

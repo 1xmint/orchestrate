@@ -107,6 +107,13 @@ The GATE commands come from `.orchestrator/gate.json`, which `run-init.mjs`
 writes when the ledger is created. Paste them; do not re-derive them by reading
 Cargo.toml and the CI file again.
 
+Do not write a DONE WHEN that makes the worker **wait on an asynchronous check** —
+CI mutation shards, a remote build, a queue. A worker that watches CI is billed
+for its whole context on every idle turn, which was the largest per-agent cost of
+the run this skill was tuned on. The worker's DONE WHEN is "pushed, and the local
+checks it can run are green"; reading the CI result and dispatching any fix is the
+lead's cheap step, not the worker's expensive wait.
+
 Never put in a packet:
 
 - the conversation transcript, or a summary of it — send facts and decisions;

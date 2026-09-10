@@ -24,6 +24,11 @@ Rules that keep the rest of the run safe:
 - Run the packet's verification commands and paste the tails.
 - Commit after each logical unit with the id prefix, and push if a remote
   exists. Unpushed work is lost when a session dies.
+- **Never sit and wait on an asynchronous check** — CI, a sharded mutation run,
+  a long remote build, a queue. Push, report the branch and commit, and stop.
+  Waiting is your whole context re-read every turn, billed as thinking, and it is
+  the single largest avoidable cost a worker creates. The lead reads the result
+  cheaply and dispatches any fix as its own small task.
 - Never rewrite history, never reset or clean, never touch work you did not
   make.
 - If the same failure happens twice, stop and report it with the exact error.

@@ -115,18 +115,9 @@ if (setIdx >= 0) {
     process.exit(0);
   }
 
-  // The week anchor, in list-price dollars, so a price tag can say what share
-  // of a week a dispatch is on this user's plan.
-  const wk = /^week=(\d+(?:\.\d+)?)$/.exec(kv);
-  if (wk) {
-    saveProfile({ weekDollars: Number(wk[1]), weekSetAt: new Date().toISOString() });
-    console.log(`week anchor saved: $${wk[1]} of list-price spend per week`);
-    process.exit(0);
-  }
-
   const m = /^tier=(\w+)$/.exec(kv);
   if (!m || !TIERS.has(m[1])) {
-    console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask | week=<dollars>`);
+    console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask`);
     process.exit(2);
   }
   saveProfile({ tier: m[1], tierSource: 'user', setAt: new Date().toISOString() });
@@ -354,14 +345,10 @@ function pricesLine(tier) {
     }
     const top = [...by.entries()].sort((a, b) => b[1].n - a[1].n).slice(0, 6)
       .map(([k, v]) => `${k} $${(v.sum / v.n).toFixed(1)} (${v.n})`);
-    const profile = readJson(join(HOME, '.claude', 'orchestrate', 'profile.json')) || {};
-    const w = Number(profile.weekDollars);
-    const week = Number.isFinite(w) && w > 0
-      ? `a week here is about $${w} of list price (you set that)`
-      : { pro: 30, max5: 150, max20: 600, team: 30 }[tier]
-        ? `a week is roughly $${{ pro: 30, max5: 150, max20: 600, team: 30 }[tier]} of list price (one observation; --set week=<dollars> to correct it)`
-        : 'no week anchor for this plan';
-    return `prices measured here: ${top.length ? top.join(', ') : 'none yet; models.md has the starting table'} · ${week}`;
+    // No weekly anchor. The $30/$150/$600 figures that used to sit here came from
+    // one observation, and a per-run Budget ceiling is what the model reasons
+    // from now — a threshold the user set, not a plan-wide figure nobody measured.
+    return `prices measured here: ${top.length ? top.join(', ') : 'none yet; models.md has the starting table'}`;
   } catch { return 'prices measured here: unavailable'; }
 }
 
