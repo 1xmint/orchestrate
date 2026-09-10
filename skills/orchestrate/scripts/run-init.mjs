@@ -1,19 +1,26 @@
 #!/usr/bin/env node
-// run-init.mjs — create the ledger for one goal.
+// run-init.mjs — create the ledger for one goal, or bind this session to one.
 //
-//   node run-init.mjs <slug> [--repo <path>] [--goal "text"] [--tier max5] [--host claude-code] [--providers "..."]
+//   node run-init.mjs <slug> [--repo <path>] [--goal "text"] [--tier max5]
+//                     [--host claude-code] [--providers "..."] [--session-id <id>]
+//   node run-init.mjs --bind <path to RUN.md> --session-id <id>
 //
 // Creates .orchestrator/runs/<yyyymmdd>-<slug>/RUN.md from assets/RUN.md,
 // fills the placeholders it can, keeps .orchestrator/ out of git through
 // .git/info/exclude (local only, never a tracked .gitignore), and prints the
 // path. Refuses to overwrite an existing RUN.md.
+//
+// `--session-id` is what makes a hook's write safe: it records which session
+// owns this run, so a return is filed against the run its own session opened
+// rather than against whichever run on the machine is newest. Without it the
+// run is still created, and an unbound session can claim it later with --bind.
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, block } from './gate.mjs';
-import { rememberActiveRun } from './lib/tier.mjs';
+import { rememberActiveRun, bindSessionRun, readRun } from './lib/tier.mjs';
 
 const args = process.argv.slice(2);
 const positional = [];
@@ -22,9 +29,23 @@ for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('--')) { opts[args[i].slice(2)] = args[i + 1] ?? ''; i++; }
   else positional.push(args[i]);
 }
+
+// Bind mode: claim an existing run for this session and stop.
+if (opts.bind) {
+  const runMd = resolve(opts.bind);
+  const run = readRun(runMd);
+  if (!run) { console.error(`no RUN.md at ${runMd}`); process.exit(2); }
+  if (!opts['session-id']) { console.error('--bind needs --session-id: the binding is what tells a hook which run is yours'); process.exit(2); }
+  const bound = bindSessionRun(opts['session-id'], run);
+  if (!bound) { console.error('could not write the session binding'); process.exit(1); }
+  console.log(`bound session ${opts['session-id']} to ${run.runId}`);
+  console.log(runMd);
+  process.exit(0);
+}
+
 const slug = (positional[0] || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 if (!slug) {
-  console.error('usage: run-init.mjs <slug> [--goal "text"] [--tier t] [--host h] [--providers "p"]');
+  console.error('usage: run-init.mjs <slug> [--goal "text"] [--tier t] [--host h] [--providers "p"] [--session-id id]\n       run-init.mjs --bind <RUN.md> --session-id <id>');
   process.exit(2);
 }
 
@@ -83,8 +104,10 @@ const withGate = gateBlock
 mkdirSync(dir, { recursive: true });
 writeFileSync(target, withGate);
 
-// Point the hooks at this run. A session whose cwd is the folder above the
-// repo — which is where Josh's sessions start — would otherwise find nothing.
+// Two records, and they do different jobs. The session binding is authority:
+// a hook writes through it. The machine-wide pointer is only a hint for a
+// session whose cwd is not inside any repo, and no write may resolve through it.
+if (opts['session-id']) bindSessionRun(opts['session-id'], readRun(target, root));
 rememberActiveRun(root, target);
 
 // keep it out of git without touching tracked files. Inside a worktree or a

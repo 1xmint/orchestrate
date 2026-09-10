@@ -27,16 +27,35 @@ test('all six role agents ship, and each names itself', () => {
   }
 });
 
-test('every role agent carries the return check as its own Stop hook', () => {
+test('no role agent carries a Stop hook that can send a finished return back', () => {
+  // There was one, and every reason it blocked for — a missing restatement, a
+  // return over 60 lines, a field in the wrong order — was formatting. Each
+  // block spent a real model turn to buy a shape, and in plan mode it spent
+  // four on one piece of finished work. A return is now filed as it arrives.
+  assert.ok(!existsSync(join(SKILL, 'scripts', 'return-check.mjs')), 'the return check is gone, not just unregistered');
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
-    assert.match(fm, /^hooks:$/m, f);
-    assert.match(fm, /^ {2}Stop:$/m, f);
-    // One token both install paths understand: a plugin expands
-    // ${CLAUDE_PLUGIN_ROOT} itself, and install.mjs replaces the whole prefix
-    // with wherever the skill landed. No build step either way.
-    assert.match(fm, /command: 'node "\$\{CLAUDE_PLUGIN_ROOT\}\/skills\/orchestrate\/scripts\/return-check\.mjs"'/, f);
-    assert.ok(existsSync(join(SKILL, 'scripts', 'return-check.mjs')), 'the script the hook names exists');
+    assert.doesNotMatch(fm, /^hooks:$/m, f);
+    assert.doesNotMatch(fm, /return-check/, f);
+  }
+});
+
+test('no role agent can dispatch another one', () => {
+  // Delegation belongs to the lead: a nested dispatch spends quota the ledger
+  // never sees and returns nothing anyone grades. Enforced by the host's own
+  // tool restrictions, not by asking the agent nicely.
+  for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
+    const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
+    const allow = (/^tools: (.+)$/m.exec(fm) || [])[1];
+    const deny = (/^disallowedTools: (.+)$/m.exec(fm) || [])[1] || '';
+    if (allow) assert.doesNotMatch(allow, /\bAgent\b/, `${f} allowlist must not include Agent`);
+    else assert.match(deny, /\bAgent\b/, `${f} has no allowlist, so it must deny Agent`);
+  }
+});
+
+test('no role agent pins an effort level over the one the user chose', () => {
+  for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
+    assert.doesNotMatch(frontmatter(readFileSync(join(AGENTS, f), 'utf8')), /^effort:/m, f);
   }
 });
 
@@ -99,11 +118,21 @@ test('no eval hard-codes one machine, so the file runs on any checkout', () => {
 test('assets/packet.md carries every field a dispatch needs', () => {
   const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');
   assert.ok(!existsSync(join(SKILL, 'references', 'contracts.md')), 'contracts.md stays deleted');
-  const fields = ['TASK:', 'OBJECTIVE', 'DONE WHEN', 'NOT IN SCOPE', 'FACTS', 'GATE',
-    'VERIFY LIVE BEFORE ACTING', 'DECISIONS ALREADY MADE', 'WHERE', 'PARALLEL',
-    'PRIOR ATTEMPTS', 'PATTERNS TO FOLLOW', 'SKILLS TO USE', 'VERIFICATION COMMANDS',
-    'DURABILITY', 'STOP AND REPORT', 'BUDGET', 'RETURN', 'RESTATED:', 'STATUS:', 'EVIDENCE:'];
-  for (const f of fields) assert.ok(packet.includes(f), `packet.md has ${f}`);
+  // Four fields always, because a packet without one of them is the packet that
+  // produced the wrong thing. Everything else is conditional, and a conditional
+  // field that does not apply is cost with no benefit.
+  const always = ['TASK:', 'OBJECTIVE', 'CONTEXT', 'SCOPE', 'DONE WHEN'];
+  for (const f of always) assert.ok(packet.includes(f), `packet.md has ${f}`);
+  const whenTheyApply = ['RUN:', 'BLOCKS ON:', 'WHERE:', 'OWNS:', 'GATE:', 'VERIFY LIVE:',
+    'PRIOR ATTEMPTS:', 'PATTERNS:', 'SKILLS:', 'STOP AND REPORT:'];
+  for (const f of whenTheyApply) assert.ok(packet.includes(f), `packet.md still offers ${f}`);
+  assert.match(packet, /Add a field only when the answer is not "none"/);
+  // The return schema, and nothing that polices its shape.
+  for (const f of ['STATUS:', 'CHANGED:', 'EVIDENCE:', 'NOT VERIFIED:']) {
+    assert.ok(packet.includes(f), `packet.md has ${f}`);
+  }
+  assert.doesNotMatch(packet, /RESTATED/, 'a restatement is not a field a return is judged on');
+  assert.doesNotMatch(packet, /at most 40 lines|under 55 lines/, 'no length cap on a return');
   // The bits contracts.md is gone but was right about.
   assert.match(packet, /Never put in a packet/);
   assert.match(packet, /gate\.json/);
@@ -150,21 +179,41 @@ test('the skill tells the manager to ask when a model is not in the plan', () =>
   assert.match(routing, /When Fable earns its cost/);
 });
 
-test('the skill carries the money rule with a number in it', () => {
-  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+test('no shipped file turns a price into a share of a subscription week', () => {
+  // The two thresholds that used to live here — mention over 5% of a week, ask
+  // over 25% — both divided by a weekly dollar figure that came from a single
+  // observation. A percentage computed from that reads like a measurement, and
+  // the reader has no way to tell that it is not one. The figure is gone, so
+  // the percentages have to be gone too, in prose as well as in code.
+  const files = [
+    join(SKILL, 'SKILL.md'),
+    ...readdirSync(join(SKILL, 'references')).map(f => join(SKILL, 'references', f)),
+    join(SKILL, 'assets', 'packet.md'),
+    join(SKILL, 'assets', 'RUN.md'),
+  ].filter(p => p.endsWith('.md'));
+  for (const p of files) {
+    for (const line of readFileSync(p, 'utf8').split('\n')) {
+      // A line saying the rule was removed is allowed to name the old numbers.
+      if (/used to|there used to|no longer|is gone|are gone|rested on/i.test(line)) continue;
+      assert.doesNotMatch(line, /\d+% of (a|your) .{0,12}week/i, `${p.split(/[\\/]/).pop()}: ${line.trim()}`);
+    }
+  }
   const routing = flat(readFileSync(join(SKILL, 'references', 'routing.md'), 'utf8'));
-  // A rule without a number is a wish. These are the two thresholds.
-  assert.match(skill, /Over about 5% of a week, say the price in one line/);
-  assert.match(skill, /over about 25%, ask first with the recommendation in front of the question/);
-  assert.match(routing, /Say the price before you spend/);
-  assert.match(routing, /Never a running total in the conversation/);
+  assert.match(routing, /List price is not what a subscription is billed/);
+  assert.match(routing, /Never a running total/);
 });
 
-test('the run ledger asks why the run is not smaller', () => {
+test('the run ledger keeps the goal above the task table', () => {
+  // What a resuming session has to recover. Task history is long, mostly
+  // finished, and on disk; these four are the run itself.
   const run = readFileSync(join(SKILL, 'assets', 'RUN.md'), 'utf8');
-  assert.match(run, /^## Shape$/m);
+  for (const h of ['Goal', 'Done when', 'Constraints and non-goals', 'Approach', 'Shape', 'Pickup']) {
+    assert.match(run, new RegExp(`^## ${h}$`, 'm'), `RUN.md has ## ${h}`);
+  }
+  assert.match(run, /Why it matters/);
+  assert.match(run, /Next deliverable/);
   assert.match(run, /why not smaller/);
-  assert.match(flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8')), /Fill the `Shape` line before the first dispatch/);
+  assert.match(flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8')), /Fill the four sections above the task table before the first dispatch/);
 });
 
 // Each of these is a rule with a test inside it, not a wish. A wish ("be
@@ -180,20 +229,23 @@ const SPEECH_RULES = [
   // The two that matter most to the person on the other end, and the two the
   // skill did not say at all until a user pointed out that it was agreeing with
   // him instead of engineering for him.
-  /Find out what they actually want/i,
+  /a clue to what they want, not the whole of it/i,
   /Agreement is not a deliverable/i,
   /Lead with the answer/i,
   /what is from memory/i,
-  /Deliver what was asked, at the scope intended/i,
-  /what happened, then the evidence with paths/i,
-  /never for the evidence/i,
-  /ask what\s+happens if they ignore it/i,
+  /Recommend, and say what it costs/i,
+  /Never (expose|show) the machinery/i,
+  /if they ignore/i,
 ];
 
 test('SKILL.md carries the plain-speech rules, each with its own test', () => {
   const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
   assert.match(skill, /How to talk to the user/);
-  assert.match(skill, /fifteen and sharp/);
+  // The reader is an adult who has not learned the words, not a child. The
+  // difference shows up in the output: one gets simpler words, the other gets
+  // simpler facts.
+  assert.match(skill, /intelligent adult who has not learned engineering words/);
+  assert.doesNotMatch(skill, /fifteen/);
   assert.match(skill, /Simplify the words, never the facts/, 'plain is not dumbed down');
   for (const r of SPEECH_RULES) assert.match(skill, r, String(r));
 });
@@ -229,7 +281,13 @@ test('the Plain output style ships, is valid, and says the same thing as §9', (
   assert.doesNotMatch(style, /double-check|re-verify|verify (your|it) again/i,
     'never an instruction to re-check its own work: that is the one thing both model guides forbid');
 
-  assert.ok(Buffer.byteLength(style) <= 4500, `the style is ${Buffer.byteLength(style)} bytes, cap 4500`);
+  // The style is `force-for-plugin`, so it sits in the system prompt of every
+  // session while the plugin is enabled and is paid for on every turn of every
+  // one of them. The cap moved from 4,500 to 4,700 once, in v0.9.0, to hold
+  // three rules that were not here before: recommend and price the tradeoff,
+  // say the assumption that mattered, and never show the machinery. Cutting
+  // prose to defend a round number is how a file loses the rules that earn it.
+  assert.ok(Buffer.byteLength(style) <= 4700, `the style is ${Buffer.byteLength(style)} bytes, cap 4700`);
 });
 
 test('the installer copies the output style but never selects it', () => {

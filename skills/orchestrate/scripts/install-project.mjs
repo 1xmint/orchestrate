@@ -50,10 +50,14 @@ export function rulesFile(g, never) {
   } else {
     lines.push('Gate: not detected. Ask what command proves a change is good here.');
   }
-  lines.push('A change is not done until the gate has run and passed on it.');
+  lines.push('A change is not done until the gate has run and passed on it. Reuse a');
+  lines.push('pass that already exists for the same unchanged artifact; rerun what the');
+  lines.push('change could have broken.');
   lines.push('');
-  lines.push('A goal with several steps, or one that needs a review, goes through');
-  lines.push('`/orchestrate` rather than being done turn by turn.');
+  // It used to say that several steps, or a review, meant `/orchestrate`. Step
+  // count is not a reason for a ledger, and saying so in a file installed into
+  // every repo pushed ordinary work up a rung it did not need.
+  lines.push('Open a run ledger when tracks run at once or work outlives a session.');
   for (const n of never) lines.push(`- ${n}`);
   // Drop the quoted never-do rules before anything else: they are in the
   // repo's own files, which the session already loads. Truncate rather than

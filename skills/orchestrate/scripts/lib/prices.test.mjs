@@ -1,9 +1,15 @@
-// prices.test.mjs — the arithmetic behind a price tag, and the rule that a
-// missing anchor prints nothing rather than a made-up percentage.
+// prices.test.mjs — the arithmetic behind a price tag, and the two things it
+// refuses to invent: a figure for a model nobody named, and a percentage of a
+// subscription week nobody measured.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dollars, family, share, weekShare, priceTag, weekDollars, PRICES, REASONED } from './prices.mjs';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { dollars, family, priceTag, reasonedPrice, PRICES, REASONED } from './prices.mjs';
+
+const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'prices.mjs'), 'utf8');
 
 test('a known usage prices to a hand-computed figure', () => {
   // 1M fresh input at $5, 1M output at $25, 1M cache read at $0.50,
@@ -15,34 +21,33 @@ test('a known usage prices to a hand-computed figure', () => {
   assert.equal(dollars({}, 'opus'), 0, 'no tokens, no dollars');
 });
 
-test('the family comes from the model id, and an unknown one does not throw', () => {
+test('an unnamed model has no family and no price', () => {
   assert.equal(family('claude-opus-5'), 'opus');
   assert.equal(family('claude-fable-5-1'), 'fable');
-  assert.equal(family('inherit'), 'sonnet', 'an unnamed model is priced as the default worker');
+  // It used to answer `sonnet` for anything it did not recognise. So a dispatch
+  // that named no model at all — one that inherits the session's — was priced
+  // as the cheap model, and the figure was then reported as a measurement.
+  assert.equal(family('inherit'), null);
+  assert.equal(family(''), null);
+  assert.equal(family(undefined), null);
+  assert.equal(dollars({ input: 1e6 }, 'inherit'), null, 'unknown stays unknown');
+  assert.equal(reasonedPrice('orch-researcher', 'inherit'), null);
   for (const p of Object.values(PRICES)) assert.ok(p.in > 0 && p.out > p.in);
 });
 
-test('a share needs an anchor, and says nothing without one', () => {
-  assert.equal(Math.round(share(15, 'max5', null)), 10, '$15 of a $150 week');
-  assert.equal(share(15, 'api', null), null, 'per-token billing has no week');
-  assert.match(weekShare(15, 'max5', null), /about 10% of a max5 week/);
-  assert.equal(weekShare(15, 'api', null), '', 'no anchor, no percentage');
-  // A percentage travels with what its denominator rests on. Printing a share
-  // of a week against a number nobody measured, unlabelled, is the exact shape
-  // of confident-and-unfounded this release exists to stop.
-  assert.match(weekShare(15, 'max5', null), /one observation.*--set week=/,
-    'the default anchor names itself as one observation, wherever it is printed');
-  assert.match(weekShare(15, 'max5', { weekDollars: 200 }), /your own figure/);
-  assert.doesNotMatch(weekShare(15, 'max5', { weekDollars: 200 }), /one observation/);
-  // The user's own measurement beats the one observation behind the default.
-  const w = weekDollars('max5', { weekDollars: 400, weekSetAt: '2026-09-09T00:00:00Z' });
-  assert.equal(w.value, 400);
-  assert.match(w.source, /set by the user 2026-09-09/);
+test('nothing here converts list price into a share of a subscription week', () => {
+  // The anchor it divided by — Pro $30, Max 5x $150, Max 20x $600 — came from a
+  // single observation. A percentage computed from that reads like a
+  // measurement and the reader cannot tell that it is not one.
+  assert.doesNotMatch(SOURCE, /weekShare|weekDollars|export const WEEK\b/);
+  const tag = priceTag('orch-researcher', 'fable', [], 'max5', { weekDollars: 150 });
+  assert.doesNotMatch(tag, /% of/);
+  assert.match(tag, /list price, not subscription usage/);
 });
 
 test('a price tag is measured when there is anything to measure, reasoned when there is not', () => {
   const none = priceTag('orch-researcher', 'fable', [], 'max5', null);
-  assert.match(none, /reasoned, not yet measured here/);
+  assert.match(none, /reasoned 2026-09-09, not yet measured here/);
   assert.match(none, /≈ \$10\.00/);
 
   const rows = [
@@ -51,12 +56,13 @@ test('a price tag is measured when there is anything to measure, reasoned when t
     { role: 'orch-implementer', model: 'sonnet', dollars: 1.1 },
   ];
   const tag = priceTag('orch-researcher', 'fable', rows, 'max5', null);
-  assert.match(tag, /≈ \$9\.20 at list price \(measured here, n=2\)/);
-  assert.match(tag, /about 6% of a max5 week/);
+  assert.match(tag, /≈ \$9\.20 at list price, not subscription usage \(measured here, n=2\)/);
   assert.doesNotMatch(tag, /reasoned/, 'measured beats reasoned');
 
   // A role nobody priced says so rather than inventing a number.
   assert.match(priceTag('mystery-role', 'opus', [], 'max5', null), /no figure yet/);
+  // And a dispatch with no model gets no figure at all.
+  assert.match(priceTag('orch-researcher', '', rows, 'max5', null), /not priced/);
 });
 
 test('every reasoned row is ordered by what the model costs', () => {

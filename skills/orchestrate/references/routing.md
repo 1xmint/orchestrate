@@ -59,19 +59,27 @@ sources that disagree and must be reconciled.
 Not when something else can check the answer: a tight packet with strong tests,
 a sweep, an extraction, a mechanical change.
 
-## Say the price before you spend
+## Saying the price
 
-- **Under ~5% of a week**: go, no ceremony.
-- **Over ~5%**: say the price in one line and carry on. A sentence, not a
-  question. "Three researchers, about $30, roughly a fifth of your week."
-- **Over ~25%**: ask first, recommendation in front of the question.
+The guard prints a price tag on every dispatch that names a model: list-price
+dollars, either measured from this machine's own past runs or labelled as
+reasoned. A dispatch that names no model gets no tag, because nothing knows what
+it will run on.
 
-**Never a running total in the conversation.** A counter reads as an allowance
-and invites spending up to it. A price is a forecast said once, before the
-spend; `measure.mjs --latest --dollars` says what a finished run actually cost,
-when it can change the next decision instead of nagging about this one. The
-guard prints a price tag on every dispatch, so the number is already in front of
-you. `models.md` has the table it comes from.
+**List price is not what a subscription is billed.** It is the unit `/usage`
+already shows the user for a session, and it is the only unit a dispatch can be
+priced in at all. Say so whenever you print a figure.
+
+There used to be a rule here: mention the price over 5% of a week, ask over 25%.
+Both numbers divided by a weekly dollar figure that rested on one observation, so
+the percentage looked like a measurement and was not. Both are gone, and so is
+the weekly figure.
+
+What is left is judgment. Say a price, once, before the spend, when it is large
+enough to change what the user would want. Ask first when the spend is theirs
+rather than the plan's. **Never a running total**: a counter reads as an
+allowance and invites spending up to it. `measure.mjs --latest --dollars` says
+what a finished run actually cost, when that can change the next decision.
 
 ## Routing table
 
@@ -93,9 +101,11 @@ retried costs more than the right one once.
 
 Pass it on the `Agent` call (`model: sonnet | opus | haiku | fable`).
 
-**Effort is not a per-call lever.** It comes from the agent file and cannot be
-set per dispatch; the six role files carry planner and debugger at `xhigh`, the
-rest at `high`. The model is the per-call lever and overrides the file.
+**Effort is not a per-call lever, and the role files no longer set it.** They
+used to: planner and debugger at `xhigh`, the rest at `high`, which overrode
+whatever the user had chosen for the session and spent their quota on a setting
+they never picked. A role agent now inherits the session's effort. The model is
+the per-call lever, and it overrides the file.
 
 **Host facts worth knowing.** A `/model` switch mid-session rebuilds the whole
 prompt cache; an effort change on Fable 5.1 keeps it (2.1.260+), a model switch
@@ -107,31 +117,40 @@ default is left alone.
 
 ## Who reviews
 
-The router's state line names the model you are on, read from the transcript.
+Review is bought for a reason, not scheduled. Dispatch `orch-reviewer` when
+being wrong here would be expensive and hard to see:
 
-- **Strictly above the author and not a risky class** → read the diff yourself.
-  A reviewer buys no independence the author did not already lack.
-- **At or below the author, or a risky class** (trigger 2 below) → dispatch
-  `orch-reviewer` on a model no weaker than the author's. A weaker reviewer
-  produces a PASS you cannot bank.
-- **You wrote any of the diff** → always dispatch. Never review your own edits.
-- **You cannot tell what you are on** → dispatch.
+- an authorisation or security boundary;
+- money moving;
+- a destructive or irreversible change to data;
+- a compatibility contract other people consume;
+- architectural uncertainty you could not resolve yourself.
+
+A cosmetic change on a public page is not one of these, and neither is "the
+author was a smaller model than me". That rule used to be here, and it created
+reviewers by arithmetic on model names — a comparison that says nothing about
+whether this change is risky.
+
+Two rules stay absolute. **Never review your own edits**: dispatch. And a
+reviewer weaker than the author produces a PASS you cannot bank, so a reviewer
+is never weaker than the author.
+
+Give the reviewer the concrete risk and the acceptance criteria. A reviewer
+asked to look for gaps will find some in any change.
 
 ## Escalation triggers (fixed list)
 
-A bigger *author* needs evidence; risk selects a *reviewer*. Escalate the author
-one step (sonnet → opus → fable), naming the trigger in the ledger, when:
+Escalate the *author* one step (sonnet → opus → fable), naming the trigger in
+the ledger, when:
 
 1. one attempt failed on a complete packet (not a context gap);
-4. two competent results disagree;
-5. the agent reports a conceptual block rather than a missing fact;
-6. the user asks.
+2. two competent results disagree;
+3. the agent reports a conceptual block rather than a missing fact;
+4. the user asks.
 
-These add a reviewer, not a bigger author:
-
-2. security, auth, payments, a public surface, a schema or default change, data
-   that moves or is rewritten, anything irreversible;
-3. the task crosses module boundaries or changes an architecture.
+A reviewer disagreeing is not on that list. A FAIL with a concrete finding is a
+fix packet on the same model; a FAIL you cannot act on is a question for the
+user, not a more expensive retry.
 
 De-escalate below the table only by naming the oracle that makes it safe: a
 strong deterministic test, a type-checked interface, an exact spec.

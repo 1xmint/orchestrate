@@ -17,7 +17,7 @@ findings must be cross-checked before you see them; a plan drafted from several 
 
 Available here: **the Workflow tool is not exposed to the model in the desktop session**
 (checked 2026-09-08). The keyword and the phrase only start a run when a human types them. So
-the orchestrator writes the exact one-line prompt into its report and the ledger, e.g.
+the lead writes the exact one-line prompt into its report and the ledger, e.g.
 `use a workflow to audit every route handler under src/routes/ for missing auth checks, and
 adversarially verify each finding before reporting it`, and the user types it. Do not promise
 the model can start one.
@@ -51,7 +51,7 @@ A session-scoped prompt-based Stop hook: after every turn a small fast model (Ha
 judges the condition against what Claude surfaced in the conversation and Claude keeps working
 until it is met or judged impossible. Restored on resume. Evaluation tokens are "typically
 negligible". The condition must be provable from output Claude can show: a test result, an exit
-code, a file count. User-typed; the orchestrator proposes the exact condition (the run's
+code, a file count. User-typed; the lead proposes the exact condition (the run's
 done-when evidence, plus "or stop after N turns") and the user types `/goal …`.
 
 An unattended loop beats this skill's own loop only when a done-when and a plan

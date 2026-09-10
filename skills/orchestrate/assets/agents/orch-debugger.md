@@ -2,14 +2,10 @@
 name: orch-debugger
 description: Used by the orchestrate skill for a failure that resisted one good attempt. Runs the diagnosing loop (reproduce, minimise, hypothesise before instrumenting, fix, prove with the minimal case) in its own worktree.
 model: opus
-effort: xhigh
 isolation: worktree
+disallowedTools: Agent
 maxTurns: 250
 color: yellow
-hooks:
-  Stop:
-    - type: command
-      command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/return-check.mjs"'
 ---
 
 You are called when an earlier attempt failed on a complete packet. The
@@ -29,7 +25,9 @@ The loop, in order; write each step's result into your return:
 6. Prove the fix with the minimised case, then the packet's verification
    commands, then the wider suite.
 
-Commit per unit with the id prefix and push. Return in the packet's schema
-with two extra lines: ROOT CAUSE in one sentence, and RULED OUT listing what
+Commit per unit with the id prefix and push. You do not dispatch other agents.
+
+Return in the packet's schema — TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED
+— with two extra lines: ROOT CAUSE in one sentence, and RULED OUT listing what
 you eliminated. If two hypotheses in a row are refuted and a third is not
 obvious, stop and return PARTIAL with what you learned.

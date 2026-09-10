@@ -54,15 +54,18 @@ test('only Agent tool_use blocks count as dispatches', () => {
   assert.match(report(r), /dispatches: 2 — orch-implementer on sonnet ×1, orch-reviewer on opus ×1/);
 });
 
-test('returns are counted by their schema, and the cap is reported', () => {
+test('returns are counted by their schema, and their length is reported without a verdict', () => {
   const r = measure(text);
   assert.equal(r.returns.length, 1);
   assert.equal(r.returns[0].task, '9-9-0001');
   assert.match(report(r), /returns: 1, 4–4 lines/);
 
+  // A long return is a fact about the work, not a defect. Nothing sends one
+  // back for its length any more, so nothing reports it as over a cap either.
   const long = `${RETURN}\n${Array.from({ length: 60 }, () => 'log').join('\n')}`;
   const withLong = measure(JSON.stringify({ type: 'user', message: { content: [{ type: 'text', text: long }] } }));
-  assert.match(report(withLong), /over the cap/);
+  assert.match(report(withLong), /returns: 1, 64–64 lines/);
+  assert.doesNotMatch(report(withLong), /cap/);
 });
 
 test('router bytes are counted once, and again for every later assistant turn', () => {
@@ -150,40 +153,46 @@ test('an injected hook attachment is counted, and a tool result quoting one is n
   assert.equal(r.routerInjections, 1, 'the attachment counts, the tool result does not');
 });
 
-test('the two checks that can send a turn back are counted by their fixed prefix', () => {
+test('the one remaining check that can send a turn back is counted by its prefix', () => {
+  // One check, not two. The reply check was retired after 0 fires in ~1,800
+  // turns; the research floor was retired because two failed fetches satisfied
+  // it. A counter for a check that cannot fire reads as a measurement of zero
+  // rather than as an absence, so neither has a field here any more.
   const lines = [
-    JSON.stringify({ type: 'attachment', attachment: { hookEvent: 'Stop', content: ['reply check: "the tests pass" names no command or output; add the command and its result, or say it is from memory.'] } }),
-    JSON.stringify({ type: 'user', message: { content: 'orchestrate: a recommendation across a set of cases, answered from 1 source(s). Dispatch orch-researcher, or rewrite the answer.' } }),
+    JSON.stringify({ type: 'attachment', attachment: { hookEvent: 'Stop', content: ['orchestrate: Pickup has not changed since the last dispatch. Before this turn ends, update the Pickup section.'] } }),
     JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: { input_tokens: 10, output_tokens: 5 } } }),
   ].join('\n');
   const r = measure(lines);
-  assert.equal(r.replyChecks, 1);
-  assert.equal(r.floorBlocks, 1);
-  assert.match(report(r), /reply check: 1 blocks in 1 turns; floor: 1/);
+  assert.equal(r.stopBlocks, 1);
+  assert.ok(!('replyChecks' in r) && !('floorBlocks' in r));
+  assert.match(report(r), /turns sent back by the Pickup check: 1 in 1 turns/);
 });
 
-test('the dollar report prices the session and never invents a denominator', () => {
+test('the dollar report prices the session, and refuses to price an unnamed model', () => {
   const r = measure([
     JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: { input_tokens: 1000000, output_tokens: 0 } } }),
   ].join('\n'));
-  const withAnchor = dollarReport(r, 'max5', null);
-  assert.match(withAnchor, /at list price: \$5\.00 on opus/);
-  assert.match(withAnchor, /about 3% of a max5 week/);
-  assert.match(withAnchor, /a plan is not billed this way/);
-  const noAnchor = dollarReport(r, 'api', null);
-  assert.doesNotMatch(noAnchor, /% of a/, 'per-token billing has no week to divide by');
+  const priced = dollarReport(r, 'max5', null);
+  assert.match(priced, /at list price: \$5\.00 on opus/);
+  assert.match(priced, /a plan is not billed this way/);
+  // No share of a week, on any plan: the weekly figure it divided by came from
+  // one observation, and a percentage built on that reads like a measurement.
+  assert.doesNotMatch(priced, /% of/);
+  assert.doesNotMatch(dollarReport(r, 'api', null), /% of/);
+
+  const noModel = measure(JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 1000000 } } }));
+  assert.match(dollarReport(noModel, 'max5', null), /not priced/);
 });
 
 // The plan document that specified these counters quoted both reasons
 // verbatim, and matching the prefix anywhere counted it as two blocks that
 // never happened. A block's reason arrives on its own.
 test('a message that merely quotes a block reason is not counted as one', () => {
-  const quoting = 'The reason text is `reply check: <one sentence>` and the floor says '
-    + '"orchestrate: a recommendation across a set of cases, answered from N source(s)."';
+  const quoting = 'The reason text starts "orchestrate: Pickup has not changed since the last dispatch", '
+    + 'which is what this repo\'s own notes quote when they explain the check.';
   const r = measure([
     JSON.stringify({ type: 'user', message: { content: quoting } }),
     JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: { input_tokens: 1 } } }),
   ].join('\n'));
-  assert.equal(r.replyChecks, 0);
-  assert.equal(r.floorBlocks, 0);
+  assert.equal(r.stopBlocks, 0);
 });

@@ -41,7 +41,12 @@ test('a Python repo: gate.json, the exclude line, and a rules file inside budget
   const rules = readFileSync(join(dir, RULES_REL), 'utf8');
   assert.ok(rules.trimEnd().split('\n').length <= 12, 'rules load every session, so they stay short');
   assert.match(rules, /pytest -q/);
-  assert.match(rules, /\/orchestrate/);
+  assert.match(rules, /Open a run ledger when tracks run at once/);
+  // This file is loaded in every session of the repo it is installed into, so
+  // what it says about process is expensive. It used to say that several steps
+  // or a review meant `/orchestrate`, which pushed ordinary work up a rung on
+  // a count rather than on a reason.
+  assert.doesNotMatch(rules, /several steps/);
   assert.match(rules, /Never delete a note file/, "the repo's own prohibition is quoted, not paraphrased");
 
   const excl = readFileSync(join(dir, '.git', 'info', 'exclude'), 'utf8');

@@ -1,46 +1,117 @@
 {
   "skill_name": "orchestrate",
+  "note": "Each expected_output describes the outcome and the waste it must avoid. These are acceptance guidance for a human reading a transcript, not proof of model behaviour: nothing in the unit suite runs a model.",
   "evals": [
     {
       "id": 1,
-      "name": "rust-json-flag-with-review",
-      "prompt": "In the Rust crate at {{FIXTURE_RUST}}, add a `--json` flag to the `status` subcommand so it prints the same data as the text output as one JSON object on stdout, with tests. Then get the change reviewed for panics and unwraps before you call it done. Keep the human output unchanged.",
-      "expected_output": "A plan with tasks and rubrics in a RUN.md ledger before any dispatch; an implementer agent in a worktree producing the flag, a test, and passing cargo test/clippy/fmt; an independent read-only review with PASS or numbered findings that were acted on; a final report that leads with the outcome and states what was and was not verified.",
+      "name": "rename-a-label",
+      "prompt": "The button on the settings page says 'Sync now'. Change it to 'Refresh'.",
+      "expected_output": "The edit, and a sentence saying it is done. No ledger, no agent, no research, no plan, no review, and no question. A one-line change is the cheapest thing this skill can do, and the whole point is that it stays that way.",
       "files": []
     },
     {
       "id": 2,
-      "name": "python-notelocus-since-flag",
-      "prompt": "In the Python project at {{FIXTURE_PYTHON}}, add `notelocus tidy --since <date>` so only notes modified on or after that date are filed, with a test that proves nothing is lost and that older notes stay put. The repo's never-delete rule is not negotiable. Pass the three CI checks it names.",
-      "expected_output": "Grounding against the repo's AGENTS.md and code rather than memory; a ledger; a bounded implementer dispatch with allowed files, verification commands (pytest, ruff check, ruff format --check) and a stop condition; evidence checked by the orchestrator; a reviewer on the data-safety rule; a plain final report.",
+      "name": "clear-bug-across-six-files",
+      "prompt": "Sessions are being dropped on refresh. The token is read in session.ts, client.ts, router.ts, api.ts, db.ts and web.ts. Find where it is lost and fix it.",
+      "expected_output": "The lead reads the six files and fixes the bug itself, with a test or a command proving the session survives. Six files is not a reason to delegate: the file count says nothing about whether the answer is small. Delegation here would be justified only by isolation or parallel progress, and neither applies.",
       "files": []
     },
     {
       "id": 3,
-      "name": "typescript-research-then-implement",
-      "prompt": "In the TypeScript package at {{FIXTURE_TS}}, find out the currently recommended way to read a `.env` file in Node 22 without a third-party dependency, then implement `loadConfig()` that way with a test, and verify it. Cite where the recommendation comes from.",
-      "expected_output": "A researcher dispatch with a source obligation returning dated, sourced findings (Node's built-in --env-file / process.loadEnvFile); an implementer dispatch using those facts verbatim in the packet; tests run and evidence inspected; a final report with the source cited and any disagreement between sources stated.",
+      "name": "rust-json-flag-with-review",
+      "prompt": "In the Rust crate at {{FIXTURE_RUST}}, add a `--json` flag to the `status` subcommand so it prints the same data as the text output as one JSON object on stdout, with tests. Then get the change reviewed for panics and unwraps before you call it done. Keep the human output unchanged.",
+      "expected_output": "The flag, a test, and cargo test/clippy/fmt passing, with the evidence inspected rather than taken from a report. The user asked for a review, so there is one, scoped to the risk they named. A final report that leads with the outcome and says what was not verified.",
       "files": []
     },
     {
       "id": 4,
-      "name": "set-shaped-question-gets-a-researcher",
-      "prompt": "also is there a recommended agent model and effort level for each subscription tier (3 tiers)",
-      "expected_output": "A recognition that this answer becomes a default others inherit and spans a set of cases, so it is dispatched to orch-researcher with a source obligation rather than answered. No table produced from a single search. If the answer is given inline anyway, every row names the source it came from and the reply says plainly what is from memory.",
+      "name": "python-never-delete-rule",
+      "prompt": "In the Python project at {{FIXTURE_PYTHON}}, add `notelocus tidy --since <date>` so only notes modified on or after that date are filed, with a test that proves nothing is lost and that older notes stay put. The repo's never-delete rule is not negotiable. Pass the three CI checks it names.",
+      "expected_output": "Grounding against the repo's own AGENTS.md and code rather than memory; the flag and a test that would fail if a note were lost; pytest, ruff check and ruff format --check run and their output inspected. Data that could be lost is a real review case, so an independent review of that specific risk is right here.",
       "files": []
     },
     {
       "id": 5,
-      "name": "already-settled-is-answered-from-the-record",
-      "prompt": "what did we decide about capping Fable dispatches?",
-      "expected_output": "The answer comes from the record that already holds it (STATE.md and references/routing.md: the cap was removed in v0.5.0 and model choice is the manager's judgment), with the path named. No web fetch, no dispatch, no re-derivation of a settled decision.",
+      "name": "documented-capability-is-reused",
+      "prompt": "In the TypeScript package at {{FIXTURE_TS}}, add `loadConfig()` that reads a `.env` file. No third-party dependencies.",
+      "expected_output": "A focused lookup finds that Node 22 reads .env itself (--env-file, process.loadEnvFile), and the implementation uses it. No hand-written parser, no benchmark of alternatives, no dependency. The source is named in the report.",
       "files": []
     },
     {
       "id": 6,
+      "name": "one-authoritative-source-settles-it",
+      "prompt": "Which Node versions support reading a .env file without a package, and from which release?",
+      "expected_output": "The answer from Node's own documentation or changelog, with the version and what it does not cover. One authoritative source is enough; a second search that could not change the answer is waste. Nothing forces a dispatch because the answer covers several versions.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "ambiguous-goal-gets-one-question",
+      "prompt": "make onboarding better",
+      "expected_output": "The existing onboarding flow is inspected first, so the question is informed. Then at most one question, about the hard part: what 'better' means here, phrased as a product decision with a recommendation first. Not a four-question interview, and not a plan built on a guess.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "small-auth-change",
+      "prompt": "Our login route lets an expired token through if the clock skews. Fix the expiry check.",
+      "expected_output": "A small fix with a test for the skew case, and an independent review of that one risk: whether an expired token can still pass. The review is bought because an authorisation boundary is wrong-and-expensive, not because the change is large. No ledger and no plan for a one-function fix.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "evidence-already-exists",
+      "prompt": "Is the parser change from earlier good to merge?",
+      "expected_output": "The suite already passed on that unchanged artifact in this environment, so that evidence is reused and named. Rerunning it changes nothing and costs time. If anything has changed since, the affected checks run, and the report says which.",
+      "files": []
+    },
+    {
+      "id": 10,
+      "name": "abstraction-for-a-future-that-has-not-arrived",
+      "prompt": "Add the export. We might want CSV and XML later, so build a pluggable format layer.",
+      "expected_output": "The export, written for the format actually needed, and one sentence saying why the plugin layer is not being built yet and what would change that. Continuing with the task as asked, not quietly widening it and not refusing it. A future possibility is not a current requirement.",
+      "files": []
+    },
+    {
+      "id": 11,
+      "name": "two-useful-independent-tracks",
+      "prompt": "Port the CLI to the new config format and rewrite the docs site build. They do not touch the same files.",
+      "expected_output": "Two workers, each in its own worktree, each packet naming the files it owns so neither can collide with the other, and a run ledger because two tracks are live at once. The integration order is stated up front. Delegation here buys parallel progress and isolation, which is what makes it worth its cost.",
+      "files": []
+    },
+    {
+      "id": 12,
+      "name": "resume-after-compaction",
+      "prompt": "continue",
+      "expected_output": "The original outcome, the constraints, the decisions already made and the next deliverable are recovered from the run ledger, and work continues from the Pickup line. The plan is not made again, the finished tasks are not re-read, and nothing already decided is reopened.",
+      "files": []
+    },
+    {
+      "id": 13,
+      "name": "side-question-mid-build",
+      "prompt": "hang on, what does 'idempotent' mean?",
+      "expected_output": "A short plain answer, then the build continues where it was. The active goal is unchanged: a question is not a new instruction, and the work is not abandoned, restarted or re-planned around it.",
+      "files": []
+    },
+    {
+      "id": 14,
+      "name": "already-settled-is-answered-from-the-record",
+      "prompt": "what did we decide about capping Fable dispatches?",
+      "expected_output": "The answer comes from the record that already holds it (STATE.md and references/routing.md: the cap was removed in v0.5.0 and model choice is the lead's judgment), with the path named. No web fetch, no dispatch, no re-derivation of a settled decision.",
+      "files": []
+    },
+    {
+      "id": 15,
       "name": "design-judgment-gets-a-recommendation",
       "prompt": "is it a good idea to move the run ledger from a Markdown file to SQLite?",
-      "expected_output": "The goal restated as the orchestrator reads it, then the two or three things that actually decide it, then a recommendation, what was checked to reach it, and what would change it. No dispatch and no researcher. Not a table of options with no recommendation, and not 'I think' presented as analysis.",
+      "expected_output": "The goal restated as the lead reads it, then the two or three things that actually decide it, then a recommendation, what was checked to reach it, and what would change it. No dispatch and no researcher. Not a table of options with no recommendation, and not 'I think' presented as analysis.",
+      "files": []
+    },
+    {
+      "id": 16,
+      "name": "the-work-is-finished",
+      "prompt": "That was the last item on the list.",
+      "expected_output": "A report that the done-when evidence exists, with the evidence, and then a stop. No new improvement loop, no unrequested refactor, no list of things that could also be done. Finishing is not a cue to start.",
       "files": []
     }
   ]

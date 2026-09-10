@@ -22,7 +22,7 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dollars, family, weekShare } from './lib/prices.mjs';
+import { dollars, family } from './lib/prices.mjs';
 import { detectTier, readJson, PROFILE_PATH } from './lib/tier.mjs';
 
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -33,7 +33,7 @@ export function measure(text) {
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
     dispatches: [], routerInjections: 0, routerBytes: 0, routerReread: 0,
     hookContext: 0, returns: [], started: null, ended: null, records: 0, skipped: 0,
-    replyChecks: 0, floorBlocks: 0,
+    stopBlocks: 0,
   };
   const marks = [];
 
@@ -82,16 +82,18 @@ export function measure(text) {
         const at = s.indexOf('[orch-router');
         if (at >= 0) { const bytes = s.length - at; r.routerInjections++; r.routerBytes += bytes; marks.push({ bytes, after: 0 }); }
         if (/orchestrate (guard|ledger):/.test(s)) r.hookContext += s.length;
-        // The two checks that can send a turn back, counted by the fixed prefix
-        // each one writes, and only when the record *starts* with it. Matching
-        // the prefix anywhere counted this file's own plan document, which
-        // quotes both reasons verbatim, as two blocks that never happened. A
-        // blocked Stop feeds its reason back on its own; if a host ever wraps
-        // it in a preamble this under-reports, which is the safe direction.
+        // A turn sent back by the one remaining Stop hook, counted by the fixed
+        // prefix it writes and only when the record *starts* with it. Matching
+        // the prefix anywhere counted this repo's own documents, which quote the
+        // reason verbatim, as blocks that never happened. Retired checks are not
+        // counted at all: a field that can now only ever read zero looks like a
+        // measurement and is not one.
         const head = s.trimStart();
-        if (head.startsWith('reply check:')) r.replyChecks++;
-        if (head.startsWith('orchestrate: a recommendation across a set of cases')) r.floorBlocks++;
+        if (head.startsWith('orchestrate: Pickup has')) r.stopBlocks++;
         const m = /^\s*TASK:\s*(\S+)/m.exec(s);
+        // STATUS is the current schema; RESTATED is what returns written to the
+        // older instruction carry. Both count, because the transcripts this
+        // reads are on disk already and predate the change.
         if (m && /^\s*(RESTATED|STATUS):/m.test(s)) r.returns.push({ task: m[1], lines: s.trim().split('\n').length });
       }
     }
@@ -132,30 +134,37 @@ export function report(r) {
   } else L.push('dispatches: none');
   if (r.returns.length) {
     const lines = r.returns.map(x => x.lines);
-    L.push(`returns: ${r.returns.length}, ${Math.min(...lines)}–${Math.max(...lines)} lines, median ${median(lines)} (the cap is 40)`);
-    const over = r.returns.filter(x => x.lines > 40).length;
-    if (over) L.push(`  ${over} over the cap: the return check let them through, or the agent files were not installed`);
+    // Length, with no cap and no verdict attached to it. A long return is a
+    // fact about the work, not a defect, and nothing sends one back for it.
+    L.push(`returns: ${r.returns.length}, ${Math.min(...lines)}–${Math.max(...lines)} lines, median ${median(lines)}`);
   } else L.push('returns: none in the schema');
   L.push('');
   L.push(`router: ${r.routerInjections} injections, ${r.routerBytes} bytes (≈ ${Math.round(r.routerBytes / 4)} tokens once)`);
   L.push(`  re-read over later turns: ≈ ${Math.round(r.routerReread / 4)} cache-read tokens, cumulative`);
   L.push(`hook context from the guard and the ledger: ${r.hookContext} bytes (≈ ${Math.round(r.hookContext / 4)} tokens)`);
-  L.push(`reply check: ${r.replyChecks} blocks in ${r.turns} turns; floor: ${r.floorBlocks}`);
+  L.push(`turns sent back by the Pickup check: ${r.stopBlocks} in ${r.turns} turns`);
   const share = r.input + r.cacheRead + r.cacheWrite;
   if (share) L.push(`  the router is ${((r.routerBytes / 4 + r.routerReread / 4) / share * 100).toFixed(2)}% of everything this session read`);
   return L.join('\n');
 }
 
-// What the session cost at list price, and what share of a week that is. List
-// price is the host's own unit: the Session block of `/usage` computes its
-// dollar figure the same way, locally from token counts.
+// What the session cost at list price. List price is the host's own unit: the
+// Session block of `/usage` computes its dollar figure the same way, locally
+// from token counts. It is not what a subscription is billed, and nothing here
+// turns it into a share of a plan's week: that needs a weekly dollar figure
+// nobody has measured, and the one that used to be here rested on a single
+// observation.
 export function dollarReport(r, tier, profile) {
   const L = [];
   const fam = Object.keys(r.models).map(family);
-  const main = fam.length ? fam.sort((a, b) => fam.filter(x => x === b).length - fam.filter(x => x === a).length)[0] : 'sonnet';
-  const total = dollars({ input: r.input, output: r.output, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }, main);
+  const named = fam.filter(Boolean);
+  const main = named.length ? named.sort((a, b) => named.filter(x => x === b).length - named.filter(x => x === a).length)[0] : null;
+  const total = main ? dollars({ input: r.input, output: r.output, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }, main) : null;
   L.push('');
-  L.push(`this session, at list price: $${total.toFixed(2)} on ${main}${weekShare(total, tier, profile)}`);
+  // A session whose transcript never names a model is not priced as the cheap
+  // one. Unknown stays unknown until something resolves it.
+  if (total == null) L.push('this session: not priced — the transcript names no model, and guessing one would invent the figure');
+  else L.push(`this session, at list price: $${total.toFixed(2)} on ${main}`);
   if (r.dispatches.length) {
     const by = {};
     for (const d of r.dispatches) { const k = `${d.agent} on ${d.model}`; by[k] = (by[k] || 0) + 1; }

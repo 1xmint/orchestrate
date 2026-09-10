@@ -35,8 +35,11 @@ test('a first install writes all six, with {{SKILL_DIR}} substituted', () => {
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(readdirSync(join(h, '.claude', 'agents')).sort(), AGENT_NAMES.map(n => `${n}.md`).sort());
   const reviewer = readFileSync(agentPath(h, 'orch-reviewer'), 'utf8');
-  assert.match(reviewer, /command: 'node "\/opt\/skill\/scripts\/return-check\.mjs"'/, 'the plugin prefix is replaced with where the skill landed');
   assert.doesNotMatch(reviewer, /\{\{SKILL_DIR\}\}|CLAUDE_PLUGIN_ROOT/, 'no unresolved path reaches the installed file');
+  // The role files carry no hooks of their own any more. The one they had sent
+  // a finished return back to be reformatted, which spent a model turn to buy a
+  // shape. Nothing in an installed agent file can now cost a turn.
+  assert.doesNotMatch(reviewer, /^hooks:/m, 'no per-agent hook survives the install');
   assert.match(r.stdout, /6 installed, 0 refreshed/);
 });
 

@@ -3,40 +3,51 @@
 An agent's report is evidence, not a verdict. Grade from artifacts you inspected
 and commands you ran or had run for you.
 
-## Check the return
+## Read the return
 
-Schema complete, `RESTATED` matches the objective, `STATUS` supported by the
-body, `CHANGED` inside the allowed files. No `EVIDENCE` means `Failed`. A
-`RESTATED` that drifts means the packet was unclear: fix the packet, not the
-agent. A forbidden file changed is a `FAIL` whatever the outcome, because the
-next task assumed it was stable.
+The ledger hook has already saved it whole under `<run dir>/returns/` and added
+a line to `returns/returns.jsonl`. Read that file, not the conversation.
 
-## Verify
+Nothing rejects a return for its length or its shape, and nothing sends one back
+to be rewritten. A return that arrives verbose, or missing a field, is still the
+work; what a missing field costs is certainty, and the answer to that is a grade
+of Built-unverified, not a re-run of finished work.
 
-Run the packet's verification commands in the real worktree, output cut to what
-decides it (`… 2>&1 | tail -20`, or a failures-only filter). Then `git diff
---stat` and `--name-only` against the base, and compare what the agent claimed
-against what the tree shows. Hand the run to `Explore` on haiku only when the
-filtered output is still long or the suite is slow. The ledger already saved the
-full return under `<run dir>/returns/`; read that file, not the conversation.
+What you do check: does `CHANGED` sit inside the scope the packet gave it, and
+does the body support the `STATUS` line. A file outside the scope is a fail
+whatever the outcome, because the next task assumed it was stable.
+
+## Prove it, proportionately
+
+The cheapest sufficient evidence is the right one:
+
+- **Reuse what already passed.** Same artifact, same relevant environment, check
+  already green: that is evidence, and running it again by ritual buys nothing.
+- **Rerun what the change could have broken**, after the change.
+- **Add a regression test** when it captures a real behaviour or a real failure
+  that nothing else covers. Never test what a type or the compiler already
+  proves; hold each property at the cheapest rung that holds it — a type or a
+  tool restriction, then one mechanical check, then a test, then prose.
+- **Drive a user flow** when reading the code cannot settle whether it works.
+- **Run whatever the repo requires to merge**, once, at the integration point.
+
+Filter the output to what decides it (`… 2>&1 | tail -20`, or a failures-only
+filter), then `git diff --stat` and `--name-only` against the base, and compare
+what was claimed against what the tree shows.
 
 The gate is in `<repo>/.orchestrator/gate.json`, written by `scripts/gate.mjs`
 from, in order: the repo's `AGENTS.md` or `CLAUDE.md` build-and-test lines; a
-`justfile` or `Makefile`; `package.json` scripts; `Cargo.toml`; `pyproject.toml`;
-the CI workflow. Run exactly those. If none was found, propose the smallest one
+`justfile` or `Makefile`; `package.json` scripts; `Cargo.toml`;
+`pyproject.toml`; the CI workflow. If none was found, propose the smallest one
 and record it in the ledger.
 
 ## Grade
-
-`ledger.mjs` pre-fills the row: 🔍 for a `DONE` claim, ◐ for `PARTIAL`, ⛔ for
-`BLOCKED`, plus attempts, the saved return path and token usage. It never writes
-✅. You do, after checking, because a `DONE` claim is a claim.
 
 Every task lands in exactly one state:
 
 - **Done**: verified by you or a reviewer, never only by its author.
 - **Built-unverified**: the change exists; the runtime or visual proof does not.
-- **Partial**: some rubric items pass; each failing item is listed.
+- **Partial**: some acceptance items pass; each failing item is listed.
 - **Blocked**: a named external boundary (credential, money, publish, a
   destructive action, a decision only the user owns).
 - **Failed**: a required check failed; the literal error is kept.
@@ -45,44 +56,49 @@ Claims inside a report grade too: `PROVED` (a command or type holds it),
 `CHECKED` (inspected once), `CONDITIONAL(on what)`, `OBSERVED` (seen, not
 reproduced), `SPECULATION`. Only the first two count toward Done.
 
-Hold each property at the cheapest rung that holds it: a type or a tool
-restriction, then one mechanical check, then a test for a behaviour, then prose.
-Never test what a type already guarantees.
+You set the row in `RUN.md`. The hook does not, and used to: two returns landing
+together each rewrote the whole file and the second erased the first's row.
+Setting it yourself is also the only moment anyone has actually judged it.
 
 Then the drift check: a "while I was here" refactor, a changed default, an added
-dependency, a test weakened to pass. Any of those is a `FAIL` with a named
-revert, even when the main change is good.
+dependency, a test weakened to pass. Any of those is a fail with a named revert,
+even when the main change is good.
 
 ## Independent review
 
-Required for security, auth, payments, a public surface, a schema or default
-change, an irreversible action, a cross-module architecture change, or two
-competent results that disagree. `orch-reviewer`, read-only, on a model no
-weaker than the author's. Give it the objective, the packet, the diff and the
-evidence, not your summary of them.
+For the cases where being wrong is expensive and hard to see: an authorisation
+or security boundary, money moving, a destructive or irreversible data change, a
+compatibility contract other people consume, or architectural uncertainty you
+could not resolve. Not for a cosmetic change to a public page, and not because
+the author ran on a smaller model than you.
+
+Give the reviewer the concrete risk and the acceptance criteria, not your
+summary of the change and not "look for problems". Correctness and the stated
+requirements decide the verdict; anything else is reported as optional and does
+not, because a reviewer can always find one more improvement and a change that
+answers all of them is never finished.
 
 One reviewer, not two. A second is warranted only when the first verdict is
 itself in doubt. A conditional pass is a `FAIL` with the exact edit named. An
-unavailable reviewer is reported, never silently skipped. Your own read is a
-check in addition to the reviewer, never instead of it.
-
-Findings are numbered so a fix packet can be scoped to them. Only correctness
-and the stated requirements count; the rest is reported as optional.
+unavailable reviewer is reported, never silently skipped. Never review your own
+edits. After a fix, review the fix, not the whole project again.
 
 ## When it is not right
 
 | Failure class | How to tell | Response |
 |---|---|---|
 | Context gap | agent guessed something the packet could have stated | add the fact; resend to the same model |
-| Capability gap | complete packet, wrong or shallow result, restatement was right | escalate one model step |
+| Capability gap | complete packet, wrong or shallow result | escalate one model step |
 | Too big | partial result, budget exhausted, many files | split into tracer bullets; dispatch the thinnest slice |
 | Environment block | missing tool, credential, service down | fix the environment or report the boundary; do not retry |
-| Ambiguity | restatement differs from objective | rewrite the objective; ask only if two readings are both plausible |
-| Overreach | forbidden files, widened scope, changed defaults | revert the overreach; resend with a tighter NOT IN SCOPE |
+| Ambiguity | the agent solved a different problem | rewrite the objective; ask only if two readings are both plausible |
+| Overreach | files outside scope, widened scope, changed defaults | revert the overreach; resend with a tighter SCOPE |
 
-Never resend the same packet. Three attempts per task, then stop and report with
-the evidence and the failure class. When a failed attempt left useful work,
-repair from the diff rather than starting over.
+Never resend the same packet. Another attempt needs a changed hypothesis,
+corrected context, or an actionable finding — not another go at the same one.
+Three attempts per task, then stop and report with the evidence and the class.
+When a failed attempt left useful work, repair from the diff rather than
+starting over.
 
 ## When a loop is worth another round
 
@@ -91,23 +107,26 @@ Evidence and citations: `docs/research/0004-loops-and-stopping.md`.
 - **A round needs an external judge**: a test, a command, or a reviewer with its
   own criteria. Self-critique with no outside signal is unreliable and can make
   an answer worse.
-- **A reviewer's FAIL that contradicts the author escalates the author**, it
-  does not resend. A confidently wrong model resists correct feedback.
 - **No progress in three rounds, or the same error twice, ends the loop** with
   the evidence.
 - **A loop making no tool call for several turns is stopped.**
 - **A second research wave needs something measurable that could change.**
-- **The run is done when the done-when evidence exists and has been seen.** A
-  limit reached ends it cleanly at a written ledger, not mid-dispatch.
+- **The run is done when the done-when evidence exists and has been seen.** Then
+  stop. Finishing is not a cue to start improving something else.
 
-`models.md` has the rule on verification instructions, which points in opposite
+`models.md` has the rule on verification instructions, which point in opposite
 directions on different models and must never be carried across a switch.
 
 ## Integrate
 
-Merge in dependency order. Focused gates per branch, the full gate at the merge
-point. Resolve conflicts by intent, not by picking a side. `gh pr merge --auto`
-where branch protection exists, instead of watching CI.
+Merge in dependency order. Focused checks per branch, the full gate at the merge
+point. Resolve conflicts by intent, not by picking a side.
+
+Committing and pushing a worker's branch is durability. Merging, releasing,
+tagging and deploying are publication, and they follow the user's authorisation
+and the repo's policy — never from the mere existence of a remote. Where they
+have authorised a merge and branch protection exists, `gh pr merge --auto`
+beats watching CI.
 
 ## Preserving work
 
@@ -119,12 +138,16 @@ where branch protection exists, instead of watching CI.
   wrapper stopped is not proof the work stopped.
 - Unpushed commits in a worktree are invisible to recovery, which is why packets
   say "push after each unit".
+- A return that no run owns is written to `~/.claude/orchestrate/returns/<session>/`
+  and named in the hook's note. Nothing is dropped because the attribution was
+  ambiguous, and nothing is guessed into the wrong ledger either.
 
 ## Research results
 
 Graded by source distance and counterexample search, not by confidence.
 `REFEREED`, `REFUTED`, `GAP` are valid grades. A renamed obstacle is not
-progress.
+progress. A count of searches is not a measure of how well something is
+answered: two failed fetches are two requests and zero sources.
 
 `RUN.md` on disk is enough state. Graph checkpointing earns its overhead only
 with genuinely independent parallel tracks, real branching, or a partial run

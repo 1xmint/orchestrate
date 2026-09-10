@@ -2,6 +2,217 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.9.0 — a senior engineer, not a process, 2026-09-09
+
+v0.8.0 cut the instruction down. v0.9.0 removes the machinery that was still
+making decisions from the *shape of a message* rather than from the work, and
+fixes two defects that could lose or misfile real work.
+
+The rule behind every change: **a hook may hold a fact the model cannot see, or
+catch a failure a pattern can genuinely detect. It may not decide how the work
+should be done, and it may never spend a model turn to buy a format.**
+
+### Two concrete bugs, fixed
+
+**The credential guard could be bypassed by asking twice.** `guard-agent.mjs`
+deduplicated first and decided second, so a packet denied for carrying a
+credential, re-sent unchanged within five seconds, was read as "the same
+dispatch, already handled" and passed. Re-sending an identical call is exactly
+what a model does when a tool call fails. The decision now runs on every
+invocation, before anything is deduplicated; only the side effects — the
+dispatch record and the price tag — are suppressed for a repeat.
+
+The same file also wrote the first 200 characters of every packet to disk as its
+dedupe key. On a packet denied for holding a credential, that wrote the
+credential to disk. Event identity is now `session_id` + `tool_use_id` where the
+host sends them, and a digest of the whole payload where it does not. Two
+packets from the same template no longer collide, two sessions no longer
+overwrite each other's single global slot, and denied attempts are recorded
+apart from work that actually ran.
+
+**A machine-wide "active run" pointer decided where a return was filed.** When a
+session's working directory was not inside a repo, every hook fell back to the
+newest run on the machine — which is not the same fact as the run this session
+is working on. Observed: a subagent's return filed into a *closed* run in a
+different repository, flipping two finished rows back to review.
+
+A run now belongs to the session that opened or claimed it:
+
+- `run-init.mjs --session-id <id>` records the binding when the run is created,
+  and `run-init.mjs --bind <RUN.md> --session-id <id>` claims an existing one.
+- A packet can carry `RUN:`, and the guard keeps that association on the
+  dispatch record.
+- The ledger resolves a return from the packet, then the dispatch record, then
+  the session binding, then a single unambiguous open run in the current repo.
+  Never from the pointer.
+- Two open runs in a repo are *candidates*, never a guess.
+- A return nothing owns is written to `~/.claude/orchestrate/returns/<session>/`
+  and the hook says so, with the command that would bind the right run. Nothing
+  is dropped, and nothing is guessed into the wrong ledger.
+- Return filenames come from agent and event identity, not from counting the
+  files already in the directory, which gave two concurrent returns the same
+  number and let the second overwrite the first.
+
+### The router stopped routing
+
+`router.mjs` was a table of regular expressions that read each message, put it
+on one of ten rungs, and injected an instruction naming an agent, a research
+depth, a reviewer or a permission request. All of that is gone. A pattern in the
+wording is not evidence about the work: six files is not a reason to delegate,
+"should we" is not a reason to research, and the word "deploy" in a sentence is
+not a reason to ask permission for an edit.
+
+What it still does is report what the model cannot see — plan tier, its own
+model, installed agents, a family limit hit today, the bound run — and, on
+resume or compaction, bring back a bounded excerpt of the run's goal,
+constraints, decisions and Pickup line. Then it is quiet until one of those
+facts changes. A different wording is not a change of state.
+
+It also no longer tells the user to change their model or effort. That advice
+fired unprompted at the start of a session, about the user's own settings.
+`models.md` still holds the recommendation, for when they ask.
+
+### Two Stop hooks retired
+
+- **`return-check.mjs` is deleted.** It blocked a subagent from finishing while
+  its return lacked a restatement, or ran past 60 lines, or put fields in the
+  wrong order. Every trigger was formatting, and every block spent a real model
+  turn. In plan mode it spent four on one piece of finished work. Returns are
+  now parsed leniently and filed whole; a missing EVIDENCE section makes a task
+  unverified, which is a grade, not a re-run.
+- **The research floor is gone from `turn-check.mjs`.** It blocked a turn when a
+  set-shaped recommendation had been answered from fewer than two source-reading
+  calls. Two failed fetches satisfied it. One authoritative document did not.
+  Counting requests is not measuring how well something is answered.
+
+The Pickup reminder survives, narrowed to a run this session explicitly bound. A
+session doing direct work has no ledger to keep current.
+
+### The ledger stopped writing rows
+
+`ledger.mjs` saves the return, prices it and records the association in
+`returns/returns.jsonl`. It no longer edits `RUN.md`: two returns landing
+together each read the whole file, changed one row and wrote it back, so the
+second erased the first. The lead sets a row when it has read the return, which
+is also the only moment anyone has actually judged it.
+
+### Cost stopped inventing numbers
+
+- **No weekly figure.** The "% of your week" on every price tag divided by an
+  anchor built from one observation (Pro ~$30, Max 5x ~$150, Max 20x ~$600). A
+  percentage computed from that reads like a measurement. Gone, and with it the
+  5%/25% thresholds that rested on it. What is left: say a price once, before
+  the spend, when it is big enough to change what the user would want.
+- **No model, no price.** `family()` used to answer `sonnet` for anything it did
+  not recognise, so a dispatch that inherited the session's model was priced as
+  the cheap one and reported as measured. Unknown now stays unknown, in the
+  guard's tag, in `costs.jsonl` and in `measure.mjs`.
+
+### Smaller interfaces
+
+- **The packet is four fields**: the task and its objective, the context and
+  decisions it needs, the scope boundaries, and the evidence that means done.
+  Everything else — run, dependencies, worktree, owned files, gate, prior
+  attempts — is added only when it applies. "Every field, every time, 'none'
+  rather than omitted" made every packet carry a dozen lines that stopped
+  nothing on that task.
+- **The return is TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED**, plus a
+  verdict and findings for a review. Older verbose returns still parse.
+- **Role agents cannot dispatch.** Enforced with the host's own tool
+  restrictions rather than a sentence asking them not to.
+- **Role agents no longer pin an effort level.** Planner and debugger were
+  `xhigh` and the rest `high`, overriding whatever the user chose for the
+  session and spending their quota at it.
+
+### Review is bought, not scheduled
+
+The rule that a manager strictly above the author could read the diff itself,
+and otherwise had to dispatch, created reviewers by arithmetic on model names —
+a comparison that says nothing about whether a change is risky. Independent
+review is now for an authorisation or security boundary, money moving, a
+destructive or irreversible data change, a compatibility contract others
+consume, or unresolved architectural doubt. The reviewer is given the concrete
+risk and the acceptance criteria. Correctness findings decide the verdict;
+anything else is optional and must not start a repair loop. A reviewer
+disagreeing is no longer a trigger to escalate the author's model.
+
+### The ledger keeps the goal
+
+`RUN.md` gained **Constraints and non-goals** and **Approach** above the task
+table, so the four things a resuming session actually needs — the outcome and
+why it matters, the evidence that would prove it, what it must respect and is
+not doing, and the next deliverable — are in one place. That block is what the
+router injects on resume, never the task history.
+
+### The lead can tell a ready task from a blocked one
+
+Josh watched a session sit idle, waiting on one agent, with a finished plan on
+the board and a `/goal` loop running: no progress, and quota burning, because an
+idle turn in a `/goal` loop still costs a turn.
+
+The cause was a gap between two files. `SKILL.md` told the lead that every task
+row carries "what it blocks on" and "the files it owns". The `RUN.md` table had
+seven columns and neither of them. The dependency graph was asked for and
+dropped, so nothing could answer "what could start right now" and the lead fell
+back to the one agent it happened to remember.
+
+- The table gained **`blocks on`** and **`owns`**, both to the left of the free
+  text, because everything that reads a row counts from the left and a stray
+  pipe in a task description would otherwise shift them.
+- `readyTasks()` in `lib/tier.mjs` computes which planned rows have no unlanded
+  blocker, from text `readRun()` already parses. No new file read, no new hook.
+- The router appends `ready now: <ids>` to the run line it already prints, and
+  `stateHash` includes the ready set so the line reprints at the moment a task
+  becomes ready. It reports; it never demands. A lead that should wait still can.
+- A ledger written before those columns existed has no edges to read, so it
+  reports nothing rather than claiming every planned row is ready.
+
+The same line also names **returns that came back and were never graded**, which
+closes a gap this release opened. The hook stopped writing rows, so a row is
+only right if the lead sets one, and `readyTasks` reads those same rows: a stale
+🔨 hides a finished task and everything waiting on it stays invisible. The
+router now says how many returns are owed a grade and which, and stops the
+moment the row is set. `returnedTasks()` reads the index the ledger already
+writes, and `ungradedReturns()` compares it against the rows.
+
+Only `📋` and `🔨` count as ungraded. `◐` and `⛔` are grades the lead chose;
+`✅`, `🧱` and `✖` are final.
+
+**This is not a push toward parallelism, and the distinction is the whole
+design.** [Anthropic's multi-agent write-up](https://www.anthropic.com/engineering/multi-agent-research-system)
+(checked 2026-09-09) warns that "most coding tasks involve fewer truly
+parallelizable tasks than research, and LLM agents are not yet great at
+coordinating and delegating to other agents in real time", and puts multi-agent
+token use at roughly 15x a chat against about 4x for a single agent. Speculative
+fan-out on coding work is a bad trade.
+
+What this ships is narrower: the plan already declared these tasks independent,
+so starting one is executing a graph rather than guessing at one. Note also that
+parallelism is a wall-clock win and not a quota win — the same tokens are spent
+either way, and concurrent agents pay slightly more because each re-reads its
+own prefix against a five-minute subagent cache. The saving is the idle turns
+that stop happening.
+
+### What was measured, and what was not
+
+Measured: 169 unit tests pass, no quota and no network. Both bugs above were
+reproduced before the fix, and each is covered by a test that fails against the
+old code.
+
+**Not measured: whether any of this makes the model work better.** Nothing here
+ran a live model. The claim this release makes is structural — the plugin no
+longer creates incentives for work nobody asked for — not behavioural. Passive
+measurement from ordinary use (`measure.mjs --latest`) is how that would be
+found out, and it has not been run on a v0.9.0 session yet.
+
+### Maintainer rule, now written down
+
+A new permanent hook or instruction needs a concrete failure it prevents, a
+reason the existing behaviour cannot cover it, and what it costs on every future
+turn. No self-modification, and no growing pile of lessons after every incident:
+an instruction that fires on everything to catch one thing costs more than the
+thing. It is in `SKILL.md` §10, because that is where it will be read.
+
 ## v0.8.0 — cut it down to judgment, 2026-09-09
 
 Josh: we are over-engineering; the manager should ask direct questions and find

@@ -1,6 +1,7 @@
 // lib/tier.mjs — the one copy of what every orchestrate hook needs: paths under
-// ~/.claude/orchestrate, plan-tier detection, the Fable counter, the latest run
-// ledger for a repo, installed role agents, and small safe file helpers.
+// ~/.claude/orchestrate, plan-tier detection, run lookup and the session-to-run
+// binding a hook writes through, installed role agents, and small safe file
+// helpers.
 // No network, no child processes, never throws to a caller (returns null instead).
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from 'node:fs';
@@ -142,78 +143,123 @@ export function isWritten(value) {
 
 export const ACTIVE_RUN_PATH = join(DIR, 'active-run.json');
 
-// A session's cwd is often not the repo. Josh's sessions start in the folder
-// that *contains* his repos, so `findRepoRoot(cwd)` returns null and every hook
-// that looked for a run from cwd found nothing: the router said "open run: none
-// in this repo" while a run was open one directory down, and `profile --brief`
-// said "runs 0". run-init records the run it just created here, and every
-// reader tries this pointer before falling back to cwd.
+// The last run `run-init` opened on this machine. It is a *hint* for a session
+// whose cwd is not inside a repo at all — sessions that start in the folder
+// that contains the repos, where `findRepoRoot(cwd)` is null and nothing else
+// can name a run. It is never authority for a write. When it was, a hook wrote
+// one repository's subagent return into another repository's ledger, because
+// "newest run on this machine" and "the run this session is working on" are not
+// the same thing. Writes resolve a run from the session binding, or from a
+// single unambiguous open run inside the current repo, and from nothing else.
 export function rememberActiveRun(root, runMd) {
   try { writeJsonAtomic(ACTIVE_RUN_PATH, { v: 1, root, runMd, at: new Date().toISOString() }); } catch {}
 }
 
-function activeRunRoot() {
+export function runIdOf(runMd) {
+  return String(runMd || '').replace(/[\\/]RUN\.md$/i, '').split(/[\\/]/).pop() || null;
+}
+
+export function activeRunPointer() {
   const p = readJson(ACTIVE_RUN_PATH);
-  return p && p.root && existsSync(join(p.root, '.orchestrator', 'runs')) ? p.root : null;
+  if (!p || !p.root || !p.runMd || !existsSync(p.runMd)) return null;
+  return readRun(p.runMd, p.root);
 }
 
-// The newest run under <root>/.orchestrator/runs that has a RUN.md. `open` is
-// true when a task row still carries a non-final glyph. Pickup lines come from
-// the "## Pickup" section; template placeholders count as empty.
-export function latestRun(root) {
-  const found = latestRunUnder(root);
-  if (found) return found;
-  // cwd knew nothing. Fall back to the run the last run-init recorded, but only
-  // when cwd is not itself a repo with runs, so a session working in repo B is
-  // never shown repo A's ledger.
-  const remembered = activeRunRoot();
-  return remembered && remembered !== root ? latestRunUnder(remembered) : null;
+// A cell, counted from the left. Task and acceptance text are free-form and can
+// contain a pipe, so anything read from the right shifts the moment one does.
+// id, phase, blocks-on and owns all sit to the left of the free text for that
+// reason.
+const cellAt = (line, i) => {
+  const c = String(line || '').split('|');
+  return c[i] == null ? '' : c[i].trim();
+};
+
+// Which planned tasks could start right now. Answering this needs the
+// dependency edges, and until v0.9.0 the table had no column for them: the
+// skill asked for "what it blocks on" and the template dropped it, so nobody
+// could tell a ready task from a blocked one. A ledger written before that
+// column existed has no edges to read, so it reports nothing rather than
+// guessing that every planned row is ready.
+//
+// Satisfied means done. A blocker still carrying an open glyph has not landed,
+// and one marked ✖ failed never will, so neither releases what waits on it.
+// 🧱 built-unverified is deliberately not enough: the artifact exists but
+// nothing has checked it, and a task built on an unchecked one inherits the
+// doubt. Loosening that is one glyph if it proves too strict in practice.
+export function readyTasks(rows, header) {
+  const cols = String(header || '').split('|').map(s => s.trim().toLowerCase());
+  const blocksAt = cols.indexOf('blocks on');
+  if (blocksAt < 0) return [];
+
+  const phaseOf = new Map();
+  for (const r of rows) phaseOf.set(cellAt(r, 1), cellAt(r, 2));
+
+  // A blocker nobody wrote a row for is nothing to wait for.
+  const landed = id => {
+    if (!phaseOf.has(id)) return true;
+    return /✅/.test(phaseOf.get(id));
+  };
+
+  const out = [];
+  for (const r of rows) {
+    if (!/📋/.test(cellAt(r, 2))) continue;
+    const blockers = cellAt(r, blocksAt).split(/[,\s]+/).filter(s => s && !/^[—-]$/.test(s));
+    if (blockers.every(landed)) out.push(cellAt(r, 1));
+  }
+  return out;
 }
 
-// The run id `run-init` recorded for this root, when that run still exists.
-// This is the one signal written at the moment a run is opened, so it is the
-// only one that cannot be moved by anything that happens afterwards.
-function pointedRunId(base, root) {
-  const p = readJson(ACTIVE_RUN_PATH);
-  if (!p || !p.root || !p.runMd) return null;
-  const same = String(p.root).toLowerCase() === String(root || '').toLowerCase();
-  if (!same) return null;
-  const id = String(p.runMd).replace(/[\\/]RUN\.md$/i, '').split(/[\\/]/).pop();
-  return id && existsSync(join(base, id, 'RUN.md')) ? id : null;
-}
-
-function latestRunUnder(root) {
+// The task ids the ledger hook has filed a return for. One small append-only
+// line per return, written by `ledger.mjs`.
+export function returnedTasks(dir) {
+  const ids = [];
   try {
-    const base = join(root || process.cwd(), '.orchestrator', 'runs');
-    if (!existsSync(base)) return null;
-    // Newest by when the run was opened, not last alphabetically.
-    // Run folders are `<YYYYMMDD>-<slug>`, so a name sort only orders runs from
-    // different days; two opened on the same day fell back to comparing slugs.
-    // Observed 2026-09-09: `20260909-v07-senior-engineer` was created after
-    // `20260909-vibe-coder-audit` and lost to it, so every hook pointed at the
-    // older run all session. That is not only a wrong label — the ledger writes
-    // the run it is given, so a subagent's return was filed into a *closed*
-    // run and flipped two finished rows back to review.
-    const runs = readdirSync(base)
-      .filter(n => existsSync(join(base, n, 'RUN.md')))
-      .map(n => {
-        // When the run was *opened*, not when its file was last touched. The
-        // ledger rewrites RUN.md on every return, so a modified time makes
-        // whichever run was written last win -- including the wrong one this
-        // bug was already writing to. A run folder is created once.
-        try { const s = statSync(join(base, n)); return { n, m: s.birthtimeMs || s.mtimeMs }; } catch { return { n, m: 0 }; }
-      })
-      .sort((a, b) => (a.m - b.m) || (a.n < b.n ? -1 : a.n > b.n ? 1 : 0))
-      .map(x => x.n);
-    if (!runs.length) return null;
-    // The pointer first, then creation order. Two runs opened on the same day
-    // can be created in the same millisecond in a test, and a name tie-break is
-    // exactly the bug this replaced.
-    const runId = pointedRunId(base, root) || runs[runs.length - 1];
-    const runMd = join(base, runId, 'RUN.md');
+    const text = readFileSync(join(dir, 'returns', 'returns.jsonl'), 'utf8');
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      if (o && o.task) ids.push(String(o.task));
+    }
+  } catch {}
+  return ids;
+}
+
+// A return came back and nobody has looked at it. The hook stopped writing task
+// rows in v0.9.0, because two returns landing together each rewrote the whole
+// file and the second erased the first. That made the row honest — it is set
+// when someone has actually judged the return — and it made it depend on the
+// lead remembering, which is where this repo's own research says things fail.
+//
+// It matters more than it looks, because `readyTasks` reads these same rows. A
+// row still saying 🔨 after its work came back hides a finished task, and
+// everything waiting on it stays invisible.
+//
+// 📋 and 🔨 are the only two phases that mean untouched-since-dispatch. ◐ and ⛔
+// are grades the lead chose; ✅, 🧱 and ✖ are final.
+export function ungradedReturns(rows, returned) {
+  const want = new Set((returned || []).filter(Boolean).map(String));
+  if (!want.size) return [];
+  const out = [];
+  for (const r of rows) {
+    const id = cellAt(r, 1);
+    if (!want.has(id) || out.includes(id)) continue;
+    if (/📋|🔨/.test(cellAt(r, 2))) out.push(id);
+  }
+  return out;
+}
+
+// One run, read from its RUN.md. `open` is true while a task row still carries
+// a non-final glyph. Pickup lines come from the "## Pickup" section; template
+// placeholders count as empty.
+export function readRun(runMd, root) {
+  try {
     const st = statSync(runMd);
     const text = readFileSync(runMd, 'utf8');
-    const rows = text.split('\n').filter(l => /^\|\s*\d+-\d+-\d{4}\s*\|/.test(l));
+    const lines = text.split('\n');
+    const rows = lines.filter(l => /^\|\s*\d+-\d+-\d{4}\s*\|/.test(l));
+    const header = lines.find(l => /^\|\s*id\s*\|/i.test(l)) || '';
+    const ready = readyTasks(rows, header);
+    const ungraded = ungradedReturns(rows, returnedTasks(dirname(runMd)));
     const open = rows.some(l => OPEN_GLYPHS.test(l));
     const pickup = {};
     const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
@@ -223,8 +269,95 @@ function latestRunUnder(root) {
         if (kv && isWritten(kv[2])) pickup[kv[1]] = kv[2].trim();
       }
     }
-    return { runId, dir: join(base, runId), runMd, root: root || process.cwd(), mtimeMs: st.mtimeMs, open, rows: rows.length, pickup };
+    const dir = dirname(runMd);
+    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, open, rows: rows.length, ready, ungraded, pickup };
   } catch { return null; }
+}
+
+// Every run under one repo, oldest first. Ordered by when the run folder was
+// created, not by name and not by modified time: run folders are created once,
+// while RUN.md is rewritten constantly, and a name sort only separates runs from
+// different days.
+export function runsUnder(root) {
+  try {
+    const base = join(root || process.cwd(), '.orchestrator', 'runs');
+    if (!existsSync(base)) return [];
+    return readdirSync(base)
+      .filter(n => existsSync(join(base, n, 'RUN.md')))
+      .map(n => {
+        let m = 0;
+        try { const s = statSync(join(base, n)); m = s.birthtimeMs || s.mtimeMs; } catch {}
+        return { n, m };
+      })
+      .sort((a, b) => (a.m - b.m) || (a.n < b.n ? -1 : a.n > b.n ? 1 : 0))
+      .map(x => readRun(join(base, x.n, 'RUN.md'), root))
+      .filter(Boolean);
+  } catch { return []; }
+}
+
+export function openRunsUnder(root) {
+  return runsUnder(root).filter(r => r.open);
+}
+
+// The newest run under this repo, or null. No cross-repo fallback: a caller
+// that has no repo asks `resolveRun` and gets candidates it must choose from.
+export function latestRun(root) {
+  const all = runsUnder(root);
+  if (!all.length) return null;
+  const p = readJson(ACTIVE_RUN_PATH);
+  // Within the same repo the pointer still breaks a tie, because two runs
+  // opened on the same day can share a creation millisecond.
+  if (p && p.root && String(p.root).toLowerCase() === String(root || '').toLowerCase()) {
+    const id = runIdOf(p.runMd);
+    const hit = all.find(r => r.runId === id);
+    if (hit) return hit;
+  }
+  return all[all.length - 1];
+}
+
+// ---- session ↔ run binding --------------------------------------------------
+// The association a hook writes through. A run belongs to the session that
+// opened or resumed it, and to no other; `--session-id` on run-init and
+// `bindSessionRun` are the only two ways it is set.
+
+export function bindSessionRun(sessionId, run) {
+  if (!sessionId || !run || !run.runMd) return null;
+  const state = loadSession(sessionId) || { v: 1, session_id: sessionId, started: new Date().toISOString() };
+  state.session_id = sessionId;
+  state.run = { root: run.root, runId: run.runId || runIdOf(run.runMd), runMd: run.runMd, boundAt: new Date().toISOString() };
+  try { saveSession(state); } catch { return null; }
+  return state.run;
+}
+
+export function sessionRun(sessionId) {
+  const state = loadSession(sessionId);
+  const r = state && state.run;
+  if (!r || !r.runMd || !existsSync(r.runMd)) return null;
+  return readRun(r.runMd, r.root);
+}
+
+// Which run, if any, this session may act on.
+//   { run, candidates, how }
+// `run` is set only when the answer is unambiguous. Otherwise `candidates`
+// carries what a resume would have to choose between, and the caller says so
+// rather than guessing. `forWrite` refuses the machine-wide pointer outright.
+export function resolveRun(sessionId, cwd, { forWrite = false } = {}) {
+  const bound = sessionRun(sessionId);
+  if (bound) return { run: bound, candidates: [bound], how: 'bound to this session' };
+
+  const root = findRepoRoot(cwd);
+  if (root) {
+    const open = openRunsUnder(root);
+    if (open.length === 1) return { run: open[0], candidates: open, how: 'the one open run in this repo' };
+    if (open.length > 1) return { run: null, candidates: open, how: `${open.length} open runs in this repo` };
+    return { run: null, candidates: [], how: 'no open run in this repo' };
+  }
+
+  if (!forWrite) {
+    const p = activeRunPointer();
+    if (p) return { run: null, candidates: [p], how: 'no repo above the working directory; this is the last run opened on this machine, and it is not bound to this session' };
+  }
+  return { run: null, candidates: [], how: 'no repo above the working directory' };
 }
 
 export function sanitizeId(s) {

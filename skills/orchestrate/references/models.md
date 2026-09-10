@@ -37,8 +37,11 @@ less preamble, terser confirmations.**
 Which workloads repay effort is a property of the work, not a preference. Coding
 and long-horizon agentic work respond strongly; chat and classification do not.
 
-`Explore` and `general-purpose` inherit the session's effort. The six `orch-*`
-files set their own and ignore it. Haiku ignores it entirely.
+Every agent inherits the session's effort, including the six `orch-*` roles.
+Haiku ignores effort entirely. The role files used to pin their own — planner
+and debugger at `xhigh` — which quietly overrode the level the user chose and
+spent their quota at it. If a role genuinely needs more thinking than the
+session is set to, that is a thing to say to the user, not to set behind them.
 
 ## Choosing between them
 
@@ -75,7 +78,11 @@ whose context dies with it, rather than to the conversation, whose context is
 re-read on every later turn. That is the whole reason this skill dispatches. A
 subagent that fills its window was usually a task that should have been two.
 
-## The manager's own model and effort
+## If the user asks what to run the lead on
+
+Answer this when they ask. Do not raise it yourself, and never ask them to
+change it mid-run: the skill used to inject that advice unprompted, which is a
+session interrupting the user about the user's own settings.
 
 | Plan | Model | Effort |
 |---|---|---|
@@ -83,25 +90,24 @@ subagent that fills its window was usually a task that should have been two.
 | Max 5x $100 | Opus | high |
 | Max 20x $200 | Opus | high |
 
-Why, in the part that survives a new plan appearing: a manager takes many short
+Why, in the part that survives a new plan appearing: a lead takes many short
 turns and effort multiplies across all of them, while a worker takes one long
-turn and stops, so depth belongs in the workers — the planner and debugger files
-are already `xhigh`. `xhigh` is the worker profile; `max` needs a measurement
-nobody has made for an orchestrator. Fable never manages: its cost across a
-hundred manager turns buys nothing `high` on Opus does not.
+turn and stops. `max` needs a measurement nobody has made for a multi-turn lead.
+Fable never leads: its cost across a hundred short turns buys nothing `high` on
+Opus does not.
 
-Cost is not a reason to stay low. A manager turn is mostly cached re-reads, so
+Cost is not a reason to stay low. A lead's turn is mostly cached re-reads, so
 Opus at high costs little more per turn than Sonnet; what costs money is a
 shallow grade that sends a task round again.
 
-Set both at the start. Changing either mid-run rebuilds the whole prompt cache on
-Opus and Sonnet. Fable 5.1 is the exception: it keeps the cache across an effort
-change. `profile.mjs --set-default model=opus effort=high` sets the default for
-new sessions; the running conversation changes only with the picker.
+Changing either mid-run rebuilds the whole prompt cache on Opus and Sonnet.
+Fable 5.1 is the exception: it keeps the cache across an effort change.
+`profile.mjs --set-default model=opus effort=high` sets the default for *new*
+sessions; the running conversation changes only with the picker.
 
-Nobody has published a measurement of effort on a multi-turn orchestrator. The
-model rows are the plan defaults; the `high` row is reasoning, marked as
-reasoning on purpose.
+Nobody has published a measurement of effort on a multi-turn lead. The model
+rows are the plan defaults; the `high` column is reasoning, marked as reasoning
+on purpose.
 
 ## Price tags
 
@@ -123,16 +129,18 @@ per-million prices above and one observation of a real fan-out:
 | `orch-browser` | — | $3 | $1 | — |
 | `Explore` | — | — | $0.50 | $0.10 |
 
-A week of a plan, same unit, so a share can be worked out: Pro about $30, Max 5x
-about $150, Max 20x about $600. That rests on **one observation**, 2026-09-09:
-three Fable researchers read 20.5M, 9.0M and 7.3M mostly-cached input tokens,
-roughly $36 of list price, reported as about a quarter of a Max 5x week.
-Everything else is that scaled by plan price. `profile.mjs --set week=<dollars>`
-replaces it with a real one.
+There is no weekly figure here any more, and so no "% of your week" on a price
+tag. The one that used to be printed — Pro about $30, Max 5x about $150, Max 20x
+about $600 — came from a single observation on 2026-09-09 scaled by what the
+plans cost. A percentage computed from that reads like a measurement, and a
+reader has no way to tell it is not one.
 
 List price is not what a subscription is billed. It is the only unit a
 subscription dispatch can be priced in, and the unit the host already shows the
 user. Say so whenever a figure is printed.
+
+A model nobody named is not priced. An inherited model used to be priced as
+Sonnet, which is a number invented about a dispatch whose model was unknown.
 
 ## Sources
 

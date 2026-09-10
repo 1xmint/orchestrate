@@ -29,13 +29,14 @@ Observed 2026-09-09 on a real background dispatch, not read from the docs: the p
 `last_assistant_message`, `agent_type` and `agent_transcript_path`, and `cwd` was the repo rather
 than the session's own working directory. Two other stops in the same session arrived with a
 `last_assistant_message` and **no** agent field at all, so `ledger.mjs` requires an agent identity
-before it treats a stop as a return; without that check the orchestrator's own messages were being
+before it treats a stop as a return; without that check the lead's own messages were being
 filed under `returns/`.
 
 **Nesting** is allowed to three layers below the main conversation
 (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`); `Agent` is removed only at the depth limit. This skill's
-rule that only the orchestrator dispatches is *policy*, kept because nested dispatch hides cost
-and returns from the ledger. Up to 20 concurrent subagents by default.
+rule that only the lead dispatches is enforced in the role files themselves
+(`disallowedTools: Agent`, or a tool allowlist without it), because a nested dispatch hides both
+its cost and its return from the ledger. Up to 20 concurrent subagents by default.
 
 **Resume** a named agent with `SendMessage`; `Explore` and `Plan` are one-shot. Named subagents
 also see a roster of each other and can message each other. Caution: with agent teams enabled
@@ -50,11 +51,11 @@ session's auto memory. `Explore` and `Plan` skip CLAUDE.md and git status, which
 start small. A `fork` inherits the whole conversation instead.
 
 **Agent files** live in `~/.claude/agents/<name>.md` (all projects) or `.claude/agents/` (one
-repo, wins). Fields used here: `name`, `description`, `model`, `effort`, `tools`,
+repo, wins). Fields used here: `name`, `description`, `model`, `tools`,
 `disallowedTools`, `maxTurns`, `isolation`, `color`, `memory` (`user` → `~/.claude/agent-memory/
 <name>/`, `project`, `local`), `hooks` (`Stop` in an agent file becomes `SubagentStop` for that
 agent). `install-agents.mjs` installs the six and substitutes the skill's absolute path into
-their hook commands. New agent files appear in a running session after a minute or two; a new
+their paths. New agent files appear in a running session after a minute or two; a new
 session sees them at once.
 
 **Skill files** load from `~/.claude/skills/<name>/SKILL.md` or `.claude/skills/`. Descriptions
@@ -66,18 +67,23 @@ the output; a failing command aborts the invocation. `${CLAUDE_SKILL_DIR}` is su
 the body. `/skill-doctor` reports unused skills and their per-turn cost.
 
 **Hooks this skill uses**: `UserPromptSubmit` and `SessionStart` (router, global),
-`PreToolUse` on `Agent` (guard: deny, or `permissionDecision: allow` + `updatedInput` to
-downgrade the model), `SubagentStop` (ledger; and the return check from each agent file),
-`Stop` (turn check). Hook `additionalContext` and skill invocations append as messages, so the
-prompt cache is not broken. Command hooks cannot run tools or slash commands; a `type: prompt`
+`PreToolUse` on `Agent` (guard: deny only; it never rewrites a dispatch), `SubagentStop`
+(ledger), `Stop` (the Pickup check). The role agents carry no hooks of their own: the one they
+had rejected a finished return over its shape, which spends a model turn to buy formatting.
+Hook `additionalContext` and skill invocations append as messages, so the prompt cache is not
+broken. Command hooks cannot run tools or slash commands; a `type: prompt`
 hook (Haiku) returns only `ok`/`reason`.
 
 **A hook registered in two places runs twice.** `settings.json` and a skill's frontmatter are
 separate registrations, and both fire on the same event; the platform does not deduplicate them.
-Any hook with a side effect therefore has to be idempotent itself. `guard-agent.mjs` and
-`ledger.mjs` each key on a signature of the payload within a few seconds and act once, which is
-why the same install can register them globally and from the skill without double-counting a
-Fable dispatch or writing a return file twice.
+Any hook with a *side effect* therefore has to be idempotent itself. `guard-agent.mjs` keys on
+`session_id` + `tool_use_id` (a payload digest where the host sends no id) and `ledger.mjs` on a
+digest of the return, so the same install can register both globally and from the skill without
+counting one dispatch twice or writing a return file twice.
+
+**A decision is not a side effect, and must not be deduplicated.** The guard used to skip the
+whole invocation on a repeat, which meant a packet denied for carrying a credential passed on an
+immediate identical retry. Decide first, then suppress only what would otherwise happen twice.
 
 **Auto mode** (the default on Pro/Max/Team): a classifier reviews each subagent's task at spawn,
 its actions, and its return; `permissionMode` in agent files is ignored; PreToolUse denies still
@@ -132,13 +138,15 @@ style whenever the plugin is enabled and overrides the user's own `outputStyle`;
 plugin is the way off.
 
 **In plan mode a subagent inherits the write restriction.** Observed 2026-09-09: a researcher
-dispatched from plan mode could write only to a sibling of the plan file, its return-check hook
-then blocked it repeatedly, and the ledger filed four returns and bumped the attempt count each
-time. From plan mode, dispatch only read-only tasks whose packet says "return the findings
+dispatched from plan mode could write only to a sibling of the plan file; a Stop hook then
+blocked it repeatedly for returning the wrong shape, and the ledger filed four returns and
+counted four attempts for one piece of work. That hook is gone — it is the clearest case there
+was of a check that spends real money to enforce formatting — but the write restriction is
+not. From plan mode, dispatch only read-only tasks whose packet says "return the findings
 inline, write nothing", or name the plan file's own sibling as the output path.
 
 **`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`** is the host's mechanical form of "only the
-orchestrator dispatches", alongside `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`. Whether the count
+the lead dispatches", alongside `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`. Whether the count
 includes the manager's own level is unverified, so nothing here sets it; one dispatch under a
 known value settles it.
 

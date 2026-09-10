@@ -1,5 +1,5 @@
-// hooks.test.mjs — the four mechanical hooks: the money guard, the ledger, the
-// return check and the turn check. Every test runs the real script as a child
+// hooks.test.mjs — the three mechanical hooks: the credential guard, the
+// ledger, and the Pickup check. Every test runs the real script as a child
 // process with a fake HOME and a fixture repo, so nothing here touches the
 // machine's own ~/.claude.
 
@@ -10,10 +10,9 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseReturn, sumUsage, updateRow, bumpAttempts, describeDispatch, PHASE, isRepeat } from './ledger.mjs';
-import { check as returnCheck, MAX_BLOCKS, countKey } from './return-check.mjs';
+import { parseReturn, sumUsage, describeDispatch, isRepeat, returnFilename, note, costLine } from './ledger.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
-import { decide } from './guard-agent.mjs';
+import { decide, eventId, markSeen } from './guard-agent.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const script = n => join(HERE, n);
@@ -39,13 +38,17 @@ function run(name, payload, home, extraEnv = {}) {
 function fixtureRepo(opts = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'orch-repo-'));
   mkdirSync(join(dir, '.git'), { recursive: true });
-  const runDir = join(dir, '.orchestrator', 'runs', '2026-09-09-0001');
+  const runDir = join(dir, '.orchestrator', 'runs', opts.runId || '20260909-fixture');
   mkdirSync(runDir, { recursive: true });
-  writeFileSync(join(runDir, 'RUN.md'), `# Run 2026-09-09-0001
+  writeFileSync(join(runDir, 'RUN.md'), `# Run ${opts.runId || '20260909-fixture'}
+
+## Goal
+
+Ship the flag.
 
 ## Tasks
 
-| id | phase | role · model | task | rubric | attempts | evidence |
+| id | phase | role · model | task | acceptance evidence | attempts | result |
 |---|---|---|---|---|---|---|
 | 9-9-0001 | 🔨 running | implementer · sonnet | add the flag | the test passes | 0 | — |
 | 9-9-0002 | 📋 planned | reviewer · opus | review it | PASS | 0 | — |
@@ -56,17 +59,32 @@ Pickup prompt: ${opts.pickup ?? '<one sentence that continues from here>'}
 Pickup confidence: high
 Resume risk: none
 `);
-  return { dir, runDir, runMd: join(runDir, 'RUN.md') };
+  return { dir, runDir, runId: opts.runId || '20260909-fixture', runMd: join(runDir, 'RUN.md') };
+}
+
+// Bind a session to a run the way run-init --session-id does, so a hook that
+// writes has an association to write through.
+function bind(home, sessionId, repo) {
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${sessionId}.json`), JSON.stringify({
+    v: 1, session_id: sessionId,
+    run: { root: repo.dir, runId: repo.runId, runMd: repo.runMd, boundAt: new Date().toISOString() },
+  }));
 }
 
 const GOOD_RETURN = `TASK: 9-9-0001
-RESTATED: Add a --since flag to tidy, with a test proving older notes stay put.
 STATUS: DONE
-BRANCH: task/9-9-0001   WORKTREE: /tmp/wt
+BRANCH: task/9-9-0001
 CHANGED: src/tidy.py, tests/test_tidy.py; 2 commits
 EVIDENCE: pytest -q -> 41 passed
-NOT VERIFIED: Windows path handling
-QUESTIONS: none`;
+NOT VERIFIED: Windows path handling`;
+
+const CRED_PACKET = {
+  hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'sc', cwd: '/tmp',
+  tool_use_id: 'toolu_cred_1',
+  tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 1\nuse ghp_abcdefghijklmnopqrstuvwxyz012345 to push' },
+};
 
 // ------------------------------------------------------------------- guard --
 
@@ -80,6 +98,113 @@ test('guard: an ordinary dispatch passes untouched', () => {
   assert.equal(decide({ tool_input: { model: 'opus', prompt: 'TASK: 1' } }).kind, 'pass');
 });
 
+// The bug this release exists partly to fix. Deduplication used to run before
+// the credential decision, so re-sending a denied packet unchanged within five
+// seconds looked like "the same dispatch, already handled" and passed. Sending
+// the same request twice is exactly what a model does when a tool call fails.
+test('guard: the same credential-bearing packet is denied every time it is sent', () => {
+  const home = sandbox();
+  for (const attempt of [1, 2, 3]) {
+    const out = run('guard-agent.mjs', CRED_PACKET, home);
+    assert.equal(out.json.hookSpecificOutput.permissionDecision, 'deny', `attempt ${attempt} denied`);
+    assert.match(out.json.hookSpecificOutput.permissionDecisionReason, /credential/);
+  }
+});
+
+test('guard: a denied attempt is recorded apart from work that actually ran', () => {
+  const home = sandbox();
+  run('guard-agent.mjs', CRED_PACKET, home);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sc.json'), 'utf8'));
+  assert.equal(state.denials.length, 1);
+  assert.equal(state.denials[0].agent, 'orch-implementer');
+  assert.ok(!state.dispatches || state.dispatches.length === 0, 'a denial is not a dispatch');
+});
+
+test('guard: nothing it writes contains the packet text', () => {
+  // The packet was denied because it holds something that must not be written
+  // down. The old dedupe key stored the first 200 characters of it on disk.
+  const home = sandbox();
+  run('guard-agent.mjs', CRED_PACKET, home);
+  const base = join(home, '.claude', 'orchestrate');
+  const files = [];
+  const walk = d => { for (const n of readdirSync(d, { withFileTypes: true })) { const p = join(d, n.name); n.isDirectory() ? walk(p) : files.push(p); } };
+  walk(base);
+  assert.ok(files.length, 'the guard wrote something');
+  for (const f of files) {
+    assert.doesNotMatch(readFileSync(f, 'utf8'), /ghp_abcdefghijklmnopqrstuvwxyz012345/, f);
+  }
+});
+
+test('guard: one dispatch delivered twice is recorded once', () => {
+  const home = sandbox();
+  const payload = {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'sd', cwd: home,
+    tool_use_id: 'toolu_99',
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\ndo it' },
+  };
+  const first = run('guard-agent.mjs', payload, home);
+  const second = run('guard-agent.mjs', payload, home);
+  assert.match(first.stdout, /price tag/);
+  assert.equal(second.stdout.trim(), '', 'the second registration of the same hook says nothing');
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sd.json'), 'utf8'));
+  assert.equal(state.dispatches.length, 1);
+});
+
+test('guard: two long packets sharing an opening are two dispatches', () => {
+  // The old key was the first 200 characters of the packet. Two packets from
+  // the same template — which is what a template is for — collided, and the
+  // second dispatch was silently dropped from the record.
+  const home = sandbox();
+  const prefix = 'TASK: 9-9-0001  ROLE: implementer\n\nOBJECTIVE\n'.padEnd(400, 'x');
+  const mk = tail => ({
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'se', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: prefix + tail },
+  });
+  run('guard-agent.mjs', mk('\nadd the flag'), home);
+  run('guard-agent.mjs', mk('\ndelete the flag'), home);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'se.json'), 'utf8'));
+  assert.equal(state.dispatches.length, 2);
+});
+
+test('guard: two sessions do not overwrite each other in one global slot', () => {
+  const home = sandbox();
+  const mk = session => ({
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: session, cwd: home,
+    tool_use_id: 'toolu_same_id_different_session',
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\ndo it' },
+  });
+  const a = run('guard-agent.mjs', mk('sf1'), home);
+  const b = run('guard-agent.mjs', mk('sf2'), home);
+  assert.match(a.stdout, /price tag/);
+  assert.match(b.stdout, /price tag/, 'a different session is a different event');
+  for (const s of ['sf1', 'sf2']) {
+    const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${s}.json`), 'utf8'));
+    assert.equal(state.dispatches.length, 1, s);
+  }
+});
+
+test('guard: event identity prefers the ids the host sends', () => {
+  const withId = eventId({ session_id: 's', tool_use_id: 'toolu_1', tool_input: { prompt: 'a' } });
+  assert.equal(withId, 's:toolu_1');
+  // A host that sends no id gets a digest of the whole payload, not a slice of
+  // the prompt, and never the prompt itself.
+  const legacy = eventId({ session_id: 's', tool_input: { prompt: 'a'.repeat(500) } });
+  const legacy2 = eventId({ session_id: 's', tool_input: { prompt: `${'a'.repeat(500)}b` } });
+  assert.notEqual(legacy, legacy2);
+  assert.doesNotMatch(legacy, /aaaa/);
+});
+
+test('guard: the seen-event store expires and stays bounded', () => {
+  const now = 1_000_000_000_000;
+  const old = markSeen({ stale: { at: now - 90_000_000 } }, 'new', now);
+  assert.equal(old.seen, false);
+  assert.deepEqual(Object.keys(old.store), ['new'], 'a day-old key is dropped');
+  let store = {};
+  for (let i = 0; i < 12; i++) store = markSeen(store, `k${i}`, now + i, 86400000, 5).store;
+  assert.equal(Object.keys(store).length, 5);
+  assert.equal(markSeen(store, 'k11', now + 20, 86400000, 5).seen, true);
+});
+
 test('guard: a dispatch is recorded and priced, and never approved', () => {
   const home = sandbox();
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'max5' }));
@@ -87,14 +212,66 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's2', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\ndo it' },
   }, home);
-  // It used to print nothing here. It now says what the dispatch costs, once,
-  // before the spend — and still carries no permission decision, so the user's
-  // own approval prompt is untouched.
   assert.match(out.stdout, /price tag: orch-implementer on sonnet/);
-  assert.doesNotMatch(out.stdout, /permissionDecision/);
+  assert.match(out.stdout, /list price, not subscription usage/);
+  assert.doesNotMatch(out.stdout, /% of a/, 'no share of a week: nothing here has measured one');
+  assert.doesNotMatch(out.stdout, /permissionDecision/, "the user's own approval prompt is untouched");
   assert.equal(out.status, 0);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's2.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'sonnet');
+});
+
+test('guard: a dispatch that names no model is recorded as inherited and not priced', () => {
+  const home = sandbox();
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's9', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0001\ndo it' },
+  }, home);
+  assert.equal(out.stdout.trim(), '', 'no model named means no figure to give');
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
+  assert.equal(state.dispatches[0].model, 'inherit');
+});
+
+test('guard: the run a packet names travels with the dispatch record', () => {
+  const home = sandbox();
+  run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'sr', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\nRUN: 20260909-fixture\ndo it' },
+  }, home);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sr.json'), 'utf8'));
+  assert.equal(state.dispatches[0].run, '20260909-fixture');
+});
+
+test('guard: the credential list covers the shapes an audit fed it', () => {
+  const shapes = [
+    'sk-ant-api03-abcdefghijklmnop',
+    'sk-proj-abcdefghijklmnopqrstuvwx',
+    'ghp_abcdefghijklmnopqrstuvwxyz012345',
+    'github_pat_11ABCDEFG0abcdefghijklmnop',
+    'AKIAIOSFODNN7EXAMPLE',
+    'AIzaSyA1234567890abcdefghijklmnopqrstuv',
+    'xoxb-1234567890-abcdefghij',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U',
+    'password=hunter2hunter2',
+    '-----BEGIN RSA PRIVATE KEY-----',
+  ];
+  for (const s of shapes) {
+    assert.equal(decide({ tool_input: { prompt: `context ${s} more` } }).kind, 'deny', s);
+  }
+  assert.equal(decide({ tool_input: { prompt: 'the token lives in the env var GITHUB_TOKEN' } }).kind, 'pass');
+});
+
+test('guard: it never blocks or rewrites a dispatch over its model, on any plan', () => {
+  const home = sandbox();
+  for (const tier of ['pro', 'max5', 'max20', 'api']) {
+    writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier }));
+    const out = run('guard-agent.mjs', {
+      hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: `t-${tier}`, cwd: home,
+      tool_input: { subagent_type: 'orch-researcher', model: 'fable', prompt: `TASK: ${tier}` },
+    }, home);
+    assert.doesNotMatch(out.stdout, /permissionDecision/, tier);
+    assert.match(out.stdout, /price tag: orch-researcher on fable/, tier);
+  }
 });
 
 test('guard: a non-Agent tool, garbage input and empty stdin all exit 0 silently', () => {
@@ -111,33 +288,51 @@ test('guard: a non-Agent tool, garbage input and empty stdin all exit 0 silently
 
 // ------------------------------------------------------------------ ledger --
 
-test('ledger: a good return parses into a row', () => {
+test('ledger: a good return parses into its fields', () => {
   const r = parseReturn(GOOD_RETURN);
   assert.equal(r.task, '9-9-0001');
   assert.equal(r.status, 'DONE');
   assert.equal(r.evidence, true);
-  assert.deepEqual(r.missing, []);
-  assert.equal(r.overLong, false);
-  assert.equal(PHASE[r.status], '🔍 review');
+  assert.match(r.changed, /src\/tidy\.py/);
 });
 
-test('ledger: a broken return names exactly what is missing and is never fatal', () => {
-  const r = parseReturn('I finished the work, it looks good.');
-  assert.deepEqual(r.missing, ['TASK', 'RESTATED', 'STATUS', 'EVIDENCE']);
+test('ledger: a return missing fields still parses, and nothing is demanded back', () => {
+  // Leniency is the point. A return that arrives in the wrong shape is still
+  // the work; what a missing field costs is certainty, not the work.
+  const r = parseReturn('all done, looks fine');
+  assert.equal(r.task, null);
   assert.equal(r.status, null);
+  assert.equal(r.evidence, false);
+  assert.equal(parseReturn(null).lines, 0);
 });
 
-test('ledger: an 80-line return is flagged long but still parsed', () => {
-  const long = `${GOOD_RETURN}\n${Array.from({ length: 80 }, (_, i) => `log line ${i}`).join('\n')}`;
+test('ledger: an 80-line return is parsed like any other', () => {
+  const long = `${GOOD_RETURN}\n${'x\n'.repeat(80)}`;
   const r = parseReturn(long);
-  assert.equal(r.task, '9-9-0001');
-  assert.equal(r.overLong, true);
+  assert.equal(r.status, 'DONE');
   assert.ok(r.lines > 60);
+  assert.ok(!('overLong' in r), 'length is not a verdict any more');
 });
 
-test('ledger: a reviewer PASS/FAIL verdict is picked up', () => {
-  assert.equal(parseReturn('TASK: 9-9-0002\nFAIL\nRESTATED: x\nSTATUS: DONE\nEVIDENCE: read the diff').verdict, 'FAIL');
-  assert.equal(parseReturn(GOOD_RETURN).verdict, null);
+test('ledger: a reviewer PASS/FAIL verdict is picked up, new schema and old', () => {
+  assert.equal(parseReturn('TASK: 1\nSTATUS: DONE\nVERDICT: FAIL\nEVIDENCE: read it').verdict, 'FAIL');
+  assert.equal(parseReturn('PASS\nTASK: 1\nSTATUS: DONE\nEVIDENCE: read it').verdict, 'PASS');
+});
+
+test('ledger: a verbose legacy return is still read', () => {
+  const legacy = `TASK: 9-9-0001
+RESTATED: Add a --since flag to tidy, in my own words, over two lines
+because the older instruction asked for exactly that.
+STATUS: PARTIAL
+BRANCH: task/9-9-0001   WORKTREE: /tmp/wt
+CHANGED: src/tidy.py
+EVIDENCE: pytest -q -> 41 passed
+NOT VERIFIED: nothing
+QUESTIONS: none`;
+  const r = parseReturn(legacy);
+  assert.equal(r.status, 'PARTIAL');
+  assert.equal(r.task, '9-9-0001');
+  assert.equal(r.evidence, true);
 });
 
 test('ledger: usage is summed from the agent transcript, absent fields as zero', () => {
@@ -154,539 +349,263 @@ test('ledger: usage is summed from the agent transcript, absent fields as zero',
   assert.deepEqual(sumUsage('/no/such/file'), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 });
 });
 
-test('ledger: updateRow rewrites one row and leaves the rest of the file alone', () => {
-  const { runMd } = fixtureRepo();
-  const md = readFileSync(runMd, 'utf8');
-  const next = updateRow(md, '9-9-0001', { phase: '🔍 review', attempts: 1, evidence: 'returns/001-orch-implementer.md' });
-  assert.ok(next.includes('| 🔍 review |'));
-  assert.ok(next.includes('| 9-9-0002 | 📋 planned |'), 'the other row is untouched');
-  assert.equal(next.split('\n').length, md.split('\n').length);
-  assert.equal(updateRow(md, '9-9-9999', { phase: 'x' }), null, 'an unknown id matches nothing');
+test('ledger: an unnamed model is left unpriced rather than priced as the cheap one', () => {
+  const usage = { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0, turns: 1 };
+  const known = costLine('orch-implementer', 'sonnet', usage);
+  assert.equal(known.priced, true);
+  assert.ok(known.dollars > 0);
+  const unknown = costLine('orch-implementer', '', usage);
+  assert.equal(unknown.priced, false);
+  assert.equal(unknown.dollars, null);
 });
 
-test('ledger: a run writes the return file and moves the row to review, never to done', () => {
+test('ledger: the return is written under the bound run and indexed', () => {
   const home = sandbox();
   const repo = fixtureRepo();
+  bind(home, 's3', repo);
   const tr = join(repo.dir, 'agent.jsonl');
   writeFileSync(tr, JSON.stringify({ type: 'assistant', message: { usage: { input_tokens: 1200, output_tokens: 900, cache_read_input_tokens: 30000 } } }));
 
   const out = run('ledger.mjs', {
-    hook_event_name: 'SubagentStop', session_id: 's3', cwd: repo.dir,
+    hook_event_name: 'SubagentStop', session_id: 's3', cwd: repo.dir, agent_id: 'agent_abc123',
     agent_type: 'orch-implementer', agent_transcript_path: tr, last_assistant_message: GOOD_RETURN,
   }, home);
 
-  const returns = readdirSync(join(repo.runDir, 'returns'));
-  assert.deepEqual(returns, ['001-orch-implementer.md']);
-  const saved = readFileSync(join(repo.runDir, 'returns', returns[0]), 'utf8');
-  assert.match(saved, /orch-implementer/);
-  assert.ok(saved.includes('RESTATED:'), 'the full return is saved, not a summary');
+  const files = readdirSync(join(repo.runDir, 'returns')).filter(f => f.endsWith('.md'));
+  assert.equal(files.length, 1);
+  assert.match(files[0], /^orch-implementer-/, 'named from who returned, not from a file count');
+  const saved = readFileSync(join(repo.runDir, 'returns', files[0]), 'utf8');
+  assert.ok(saved.includes('EVIDENCE: pytest'), 'the full return is saved, not a summary');
 
-  const md = readFileSync(repo.runMd, 'utf8');
-  assert.match(md, /\| 9-9-0001 \| 🔍 review \|/);
-  assert.doesNotMatch(md, /✅/, 'the ledger never marks a task done');
-  assert.match(md, /returns\/001-orch-implementer\.md/);
-  assert.match(md, /\| 1 \|/, 'attempts incremented');
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index.length, 1);
+  assert.equal(index[0].task, '9-9-0001');
+  assert.equal(index[0].run, repo.runId);
+  assert.equal(index[0].status, 'DONE');
   assert.equal(out.status, 0);
-  assert.equal(out.stdout.trim(), '', 'a clean DONE return needs no words back');
 });
 
-test('ledger: a broken return still saves, and tells the orchestrator to grade it Failed', () => {
+test('ledger: the task rows are left exactly as they were', () => {
+  // Two returns landing together each rewrote the whole file, and the second
+  // erased the first one's row. The lead sets a row when it has read the
+  // return, which is also the only moment anyone has judged it.
   const home = sandbox();
   const repo = fixtureRepo();
+  bind(home, 's3b', repo);
+  const before = readFileSync(repo.runMd, 'utf8');
   const out = run('ledger.mjs', {
-    hook_event_name: 'SubagentStop', session_id: 's4', cwd: repo.dir,
-    agent_type: 'orch-researcher', last_assistant_message: 'all done, looks fine',
+    hook_event_name: 'SubagentStop', session_id: 's3b', cwd: repo.dir,
+    agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
   }, home);
-  assert.equal(readdirSync(join(repo.runDir, 'returns')).length, 1);
-  assert.match(out.json.hookSpecificOutput.additionalContext, /missing TASK, RESTATED, STATUS, EVIDENCE/);
-  assert.match(out.json.hookSpecificOutput.additionalContext, /Grade this return Failed/);
-  assert.equal(readFileSync(repo.runMd, 'utf8').includes('🔍'), false, 'no TASK line means no row is touched');
+  assert.equal(readFileSync(repo.runMd, 'utf8'), before, 'RUN.md is byte-identical');
+  assert.match(out.json.hookSpecificOutput.additionalContext, /set the row yourself/);
 });
 
-test('ledger: PARTIAL and BLOCKED map to their glyphs and prompt a decision', () => {
-  for (const [status, glyph] of [['PARTIAL', '◐ partial'], ['BLOCKED', '⛔ blocked']]) {
-    const home = sandbox();
-    const repo = fixtureRepo();
-    const out = run('ledger.mjs', {
-      hook_event_name: 'SubagentStop', session_id: 's5', cwd: repo.dir, agent_type: 'orch-implementer',
-      last_assistant_message: GOOD_RETURN.replace('STATUS: DONE', `STATUS: ${status}`),
+test('ledger: two returns arriving together are both kept', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 's3c', repo);
+  for (const [agent, id] of [['orch-implementer', 'agent_1'], ['orch-reviewer', 'agent_2']]) {
+    run('ledger.mjs', {
+      hook_event_name: 'SubagentStop', session_id: 's3c', cwd: repo.dir, agent_id: id,
+      agent_type: agent, last_assistant_message: GOOD_RETURN.replace('9-9-0001', agent === 'orch-reviewer' ? '9-9-0002' : '9-9-0001'),
     }, home);
-    assert.match(readFileSync(repo.runMd, 'utf8'), new RegExp(glyph));
-    assert.match(out.json.hookSpecificOutput.additionalContext, new RegExp(`STATUS ${status}`));
   }
+  const files = readdirSync(join(repo.runDir, 'returns')).filter(f => f.endsWith('.md'));
+  assert.equal(files.length, 2, 'neither overwrote the other');
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.deepEqual(index.map(x => x.task).sort(), ['9-9-0001', '9-9-0002']);
 });
 
-test('ledger: no run in this repo, or an empty message, is a silent no-op', () => {
+test('ledger: a filename is unique per return and stable for one event', () => {
+  const a = returnFilename('orch-implementer', { agent_id: 'agent_abc' }, 'text');
+  assert.equal(a, returnFilename('orch-implementer', { agent_id: 'agent_abc' }, 'text'));
+  assert.notEqual(a, returnFilename('orch-implementer', { agent_id: 'agent_xyz' }, 'text'));
+  const noId = returnFilename('orch-reviewer', { session_id: 's' }, 'one');
+  assert.notEqual(noId, returnFilename('orch-reviewer', { session_id: 's' }, 'two'));
+  assert.match(noId, /^orch-reviewer-[0-9a-f]{12}\.md$/);
+});
+
+test('ledger: two sessions on two runs cannot file into each other', () => {
+  const home = sandbox();
+  const a = fixtureRepo({ runId: '20260909-alpha' });
+  const b = fixtureRepo({ runId: '20260909-beta' });
+  bind(home, 'sa', a);
+  bind(home, 'sb', b);
+  run('ledger.mjs', { hook_event_name: 'SubagentStop', session_id: 'sa', cwd: a.dir, agent_type: 'orch-implementer', agent_id: 'x1', last_assistant_message: GOOD_RETURN }, home);
+  run('ledger.mjs', { hook_event_name: 'SubagentStop', session_id: 'sb', cwd: b.dir, agent_type: 'orch-implementer', agent_id: 'x2', last_assistant_message: GOOD_RETURN.replace('9-9-0001', '9-9-0002') }, home);
+  assert.equal(readdirSync(join(a.runDir, 'returns')).filter(f => f.endsWith('.md')).length, 1);
+  assert.equal(readdirSync(join(b.runDir, 'returns')).filter(f => f.endsWith('.md')).length, 1);
+  const ia = readFileSync(join(a.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(ia[0].run, '20260909-alpha');
+});
+
+test('ledger: an unowned return is kept where the note says, not guessed into a ledger', () => {
   const home = sandbox();
   const bare = mkdtempSync(join(tmpdir(), 'orch-bare-'));
   mkdirSync(join(bare, '.git'), { recursive: true });
-  const a = run('ledger.mjs', { hook_event_name: 'SubagentStop', cwd: bare, last_assistant_message: GOOD_RETURN }, home);
-  assert.equal(a.status, 0);
-  assert.equal(a.stdout.trim(), '');
+  // Another repo's run is open and is the newest on the machine. It must not
+  // receive this return: "newest run here" and "the run this session is doing"
+  // are not the same thing, and treating them as one filed a return into a
+  // closed run in a different repository.
+  const other = fixtureRepo({ runId: '20260909-elsewhere' });
+  writeFileSync(join(home, '.claude', 'orchestrate', 'active-run.json'), JSON.stringify({ v: 1, root: other.dir, runMd: other.runMd, at: new Date().toISOString() }));
+
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'sz', cwd: bare, agent_id: 'a9',
+    agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+
+  assert.equal(existsSync(join(other.runDir, 'returns')), false, "the other repo's ledger is untouched");
+  const kept = join(home, '.claude', 'orchestrate', 'returns', 'sz');
+  assert.ok(existsSync(kept), 'the return is kept somewhere real');
+  assert.equal(readdirSync(kept).filter(f => f.endsWith('.md')).length, 1);
+  assert.match(out.json.hookSpecificOutput.additionalContext, /no run owns it/);
+  assert.match(out.json.hookSpecificOutput.additionalContext, /--bind/);
+});
+
+test('ledger: an empty message is a silent no-op', () => {
+  const home = sandbox();
   const repo = fixtureRepo();
-  const b = run('ledger.mjs', { hook_event_name: 'SubagentStop', cwd: repo.dir, last_assistant_message: '' }, home);
+  const b = run('ledger.mjs', { hook_event_name: 'SubagentStop', cwd: repo.dir, agent_type: 'orch-implementer', last_assistant_message: '' }, home);
   assert.equal(b.stdout.trim(), '');
   assert.equal(existsSync(join(repo.runDir, 'returns')), false);
 });
 
-// ------------------------------------------------------------ return check --
-
-test('return check: the schema decides, and the line cap is 60', () => {
-  assert.equal(returnCheck(GOOD_RETURN).ok, true);
-  assert.deepEqual(returnCheck('STATUS: DONE\nEVIDENCE: x').missing, ['RESTATED']);
-  assert.deepEqual(returnCheck('RESTATED: x\nEVIDENCE: y').missing, ['STATUS (DONE, PARTIAL or BLOCKED)']);
-  assert.deepEqual(returnCheck('RESTATED: x\nSTATUS: DONE').missing, ['EVIDENCE']);
-  assert.equal(returnCheck('RESTATED: x\nSTATUS: MOSTLY DONE\nEVIDENCE: y').ok, false, 'STATUS must be one of the three words');
-  const long = `${GOOD_RETURN}\n${Array.from({ length: 70 }, () => 'noise').join('\n')}`;
-  assert.equal(returnCheck(long).ok, false);
-  assert.match(returnCheck(long).reasons.join(' '), /the cap is 40/);
+test('ledger: a stop with no agent identity is not a return', () => {
+  // Stops that are not subagent returns arrive carrying a last_assistant_message
+  // and no agent field. Accepting those filed twenty-one of the lead's own
+  // messages under returns/ in one session.
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'sn', repo);
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'sn', cwd: repo.dir,
+    agent_id: 'abc', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.equal(out.stdout.trim(), '');
+  assert.equal(existsSync(join(repo.runDir, 'returns')), false);
 });
 
-test('return check: blocks twice, then lets the agent finish', () => {
+test('ledger: the same stop delivered twice writes one return', () => {
   const home = sandbox();
-  const payload = { hook_event_name: 'SubagentStop', session_id: 's6', agent_type: 'orch-implementer', last_assistant_message: 'done!' };
-  for (let i = 0; i < MAX_BLOCKS; i++) {
-    const out = run('return-check.mjs', payload, home);
-    assert.equal(out.json.decision, 'block', `block ${i + 1}`);
-    assert.equal(out.json.hookSpecificOutput.decision, 'block');
-    assert.match(out.json.reason, /RESTATED/);
-  }
-  assert.equal(run('return-check.mjs', payload, home).stdout.trim(), '', 'the third time it gives up and allows');
+  const repo = fixtureRepo();
+  bind(home, 's6', repo);
+  const payload = {
+    hook_event_name: 'SubagentStop', session_id: 's6', cwd: repo.dir, agent_id: 'aa',
+    agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  };
+  run('ledger.mjs', payload, home);
+  const second = run('ledger.mjs', payload, home);
+  assert.equal(readdirSync(join(repo.runDir, 'returns')).filter(f => f.endsWith('.md')).length, 1);
+  assert.equal(second.stdout.trim(), '');
 });
 
-test('return check: each agent in a session gets its own two chances', () => {
-  const home = sandbox();
-  const bad = { hook_event_name: 'SubagentStop', session_id: 's7', last_assistant_message: 'done!' };
-  run('return-check.mjs', { ...bad, agent_type: 'orch-implementer' }, home);
-  run('return-check.mjs', { ...bad, agent_type: 'orch-implementer' }, home);
-  assert.equal(run('return-check.mjs', { ...bad, agent_type: 'orch-reviewer' }, home).json.decision, 'block');
+test('ledger: the dedupe window is a window, not a permanent memory', () => {
+  const now = 1_000_000_000_000;
+  assert.equal(isRepeat({ sig: 'x', ts: now - 1000 }, 'x', now), true);
+  assert.equal(isRepeat({ sig: 'x', ts: now - 60_000 }, 'x', now), false);
+  assert.equal(isRepeat({ sig: 'y', ts: now }, 'x', now), false);
+  assert.equal(isRepeat(null, 'x', now), false);
 });
 
-test('return check: a good return, a re-entrant call and junk are all silent', () => {
-  const home = sandbox();
-  assert.equal(run('return-check.mjs', { session_id: 's8', last_assistant_message: GOOD_RETURN }, home).stdout.trim(), '');
-  assert.equal(run('return-check.mjs', { session_id: 's8', stop_hook_active: true, last_assistant_message: 'done!' }, home).stdout.trim(), '');
-  assert.equal(run('return-check.mjs', { session_id: 's8' }, home).stdout.trim(), '');
+test('ledger: the model is reported as dispatched, or as inherited', () => {
+  assert.equal(describeDispatch({ model: 'opus' }), 'opus');
+  assert.equal(describeDispatch({ model: 'inherit' }), 'inherited model');
+  assert.equal(describeDispatch(null), null);
+});
+
+test('ledger: the note says where the return is and never asks for the work again', () => {
+  const text = note({
+    run: { runId: 'r1', runMd: '/r/RUN.md' }, how: 'bound to this session', candidates: [],
+    file: '/r/returns/orch-implementer-abc.md', parsed: parseReturn(GOOD_RETURN),
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, turns: 1 }, priced: '$0.01 at list price',
+  });
+  assert.match(text, /return saved to/);
+  assert.match(text, /task 9-9-0001/);
+  assert.doesNotMatch(text, /re-dispatch|rewrite the return|grade this return Failed/i);
 });
 
 // -------------------------------------------------------------- turn check --
 
 test('turn check: the decision table', () => {
-  const written = 'Pickup prompt: continue at step 3\nPickup confidence: high';
+  const written = 'Pickup prompt: carry on from the reviewer FAIL\nPickup confidence: high';
   const unwritten = 'Pickup prompt: <one sentence that continues from here>';
-  assert.equal(pickupWritten(written), true);
-  assert.equal(pickupWritten(unwritten), false);
   const at = '2026-09-09T12:00:00Z';
-  assert.equal(shouldBlock({ pickupHash: 'a', section: written, lastDispatchAt: null }).block, false, 'no dispatch, nothing to record');
-  assert.equal(shouldBlock({ pickupHash: 'a', section: unwritten, lastDispatchAt: at }).block, true, 'a placeholder Pickup is never written');
-  assert.equal(shouldBlock({ pickupHash: 'b', section: written, lastDispatchAt: at, prev: { hash: 'a', checkedAt: '2026-09-09T11:00:00Z' } }).block, false, 'the text changed since the last check');
-  assert.equal(shouldBlock({ pickupHash: 'a', section: written, lastDispatchAt: at, prev: { hash: 'a', checkedAt: '2026-09-09T11:00:00Z' } }).block, true, 'unchanged, and a dispatch happened since');
-  assert.equal(shouldBlock({ pickupHash: 'a', section: written, lastDispatchAt: at, prev: { hash: 'a', checkedAt: '2026-09-09T13:00:00Z' } }).block, false, 'no dispatch since the last check');
-  assert.equal(shouldBlock({ pickupHash: 'a', section: written, lastDispatchAt: at, prev: { hash: 'a', blockedFor: 'a' } }).block, false, 'one block per text');
+  const later = '2026-09-09T13:00:00Z';
+  assert.equal(shouldBlock({ pickupHash: 'h', section: written, lastDispatchAt: null }).block, false);
+  assert.equal(shouldBlock({ pickupHash: 'h', section: unwritten, lastDispatchAt: at }).block, true);
+  assert.equal(shouldBlock({ pickupHash: 'h2', section: written, lastDispatchAt: at, prev: { hash: 'h1' } }).block, false);
+  assert.equal(shouldBlock({ pickupHash: 'h', section: written, lastDispatchAt: later, prev: { hash: 'h', checkedAt: at } }).block, true);
+  assert.equal(shouldBlock({ pickupHash: 'h', section: written, lastDispatchAt: at, prev: { hash: 'h', checkedAt: later } }).block, false);
+  assert.equal(shouldBlock({ pickupHash: 'h', section: unwritten, lastDispatchAt: at, prev: { blockedFor: 'h' } }).block, false);
 });
 
 test('turn check: the Pickup hash changes only when the section changes', () => {
-  const a = '# Run\n\n## Pickup\n\nPickup prompt: one\n\n## Verified\n\nx';
-  const b = a.replace('# Run', '# Run 2');
-  const c = a.replace('one', 'two');
+  const a = '## Goal\nx\n\n## Pickup\n\nPickup prompt: one\n';
+  const b = '## Goal\nCHANGED\n\n## Pickup\n\nPickup prompt: one\n';
+  const c = '## Goal\nx\n\n## Pickup\n\nPickup prompt: two\n';
   assert.equal(pickupHash(a), pickupHash(b));
   assert.notEqual(pickupHash(a), pickupHash(c));
-  assert.match(pickupSection(a), /^Pickup prompt: one$/);
+  assert.equal(pickupSection(a), 'Pickup prompt: one');
+  assert.equal(pickupWritten('Pickup prompt: <one sentence>'), false);
+  assert.equal(pickupWritten('Pickup prompt: continue from the FAIL'), true);
 });
 
-test('turn check: an open run with a stale Pickup blocks once and names the file', () => {
+test('turn check: a bound run with a stale Pickup blocks once and names the file', () => {
   const home = sandbox();
   const repo = fixtureRepo();
-  mkdirSync(join(home, '.claude', 'orchestrate', 'sessions'), { recursive: true });
-  writeFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), JSON.stringify({ session_id: 's9', lastDispatchAt: new Date().toISOString() }));
+  bind(home, 's7', repo);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const state = JSON.parse(readFileSync(join(sessions, 's7.json'), 'utf8'));
+  state.lastDispatchAt = new Date().toISOString();
+  writeFileSync(join(sessions, 's7.json'), JSON.stringify(state));
 
-  const payload = { hook_event_name: 'Stop', session_id: 's9', cwd: repo.dir };
-  const first = run('turn-check.mjs', payload, home);
+  const first = run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's7', cwd: repo.dir }, home);
   assert.equal(first.json.decision, 'block');
-  assert.match(first.json.reason, /Pickup section of/);
-  assert.ok(first.json.reason.includes('RUN.md'));
-  assert.equal(run('turn-check.mjs', payload, home).stdout.trim(), '', 'it nags once, not every turn');
+  assert.match(first.json.reason, /Pickup/);
+  assert.ok(first.json.reason.includes(repo.runMd), 'it names the file to edit');
+
+  const second = run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's7', cwd: repo.dir }, home);
+  assert.equal(second.stdout.trim(), '', 'it blocks once, not in a loop');
 });
 
-test('turn check: no dispatch, no open run, or a Pickup written after the dispatch, stays quiet', () => {
+test('turn check: a session with no bound run says nothing at all', () => {
+  // Direct work has no ledger to keep current, and an open run in the repo that
+  // this session never claimed is not this session's to be nagged about.
   const home = sandbox();
-  const repo = fixtureRepo({ pickup: 'continue at step 3' });
+  const repo = fixtureRepo();
   const sessions = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(sessions, { recursive: true });
-
-  // no dispatch recorded
-  writeFileSync(join(sessions, 'a.json'), JSON.stringify({ session_id: 'a' }));
-  assert.equal(run('turn-check.mjs', { session_id: 'a', cwd: repo.dir }, home).stdout.trim(), '');
-
-  // A dispatch, and a written Pickup seen for the first time: the orchestrator
-  // is taken at its word this turn, so no block, and the sighting is recorded.
-  writeFileSync(join(sessions, 'b.json'), JSON.stringify({ session_id: 'b', lastDispatchAt: '2026-09-09T10:00:00Z' }));
-  assert.equal(run('turn-check.mjs', { session_id: 'b', cwd: repo.dir }, home).stdout.trim(), '');
-
-  // A second dispatch after that sighting, with the same Pickup text, is the
-  // case the hook exists for: the ledger moved but the resume point did not.
-  const later = new Date(Date.now() + 60000).toISOString();
-  writeFileSync(join(sessions, 'b.json'), JSON.stringify({ session_id: 'b', lastDispatchAt: later }));
-  assert.equal(run('turn-check.mjs', { session_id: 'b', cwd: repo.dir }, home).json.decision, 'block');
-
-  writeFileSync(repo.runMd, readFileSync(repo.runMd, 'utf8').replace('continue at step 3', 'now at step 4'));
-  assert.equal(run('turn-check.mjs', { session_id: 'b', cwd: repo.dir }, home).stdout.trim(), '', 'a rewritten Pickup clears it');
-
-  // no run at all
-  const bare = mkdtempSync(join(tmpdir(), 'orch-bare2-'));
-  mkdirSync(join(bare, '.git'), { recursive: true });
-  assert.equal(run('turn-check.mjs', { session_id: 'b', cwd: bare }, home).stdout.trim(), '');
-});
-
-// ---- the ledger fires twice on every stop, by design of the install --------
-
-test('ledger: the same stop delivered twice writes one return and one attempt', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  const payload = {
-    hook_event_name: 'SubagentStop', session_id: 'dbl', cwd: repo.dir,
-    agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
-  };
-  // The recommended install registers this hook globally AND from SKILL.md's
-  // frontmatter, so both copies see the same stop. Before the dedupe this left
-  // returns/001 and returns/002 and an attempt count of 2 for one dispatch.
-  run('ledger.mjs', payload, home);
-  const second = run('ledger.mjs', payload, home);
-
-  assert.deepEqual(readdirSync(join(repo.runDir, 'returns')), ['001-orch-implementer.md']);
-  assert.match(readFileSync(repo.runMd, 'utf8'), /\| 9-9-0001 \| 🔍 review \|.*\| 1 \|/);
-  assert.equal(second.stdout.trim(), '', 'the second copy says nothing');
-});
-
-test('ledger: a genuine second attempt is still recorded', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  const base = { hook_event_name: 'SubagentStop', session_id: 'retry', cwd: repo.dir, agent_type: 'orch-implementer' };
-  run('ledger.mjs', { ...base, last_assistant_message: GOOD_RETURN }, home);
-  run('ledger.mjs', { ...base, last_assistant_message: GOOD_RETURN.replace('41 passed', '42 passed') }, home);
-  assert.equal(readdirSync(join(repo.runDir, 'returns')).length, 2, 'a different return is a different stop');
-  assert.match(readFileSync(repo.runMd, 'utf8'), /\| 2 \|/);
-});
-
-test('ledger: two agents stopping together are not mistaken for one', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  const base = { hook_event_name: 'SubagentStop', session_id: 'par', cwd: repo.dir, last_assistant_message: GOOD_RETURN };
-  run('ledger.mjs', { ...base, agent_type: 'orch-implementer' }, home);
-  run('ledger.mjs', { ...base, agent_type: 'orch-reviewer' }, home);
-  assert.deepEqual(readdirSync(join(repo.runDir, 'returns')), ['001-orch-implementer.md', '002-orch-reviewer.md']);
-});
-
-test('ledger: the dedupe window is a window, not a permanent memory', () => {
-  const sig = 'abc';
-  assert.equal(isRepeat({ sig, ts: 1000 }, sig, 5000), true, 'four seconds later is the same stop');
-  assert.equal(isRepeat({ sig, ts: 1000 }, sig, 60000), false, 'a minute later is not');
-  assert.equal(isRepeat({ sig: 'other', ts: 1000 }, sig, 1500), false);
-  assert.equal(isRepeat(null, sig, 1000), false);
-});
-
-// ---- what the fresh-context audit found ------------------------------------
-
-test('ledger: a pipe in a rubric no longer writes the attempt count into it', () => {
-  const md = [
-    '| id | phase | role · model | task | rubric | attempts | evidence |',
-    '|---|---|---|---|---|---|---|',
-    '| 9-9-0001 | 🔨 running | implementer · sonnet | add flag | exit 0 | 41 passed | 0 | — |',
-  ].join('\n');
-  const out = updateRow(md, '9-9-0001', { phase: '🔍 review', attempts: 1, evidence: 'returns/001.md' });
-  const cells = out.split('\n')[2].split('|');
-  assert.equal(cells[cells.length - 2].trim(), 'returns/001.md', 'evidence is the last cell');
-  assert.equal(cells[cells.length - 3].trim(), '1', 'attempts is the one before it');
-  assert.match(out, /exit 0 \| 41 passed/, 'the free-text rubric is untouched');
-  assert.equal(bumpAttempts(md, '9-9-0001'), 1);
-});
-
-test('ledger: a stop with no agent identity is not a return', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  // Before this check, the orchestrator's own last message was filed under
-  // returns/ and could move a row. Two such files landed in a real run.
-  const out = run('ledger.mjs', {
-    hook_event_name: 'Stop', session_id: 'noid', cwd: repo.dir,
-    last_assistant_message: 'wait for the audit and apply its findings',
-  }, home);
+  writeFileSync(join(sessions, 's8.json'), JSON.stringify({ v: 1, session_id: 's8', lastDispatchAt: new Date().toISOString() }));
+  const out = run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's8', cwd: repo.dir }, home);
   assert.equal(out.stdout.trim(), '');
-  assert.equal(existsSync(join(repo.runDir, 'returns')), false);
 });
 
-test('ledger: the row records the model the guard actually used', () => {
-  assert.equal(describeDispatch({ model: 'opus', requested: 'fable' }), 'opus (asked for fable)');
-  assert.equal(describeDispatch({ model: 'sonnet', requested: 'sonnet' }), 'sonnet');
-  assert.equal(describeDispatch({ model: 'sonnet' }), 'sonnet');
-  assert.equal(describeDispatch(null), null);
-
+test('turn check: no dispatch, a written Pickup, and a re-entrant call all stay quiet', () => {
   const home = sandbox();
-  const repo = fixtureRepo();
-  mkdirSync(join(home, '.claude', 'orchestrate', 'sessions'), { recursive: true });
-  writeFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'dg.json'), JSON.stringify({
-    session_id: 'dg', dispatches: [{ at: new Date().toISOString(), agent: 'orch-planner', model: 'opus', requested: 'fable', task: '9-9-0001' }],
-  }));
-  run('ledger.mjs', {
-    hook_event_name: 'SubagentStop', session_id: 'dg', cwd: repo.dir,
-    agent_type: 'orch-planner', last_assistant_message: GOOD_RETURN,
-  }, home);
-  assert.match(readFileSync(repo.runMd, 'utf8'), /opus \(asked for fable\)/,
-    'the return echoes the packet, so the row is the only honest record of the downgrade');
+  const quiet = fixtureRepo();
+  bind(home, 's10', quiet);
+  assert.equal(run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's10', cwd: quiet.dir }, home).stdout.trim(), '');
+
+  const written = fixtureRepo({ pickup: 'continue from the reviewer FAIL' });
+  bind(home, 's11', written);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const state = JSON.parse(readFileSync(join(sessions, 's11.json'), 'utf8'));
+  state.lastDispatchAt = new Date().toISOString();
+  writeFileSync(join(sessions, 's11.json'), JSON.stringify(state));
+  // First check records the hash; the Pickup is written, so nothing is blocked.
+  assert.equal(run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's11', cwd: written.dir }, home).stdout.trim(), '');
+
+  assert.equal(run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's11', cwd: written.dir, stop_hook_active: true }, home).stdout.trim(), '');
 });
 
-test('ledger: a reviewer VERDICT line is read as the verdict', () => {
-  const r = parseReturn('TASK: 9-9-0002\nRESTATED: x\nSTATUS: DONE\nVERDICT: FAIL\nEVIDENCE: read the diff');
-  assert.equal(r.verdict, 'FAIL');
-  assert.equal(r.status, 'DONE', 'STATUS says the review finished, not whether it passed');
-  assert.deepEqual(r.missing, []);
-});
-
-test('return check: each invocation gets its own two chances, not each role', () => {
-  const home = sandbox();
-  const bad = { hook_event_name: 'SubagentStop', session_id: 'inv', agent_type: 'orch-implementer', last_assistant_message: 'done!' };
-  // First implementer spends its budget.
-  run('return-check.mjs', { ...bad, agent_id: 'a1' }, home);
-  run('return-check.mjs', { ...bad, agent_id: 'a1' }, home);
-  assert.equal(run('return-check.mjs', { ...bad, agent_id: 'a1' }, home).stdout.trim(), '');
-  // A second implementer in the same session used to inherit that spent budget
-  // and was never checked at all.
-  assert.equal(run('return-check.mjs', { ...bad, agent_id: 'a2' }, home).json.decision, 'block');
-  assert.equal(countKey({ session_id: 's', agent_id: 'a1' }), countKey({ session_id: 's', agent_id: 'a1' }));
-  assert.notEqual(countKey({ session_id: 's', agent_id: 'a1' }), countKey({ session_id: 's', agent_id: 'a2' }));
-});
-
-test('guard: the credential list covers the shapes an audit fed it', () => {
-  const deny = p => decide({ tool_input: { model: 'sonnet', prompt: p } }).kind;
-  assert.equal(deny('use sk-proj-abcdefghijklmnopqrstuvwxyz0123456789'), 'deny', 'an OpenAI project key');
-  assert.equal(deny('AIzaSyA1bcDefGhIjKlMnOpQrStUvWxYz0123456'), 'deny', 'a Google API key');
-  assert.equal(deny('Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.abcdefghijklmnop'), 'deny', 'a JWT');
-  assert.equal(deny('connect with password=hunter2correcthorse'), 'deny', 'a password in a connection string');
-  assert.equal(deny('api_key: 9f8e7d6c5b4a39281706'), 'deny');
-  assert.equal(deny('-----BEGIN RSA PRIVATE KEY-----'), 'deny');
-  // A packet that merely talks about credentials is not carrying one.
-  assert.equal(deny('TASK: 9-9-0001 read the token from the environment, never inline it'), 'pass');
-  assert.equal(deny('the password field on the login form'), 'pass');
-});
-
-test('guard: it never blocks or rewrites a dispatch over its model, on any plan', () => {
-  // The cap and the silent downgrade to Opus are gone. A count answers "how
-  // many have you done" when the only question worth asking is "is this task
-  // worth it", and a cap reads as an allowance. Model choice is the manager's
-  // judgment now, with the user asked whenever the model is not included in
-  // their plan. This test exists so that cannot creep back.
-  for (const tier of ['pro', 'max5', 'max20', 'team', 'api', 'unknown']) {
-    for (const model of ['fable', 'opus', 'sonnet', 'haiku', '', undefined]) {
-      const d = decide({ tool_input: { subagent_type: 'orch-planner', model, prompt: 'TASK: 9-9-0001\nplan it' } }, { tier });
-      assert.equal(d.kind, 'pass', `${tier}/${model}`);
-      assert.equal(d.model, undefined, 'it never names a replacement model');
-    }
-  }
-});
-
-test('guard: a Fable dispatch on Pro is priced, never blocked', () => {
-  const home = sandbox();
-  writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro' }));
-  const out = run('guard-agent.mjs', {
-    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'pro1', cwd: home,
-    tool_input: { subagent_type: 'orch-planner', model: 'fable', prompt: 'TASK: 9-9-0007\nplan it' },
-  }, home);
-  // Whether to spend on Fable here is the user's call, not a hook's. What the
-  // hook owes them is the number before they make it.
-  assert.doesNotMatch(out.stdout, /permissionDecision/, 'never denied over its model');
-  assert.match(out.stdout, /price tag: orch-planner on fable/);
-  assert.equal(out.status, 0);
-  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'pro1.json'), 'utf8'));
-  assert.equal(state.dispatches[0].model, 'fable', 'but it is still recorded');
-  assert.equal(state.dispatches[0].task, '9-9-0007');
-});
-
-test('guard: a dispatch that names no model is recorded as inherited', () => {
-  const home = sandbox();
-  const out = run('guard-agent.mjs', {
-    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'inh', cwd: home,
-    tool_input: { subagent_type: 'Explore', prompt: 'sweep the repo' },
-  }, home);
-  assert.doesNotMatch(out.stdout, /permissionDecision/);
-  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'inh.json'), 'utf8'));
-  assert.equal(state.dispatches[0].model, 'inherit', 'the meter says inherited rather than guessing');
-});
-
-test('ledger: a stop carrying only an agent_id is not a return', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  // This filed twenty-one of the orchestrator's own messages into one run
-  // before the check tightened. agent_id alone does not prove a subagent
-  // returned; only agent_type does.
-  const out = run('ledger.mjs', {
-    hook_event_name: 'SubagentStop', session_id: 'idonly', cwd: repo.dir,
-    agent_id: 'abc123', last_assistant_message: 'Still waiting on the three researchers.',
-  }, home);
-  assert.equal(out.stdout.trim(), '');
-  assert.equal(existsSync(join(repo.runDir, 'returns')), false);
-
-  // A real return, with a type, still lands.
-  run('ledger.mjs', {
-    hook_event_name: 'SubagentStop', session_id: 'idonly2', cwd: repo.dir,
-    agent_id: 'abc124', agent_type: 'orch-researcher', last_assistant_message: GOOD_RETURN,
-  }, home);
-  assert.deepEqual(readdirSync(join(repo.runDir, 'returns')), ['001-orch-researcher.md']);
-});
-
-
-// ---- the research floor -----------------------------------------------------
-// The one shape an evaluator that reads only the reply cannot catch: a table
-// with a Sources line naming pages that were never fetched. From the reply
-// alone it looks exactly like a well-sourced answer. Only the transcript shows
-// how many sources were actually read.
-
-import { floorDecision, hasRecommendation, humanText, turnFacts, replayFile } from './turn-check.mjs';
-
-// Typed exactly as Josh typed it, the day this rule became necessary.
-const THE_QUESTION = 'also is there recommended manager models and effort levels for each subscription tier (3 tiers)';
-const A_TABLE = '| Plan | Model | Effort |\n|---|---|---|\n| Pro | Sonnet | high |';
-
-test('the floor fires on the question that caused it, answered from one search', () => {
-  const d = floorDecision({ text: THE_QUESTION, sourceCalls: 1, reply: A_TABLE });
-  assert.equal(d.block, true);
-  assert.match(d.why, /answered from 1 source/);
-});
-
-test('the floor stays out of the way of everything else', () => {
-  const ok = (label, args) => assert.equal(floorDecision(args).block, false, label);
-  ok('a single current fact is not the set shape', { text: "what's the current node version", sourceCalls: 0, reply: 'You should use 22.' });
-  ok('two sources is the bar, and it was cleared', { text: THE_QUESTION, sourceCalls: 2, reply: A_TABLE });
-  ok('nothing was recommended', { text: THE_QUESTION, sourceCalls: 0, reply: 'Here is what I read, with the parts that disagree.' });
-  ok('once per question, not once per turn', { text: THE_QUESTION, sourceCalls: 1, reply: A_TABLE, prev: { blocked: true } });
-  // Measured: without this, a pasted plan containing "recommended" and "for
-  // each", answered with a "should", fired 5.57 times a day on real
-  // transcripts. Instructing is not asking.
-  ok('a pasted plan is an instruction, not a question', {
-    text: '# Plan 0008\n\nThis file sets the recommended defaults for each tier.\n' + 'x '.repeat(80),
-    sourceCalls: 0, reply: 'You should start with the first one.',
-  });
-  ok('a task notification is the host talking', { text: '<task-notification>\n' + THE_QUESTION, sourceCalls: 0, reply: A_TABLE });
-});
-
-test('a recommendation is a word or a table row', () => {
-  assert.equal(hasRecommendation('| a | b |\n|---|---|\n| Pro | Sonnet |'), true);
-  assert.equal(hasRecommendation('You should use the second one.'), true);
-  assert.equal(hasRecommendation('I read three pages and they disagree.'), false);
-});
-
-test('the user talking is told apart from a tool result and a hook', () => {
-  assert.equal(humanText({ type: 'user', message: { content: 'hello' } }), 'hello');
-  assert.equal(humanText({ type: 'user', message: { content: [{ type: 'text', text: 'hi' }] } }), 'hi');
-  assert.equal(humanText({ type: 'user', message: { content: [{ type: 'tool_result', content: 'x' }] } }), null);
-  assert.equal(humanText({ type: 'attachment', attachment: { hookName: 'UserPromptSubmit', content: ['[orch-router] …'] } }), null);
-  // A message typed mid-turn is still the user asking. Observed field: `prompt`.
-  assert.equal(humanText({ type: 'attachment', attachment: { type: 'queued_command', prompt: THE_QUESTION } }), THE_QUESTION);
-});
-
-test('sources are counted distinctly, and only after the question', () => {
-  const lines = [
-    JSON.stringify({ type: 'user', message: { content: 'earlier, unrelated' } }),
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebFetch', input: { url: 'https://old' } }] } }),
-    JSON.stringify({ type: 'user', message: { content: THE_QUESTION } }),
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'a' } }] } }),
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'a' } }] } }),
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } }),
-  ].join('\n');
-  const f = turnFacts(lines);
-  assert.equal(f.text, THE_QUESTION);
-  assert.equal(f.sourceCalls, 1, 'the same search twice is one source, and the earlier fetch belongs to the earlier turn');
-});
-
-test('replay reports what the floor would have done, and writes nothing', () => {
-  const lines = [
-    JSON.stringify({ type: 'user', message: { content: THE_QUESTION } }),
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'tiers' } }] } }),
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: A_TABLE }] } }),
-  ].join('\n');
-  const hits = replayFile(lines);
-  assert.equal(hits.length, 1);
-  assert.match(hits[0].prompt, /recommended manager models/);
-});
-
-test('the floor blocks the turn, and the Pickup rule is untouched by it', () => {
-  const home = sandbox();
-  const repo = fixtureRepo().dir;
-  const transcript = join(repo, 'floor.jsonl');
-  writeFileSync(transcript, [
-    JSON.stringify({ type: 'user', message: { content: THE_QUESTION } }),
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'WebSearch', input: { query: 'tiers' } }] } }),
-  ].join('\n') + '\n');
-
-  const payload = { hook_event_name: 'Stop', session_id: 'floor-sess', cwd: repo, transcript_path: transcript, last_assistant_message: A_TABLE };
-  const first = run('turn-check.mjs', payload, home);
-  assert.equal(first.json && first.json.decision, 'block');
-  assert.match(first.json.reason, /a recommendation across a set of cases, answered from 1 source/);
-  assert.match(first.json.reason, /Dispatch orch-researcher/);
-
-  // Once per question. A second Stop on the same question is quiet, which is
-  // what keeps the host's eight-block override from ever being reached.
-  const second = run('turn-check.mjs', payload, home);
-  assert.equal(second.json, null, 'blocked once, not every turn');
-
-  // And the store key is its own: the Pickup rule can still fire afterwards.
-  const store = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'turn-checks.json'), 'utf8'));
-  assert.ok(Object.keys(store).some(k => k.startsWith('floor_')), `floor key namespace: ${Object.keys(store)}`);
-});
-
-test('stop_hook_active silences the floor as well', () => {
-  const home = sandbox();
-  const repo = fixtureRepo().dir;
-  const transcript = join(repo, 'again.jsonl');
-  writeFileSync(transcript, JSON.stringify({ type: 'user', message: { content: THE_QUESTION } }) + '\n');
-  const out = run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's', cwd: repo, transcript_path: transcript, last_assistant_message: A_TABLE, stop_hook_active: true }, home);
-  assert.equal(out.json, null);
-});
-
-
-// ---- money ------------------------------------------------------------------
-
-import { costLine, appendCost, readCosts, COSTS_MAX } from './ledger.mjs';
-import { tagFor } from './guard-agent.mjs';
-
-test('a finished dispatch is priced and appended, and the file stays bounded', () => {
-  const home = sandbox();
-  const path = join(home, 'costs.jsonl');
-  const row = costLine('orch-researcher', 'claude-fable-5-1', { input: 1e6, output: 0, cacheRead: 0, cacheWrite: 0, turns: 3 });
-  assert.equal(row.role, 'orch-researcher');
-  assert.equal(row.model, 'fable', 'the family, not the full id');
-  assert.equal(row.dollars, 10, '1M fresh input on Fable is $10');
-
-  for (let i = 0; i < COSTS_MAX + 20; i++) appendCost({ ...row, i }, path);
-  const rows = readCosts(path);
-  assert.equal(rows.length, COSTS_MAX, 'the oldest are dropped rather than kept forever');
-  assert.equal(rows[rows.length - 1].i, COSTS_MAX + 19, 'the newest survive');
-});
-
-// The trap the reviewer caught: `additionalContext` is documented alongside
-// `permissionDecision: "allow"`, and emitting `allow` here would auto-approve
-// every dispatch and remove the user's permission prompt. The tag is
-// information, never a decision.
-test('the guard never approves a dispatch, whatever it has to say about the price', () => {
-  const home = sandbox();
-  const inputs = [
-    { subagent_type: 'orch-researcher', model: 'fable', prompt: 'TASK: 9-9-0001\nfind out X' },
-    { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0002\nbuild Y' },
-    { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'here is a key: sk-ant-abcdefghijklmnop' },
-    { prompt: 'no role, no model' },
-  ];
-  for (const [i, tool_input] of inputs.entries()) {
-    const out = run('guard-agent.mjs', { tool_name: 'Agent', session_id: `guard-${i}`, cwd: home, tool_input }, home);
-    const s = out.stdout || '';
-    assert.doesNotMatch(s, /"permissionDecision"\s*:\s*"allow"/, `input ${i} must never carry allow`);
-  }
-});
-
-test('the price tag reads the ledger, and says so when there is nothing to read', () => {
-  const fresh = tagFor({ subagent_type: 'orch-researcher', model: 'fable' });
-  assert.match(fresh, /price tag: orch-researcher on fable/);
-  assert.match(fresh, /\$\d/);
-  // Whatever this machine's costs.jsonl holds, the tag labels itself as one of
-  // exactly two things: measured here with a count, or reasoned.
-  const measured = /\(measured here, n=\d+\)/.test(fresh);
-  const reasoned = /\(reasoned, not yet measured here\)/.test(fresh);
-  assert.equal(measured !== reasoned, true, `exactly one label: ${fresh}`);
+test('turn check: nothing in it can ask for more research, testing or improvement', () => {
+  // The check that used to live here counted the source-reading tool calls in a
+  // turn and blocked a recommendation answered from fewer than two. Two failed
+  // fetches satisfied it; one authoritative document did not.
+  const src = readFileSync(script('turn-check.mjs'), 'utf8');
+  const live = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+  assert.doesNotMatch(live, /sourceCalls|WebFetch|WebSearch|floorDecision/);
+  assert.doesNotMatch(live, /orch-researcher/);
 });

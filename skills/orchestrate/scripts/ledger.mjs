@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// ledger.mjs — a SubagentStop hook. It writes the run ledger so the model does
-// not have to remember to.
+// ledger.mjs — a SubagentStop hook. It saves what a subagent returned, prices
+// it, and records which run and task it belongs to, so nothing is lost when a
+// session ends between a return and the lead reading it.
 //
 // SubagentStop, not PostToolUse(Agent): a background dispatch returns as a task
 // notification, and PostToolUse never fires for it. SubagentStop fires either
@@ -8,47 +9,44 @@
 // token usage lives.
 //
 // On every subagent stop:
-//   1. save the full return to <run dir>/returns/NNN-<agent_type>.md;
-//   2. sum the agent's usage from its transcript;
-//   3. update the RUN.md row whose id matches the return's `TASK:` line —
-//      phase 🔍 review for DONE, ◐ for PARTIAL, ⛔ for BLOCKED. Never ✅: only
-//      the orchestrator marks a task done, and only on evidence it checked.
+//   1. save the full return under the run's returns/ folder, under a name
+//      derived from the agent and the event rather than from a file count;
+//   2. sum the agent's usage from its transcript and price it at list price;
+//   3. append the association (run, task, agent, model, file) to an index.
 //
-// It never blocks, never fails a stop, and prints `additionalContext` only when
-// the return is missing the fields the orchestrator needs to grade it.
+// It does NOT edit the RUN.md task rows any more. Two returns landing together
+// each read the whole file, changed one row and wrote it back, so the second
+// write erased the first one's row. The lead updates the row when it consumes
+// the return, which is also the only moment anyone has actually graded it.
+//
+// It never blocks and never fails a stop.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { findRepoRoot, latestRun, readJson, loadSession, DIR } from './lib/tier.mjs';
+import { DIR, sanitizeId, readJson, loadSession, resolveRun, runsUnder, findRepoRoot } from './lib/tier.mjs';
 import { dollars, family } from './lib/prices.mjs';
 
-export const PHASE = { DONE: '🔍 review', PARTIAL: '◐ partial', BLOCKED: '⛔ blocked' };
-
-// Lenient on purpose: an agent that got the shape almost right should still be
-// recorded. Anything missing is reported, not corrected.
+// Lenient on purpose, and it stays lenient: a return that got the shape almost
+// right is still the work. Anything absent is reported as absent, never
+// corrected and never sent back to be rewritten.
 export function parseReturn(text) {
   const t = String(text || '');
   const field = re => { const m = re.exec(t); return m ? m[1].trim() : null; };
   const status = (field(/^\s*STATUS:\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
   const lines = t.trim() ? t.trim().split('\n').length : 0;
-  const missing = [];
-  const task = field(/^\s*TASK:\s*(\S+)/im);
-  const restated = field(/^\s*RESTATED:\s*(.+)$/im);
-  const evidence = /^\s*EVIDENCE:\s*\S/im.test(t);
-  if (!task) missing.push('TASK');
-  if (!restated) missing.push('RESTATED');
-  if (!status) missing.push('STATUS');
-  if (!evidence) missing.push('EVIDENCE');
   return {
-    task, status, restated, evidence, lines,
+    task: field(/^\s*TASK:\s*(\S+)/im),
+    run: field(/^\s*RUN:\s*(\S+)/im),
+    status,
+    evidence: /^\s*EVIDENCE:\s*\S/im.test(t),
+    lines,
     branch: field(/^\s*BRANCH:\s*(.+)$/im),
     changed: field(/^\s*CHANGED:\s*(.+)$/im),
-    // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what a reviewer
-    // written to the older instruction produces, and is still read.
+    // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what older
+    // reviewer instructions produced, and is still read.
     verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
-    missing, overLong: lines > 60,
   };
 }
 
@@ -73,9 +71,8 @@ export function sumUsage(transcriptPath) {
   return totals;
 }
 
-// Every finished dispatch, priced, one line each. This is the only place a
-// price becomes a measurement rather than a guess: the guard's tag before a
-// dispatch is a forecast, and it reads its averages from this file.
+// Every finished dispatch, priced, one line each, at list price. A model nobody
+// named stays unpriced rather than being quietly priced as the cheap one.
 //
 // Capped at 500 lines. It is a rolling record of what things cost here, not an
 // archive, and an unbounded append in a hook is a slow leak.
@@ -84,12 +81,14 @@ export const COSTS_MAX = 500;
 
 export function costLine(role, model, usage) {
   const fam = family(model);
+  const d = dollars(usage, model);
   return {
     at: new Date().toISOString(),
     role: String(role || 'claude'),
-    model: fam,
+    model: fam || String(model || 'unknown'),
+    priced: Boolean(fam),
     input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite,
-    dollars: Number(dollars(usage, fam).toFixed(4)),
+    dollars: d == null ? null : Number(d.toFixed(4)),
   };
 }
 
@@ -116,70 +115,72 @@ export function formatUsage(u) {
   return `${k(u.input + u.cacheRead + u.cacheWrite)} in / ${k(u.output)} out, ${u.turns} turns`;
 }
 
-// Task ids are `M-D-NNNN`, but an agent can echo anything on the TASK line, so
-// the id is escaped before it becomes part of a pattern.
-const escapeId = id => String(id).replace(/[^A-Za-z0-9_-]/g, c => `\\${c}`);
-
-// | id | phase | role · model | task | rubric | attempts | evidence |
-//
-// The three cells this hook owns are addressed from the ends, never by counting
-// from the left. Task and rubric are free text written by a human or an agent,
-// and one unescaped pipe in either shifts every later index: before this, a
-// rubric of "exit 0 | 41 passed" put the attempt count into the rubric cell and
-// left evidence empty, silently, on the row the orchestrator grades from.
-const PHASE_COL = 2;        // id and phase come before any free text
-const EVIDENCE_FROM_END = 2;
-const ATTEMPTS_FROM_END = 3;
-
-function rowCells(line) {
-  const cols = line.split('|');
-  return cols.length >= 9 ? cols : null;
-}
-
-export function updateRow(runMd, id, cells) {
-  const lines = runMd.split('\n');
-  const idRe = new RegExp(`^\\|\\s*${escapeId(id)}\\s*\\|`);
-  for (let i = 0; i < lines.length; i++) {
-    if (!idRe.test(lines[i])) continue;
-    const cols = rowCells(lines[i]);
-    if (!cols) continue;
-    if (cells.phase) cols[PHASE_COL] = ` ${cells.phase} `;
-    if (cells.attempts != null) cols[cols.length - ATTEMPTS_FROM_END] = ` ${cells.attempts} `;
-    if (cells.evidence) cols[cols.length - EVIDENCE_FROM_END] = ` ${cells.evidence} `;
-    lines[i] = cols.join('|');
-    return lines.join('\n');
-  }
-  return null;
-}
-
-export function bumpAttempts(runMd, id) {
-  const idRe = new RegExp(`^\\|\\s*${escapeId(id)}\\s*\\|`, 'm');
-  const cols = rowCells(runMd.split('\n').find(l => idRe.test(l)) || '');
-  const n = cols ? Number((cols[cols.length - ATTEMPTS_FROM_END] || '').trim()) : NaN;
-  return Number.isFinite(n) ? n + 1 : 1;
-}
-
-// What the guard recorded for this task in the session state. Returns
-// "opus (asked for fable)" when the guard moved it, the model alone otherwise,
-// and null when there is nothing to say.
+// The model the guard recorded for this task in this session, and nothing else.
+// `inherit` means the packet named no model; it is reported as inherited rather
+// than resolved to a guess.
 export function describeDispatch(d) {
   if (!d || !d.model) return null;
-  return d.requested && d.requested !== d.model ? `${d.model} (asked for ${d.requested})` : d.model;
+  return d.model === 'inherit' ? 'inherited model' : d.model;
 }
 
-function dispatchedModel(sessionId, task) {
+function dispatchFor(sessionId, task) {
   try {
     const state = loadSession(sessionId);
     const list = (state && Array.isArray(state.dispatches) ? state.dispatches : []).filter(d => !task || d.task === task);
-    return describeDispatch(list[list.length - 1]);
+    return list[list.length - 1] || null;
   } catch { return null; }
 }
 
-function nextReturnNumber(dir) {
+// A name that is unique per return and stable for one event, derived from who
+// returned and which invocation it was. Counting the files in the directory
+// gave two concurrent returns the same number, and the second overwrote the
+// first.
+export function returnFilename(agent, input, text) {
+  const who = input && (input.agent_id || input.tool_use_id);
+  const id = who
+    ? sanitizeId(String(who)).slice(-12)
+    : createHash('sha256').update(`${input && input.session_id}|${agent}|${text}`).digest('hex').slice(0, 12);
+  return `${agent}-${id}.md`;
+}
+
+// Which run this return belongs to: the RUN line the packet gave it, then the
+// run recorded against this task at dispatch, then whatever this session is
+// bound to or the one unambiguous open run in the repo. Never "the newest run
+// on the machine": that is how one repository's return was filed into another
+// repository's ledger.
+export function resolveReturnRun(input, parsed, dispatch) {
+  const root = findRepoRoot(input.cwd) || input.cwd || process.cwd();
+  const named = parsed.run || (dispatch && dispatch.run) || null;
+  if (named) {
+    const hit = runsUnder(root).find(r => r.runId === named);
+    if (hit) return { run: hit, how: 'named in the packet' };
+    const bound = resolveRun(input.session_id, input.cwd, { forWrite: true });
+    if (bound.run && bound.run.runId === named) return { run: bound.run, how: 'named in the packet' };
+  }
+  const r = resolveRun(input.session_id, input.cwd, { forWrite: true });
+  return { run: r.run, how: r.how, candidates: r.candidates };
+}
+
+// Where a return goes when no run owns it. Losing it is not an option, and
+// guessing a destination is what this release removed, so it is kept per
+// session and the note says where.
+export function orphanDir(sessionId) {
+  return join(DIR, 'returns', sanitizeId(sessionId || 'nosession'));
+}
+
+export const INDEX_NAME = 'returns.jsonl';
+
+// The association, appended as one line. Append-only, so two hooks finishing at
+// the same moment cannot erase each other the way two RUN.md rewrites did.
+export function indexLine(rec) {
+  return JSON.stringify(rec);
+}
+
+function appendIndex(dir, rec) {
   try {
-    const n = readdirSync(dir).filter(f => /^\d{3}-/.test(f)).length;
-    return String(n + 1).padStart(3, '0');
-  } catch { return '001'; }
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, INDEX_NAME), indexLine(rec) + '\n');
+  } catch {}
 }
 
 function emit(text) {
@@ -219,63 +220,64 @@ function main() {
 
   // Only a subagent's stop is a return, and only `agent_type` proves it is one.
   // `agent_id` does not: stops that are not subagent returns arrive carrying an
-  // id and no type, and accepting those filed twenty-one of the orchestrator's
-  // own messages under returns/ in one session, each one also posting a "grade
-  // this Failed" note back into the conversation. An unnamed return is not a
-  // return.
+  // id and no type, and accepting those filed twenty-one of the lead's own
+  // messages under returns/ in one session. An unnamed return is not a return.
   const agentType = input.agent_type || input.subagent_type;
   if (!agentType) return;
   const agent = String(agentType).replace(/[^A-Za-z0-9_-]/g, '_');
 
   // The recommended install registers this hook twice: once globally in
   // settings.json, and once from SKILL.md's frontmatter while the skill is in
-  // play. Both fire on the same stop. Without this, one dispatch writes two
-  // return files and counts as two attempts. Same payload within ten seconds
-  // is the same stop: act once.
+  // play. Both fire on the same stop. Act once.
   if (alreadyHandled(input, agent, text)) return;
+
   const r = parseReturn(text);
   const usage = sumUsage(input.agent_transcript_path);
-  const ranModel = dispatchedModel(input.session_id, r.task) || agent;
-  const cost = appendCost(costLine(agent, ranModel, usage));
+  const dispatch = dispatchFor(input.session_id, r.task);
+  const ranModel = (dispatch && dispatch.model) || 'inherit';
+  const cost = appendCost(costLine(agent, ranModel === 'inherit' ? '' : ranModel, usage));
 
-  const root = findRepoRoot(input.cwd) || input.cwd || process.cwd();
-  const run = latestRun(root);
-  const notes = [];
+  const { run, how, candidates } = resolveReturnRun(input, r, dispatch);
+  const dir = run ? join(run.dir, 'returns') : orphanDir(input.session_id);
+  const file = join(dir, returnFilename(agent, input, text));
+  const priced = cost.dollars == null ? 'unpriced (no model named)' : `$${cost.dollars.toFixed(2)} at list price`;
 
-  if (run) {
-    try {
-      const returnsDir = join(run.dir, 'returns');
-      mkdirSync(returnsDir, { recursive: true });
-      const file = join(returnsDir, `${nextReturnNumber(returnsDir)}-${agent}.md`);
-      const header = `<!-- ${new Date().toISOString()} · ${agent} · ${formatUsage(usage)} · ${r.lines} lines -->\n\n`;
-      writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
-      notes.push(`return saved to ${file}`);
+  try {
+    mkdirSync(dir, { recursive: true });
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced} -->\n\n`;
+    writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
+  } catch { return; }
 
-      if (r.task) {
-        const md = readFileSync(run.runMd, 'utf8');
-        const phase = PHASE[r.status] || '🔍 review';
-        // The model the guard actually dispatched on, which is not always the
-        // one the packet named: past the daily cap the guard rewrites fable to
-        // opus, and the agent's own return still echoes the packet.
-        const ran = dispatchedModel(input.session_id, r.task);
-        const evidence = `${r.verdict ? `${r.verdict} · ` : ''}${ran ? `${ran} · ` : ''}${formatUsage(usage)} · $${cost.dollars.toFixed(2)} · returns/${file.split(/[\\/]/).pop()}`;
-        const next = updateRow(md, r.task, { phase, attempts: bumpAttempts(md, r.task), evidence });
-        if (next) { writeFileSync(run.runMd, next); notes.push(`RUN.md row ${r.task} → ${phase}`); }
-        else notes.push(`no RUN.md row for ${r.task}: write the row before the next dispatch`);
-      }
-    } catch {}
+  appendIndex(dir, {
+    at: new Date().toISOString(),
+    session: input.session_id || null,
+    run: run ? run.runId : null,
+    task: r.task || null,
+    agent,
+    model: ranModel,
+    status: r.status || null,
+    verdict: r.verdict || null,
+    evidence: r.evidence,
+    file,
+    dollars: cost.dollars,
+  });
+
+  emit(note({ run, how, candidates, file, parsed: r, usage, priced }));
+}
+
+// One line back to the lead: where the return is, what it claims, and the one
+// thing to do about it. It never asks for the work to be done again.
+export function note({ run, how, candidates, file, parsed, usage, priced }) {
+  const parts = [`return saved to ${file} (${formatUsage(usage)}, ${priced})`];
+  if (!run) {
+    const list = (candidates || []).map(c => c.runMd).join(', ');
+    parts.push(`no run owns it (${how})${list ? `; candidates: ${list}` : ''}. Bind this session to the right run before the next dispatch: node scripts/run-init.mjs --bind <RUN.md> --session-id <this session>`);
   }
-
-  const problems = [];
-  if (r.missing.length) problems.push(`the return is missing ${r.missing.join(', ')}`);
-  if (r.overLong) problems.push(`the return is ${r.lines} lines (the cap is 40)`);
-  if (!r.task) problems.push('no TASK line, so no ledger row could be keyed');
-
-  if (problems.length) {
-    emit(`orchestrate ledger: ${problems.join('; ')}. Grade this return Failed or re-dispatch with the schema restated; do not mark the task done on it. ${notes.join('. ')}`);
-  } else if (notes.length && r.status !== 'DONE') {
-    emit(`orchestrate ledger: ${notes.join('. ')}. STATUS ${r.status}: decide retry, escalate or ask before moving on.`);
-  }
+  const id = parsed.task ? `task ${parsed.task}` : 'no TASK line, so no row is keyed to it';
+  const status = parsed.status ? `STATUS ${parsed.status}` : 'no STATUS line';
+  const ev = parsed.evidence ? '' : ' with no EVIDENCE section, so it cannot be graded Done from the return alone';
+  parts.push(`${id}, ${status}${ev}. Read the file, then set the row yourself.`);
+  return `orchestrate ledger: ${parts.join('. ')}`;
 }
 
 // Only when run as a hook, not when a test imports the pure functions above.

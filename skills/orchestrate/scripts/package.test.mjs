@@ -82,3 +82,38 @@ test('the portable build leaves no unresolved path, since nothing resolves one t
     assert.doesNotMatch(t, /\{\{NODE\}\}|\{\{SKILL_DIR\}\}/);
   }
 });
+
+test('both builds carry the revised policy, and neither names a hook that is gone', () => {
+  const spec = toSpec(SKILL);
+  for (const [name, text] of [['plugin', SKILL], ['portable', spec]]) {
+    // The three execution choices replaced the ten-rung routing ladder.
+    assert.match(text, /\*\*Direct\.\*\*/, name);
+    assert.match(text, /\*\*Assisted\.\*\*/, name);
+    assert.match(text, /\*\*Coordinated\.\*\*/, name);
+    // Review is bought for a named risk, not scheduled by model rank.
+    assert.match(text, /authorisation or security boundary/, name);
+    // Evidence is reused rather than rerun by ritual.
+    assert.match(text, /Do not rerun it by ritual/, name);
+    // Local durability is not publication.
+    assert.match(text, /Local durability is not publication/, name);
+    // And the maintainer rule that keeps this from growing back. Flattened,
+    // so reflowing the paragraph never fails a test about what it says.
+    assert.match(text.replace(/\s+/g, ' '), /needs a concrete failure it prevents/, name);
+    assert.doesNotMatch(text, /return-check/, name);
+    assert.doesNotMatch(text, /\d+% of a week/, name);
+  }
+});
+
+test('the hook paths the plugin registers all point at scripts that exist', () => {
+  const fm = /^---\n([\s\S]*?)\n---\n/.exec(SKILL)[1];
+  const named = [...fm.matchAll(/scripts\/([A-Za-z0-9_-]+\.mjs)/g)].map(m => m[1]);
+  assert.ok(named.length >= 3, 'the skill registers its hooks');
+  for (const n of named) {
+    assert.ok(existsSync(join(ROOT, 'skills', 'orchestrate', 'scripts', n)), `${n} exists`);
+  }
+  const hooks = readFileSync(join(ROOT, 'hooks', 'hooks.json'), 'utf8');
+  JSON.parse(hooks);
+  for (const m of hooks.matchAll(/scripts\/([A-Za-z0-9_-]+\.mjs)/g)) {
+    assert.ok(existsSync(join(ROOT, 'skills', 'orchestrate', 'scripts', m[1])), `hooks.json names ${m[1]}, which exists`);
+  }
+});

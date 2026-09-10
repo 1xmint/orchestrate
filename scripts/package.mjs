@@ -60,11 +60,11 @@ export function toSpec(text) {
   // Nothing enforces the rules here, so say so plainly instead of promising
   // hooks the host will never run.
   body = body.replace(
-    /Three hooks hold what is mechanical, so you need not: `guard-agent\.mjs`[\s\S]*?§0\s+says how\./,
-    'This host runs none of the skill\'s hooks, so nothing keeps credentials out\nof a packet, writes the ledger row or holds the Pickup line for you. Hold them\nyourself; they are stated where they apply below. Choosing the model was never\nmechanical anyway, so §0 reads the same here as everywhere.'
+    /Two hooks hold what is mechanical, so you need not: `guard-agent\.mjs`[\s\S]*?decides what a task deserves\./,
+    'This host runs none of the skill\'s hooks, so nothing keeps credentials out\nof a packet, saves a return under the run, or holds the Pickup line for you.\nHold them yourself; they are stated where they apply below. Nothing mechanical\never decided what a task deserves, so the rest reads the same here.'
   );
   body = body.replace(/^Tier `unknown` above:/m, 'Start by running `profile.mjs` in the skill folder. Tier `unknown`:');
-  body = body.replace(/`ledger\.mjs` saves every return and moves its row to 🔍 review; grading is\nyours\./, 'Save every return under the run folder and move its row to 🔍 review yourself.');
+  body = body.replace(/The ledger hook saves and indexes the return; you set the row,\nbecause you are the one who read it\./, 'Save the return under the run folder and set the row yourself.');
   body = body.split('${CLAUDE_SKILL_DIR}').join('<skill folder>');
   // No installer runs on these hosts, so nothing would substitute the
   // interpreter placeholder; plain `node` is the honest fallback there.
