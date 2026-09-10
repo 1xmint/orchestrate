@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      - name: Build the .skill artifacts the suite checks
+        run: node scripts/package.mjs --both
       - name: Run the offline test suite
         run: node --test $(find skills -name '*.test.mjs')
 
