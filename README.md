@@ -162,9 +162,14 @@ used it for a while, in `~/.claude/settings.json`:
 }
 ```
 
-- **`model` and `effortLevel`** are what the conversation itself runs on. The
-  table under [What to run it on](#what-to-run-it-on) has the recommendation per
-  plan. The skill will not change these and will not nag you about them.
+- **`model` and `effortLevel`** seed what a *new* session starts on. They do not
+  govern a session you are already in: the picker wins, and `effortLevel` is
+  written by the picker rather than read by it, so the value sitting in the file
+  is usually a record of the last thing you chose. On a machine here the file
+  read `opus` at `low` while the live session ran `opus` at `high`, and the
+  session was right. The recommendation per plan is under
+  [What to run it on](#what-to-run-it-on); the skill will not change either key
+  and will not nag you about them.
 - **`FORCE_AUTOUPDATE_PLUGINS`** only matters if you also set
   `DISABLE_AUTOUPDATER=1` to pin Claude Code itself. That switch stops plugin
   updates too, and this one lets them through again.
