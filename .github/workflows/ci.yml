@@ -1,0 +1,38 @@
+name: CI
+
+# The plugin ships hooks that run in every session, and the marketplace is set to
+# auto-update, so a red main installs itself. This gate keeps main green: the tests
+# need no network and no quota, so there is no reason for a merge to skip them.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Build the .skill artifacts the suite checks
+        run: node scripts/package.mjs --both
+      - name: Run the offline test suite
+        run: node --test $(find skills -name '*.test.mjs')
+
+  # A single context to require in branch protection, green only when every Node
+  # version above passed. Requiring one gate is simpler than requiring each leg.
+  ci-ok:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "all test legs passed"

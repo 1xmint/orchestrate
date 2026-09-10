@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (hey-vera)
-  version: "0.9.0"
+  version: "0.10.0"
 hooks:
   PreToolUse:
     - matcher: "Agent"
@@ -156,10 +156,21 @@ writes `<repo>/.orchestrator/runs/<date>-<slug>/RUN.md`, prefills Facts with the
 repo's detected gate, and binds the run to this session so a hook's write lands
 in the right ledger. Keep its headings; a resuming session looks for them.
 
-Fill the four sections above the task table before the first dispatch: the
-outcome and why it matters, the evidence that would prove it, the constraints
-and what you are deliberately not doing, and the current approach with the next
-deliverable. Link to the repo's own documents rather than copying them in.
+Fill the sections above the task table before the first dispatch: the outcome
+and why it matters, the evidence that would prove it, the constraints and what
+you are deliberately not doing, the current approach with the next deliverable,
+and the **budget of record** — a spend ceiling in list-price dollars you set with
+the user, once. The dispatch guard refuses a subagent that would cross it and
+asks; it never invents a tighter ceiling, and raising it in the ledger lets the
+next dispatch through. Link to the repo's own documents rather than copying them.
+
+A run this size is a **relay across fresh sessions, not one marathon.** A long
+conversation re-reads its whole self on every turn, and that re-read is the
+largest cost there is — bigger than any subagent. Do a wave or two, keep the
+Pickup line honest, and hand off: a fresh session resumes from the ledger and
+starts with a small, cheap context. The heartbeat reminds you when a session has
+run long; `--max-budget-usd` at launch and `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` are
+the host's own levers if the user wants a hard cap or fewer idle `/goal` check-ins.
 
 Plan as tracer bullets: the thinnest slice that works end to end, then the
 slices that widen it. Each row carries an id (`M-D-NNNN`), an owner, what it

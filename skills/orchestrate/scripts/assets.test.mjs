@@ -207,13 +207,16 @@ test('the run ledger keeps the goal above the task table', () => {
   // What a resuming session has to recover. Task history is long, mostly
   // finished, and on disk; these four are the run itself.
   const run = readFileSync(join(SKILL, 'assets', 'RUN.md'), 'utf8');
-  for (const h of ['Goal', 'Done when', 'Constraints and non-goals', 'Approach', 'Shape', 'Pickup']) {
+  for (const h of ['Goal', 'Done when', 'Constraints and non-goals', 'Approach', 'Budget', 'Shape', 'Pickup']) {
     assert.match(run, new RegExp(`^## ${h}$`, 'm'), `RUN.md has ## ${h}`);
   }
   assert.match(run, /Why it matters/);
   assert.match(run, /Next deliverable/);
   assert.match(run, /why not smaller/);
-  assert.match(flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8')), /Fill the four sections above the task table before the first dispatch/);
+  assert.match(run, /Ceiling:/, 'the Budget block seeds a ceiling');
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  assert.match(skill, /Fill the sections above the task table before the first dispatch/);
+  assert.match(skill, /budget of record/, 'the skill tells the lead to set a budget of record');
 });
 
 // Each of these is a rule with a test inside it, not a wish. A wish ("be

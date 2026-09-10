@@ -64,6 +64,18 @@ export function reasonedPrice(role, model) {
   return f && row[f] != null ? row[f] : null;
 }
 
+// One dollar figure for a dispatch about to happen: the measured average for
+// this role and model on this machine when there is one, else the reasoned
+// table, else null when the model is unknown. The spend gate uses it to decide
+// whether this dispatch would cross the run's budget ceiling.
+export function estimateDollars(role, model, rows) {
+  const f = family(model);
+  if (!f) return null;
+  const mine = (rows || []).filter(r => r && r.role === role && family(r.model) === f && Number.isFinite(Number(r.dollars)));
+  if (mine.length) return mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
+  return reasonedPrice(role, model);
+}
+
 // A price tag: measured from this machine's own past runs when there are any,
 // and labelled as reasoned when there are not. `rows` is the parsed contents of
 // costs.jsonl. `tier` and `profile` are accepted so callers need not know

@@ -2,6 +2,45 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.10.0 — manage to a budget, not just work, 2026-09-10
+
+A single "execute the plan" session on this machine burned about 20% of a Max 5x
+plan. Measured (`measure.mjs` on session `ea7b6432`): 977 turns, ~18 hours, $276.51
+at list price on the lead conversation alone, of which ~84% was the conversation
+re-reading its own context every turn (~465M cache-read tokens); another ~$300
+across ~20 subagents, implementers averaging $23.60 each. v0.10.0 makes the run
+manage itself instead of drifting, structurally (facts and guardrails), not with
+more prose — the compliance research in `docs/research/0003` says prose does not
+hold under load.
+
+- **Budget of record.** `assets/RUN.md` gains a `## Budget` block with a list-price
+  dollar ceiling, seeded by `run-init --budget`; `parseBudget`, `runSpend` and
+  `readRun` (in `lib/tier.mjs`) read it and the per-run subagent spend.
+- **A spend gate.** `guard-agent.mjs` (`budgetDecision`/`overCeiling`) denies a
+  dispatch that would cross the ceiling and asks to raise it or stop. It is a
+  PreToolUse deny, so it holds even inside an autonomous `/goal` loop, and it reads
+  the live ceiling every time so raising it needs no separate acknowledgement.
+- **The readiness signal finally fires.** `router.mjs` shows a run's ready tasks,
+  progress and budget even when the session starts above the repo — the reason it
+  never showed before (`ctx.run` was null) — and surfaces the missing-`blocks on`-
+  column case out loud (`lib/tier.mjs` `edgesMissing`) instead of a silent, empty
+  "nothing ready". Proven against the real ledger that hit exactly this.
+- **A management heartbeat.** `turn-check.mjs` (`heartbeatDecision`) adds a
+  marathon-handoff nudge (~150 turns) and an idle nudge (≥2 tasks unblocked) ahead
+  of the existing Pickup check, one block per Stop, by priority.
+- **Workers never wait on CI.** The implementer and debugger role files and
+  `packet.md` say push and return; the lead reads the async result cheaply.
+- **Removed** the resurrected weekly-dollar anchor from `profile.mjs`; the per-run
+  Budget ceiling replaces it.
+- **CI, at last.** `.github/workflows/ci.yml` runs the offline suite on push and PR
+  across Node 18/20/22, gated by one `ci-ok` context, because the marketplace
+  auto-updates and a red main would install itself.
+
+Tests: 199 pass (12 new), no network, no quota. Not verified live: whether a Stop
+hook can yield a `/goal` loop, `--max-budget-usd` on the desktop app, and
+`SendMessage` to a running subagent.
+
+
 ## v0.9.0 — a senior engineer, not a process, 2026-09-09
 
 v0.8.0 cut the instruction down. v0.9.0 removes the machinery that was still

@@ -23,8 +23,8 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun } from './lib/tier.mjs';
-import { priceTag } from './lib/prices.mjs';
+import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer } from './lib/tier.mjs';
+import { priceTag, estimateDollars } from './lib/prices.mjs';
 import { readCosts } from './ledger.mjs';
 
 // Anything here means the packet is carrying a live secret. The list grew after
@@ -144,6 +144,50 @@ export function runFor(input, ti) {
   return bound ? bound.runId : null;
 }
 
+const round2 = n => Math.round(Number(n) * 100) / 100;
+
+// The run object this dispatch bills against, so the gate can read its budget
+// ceiling and spend so far. Resolved the way a return is: the session binding
+// first, then a run named in the packet or the one open run in the repo, then
+// the machine's last-opened run as a hint for a session working above its repo.
+// This is a read, never a write, so the last-opened hint is allowed here where
+// it is refused for filing a return.
+export function resolveRunObj(input, ti) {
+  const bound = sessionRun(input.session_id);
+  if (bound) return bound;
+  const named = (/^\s*RUN:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1];
+  const root = findRepoRoot(input.cwd);
+  if (root) {
+    if (named) { const hit = runsUnder(root).find(r => r.runId === named); if (hit) return hit; }
+    const open = openRunsUnder(root);
+    if (open.length === 1) return open[0];
+  }
+  return activeRunPointer();
+}
+
+// The pure arithmetic of the gate, so it can be tested without a machine's cost
+// history: does spend-so-far plus this dispatch cross the ceiling? Null when
+// there is nothing to decide (no ceiling, or no price for this dispatch).
+export function overCeiling(already, est, ceiling) {
+  if (ceiling == null || est == null) return null;
+  const total = (Number(already) || 0) + Number(est);
+  return total > ceiling
+    ? { already: round2(Number(already) || 0), est: round2(Number(est)), total: round2(total), ceiling }
+    : null;
+}
+
+// Would this dispatch push the run past its budget ceiling? Null when there is
+// nothing to gate on: no model named (so no price), no run resolved, or no
+// ceiling set. Otherwise the numbers the deny reason needs.
+export function budgetDecision(input, ti, run = resolveRunObj(input, ti)) {
+  const model = String(ti.model || '');
+  if (!model) return null;
+  if (!run || !run.budget || run.budget.ceiling == null) return null;
+  const est = estimateDollars(String(ti.subagent_type || 'claude'), model, readCosts());
+  const over = overCeiling(Number(run.spend) || 0, est, run.budget.ceiling);
+  return over ? { runId: run.runId, ...over } : null;
+}
+
 function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
@@ -163,6 +207,17 @@ function main() {
   if (d.kind === 'deny') {
     if (!repeat) recordDenial(input, ti);
     emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate guard: ${d.reason}` } });
+    return;
+  }
+
+  // The spend gate, a decision like the credential check: computed every time on
+  // the live ceiling, so raising the budget in RUN.md lets the next attempt
+  // through with no separate acknowledgement. It holds even inside an autonomous
+  // /goal loop, because the loop cannot spend past a PreToolUse deny — the one
+  // stop the compliance evidence says actually works.
+  const b = budgetDecision(input, ti);
+  if (b) {
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate budget: this ${String(ti.subagent_type || 'dispatch')} is about $${b.est} at list price, and run ${b.runId} has already spent about $${b.already}, so it would cross the $${b.ceiling} ceiling. Raise the ceiling in the run's Budget section, or stop — nothing tightens or lifts it on its own.` } });
     return;
   }
 
