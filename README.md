@@ -73,6 +73,108 @@ byte, a backup is written to `~/.claude/orchestrate/settings.backup.<time>.json`
 before the first change, and a second run replaces our entries rather than
 stacking them. `--dry-run` says what would happen and changes nothing.
 
+## Use it
+
+**There is nothing to learn.** Describe what you want. The skill triggers itself
+on work with several parts, and stays out of the way on everything else. Typing
+`/orchestrate <goal>` forces it, but you rarely need to.
+
+What you get back depends on the size of the thing, and that is the whole point.
+
+**A small change stays small.**
+
+> Rename the button on the settings page from "Sync now" to "Refresh".
+
+It makes the edit and tells you. No plan, no agents, no ledger, no questions.
+This is most work, and the plugin's main job here is to not get in the way.
+
+**A real change gets evidence, not a claim.**
+
+> Add a `--json` flag to the status command so it prints the same data as one
+> JSON object, with tests, and don't change the human output.
+
+It reads the code, makes the change, runs your project's own test and lint
+commands, and reports what passed with the output. If it could not verify
+something, it says so rather than calling it done.
+
+**Work with several tracks gets a ledger.**
+
+> Port the CLI to the new config format and rewrite the docs site build. They
+> don't touch the same files.
+
+Now it writes `.orchestrator/runs/<date>-<slug>/RUN.md` in your repo: the goal,
+what "done" looks like, the constraints, and a task table. Each worker gets its
+own git worktree so they cannot collide. You can read that file at any time, and
+if the session dies you can open a new one and say "continue".
+
+**Work that is expensive to get wrong gets a second pair of eyes.**
+
+> Our login route lets an expired token through if the clock skews. Fix it.
+
+An authorisation boundary is one of the few things that always gets an
+independent review. A cosmetic change to a public page does not.
+
+### What you will see while it works
+
+While a run is open, the first message of each session carries one line of state:
+
+```
+[orchestrate] you: opus @ high effort · tier max5 · orch-agents 6/6 · run: 20260909-tidy (bound to this session) · 1 return to grade: 9-9-0001 · ready now: 9-9-0003 · limits today: none
+```
+
+Read it left to right. What you are running on, which plan, whether the six role
+agents are installed, which run this session owns, then two things worth acting
+on: **returns to grade** is finished work waiting for someone to judge it, and
+**ready now** is a task whose blockers have all landed, so nothing should be
+sitting idle. After that first line it stays quiet until one of those facts
+changes.
+
+### When it will stop and ask you
+
+Four things, and only these: money, a public surface, credentials, and anything
+destructive or irreversible. It asks once, with a recommendation first, and
+permission you have already given for a piece of work is not asked for twice.
+
+Everything else it decides and tells you, including which files to touch and
+whether something needs a test.
+
+### Configure it
+
+You need none of this to start. These are the keys worth knowing once you have
+used it for a while, in `~/.claude/settings.json`:
+
+```json
+{
+  "model": "opus",
+  "effortLevel": "high",
+  "env": {
+    "FORCE_AUTOUPDATE_PLUGINS": "1"
+  },
+  "enabledPlugins": {
+    "orchestrate@orchestrate": true
+  },
+  "extraKnownMarketplaces": {
+    "orchestrate": {
+      "source": { "source": "github", "repo": "1xmint/orchestrate" },
+      "autoUpdate": true
+    }
+  }
+}
+```
+
+- **`model` and `effortLevel`** are what the conversation itself runs on. The
+  table under [What to run it on](#what-to-run-it-on) has the recommendation per
+  plan. The skill will not change these and will not nag you about them.
+- **`FORCE_AUTOUPDATE_PLUGINS`** only matters if you also set
+  `DISABLE_AUTOUPDATER=1` to pin Claude Code itself. That switch stops plugin
+  updates too, and this one lets them through again.
+- **`autoUpdate`** on the marketplace entry is what the plugin manager writes
+  when you enable auto-update in its UI. It is off by default for third-party
+  marketplaces like this one.
+
+`enabledPlugins` and `extraKnownMarketplaces` are written for you by the
+install. You should not need to type them.
+
 ### What the hooks do
 
 | Hook | When | What it holds |
@@ -141,22 +243,14 @@ then `orchestrate` then **Enable auto-update**. After that Claude Code refreshes
 and updates in the background shortly after each session starts, with a delay of
 up to ten minutes so the running session keeps what it launched with.
 
-There is also an `"autoUpdate": true` key on a marketplace entry in
-`~/.claude/settings.json`, which is what the plugin manager writes. It is
+There is also an `"autoUpdate": true` key on the marketplace entry in
+`~/.claude/settings.json`, which is what the plugin manager writes when you use
+that toggle. [Configure it](#configure-it) shows where it sits in the file. It is
 **undocumented for user settings** and unverified here, so it is worth knowing
-about but not worth relying on:
+about but not worth relying on.
 
-```json
-"extraKnownMarketplaces": {
-  "orchestrate": {
-    "source": { "source": "github", "repo": "1xmint/orchestrate" },
-    "autoUpdate": true
-  }
-}
-```
-
-To turn auto-updating off again, set that to `false`, or use the same toggle in
-the plugin manager. The `DISABLE_AUTOUPDATER` environment variable also works
+To turn auto-updating off again, set that key to `false`, or use the same toggle
+in the plugin manager. The `DISABLE_AUTOUPDATER` environment variable also works
 but is blunter: it stops Claude Code updating itself as well. Setting
 `FORCE_AUTOUPDATE_PLUGINS=1` alongside it keeps plugin updates while pinning
 Claude Code.
