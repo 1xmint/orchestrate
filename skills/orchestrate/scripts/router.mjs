@@ -33,14 +33,20 @@ import {
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---- the card (from references/ladder.md, so the text has one home) ---------
-// Four short paragraphs: how the work is shaped, when a question is worth a
-// search, what always stops and asks, and how to mute this. No rung numbers and
-// no agent names, because nothing here has read the work.
-const FALLBACK_CARD = [
-  'orchestrate is loaded. Do ordinary bounded work yourself. Delegate a substantial separable task when isolation, parallel progress, a specialist, or independent scrutiny buys something concrete. Open a run ledger when several tracks run at once or the work outlives this session.',
-  'Before adding a dependency, an abstraction or another worker, name the unresolved problem it solves now. A future possibility is not one.',
-  'Stop and ask, with a recommendation first, only for money, a public surface, credentials, or a destructive or irreversible action. Existing authorisation is not asked for twice.',
-  'Mute: type "router off".',
+// Five short paragraphs: how the work is shaped, how a question is answered,
+// when a dependency or a worker earns its cost, what evidence decides done,
+// and what always stops and asks. No rung numbers and no agent names, because
+// nothing here has read the work.
+// Kept byte-identical to the fenced card in references/ladder.md — see the
+// drift test in router.test.mjs. This copy is the fallback for the rare case
+// the file cannot be read; it used to be a shorter, separately-maintained
+// summary that silently fell two paragraphs behind the real card.
+export const FALLBACK_CARD = [
+  'orchestrate is loaded. Do ordinary bounded work yourself, including long work and work across several files. Delegate one substantial separable task when isolation, parallel progress, a specialist, or independent scrutiny buys something concrete. Open a run ledger only when several tracks run at once or the work outlives this session.',
+  'Answer a settled question from the record and say where. Answer a question about the world from the world: search it, open the source that settles it, stop when nothing further could change the answer. One authoritative source can be enough. Answer a judgment question with a recommendation and what would change it.',
+  'Before adding a dependency, an abstraction, another research wave or another worker, name the unresolved problem it solves now. A future possibility is not one.',
+  'Evidence decides done: reuse a check that already passed, add a test for a real uncovered behaviour, drive a user flow when reading it cannot settle it. Independent review is for money, auth, destructive data, a contract others consume, or real architectural doubt.',
+  'Stop and ask, recommendation first, only for money, a public surface, credentials, or a destructive or irreversible action. Authorisation already given is not asked for twice. Mute this card: type "router off".',
 ].join('\n');
 
 export const CARD_CAP = 1550;

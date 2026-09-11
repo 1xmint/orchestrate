@@ -1,8 +1,9 @@
 # Models: what each one is for
 
-First-party API rates and windows, cached 2026-06-24. They move; re-check before
-a run that will spend heavily. On a Max plan you are not paying these dollars,
-you are spending a share of a weekly window, so read the ratios.
+First-party API rates and windows, cached 2026-06-24, re-verified against
+claude.com/pricing 2026-09-10 (unchanged). They move; re-check before a run
+that will spend heavily. On a Max plan you are not paying these dollars, you
+are spending a share of a weekly window, so read the ratios.
 
 ## The four
 
@@ -77,6 +78,23 @@ limit is what you will re-read, not the ceiling. Give a wide read to a subagent,
 whose context dies with it, rather than to the conversation, whose context is
 re-read on every later turn. That is the whole reason this skill dispatches. A
 subagent that fills its window was usually a task that should have been two.
+
+**The SDK-hosted path has its own answer to the same problem.** The Messages
+API can clear old tool results and thinking blocks server-side
+(`anthropic-beta: context-management-2025-06-27`, `clear_tool_uses_20250919` —
+100K-token default trigger, keeps the 3 most recent) and, separately, can
+summarize the whole earlier history into one compaction block as a long
+session nears its limit (`anthropic-beta: compact-2026-01-12`,
+`compact_20260112` — 150K-token default trigger, 50K minimum), on Opus 5,
+Sonnet 5 and Fable 5.1 among others (platform.claude.com/docs/en/build-with-
+claude/context-editing and .../compaction, both read 2026-09-10). This is
+the platform's own version of the relay-across-fresh-sessions move `SKILL.md
+§4` asks the lead to do by hand — for an SDK-hosted agent it can be set once
+as a request parameter instead. **Inferred, not verified here**: nothing in
+`code.claude.com/docs` names either beta header as something a Claude Code
+session can set, and no tool in this build exposes one — so treat the lead's
+own Pickup-line handoff as the only mechanism available in this host until
+someone finds a way to ask for one from inside a session.
 
 ## If the user asks what to run the lead on
 

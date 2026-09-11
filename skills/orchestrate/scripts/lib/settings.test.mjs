@@ -40,7 +40,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
   const report = applyRegistrations(s, entries);
 
   assert.equal(report.removed, 0);
-  assert.equal(report.added, 4);
+  assert.equal(report.added, 6);
   const gate = s.hooks.PreToolUse.find(g => JSON.stringify(g).includes('memory-write-gate.mjs'));
   assert.deepEqual(gate, REAL_SHAPE.hooks.PreToolUse[0], 'the memory-write-gate entry is untouched');
   assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
@@ -53,6 +53,9 @@ test('registering router and guard keeps every entry that is not ours', () => {
   assert.equal(s.hooks.SessionStart[0].matcher, 'resume|compact|clear');
   assert.equal(s.hooks.SubagentStop[0].hooks[0].command, commandFor(join(SCRIPTS, 'ledger.mjs')));
   assert.match(s.hooks.PreToolUse.map(g => JSON.stringify(g)).join(''), /guard-agent\.mjs/);
+  assert.match(s.hooks.PreToolUse.map(g => JSON.stringify(g)).join(''), /Agent\|Task/, 'the guard matches a future Task-named tool too');
+  assert.equal(s.hooks.Stop[0].hooks[0].command, commandFor(join(SCRIPTS, 'turn-check.mjs')), 'the Pickup check is pinned by a script install too, not just SKILL.md\'s bare `node`');
+  assert.equal(s.hooks.PreCompact[0].hooks[0].command, commandFor(join(SCRIPTS, 'precompact-check.mjs')));
 });
 
 test('a second run replaces our entries instead of stacking them', () => {
@@ -61,10 +64,12 @@ test('a second run replaces our entries instead of stacking them', () => {
   const once = clone(s);
   const report = applyRegistrations(s, registrations(SCRIPTS, { router: true, guard: true }));
 
-  assert.equal(report.removed, 4, 'the stale copies are found by basename and dropped');
+  assert.equal(report.removed, 6, 'the stale copies are found by basename and dropped');
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.equal(s.hooks.SessionStart.length, 1);
   assert.equal(s.hooks.SubagentStop.length, 1);
+  assert.equal(s.hooks.Stop.length, 1);
+  assert.equal(s.hooks.PreCompact.length, 1);
   assert.equal(s.hooks.PreToolUse.length, 2, 'the user hook plus one of ours');
   assert.deepEqual(new Set(Object.keys(s.hooks)), new Set(Object.keys(once.hooks)));
 });
@@ -146,7 +151,7 @@ test('the real settings.json on this machine survives a dry merge', { skip: !exi
   const s = readSettings(p);
   applyRegistrations(s, registrations(SCRIPTS, { router: true, guard: true }));
   // Every non-orchestrate hook group is still present, byte for byte.
-  const ours = new Set(['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs']);
+  const ours = new Set(['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs']);
   const theirs = o => JSON.stringify(Object.fromEntries(Object.entries((o.hooks) || {}).map(([ev, gs]) => [ev, (gs || []).map(g => ({ ...g, hooks: (g.hooks || []).filter(h => !ours.has(commandBasename(h.command))) })).filter(g => g.hooks.length)]).filter(([, gs]) => gs.length)));
   assert.equal(theirs(s), theirs(before));
   for (const k of Object.keys(before)) if (k !== 'hooks') assert.deepEqual(s[k], before[k], `${k} is untouched`);

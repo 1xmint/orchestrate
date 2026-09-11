@@ -4,7 +4,9 @@
 //
 //   node scripts/install.mjs                     ~/.claude/skills/orchestrate, ~/.agents/..., role agents
 //   node scripts/install.mjs --with-router        + the per-message router in ~/.claude/settings.json
-//   node scripts/install.mjs --with-hook          + the Agent money guard and the SubagentStop ledger
+//   node scripts/install.mjs --with-hook          + the Agent money guard, the SubagentStop ledger,
+//                                                   and the Stop Pickup check, all with the
+//                                                   interpreter's absolute path pinned in
 //   node scripts/install.mjs --no-codex           skip ~/.agents
 //   node scripts/install.mjs --no-agents          skip the role agents
 //   node scripts/install.mjs --project <repo>     drop the project kit into one repo (see below)

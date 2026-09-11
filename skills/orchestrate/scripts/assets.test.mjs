@@ -80,6 +80,25 @@ test('read-only roles keep read-only tool sets', () => {
   }
 });
 
+test('WS4: no worker role can message another agent or publish, and the browser cannot reach the network around its own pane', () => {
+  // A permissionMode narrowed per dispatch would be the other lever, but a
+  // plugin-installed subagent ignores permissionMode in its own frontmatter
+  // entirely (code.claude.com/docs/en/sub-agents, checked 2026-09-10) — the
+  // plugin path is this skill's primary channel, so tools/disallowedTools is
+  // the only lever that reaches every install path. See hosts.md.
+  const deny = n => (/^disallowedTools: (.+)$/m.exec(readFileSync(join(AGENTS, `${n}.md`), 'utf8')) || [])[1] || '';
+  for (const n of ['orch-implementer', 'orch-debugger']) {
+    const d = deny(n);
+    assert.match(d, /\bSendMessage\b/, `${n} cannot message a sibling agent around the lead`);
+    assert.match(d, /\bArtifact\b/, `${n} cannot publish`);
+    assert.match(d, /\bMonitor\b/, `${n} cannot wait on an async check — its own instructions already forbid it`);
+  }
+  const browser = deny('orch-browser');
+  for (const tool of ['SendMessage', 'Artifact', 'Bash', 'WebFetch', 'WebSearch']) {
+    assert.match(browser, new RegExp(`\\b${tool}\\b`), `orch-browser cannot reach the network or the shell around its own browser pane (${tool})`);
+  }
+});
+
 test('the placeholder is only ever {{SKILL_DIR}}, never a machine path', () => {
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const text = readFileSync(join(AGENTS, f), 'utf8');

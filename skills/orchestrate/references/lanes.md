@@ -28,14 +28,57 @@ Splits one change across 5–30 subagents, each in its own worktree, each openin
 hand dispatch for one mechanical instruction over many files (rename, bump, header, import
 rewrite). Needs a git repository with a remote. User-typed command; hand the user the line.
 
+## `batch` (this skill's own fan-out, `scripts/batch.mjs`)
+
+For real parallel mass-edit — the same mechanical change across many files —
+without depending on `/batch` or the Workflow tool, neither of which the model
+can start here (above). `scripts/batch.mjs <RUN.md> --spec "…" --files
+"a,b,c" [--done-when "…"] [--concurrency 20]` reads the run's own task id
+sequence and writes one packet and one task row per file, each `OWNS` exactly
+that file so N `orch-implementer` worktrees can run at once with no merge
+conflict — the same rule SKILL.md §4 already states for parallel tasks, just
+generated rather than typed by hand N times. Default concurrency 20, matching
+the host's own default concurrent-subagent limit (`hosts.md`).
+
+Use it for one mechanical instruction applied identically across files: a
+rename, a header, an import rewrite, a dependency bump repeated per package.
+Not for a change where two files need to see each other — a shared rename
+across a type and its call sites is one task owning the whole set, not a
+batch. Paste the printed rows into `RUN.md`'s table, then dispatch each
+file's packet as its own `orch-implementer` call, in waves of the printed
+size; the full gate runs once at the join, same as any other coordinated run
+(`SKILL.md §6`).
+
+Portable, not a fast path: it costs a real dispatch per file, same as typing
+each packet by hand would. If a future host exposes `/batch` or the Workflow
+tool to the model directly, that beats this for the cases `/batch` already
+covers (5–30 files, one worktree per file, opens a PR) — check `hosts.md`'s
+dated finding before assuming either is still unavailable.
+
 ## `fork`
 
 A subagent that inherits the parent's whole conversation, tools and cache, so its first request
 is a cache read and nothing has to be re-explained. Use it for a short task that needs this
 conversation: "verify the diff we just discussed", "answer from what we read". Every fork turn
 costs what a main-conversation turn costs, so it loses to a packet as soon as the task is long.
-Documented as `subagent_type: fork`; not listed in this session's agent types on 2026-09-08,
-so treat it as documented-unverified until one probe succeeds.
+
+**Not available here, probed 2026-09-10**: `Agent` with `subagent_type: "fork"` is refused —
+`Agent type 'fork' not found` — against the same list `Agent`'s own error names every time. It
+is documented elsewhere as `subagent_type: fork`; this build does not expose it. Do not offer it
+to the user as a move; re-probe after a host upgrade.
+
+## `SendMessage`, as a delta lane
+
+Resumes a subagent — background or already finished — with a follow-up that reads its existing
+transcript instead of starting cold: a cache-warm continuation, not a fresh dispatch. Proven
+2026-09-10: a background `Agent` dispatch was let finish, then `SendMessage`'d by its raw
+`agentId` with a follow-up instruction, and it resumed and completed cleanly. Use it for the
+common reviewer-found-a-problem → implementer-fixes-it loop, or a short second ask of an agent
+whose context is worth keeping, in place of a fresh dispatch that reloads CLAUDE.md, the git
+snapshot and the packet from nothing. Capture the id from the dispatch result; a *named* agent
+(one with a stable `name`, not just an id) can also be reached by that name later in the session.
+Loses to a fresh dispatch when the model needs to change, or when the earlier attempt would bias
+the next one — same rule as a packet delta by hand.
 
 ## Agent teams (experimental, off)
 

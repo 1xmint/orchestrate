@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { priceTag, estimateDollars } from './lib/prices.mjs';
 import { readCosts } from './ledger.mjs';
 
@@ -87,28 +87,25 @@ export const EVENTS_PATH = join(DIR, 'dispatch-events.json');
 export const EVENT_TTL_MS = 86400000;
 export const EVENTS_MAX = 400;
 
-// Per session and per event, not one global "last dispatch". Two sessions
-// dispatching at the same moment used to overwrite each other's single slot, so
-// whichever wrote second was recorded twice and the first not at all.
-export function markSeen(store, id, now = Date.now(), ttl = EVENT_TTL_MS, max = EVENTS_MAX) {
-  const out = {};
-  for (const [k, v] of Object.entries(store || {})) {
-    const at = Number(v && v.at);
-    if (Number.isFinite(at) && now - at < ttl) out[k] = { at };
-  }
-  const seen = Boolean(out[id]);
-  out[id] = { at: now };
-  const keys = Object.keys(out);
-  if (keys.length > max) {
-    for (const k of keys.sort((a, b) => out[a].at - out[b].at).slice(0, keys.length - max)) delete out[k];
-  }
-  return { seen, store: out };
-}
+// Re-exported so a caller that imported the object-keyed form from here still
+// gets it; the guard's own dedupe below no longer uses it. Up to 20 concurrent
+// subagents is a documented, ordinary case here, and a read-modify-write JSON
+// store — even an atomically-renamed one — can lose an update when two of
+// those dispatches' PreToolUse hooks race it: whichever writes second wins,
+// and the first dispatch's event can vanish from the record. `seenRecently`/
+// `recordSeen` (`lib/tier.mjs`) replace it with an append-only log: a
+// concurrent writer only ever adds its own line, so there is nothing to race.
+export { markSeen } from './lib/tier.mjs';
 
 function seenBefore(id) {
+  const now = Date.now();
   try {
-    const { seen, store } = markSeen(readJson(EVENTS_PATH) || {}, id);
-    writeJsonAtomic(EVENTS_PATH, store);
+    const seen = seenRecently(EVENTS_PATH, id, now, EVENT_TTL_MS);
+    recordSeen(EVENTS_PATH, id, now);
+    // Trimming is a read-modify-write; done rarely so it is never what a
+    // concurrent dispatch races against. Losing this particular race only
+    // delays the trim, never a record.
+    if (Math.random() < 0.02) trimLog(EVENTS_PATH, EVENTS_MAX);
     return seen;
   } catch { return false; }
 }
@@ -151,8 +148,14 @@ const round2 = n => Math.round(Number(n) * 100) / 100;
 // first, then a run named in the packet or the one open run in the repo, then
 // the machine's last-opened run as a hint for a session working above its repo.
 // This is a read, never a write, so the last-opened hint is allowed here where
-// it is refused for filing a return.
-export function resolveRunObj(input, ti) {
+// it is refused for filing a return — *except* for the budget gate, whose
+// caller passes `forBudget: true`. The pointer names whichever run was opened
+// last on this whole machine, which can belong to a repo this dispatch has
+// nothing to do with; enforcing its ceiling denied dispatches against a
+// stranger repo's budget. Everywhere the pointer is shown rather than
+// enforced (`router.mjs`'s "candidate, not bound") already hedges it; the gate
+// is the one caller that would otherwise have treated it as authoritative.
+export function resolveRunObj(input, ti, { forBudget = false } = {}) {
   const bound = sessionRun(input.session_id);
   if (bound) return bound;
   const named = (/^\s*RUN:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1];
@@ -162,6 +165,7 @@ export function resolveRunObj(input, ti) {
     const open = openRunsUnder(root);
     if (open.length === 1) return open[0];
   }
+  if (forBudget) return null;
   return activeRunPointer();
 }
 
@@ -179,7 +183,7 @@ export function overCeiling(already, est, ceiling) {
 // Would this dispatch push the run past its budget ceiling? Null when there is
 // nothing to gate on: no model named (so no price), no run resolved, or no
 // ceiling set. Otherwise the numbers the deny reason needs.
-export function budgetDecision(input, ti, run = resolveRunObj(input, ti)) {
+export function budgetDecision(input, ti, run = resolveRunObj(input, ti, { forBudget: true })) {
   const model = String(ti.model || '');
   if (!model) return null;
   if (!run || !run.budget || run.budget.ceiling == null) return null;
@@ -193,7 +197,10 @@ function main() {
   try { payload = readFileSync(0, 'utf8'); } catch {}
   let input = null;
   try { input = JSON.parse(payload); } catch { return; }
-  if (!input || input.tool_name !== 'Agent') return;
+  // The dispatch tool is named `Agent` in every build seen so far; `Task` is
+  // matched too so a host that renames it does not silently stop being guarded
+  // and priced — the hooks.json/SKILL.md matcher accepts both for the same reason.
+  if (!input || (input.tool_name !== 'Agent' && input.tool_name !== 'Task')) return;
 
   const ti = input.tool_input || {};
 

@@ -4,7 +4,7 @@
 // helpers.
 // No network, no child processes, never throws to a caller (returns null instead).
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 
@@ -406,6 +406,63 @@ export function resolveRun(sessionId, cwd, { forWrite = false } = {}) {
     if (p) return { run: null, candidates: [p], how: 'no repo above the working directory; this is the last run opened on this machine, and it is not bound to this session' };
   }
   return { run: null, candidates: [], how: 'no repo above the working directory' };
+}
+
+// Per-key, TTL-pruned, size-bounded "have I seen this before" store — the
+// shape both the dispatch guard and the return ledger need for their own
+// dedupe. One global {sig, ts} slot used to serve this job in each hook; two
+// events landing at the same moment overwrote each other's slot, so whichever
+// wrote second could mask a genuine repeat of the first. Keying by event id
+// instead means two different events never collide, and each is pruned on its
+// own TTL rather than sharing one clock. This form is a read-modify-write
+// (via `writeJsonAtomic`), which is safe from corruption — the rename is
+// atomic — but not from a lost update if two processes race it; `markSeen`
+// stays the right shape for return dedupe (lower concurrency: one stop at a
+// time is the common case). For the dispatch guard, where up to 20 concurrent
+// subagents are a documented, ordinary case, `seenRecently`/`recordSeen`
+// below avoid the read-modify-write entirely.
+export function markSeen(store, id, now = Date.now(), ttl = 86400000, max = 400) {
+  const out = {};
+  for (const [k, v] of Object.entries(store || {})) {
+    const at = Number(v && v.at);
+    if (Number.isFinite(at) && now - at < ttl) out[k] = { at };
+  }
+  const seen = Boolean(out[id]);
+  out[id] = { at: now };
+  const keys = Object.keys(out);
+  if (keys.length > max) {
+    for (const k of keys.sort((a, b) => out[a].at - out[b].at).slice(0, keys.length - max)) delete out[k];
+  }
+  return { seen, store: out };
+}
+
+// Append-only alternative to `markSeen`, for a store several processes can
+// write to at once. `recordSeen` never reads before it writes, so a
+// concurrent writer can only ever add its own line — nothing to race and
+// nothing to lose. `seenRecently` scans for a match inside the TTL window;
+// the scan is only ever as large as the log was last trimmed to, so it stays
+// cheap. Trimming (`trimLog`) is the one read-modify-write left, kept rare and
+// safe to skip on any given call: at worst the file grows a little past `max`
+// until the next trim lands, never a lost or corrupted record.
+export function seenRecently(path, id, now = Date.now(), ttl = 86400000) {
+  let lines = [];
+  try { lines = readFileSync(path, 'utf8').split('\n').filter(Boolean); } catch { return false; }
+  for (const line of lines) {
+    let rec; try { rec = JSON.parse(line); } catch { continue; }
+    if (rec && rec.id === id && now - Number(rec.at) < ttl) return true;
+  }
+  return false;
+}
+
+export function recordSeen(path, id, now = Date.now()) {
+  try { mkdirSync(dirname(path), { recursive: true }); appendFileSync(path, JSON.stringify({ id, at: now }) + '\n'); } catch {}
+}
+
+export function trimLog(path, max = 400) {
+  try {
+    const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+    if (lines.length > max) writeFileSync(path, lines.slice(-max).join('\n') + '\n');
+  } catch {}
 }
 
 export function sanitizeId(s) {

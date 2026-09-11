@@ -188,9 +188,18 @@ install. You should not need to type them.
 | `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It has no opinion about which model a task deserves: that is the manager's judgment, and when the right model is not included in your plan it asks you rather than spending or downgrading quietly |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run this session is bound to, prices it, and records which run and task it belongs to in `returns/returns.jsonl`. It does not touch the task rows: two returns landing together each rewrote the whole file, and the second erased the first |
 | `turn-check.mjs` | when a turn ends | one rule, and only for a run this session is bound to: it asks once for the Pickup line when that line has not moved since the last dispatch, so a session that dies is still resumable |
+| `precompact-check.mjs` | just before the conversation is compacted | the same Pickup rule as `turn-check.mjs`, fired one moment earlier: a long session can auto-compact mid-turn, and a stale Pickup line does not just age, it is gone. Asks once per unwritten line, then lets compaction proceed either way so it can never block the very thing that frees up context |
 
-Only the router and the guard are global. The ledger and the turn check come
-from the skill's own frontmatter, so they are live whenever the skill is.
+The router, the guard and the ledger are global, registered once from the
+plugin's own `hooks/hooks.json` so they run whether or not the skill is
+currently in play — **for a plugin install.** `guard-agent.mjs` and
+`ledger.mjs` are also named in `SKILL.md`'s frontmatter, which means a plugin
+install registers each of those two twice — see "A hook registered in two
+places runs twice" in `references/hosts.md` for why that is safe: both are
+keyed to be idempotent. **A script install (`--with-hook`) additionally
+registers the turn check in `settings.json`** with the interpreter's absolute
+path pinned in, the same way it pins the other two; only there does it not
+depend on `node` being on the launching app's PATH.
 
 Two hooks that used to be here are gone in v0.9.0. One refused a subagent's
 return over its shape, spending a real model turn to buy a restatement or a
@@ -401,7 +410,8 @@ rm -rf ~/.claude/skills/orchestrate ~/.agents/skills/orchestrate ~/.claude/agent
 ```
 
 Then open `~/.claude/settings.json` and delete the hook entries naming
-`router.mjs`, `guard-agent.mjs`, `ledger.mjs` or `turn-check.mjs`. Your own
+`router.mjs`, `guard-agent.mjs`, `ledger.mjs`, `turn-check.mjs` or
+`precompact-check.mjs`. Your own
 hooks sit in the same arrays, so read before you cut; a backup from before the
 first install is in `~/.claude/orchestrate/`.
 
@@ -505,10 +515,10 @@ supported path. See `skills/orchestrate/references/hosts.md`.
 
 ```
 skills/orchestrate/
-  SKILL.md              the skill (275 body lines; stays in context)
+  SKILL.md              the skill (317 body lines; stays in context)
   references/           ladder, routing, evaluation, lanes, hosts, models
-  scripts/              router, guard, ledger, turn-check, gate,
-                        profile, run-init, measure, install-agents, install-project
+  scripts/              router, guard, ledger, turn-check, precompact-check, gate,
+                        profile, run-init, measure, install-agents, install-project, batch
   assets/               RUN.md template, packet template, six role agents, the Plain output style
 .claude-plugin/          plugin manifest, so /plugin install works
 hooks/hooks.json         the three global hooks, for the plugin path
@@ -521,7 +531,7 @@ STATE.md                build progress and resume point
 ## Test it
 
 ```bash
-node --test "skills/orchestrate/scripts/**/*.test.mjs"
+node --test $(find skills -name '*.test.mjs')
 ```
 
 No quota, no network, no dependencies. They cover the router's emission policy

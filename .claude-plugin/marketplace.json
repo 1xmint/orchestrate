@@ -9,8 +9,8 @@
     {
       "name": "orchestrate",
       "source": "./",
-      "description": "Run a goal as an autonomous technical project manager: plan it, split it, route each task to the right agent and model for your plan, judge what comes back, verify, and report plainly.",
-      "version": "0.10.0",
+      "description": "Run a goal end to end like a senior engineer: pick an approach and say why, do the work or delegate the parts worth delegating, prove it with evidence, and report plainly.",
+      "version": "0.11.0",
       "homepage": "https://github.com/1xmint/orchestrate",
       "license": "MIT",
       "author": {

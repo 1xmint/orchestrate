@@ -2,6 +2,159 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.11.0 — most coherent, reliable, Claude-native, 2026-09-10
+
+Three read-only scouts placed v0.10.0 at or near the front of the field on
+design, found it marked three *live* Claude features as unavailable, and named
+real but non-catastrophic defects plus two competitive gaps (enforced per-role
+tool limits, native mass-edit fan-out). This release works the whole list.
+221 tests pass (up from 199), `node --test $(find skills -name '*.test.mjs')`
+— the glob form in the old command does not run reliably before Node 21; CI
+already used `find` and the docs now agree.
+
+**A real blocker, fixed and proven live.** `SKILL.md`'s injection line
+(`!`node "${CLAUDE_SKILL_DIR}/scripts/profile.mjs" --brief`) aborted the whole
+skill load if `node` was not on the launching app's PATH — the exact GUI-launch
+case the README already warns about, just one line the warning did not reach.
+Now `... --brief 2>/dev/null || true`. Proved, not just fixed: the same
+command with `PATH` stripped of `node` exits 127 unwrapped and 0 wrapped.
+`{{NODE}}`-templating the line instead was considered and rejected — the
+plugin install (this skill's primary channel) never runs the templater, so a
+literal `{{NODE}}` token would have shipped broken to everyone on that path.
+**`turn-check.mjs` was in the same position** for a script install specifically:
+`--with-hook` pinned the interpreter for the other two money hooks and simply
+never registered the Pickup check at all, so it ran on bare `node` regardless
+of which install path someone used. It's the third entry `--with-hook`
+registers now, pinned the same way — confirmed on a real (non-dry-run) install
+into a temp `HOME`.
+
+**The dispatch tool now has two names to answer to.** `guard-agent.mjs`,
+`hooks/hooks.json`, `SKILL.md`'s own matcher and `lib/settings.mjs`'s
+registrations all matched only `Agent`; a host that ever renames it to `Task`
+would have made every hook — pricing, the credential guard, the budget gate —
+silently stop firing. All four now accept `Agent|Task`, and so does
+`measure.mjs`'s dispatch counter.
+
+**Three concurrency bugs in the hooks that hold the money rules**, found by
+reasoning through what "up to 20 concurrent subagents" (a documented, ordinary
+case here) actually does to each store:
+- `costs.jsonl` (R1) was read-all/push-one/write-all; two returns landing
+  together meant whichever wrote second discarded the first's cost line.
+  `appendFileSync` now, one line, with a rare (2% per call) trim pass, so
+  losing the trim's own race only delays it, never a record.
+- The return ledger's dedupe (R2) was one global `{sig, ts}` slot in
+  `last-return.json`; a second, *different* return landing in between could
+  overwrite the first's record before it was checked, so a genuine duplicate
+  stop for the first could pass and get double-counted in `costs.jsonl` and
+  `returns.jsonl` — which `runSpend()` reads to decide whether a run is still
+  under budget. An append-only per-signature log (`returns-seen.jsonl`)
+  replaces it: a concurrent writer only ever adds its own line.
+- The dispatch guard's own event log (R4, `dispatch-events.json`) had the same
+  read-modify-write shape under concurrent `PreToolUse` calls. Same fix,
+  factored once into `lib/tier.mjs` (`seenRecently`/`recordSeen`/`trimLog`) and
+  reused by both hooks; the old object-keyed `markSeen` stays exported from
+  `guard-agent.mjs` for anything still importing it, but nothing here calls it
+  anymore.
+- **The budget gate could enforce a stranger repo's ceiling** (R3): a session
+  with no repo above its `cwd` fell back to the machine-wide last-opened-run
+  pointer for *everything*, including the spend gate — so a dispatch could be
+  denied (or silently allowed) against a completely unrelated repo's budget,
+  just because that repo's run happened to be the last one opened anywhere.
+  `resolveRunObj(input, ti, { forBudget: true })` now refuses the pointer for
+  that one caller; display (`router.mjs`'s "candidate, not bound") already
+  hedged it correctly, only the gate was treating it as authoritative.
+
+**F6: the budget gate was inert by default.** `run-init --budget` existed
+since v0.10.0; the canonical dispatch command in `SKILL.md §4` never included
+it, so a run built by following the skill's own instructions had no ceiling
+and the gate never fired. `--budget` is now always in the canonical command,
+and the ask is in money words with a recommendation from the plan's own shape
+("about $40 in list-price dollars, not what your subscription bills you"),
+skipped entirely for a run small enough it would not have been delegated more
+than once anyway.
+
+**SendMessage proven as a delta lane, live, 2026-09-10.** Dispatched a
+background agent, let it finish, then `SendMessage`'d its raw agent id with a
+follow-up — no `ListAgents` lookup needed for a same-session id — and it
+resumed from its own transcript and completed cleanly. `hosts.md`, `lanes.md`
+and `SKILL.md §5` now state this as a first-class move instead of "documented,
+unverified". **`fork` is the opposite finding**: probed the same way
+(`subagent_type: "fork"`), and the host refuses it outright —
+`Agent type 'fork' not found` — not just absent from a listing. Not offered
+as a lane. **The Workflow tool re-confirmed still not exposed** to the model
+(absent from every deferred-tool query, 2026-09-10). **A new, grounded fact for
+the SDK-hosted path**: server-side context editing and compaction
+(`anthropic-beta: context-management-2025-06-27`, `compact-2026-01-12`,
+platform.claude.com docs read 2026-09-10) are that path's own answer to the
+same "the conversation re-reading itself is the biggest cost" problem this
+skill solves by hand with the Pickup relay — named in `models.md`, marked
+inferred-not-verified for whether a Claude Code session can reach either.
+
+**A fourth hook, `precompact-check.mjs`** — the one unguarded hole in the
+relay design: a long lead can auto-compact mid-turn with a stale Pickup line,
+and the compacted context has no way back. Same question as `turn-check.mjs`'s
+Stop check, reused rather than re-implemented (`pickupSection`/`pickupHash`/
+`shouldBlock` imported, not copied), fired one lifecycle point earlier, and
+carrying the same "never block twice for the same unwritten text" safety rule
+— PreCompact commonly fires because context is already low, and refusing
+forever would risk the overflow this hook exists to prevent. Frontmatter-scoped
+like `turn-check.mjs`, and registered by `--with-hook` for a script install.
+
+**Tool scoping tightened, not built from zero.** `orch-planner`, `orch-
+researcher` and `orch-reviewer` already carried explicit allowlists that were
+already correct (reviewer cannot write at all). `orch-implementer`,
+`orch-debugger` and `orch-browser` used a blocklist naming only `Agent`;
+each now also denies `SendMessage` and `Artifact` (no worker can message a
+sibling around the lead or publish anything), `Monitor` is denied on the two
+roles whose own instructions already forbid waiting on an async check, and
+`orch-browser` additionally denies `Bash`, `WebFetch` and `WebSearch` so it
+cannot reach the network or a shell outside its own browser pane. **One real
+finding changed the plan**: a plugin-installed subagent ignores `hooks`,
+`mcpServers` and `permissionMode` in its own frontmatter entirely
+(code.claude.com/docs/en/sub-agents, read 2026-09-10) — since the plugin path
+is this skill's primary channel, per-dispatch `permissionMode` narrowing was
+never a real lever here, and `tools`/`disallowedTools` is the only one that
+reaches every install path. `hosts.md` and `SKILL.md §10` say so, with the
+finding, so nobody tries `permissionMode` again expecting it to work.
+
+**`scripts/batch.mjs`**, the in-model fan-out lane for real parallel
+mass-edit. The model cannot reliably start Claude Code's own `/batch` (a
+user-typed slash command) or the Workflow tool (not exposed here, confirmed
+above), so this is the portable fallback: one spec plus a file list becomes N
+per-file packets and N task rows, each `OWNS` exactly one file, grouped into
+waves at a concurrency default of 20 (matching the host's own default
+concurrent-subagent limit). Costs a real dispatch per file — it is not a
+cheaper `/batch`, it is the one that works without depending on either
+unreleased-to-the-model feature. Documented in `lanes.md`, pointed to from
+`SKILL.md`'s reference list.
+
+**Also fixed**: `router.mjs`'s `FALLBACK_CARD` had silently drifted two
+paragraphs behind the real card in `ladder.md` (it only runs when that file
+cannot be read, so nothing else exercised it) — now byte-identical, with a
+test that would fail on the next drift; the stale `hey-vera` author handle;
+`plugin.json`/`marketplace.json` description text still framed as "an
+autonomous technical project manager" from before v0.8.0/v0.9.0's "a senior
+engineer, not a process" rewrite; `hosts.md`'s "effort comes from the agent
+file" corrected to "inherits the session's effort", matching what
+`routing.md` and `models.md` already said; the README's hook table, which
+called the ledger frontmatter-only when `hooks/hooks.json` also registers it
+globally; `models.md`'s price table re-verified live against claude.com/pricing
+(unchanged, stamp refreshed); `HANDOFF.md`, entirely v0.8.0/v0.9.0 stale,
+deleted — this file is the resume point now. **Checked and found already
+correct, not changed**: the "prices are estimates" caveat (both price tables
+already carry one, in different but adequate words); SKILL.md §9's supposed
+pointer at a removed `/output-style` command (no such reference exists in the
+current file).
+
+Not done here: publishing. Version bumped to 0.11.0 in `plugin.json`,
+`marketplace.json` and `SKILL.md`; both `.skill` zips rebuilt
+(`scripts/package.mjs --both`); everything above committed to a branch and
+pushed. Tagging, the marketplace update and enabling auto-update on anyone's
+install are Josh's call, not made here — a red main would self-install given
+the marketplace's auto-update setting, so the offline suite staying green
+(it does, 221/221, Node 18/20/22 via CI) is the gate before that call, not a
+substitute for making it.
+
 ## v0.10.0 — manage to a budget, not just work, 2026-09-10
 
 A single "execute the plan" session on this machine burned about 20% of a Max 5x

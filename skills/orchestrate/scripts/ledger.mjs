@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } fr
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { DIR, sanitizeId, readJson, loadSession, resolveRun, runsUnder, findRepoRoot } from './lib/tier.mjs';
+import { DIR, sanitizeId, loadSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family } from './lib/prices.mjs';
 
 // Lenient on purpose, and it stays lenient: a return that got the shape almost
@@ -92,14 +92,19 @@ export function costLine(role, model, usage) {
   };
 }
 
+// R1: this used to read the whole file, push one line, and write the whole
+// file back. Two returns landing together each read the same starting
+// content, so whichever wrote second silently discarded the first's cost
+// line — the read-all/write-all shape the index beside it (`appendIndex`)
+// already avoided. `appendFileSync` is one line, not a read-modify-write, so
+// a concurrent writer can only ever add its own line. Trimming to `COSTS_MAX`
+// is still a read-modify-write, so it runs rarely rather than on every call:
+// losing that race only delays a trim, never a cost line.
 export function appendCost(row, path = COSTS_PATH) {
   try {
     mkdirSync(DIR, { recursive: true });
-    let lines = [];
-    try { lines = readFileSync(path, 'utf8').split('\n').filter(Boolean); } catch {}
-    lines.push(JSON.stringify(row));
-    if (lines.length > COSTS_MAX) lines = lines.slice(-COSTS_MAX);
-    writeFileSync(path, lines.join('\n') + '\n');
+    appendFileSync(path, JSON.stringify(row) + '\n');
+    if (Math.random() < 0.02) trimLog(path, COSTS_MAX);
   } catch {}
   return row;
 }
@@ -188,22 +193,29 @@ function emit(text) {
 }
 
 export const DEDUPE_MS = 10000;
+export const SEEN_RETURNS_PATH = join(DIR, 'returns-seen.jsonl');
+export const SEEN_RETURNS_MAX = 400;
 
 // True when this exact stop was already recorded, by this hook, a moment ago.
 // Keyed on the return itself, so a genuine retry minutes later still counts.
 // Any failure here answers false: a duplicate row is better than a lost one.
-export function isRepeat(prev, sig, now, windowMs = DEDUPE_MS) {
-  return Boolean(prev && prev.sig === sig && now - Number(prev.ts) < windowMs);
-}
-
+//
+// One global {sig, ts} slot used to serve this job: a return recorded here,
+// and another return landing in between, overwrote the slot before the first
+// could be checked, so a genuine duplicate stop for the first could pass and
+// get filed twice — double-counted in costs.jsonl and returns.jsonl, which is
+// exactly what the spend gate reads to decide whether a run is still under its
+// budget. Up to 20 concurrent subagents finishing near together is a
+// documented, ordinary case here, so this is an append-only log rather than a
+// read-modify-write store: a concurrent stop only ever adds its own line.
 function alreadyHandled(input, agent, text) {
   try {
     const sig = createHash('sha256').update(`${input.session_id || ''}|${agent}|${text}`).digest('hex').slice(0, 32);
-    const path = join(DIR, 'last-return.json');
     const now = Date.now();
-    if (isRepeat(readJson(path), sig, now)) return true;
-    mkdirSync(DIR, { recursive: true });
-    writeFileSync(path, JSON.stringify({ sig, ts: now }) + '\n');
+    const seen = seenRecently(SEEN_RETURNS_PATH, sig, now, DEDUPE_MS);
+    recordSeen(SEEN_RETURNS_PATH, sig, now);
+    if (Math.random() < 0.02) trimLog(SEEN_RETURNS_PATH, SEEN_RETURNS_MAX);
+    return seen;
   } catch {}
   return false;
 }
