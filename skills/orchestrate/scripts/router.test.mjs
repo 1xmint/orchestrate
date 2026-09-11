@@ -1,6 +1,6 @@
 // router.test.mjs — what the context provider says, and the much larger set of
 // things it no longer says.
-//   node --test "skills/orchestrate/scripts/**/*.test.mjs"
+//   node --test $(find skills -name '*.test.mjs')
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase } from './router.mjs';
+import { cardBody, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD } from './router.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTER = join(HERE, 'router.mjs');
@@ -259,6 +259,14 @@ test('the card body stays inside the cap it names', () => {
   const ladder = readFileSync(join(HERE, '..', 'references', 'ladder.md'), 'utf8');
   assert.ok(ladder.includes(body), 'the card is the fenced block in ladder.md, verbatim');
   assert.match(body, /router off/, 'it says how to turn itself off');
+});
+
+test('the fallback card cannot silently drift from the real one', () => {
+  // FALLBACK_CARD only runs when ladder.md cannot be read, so nothing else
+  // exercises it; it drifted two paragraphs behind the real card once already.
+  const ladder = readFileSync(join(HERE, '..', 'references', 'ladder.md'), 'utf8');
+  assert.ok(ladder.includes(FALLBACK_CARD), 'FALLBACK_CARD is byte-identical to the fenced block in ladder.md');
+  assert.ok(FALLBACK_CARD.length <= CARD_CAP, `fallback card is ${FALLBACK_CARD.length} characters, cap ${CARD_CAP}`);
 });
 
 // ---- which task is ready ----------------------------------------------------

@@ -3,7 +3,7 @@ name: orch-debugger
 description: Used by the orchestrate skill for a failure that resisted one good attempt. Runs the diagnosing loop (reproduce, minimise, hypothesise before instrumenting, fix, prove with the minimal case) in its own worktree.
 model: opus
 isolation: worktree
-disallowedTools: Agent
+disallowedTools: Agent, SendMessage, Artifact, Monitor
 maxTurns: 250
 color: yellow
 ---
@@ -25,7 +25,9 @@ The loop, in order; write each step's result into your return:
 6. Prove the fix with the minimised case, then the packet's verification
    commands, then the wider suite.
 
-Commit per unit with the id prefix and push. You do not dispatch other agents.
+Commit per unit with the id prefix and push. You do not dispatch other agents,
+and your tools cannot message another agent or publish anything either —
+enforced, not just asked for.
 Never sit and wait on an asynchronous check — CI, a sharded mutation run, a long
 remote build. Push, report the branch and commit, and stop; waiting is your whole
 context re-read every turn, and the lead reads the result cheaply.

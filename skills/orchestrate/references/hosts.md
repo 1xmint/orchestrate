@@ -1,15 +1,17 @@
 # Hosts: the mechanics under the skill
 
 Checked 2026-09-08 against code.claude.com/docs; the desktop app bundled Claude Code 2.1.260,
-the CLI on PATH was 2.1.209. Built and tested on Claude Code; Codex loads the same folder but
-its dispatch path is documented, not exercised.
+the CLI on PATH was 2.1.209. Re-checked 2026-09-10 against code.claude.com/docs/en/sub-agents
+for the agent-file frontmatter fields below. Built and tested on Claude Code; Codex loads the
+same folder but its dispatch path is documented, not exercised.
 
 ## Claude Code (desktop app or CLI)
 
 **Dispatch** is the `Agent` tool: `subagent_type` (a role agent, or `Explore` /
 `general-purpose`), `model` (`sonnet | opus | haiku | fable`; overrides the agent file), `prompt`
 (the packet), `isolation: "worktree"`, `run_in_background` (default true), `description` (3–5
-words the user sees). There is **no per-call effort**; effort comes from the agent file.
+words the user sees). There is **no per-call effort**; a role agent inherits the session's effort
+(`routing.md`), and the role files no longer pin their own.
 
 **Background is the default** in an interactive session and the caller cannot ask for the
 foreground. A background subagent keeps every MCP tool and these built-in tools: Read, Grep,
@@ -56,6 +58,20 @@ repo, wins). Fields used here: `name`, `description`, `model`, `tools`,
 <name>/`, `project`, `local`), `hooks` (`Stop` in an agent file becomes `SubagentStop` for that
 agent). `install-agents.mjs` installs the six and substitutes the skill's absolute path into
 their paths. New agent files appear in a running session after a minute or two; a new
+
+The full field list also has `model: inherit` (run on whatever the session is on, rather than a
+named family), `permissionMode`, `skills` (preloaded at startup; a subagent can still invoke an
+unlisted one through the Skill tool), `mcpServers` (per-subagent, including inline server
+definitions), `background` (stay backgrounded even if Claude asks to run it in the foreground),
+`effort` (overrides the session's effort for that subagent only — unused here on purpose, see
+`routing.md`'s "Effort is not a per-call lever"), `initialPrompt`, and `experimental.cacheTtl`
+(`5m` or `1h`, the file-level form of `subagentPromptCacheTtl`). **None of the six role agents
+here uses any of these**, and one is worth naming why: **a plugin-installed subagent ignores
+`hooks`, `mcpServers` and `permissionMode` in its own frontmatter entirely** (documented
+2026-09-10). Since the plugin path is this skill's primary distribution channel, per-role
+`permissionMode` narrowing is not a lever available here — `tools`/`disallowedTools` (which
+plugin subagents do respect) is the only mechanism that reaches every install path, which is why
+`SKILL.md §10` / `assets/agents/*.md` lean on that one exclusively.
 session sees them at once.
 
 **Skill files** load from `~/.claude/skills/<name>/SKILL.md` or `.claude/skills/`. Descriptions
@@ -101,12 +117,23 @@ Opus limit") leaves other families working; a session or weekly limit stops ever
 reset. Task tools (TaskCreate/List) are off by default on Sonnet 5 and Fable, so the on-disk
 `RUN.md` is the ledger.
 
-**Documented, unverified in this build; one probe each is the check**: the Workflow tool
-(checked 2026-09-08 in the desktop session), `subagent_type: fork`, and `SendMessage` — the
-last is named in the Agent tool's own description and in every launch result, but three
-ToolSearch queries and `ListAgents` found no way to reach a running subagent with it on
-2026-09-09. Until one of those probes runs, a packet delta to a live agent is not a move here.
-See `lanes.md`.
+**`SendMessage` works as a delta lane, proven 2026-09-10.** A background `Agent` dispatch was
+launched, allowed to finish, then resumed by its raw `agentId` with `SendMessage` — no `to`
+naming, no `ListAgents` lookup needed for a same-session agent id — and it completed the delta
+turn cleanly. It reads the target's existing transcript rather than starting cold, so it is a
+cache-warm continuation, not a fresh dispatch. Use it for the reviewer→implementer fix loop and
+short follow-ups on an agent whose context is still worth keeping. `lanes.md` has the move.
+
+**`subagent_type: fork` is not available in this build, probed 2026-09-10**: `Agent` with
+`subagent_type: "fork"` returns `Agent type 'fork' not found. Available agents: claude,
+claude-code-guide, Explore, general-purpose, <installed skill agents>, Plan, statusline-setup` —
+an explicit rejection, not just an absence from a listing. Documented (`lanes.md`'s own source),
+still not reachable here. Re-probe after a host upgrade before relying on it.
+
+**The Workflow tool is still not exposed to the model, confirmed 2026-09-10**: it does not
+appear anywhere in this session's deferred-tool list (`ToolSearch` finds nothing named
+`Workflow`), consistent with the 2026-09-08 finding. The keyword-triggered form
+(`lanes.md`) is still the only way to start one.
 
 **Hooks, as of 2026-09-09.** A `prompt` hook hands its text to a model (a fast one by default;
 `model` picks another) with `$ARGUMENTS` replaced by the hook input JSON, and reads back

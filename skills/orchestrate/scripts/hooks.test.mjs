@@ -10,9 +10,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseReturn, sumUsage, describeDispatch, isRepeat, returnFilename, note, costLine } from './ledger.mjs';
+import { parseReturn, sumUsage, describeDispatch, returnFilename, note, costLine, appendCost, readCosts, COSTS_MAX } from './ledger.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
+import { decide as precompactDecide } from './precompact-check.mjs';
 import { decide, eventId, markSeen } from './guard-agent.mjs';
+import { trimLog } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const script = n => join(HERE, n);
@@ -232,6 +234,31 @@ test('guard: a dispatch that names no model is recorded as inherited and not pri
   assert.equal(state.dispatches[0].model, 'inherit');
 });
 
+// R3: the machine-wide active-run pointer is a display hint for a session
+// above any repo ("candidate, not bound" in router.mjs), never authority for
+// money. Enforcing its ceiling meant a dispatch from a cwd with no repo above
+// it could be denied — or silently allowed — against a completely unrelated
+// repo's budget, just because that repo's run happened to be the last one
+// opened anywhere on the machine.
+test('guard: a dispatch outside any repo is not gated on a stranger repo\'s ceiling via the pointer', () => {
+  const home = sandbox();
+  const elsewhere = fixtureRepo({ runId: '20260910-elsewhere' });
+  // A $0.01 ceiling that any real dispatch crosses — if the gate used the
+  // pointer here, this dispatch would be denied against a repo it never asked
+  // about.
+  writeFileSync(elsewhere.runMd, readFileSync(elsewhere.runMd, 'utf8').replace('## Tasks', '## Budget\n\nCeiling: $0.01 at list price\n\n## Tasks'));
+  writeFileSync(join(home, '.claude', 'orchestrate', 'active-run.json'), JSON.stringify({
+    v: 1, root: elsewhere.dir, runMd: elsewhere.runMd, at: new Date().toISOString(),
+  }));
+  const bare = mkdtempSync(join(tmpdir(), 'orch-bare-'));
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'sg', cwd: bare,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 1\ndo it' },
+  }, home);
+  assert.doesNotMatch(out.stdout, /permissionDecision.*deny/, 'not denied against a repo this dispatch never named');
+  assert.match(out.stdout, /price tag/, 'the dispatch still goes through and is still priced');
+});
+
 test('guard: the run a packet names travels with the dispatch record', () => {
   const home = sandbox();
   run('guard-agent.mjs', {
@@ -357,6 +384,35 @@ test('ledger: an unnamed model is left unpriced rather than priced as the cheap 
   const unknown = costLine('orch-implementer', '', usage);
   assert.equal(unknown.priced, false);
   assert.equal(unknown.dollars, null);
+});
+
+// R1: appendCost used to read the whole file, push one line and write the
+// whole file back, so two returns landing together each started from the
+// same content and whichever wrote second silently discarded the first's
+// cost line. Simulated here as many rapid sequential calls against one file:
+// every one of them must survive, which the old read-all/write-all form did
+// not guarantee under real concurrency.
+test('ledger: appendCost never loses a line under a burst of writes', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-costs-'));
+  const path = join(dir, 'costs.jsonl');
+  const n = 30;
+  for (let i = 0; i < n; i++) appendCost(costLine('orch-implementer', 'sonnet', { input: i, output: 1, cacheRead: 0, cacheWrite: 0, turns: 1 }), path);
+  assert.equal(readCosts(path).length, n, 'every append survived');
+});
+
+test('ledger: costs.jsonl trims to its cap and keeps the newest rows', () => {
+  // appendCost's own trim is a dice roll (rare on purpose, so it is never what
+  // a concurrent write races against); trimLog is the deterministic mechanism
+  // it calls, exercised here directly against a costs.jsonl-shaped file.
+  const dir = mkdtempSync(join(tmpdir(), 'orch-costs-'));
+  const path = join(dir, 'costs.jsonl');
+  const rows = Array.from({ length: COSTS_MAX + 50 }, (_, i) => JSON.stringify(costLine('orch-implementer', 'sonnet', { input: i, output: 1, cacheRead: 0, cacheWrite: 0, turns: 1 })));
+  writeFileSync(path, rows.join('\n') + '\n');
+  assert.equal(readCosts(path).length, COSTS_MAX + 50);
+  trimLog(path, COSTS_MAX);
+  const after = readCosts(path);
+  assert.equal(after.length, COSTS_MAX);
+  assert.equal(after[after.length - 1].input, COSTS_MAX + 49, 'the newest row survived the trim');
 });
 
 test('ledger: the return is written under the bound run and indexed', () => {
@@ -501,12 +557,23 @@ test('ledger: the same stop delivered twice writes one return', () => {
   assert.equal(second.stdout.trim(), '');
 });
 
-test('ledger: the dedupe window is a window, not a permanent memory', () => {
-  const now = 1_000_000_000_000;
-  assert.equal(isRepeat({ sig: 'x', ts: now - 1000 }, 'x', now), true);
-  assert.equal(isRepeat({ sig: 'x', ts: now - 60_000 }, 'x', now), false);
-  assert.equal(isRepeat({ sig: 'y', ts: now }, 'x', now), false);
-  assert.equal(isRepeat(null, 'x', now), false);
+// R2: the dedupe used to be one global {sig, ts} slot, so a different return
+// landing in between overwrote the slot the first return needed to be checked
+// against, and a genuine duplicate stop for the first could pass and get
+// filed twice — double-counted in costs.jsonl and returns.jsonl, which the
+// spend gate reads. An append-only per-signature log has no slot to clobber.
+test('ledger: two different returns landing together do not blind each other\'s dedupe', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 's3d', repo);
+  const first = { hook_event_name: 'SubagentStop', session_id: 's3d', cwd: repo.dir, agent_id: 'agent_1', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN };
+  const second = { hook_event_name: 'SubagentStop', session_id: 's3d', cwd: repo.dir, agent_id: 'agent_2', agent_type: 'orch-reviewer', last_assistant_message: GOOD_RETURN.replace('9-9-0001', '9-9-0002') };
+  run('ledger.mjs', first, home);
+  run('ledger.mjs', second, home); // a different return, landing right after
+  const repeatOfFirst = run('ledger.mjs', first, home); // the same first return again
+  assert.equal(repeatOfFirst.stdout.trim(), '', 'still recognised as a repeat, even with another return in between');
+  const files = readdirSync(join(repo.runDir, 'returns')).filter(f => f.endsWith('.md'));
+  assert.equal(files.length, 2, 'one file per distinct return, not three');
 });
 
 test('ledger: the model is reported as dispatched, or as inherited', () => {
@@ -598,6 +665,62 @@ test('turn check: no dispatch, a written Pickup, and a re-entrant call all stay 
   assert.equal(run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's11', cwd: written.dir }, home).stdout.trim(), '');
 
   assert.equal(run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's11', cwd: written.dir, stop_hook_active: true }, home).stdout.trim(), '');
+});
+
+// ---------------------------------------------------------------- precompact --
+// WS3: the one unguarded hole in the relay design — a long lead auto-compacts
+// mid-run with a stale Pickup line, and the compacted context has no way back
+// to where the run was. Same question as the Stop check, reused rather than
+// re-implemented, fired one lifecycle point earlier.
+
+test('precompact: the pure decision — no run, no dispatch, and a stale Pickup', () => {
+  assert.equal(precompactDecide({ run: null, lastDispatchAt: null, prev: {} }), null);
+  assert.equal(precompactDecide({ run: { open: true, runMd: '/x/RUN.md' }, lastDispatchAt: null, prev: {} }), null, 'direct work has no ledger to keep current');
+});
+
+test('precompact: a bound run with a stale Pickup blocks compaction once, and names the file', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'spc1', repo);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const state = JSON.parse(readFileSync(join(sessions, 'spc1.json'), 'utf8'));
+  state.lastDispatchAt = new Date().toISOString();
+  writeFileSync(join(sessions, 'spc1.json'), JSON.stringify(state));
+
+  const first = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1', cwd: repo.dir, trigger: 'auto' }, home);
+  assert.equal(first.json.decision, 'block');
+  assert.equal(first.json.hookSpecificOutput.hookEventName, 'PreCompact');
+  assert.equal(first.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(first.json.hookSpecificOutput.permissionDecisionReason, /Pickup/);
+  assert.ok(first.json.reason.includes(repo.runMd), 'it names the file to edit');
+
+  // Never twice for the same unwritten text: PreCompact commonly fires because
+  // context is already low, and refusing forever risks the overflow this hook
+  // exists to prevent.
+  const second = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1', cwd: repo.dir, trigger: 'auto' }, home);
+  assert.equal(second.stdout.trim(), '', 'it blocks once, not in a loop, and lets compaction proceed');
+});
+
+test('precompact: a written Pickup, or no dispatch yet, never blocks', () => {
+  const home = sandbox();
+  const written = fixtureRepo({ pickup: 'continue from the reviewer FAIL' });
+  bind(home, 'spc2', written);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const state = JSON.parse(readFileSync(join(sessions, 'spc2.json'), 'utf8'));
+  state.lastDispatchAt = new Date().toISOString();
+  writeFileSync(join(sessions, 'spc2.json'), JSON.stringify(state));
+  assert.equal(run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc2', cwd: written.dir }, home).stdout.trim(), '');
+
+  const quiet = fixtureRepo();
+  bind(home, 'spc3', quiet); // bound, but nothing dispatched yet
+  assert.equal(run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc3', cwd: quiet.dir }, home).stdout.trim(), '');
+});
+
+test('precompact: a session with no bound run says nothing at all', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  const out = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc4', cwd: repo.dir }, home);
+  assert.equal(out.stdout.trim(), '');
 });
 
 test('turn check: nothing in it can ask for more research, testing or improvement', () => {

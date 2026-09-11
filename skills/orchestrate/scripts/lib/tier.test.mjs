@@ -4,11 +4,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { isWritten, latestRun, readyTasks, ungradedReturns, returnedTasks, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot } from './tier.mjs';
+import { isWritten, latestRun, readyTasks, ungradedReturns, returnedTasks, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot, seenRecently, recordSeen, trimLog } from './tier.mjs';
 
 const TIER = new URL('./tier.mjs', import.meta.url).href;
 
@@ -23,6 +23,70 @@ function inFakeHome(code, setup) {
   });
   if (r.status !== 0) throw new Error(r.stderr);
   return r.stdout.trim();
+}
+
+// ---- append-only seen-log (R4: dispatch-events.json under concurrent writers) --
+
+test('recordSeen never reads before it writes, so two ids never collide', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-seenlog-'));
+  const path = join(dir, 'events.jsonl');
+  const now = 1_000_000_000_000;
+  recordSeen(path, 'a', now);
+  recordSeen(path, 'b', now + 1);
+  assert.equal(seenRecently(path, 'a', now + 2, 86400000), true);
+  assert.equal(seenRecently(path, 'b', now + 2, 86400000), true);
+  assert.equal(seenRecently(path, 'c', now + 2, 86400000), false);
+});
+
+test('two events landing at the same moment are both recorded (the bug a single slot had)', () => {
+  // The defect this replaces: one {sig, ts} object, so a second concurrent
+  // write clobbered the first's record before it could be checked. An
+  // append-only log has no slot to clobber.
+  const dir = mkdtempSync(join(tmpdir(), 'orch-seenlog-'));
+  const path = join(dir, 'events.jsonl');
+  const now = 1_000_000_000_000;
+  const firstSeenBefore = seenRecently(path, 'dispatch-1', now, 86400000);
+  recordSeen(path, 'dispatch-1', now);
+  const secondSeenBefore = seenRecently(path, 'dispatch-2', now, 86400000);
+  recordSeen(path, 'dispatch-2', now);
+  assert.equal(firstSeenBefore, false, 'neither had been seen yet');
+  assert.equal(secondSeenBefore, false, 'recording the first did not consume the slot the second needed');
+  // A genuine repeat of the first, after the second was recorded in between,
+  // is still caught — the exact case the global slot got wrong.
+  assert.equal(seenRecently(path, 'dispatch-1', now + 1, 86400000), true);
+});
+
+test('seenRecently respects the TTL and ignores anything malformed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-seenlog-'));
+  const path = join(dir, 'events.jsonl');
+  const now = 1_000_000_000_000;
+  recordSeen(path, 'stale', now - 90_000_000);
+  writeFileSync(path, 'not json\n', { flag: 'a' });
+  recordSeen(path, 'fresh', now);
+  assert.equal(seenRecently(path, 'stale', now, 86400000), false, 'older than the TTL is not a repeat');
+  assert.equal(seenRecently(path, 'fresh', now, 86400000), true);
+  assert.equal(seenRecently(path, 'missing-file-entirely', now), false);
+});
+
+test('trimLog drops the oldest lines and leaves a short log untouched', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-seenlog-'));
+  const path = join(dir, 'events.jsonl');
+  for (let i = 0; i < 10; i++) recordSeen(path, `k${i}`, 1000 + i);
+  trimLog(path, 4);
+  const kept = require_lines(path);
+  assert.equal(kept.length, 4);
+  assert.deepEqual(kept.map(l => JSON.parse(l).id), ['k6', 'k7', 'k8', 'k9']);
+
+  const untouched = join(dir, 'short.jsonl');
+  recordSeen(untouched, 'only-one', 1000);
+  trimLog(untouched, 4);
+  assert.equal(require_lines(untouched).length, 1, 'nothing to trim is not an error');
+
+  trimLog(join(dir, 'does-not-exist.jsonl'), 4); // must not throw
+});
+
+function require_lines(path) {
+  return readFileSync(path, 'utf8').split('\n').filter(Boolean);
 }
 
 test('a Pickup value is written only when it is neither a placeholder nor the template list', () => {

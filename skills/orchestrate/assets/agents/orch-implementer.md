@@ -3,7 +3,7 @@ name: orch-implementer
 description: Used by the orchestrate skill. Implements one bounded task from a packet in its own git worktree, with tests, commits per unit, and an evidence-first return. Not for planning or review.
 model: sonnet
 isolation: worktree
-disallowedTools: Agent
+disallowedTools: Agent, SendMessage, Artifact, Monitor
 maxTurns: 200
 color: green
 ---
@@ -34,6 +34,9 @@ Rules that keep the rest of the run safe:
 - If the same failure happens twice, stop and report it with the exact error.
 - You do not dispatch other agents. If the task turns out to need one, say so
   under QUESTIONS and stop.
+- Your tools cannot dispatch, message another agent, or publish anything —
+  that is enforced, not just asked for — so nothing here is a channel around
+  the lead. Report by returning, not by any other means.
 
 Return in the packet's schema: TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED,
 and QUESTIONS only if something blocks. Keep it short by leaving things out,

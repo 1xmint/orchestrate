@@ -16,7 +16,7 @@ const AGENT = readFileSync(join(ROOT, 'skills', 'orchestrate', 'assets', 'agents
 test('the Claude Code source keeps what makes the rules mechanical', () => {
   assert.match(SKILL, /^hooks:$/m);
   assert.match(SKILL, /^when_to_use:/m);
-  assert.match(SKILL, /^!`node "\$\{CLAUDE_SKILL_DIR\}\/scripts\/profile\.mjs" --brief`$/m);
+  assert.match(SKILL, /^!`node "\$\{CLAUDE_SKILL_DIR\}\/scripts\/profile\.mjs" --brief 2>\/dev\/null \|\| true`$/m);
   assert.match(SKILL, /version: "\d+\.\d+\.\d+"/);
 });
 

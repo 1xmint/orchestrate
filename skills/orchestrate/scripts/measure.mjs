@@ -58,7 +58,7 @@ export function measure(text) {
       }
       if (typeof msg.model === 'string') r.models[msg.model] = (r.models[msg.model] || 0) + 1;
       for (const b of Array.isArray(msg.content) ? msg.content : []) {
-        if (b && b.type === 'tool_use' && b.name === 'Agent') {
+        if (b && b.type === 'tool_use' && (b.name === 'Agent' || b.name === 'Task')) {
           const i = b.input || {};
           r.dispatches.push({
             agent: String(i.subagent_type || 'claude'),
