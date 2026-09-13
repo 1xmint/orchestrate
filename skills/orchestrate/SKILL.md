@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.12.0"
+  version: "0.12.1"
 hooks:
   PreToolUse:
     - matcher: "Agent|Task"
