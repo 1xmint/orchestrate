@@ -114,7 +114,10 @@ only the tasks it actually touches.
 Facts about the world come from the world, not from memory: the repo's rules,
 whether it has a remote and `gh` is signed in, the current docs of a service,
 the `--help` of a CLI, the live state of a page. Read the files the goal names
-yourself, and sweep with Grep and Glob, reading line ranges. Delegate a sweep
+yourself, and sweep with Grep and Glob, reading line ranges; when a language
+server tool is loaded, ask it for definitions and callers first. For a library's
+API, current docs (a docs tool such as context7 when installed) beat memory and
+beat reading its source. Delegate a sweep
 only when it would read far more than it returns, and name `model: "haiku"`:
 an unnamed `Explore` runs on your own model, and every page it reads stays in
 its context for every later step.
