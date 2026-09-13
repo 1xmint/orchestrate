@@ -38,11 +38,13 @@ less preamble, terser confirmations.**
 Which workloads repay effort is a property of the work, not a preference. Coding
 and long-horizon agentic work respond strongly; chat and classification do not.
 
-Every agent inherits the session's effort, including the six `orch-*` roles.
-Haiku ignores effort entirely. The role files used to pin their own — planner
-and debugger at `xhigh` — which quietly overrode the level the user chose and
-spent their quota at it. If a role genuinely needs more thinking than the
-session is set to, that is a thing to say to the user, not to set behind them.
+The six `orch-*` roles pin their own effort, at or below `high` and never
+above: implementer and researcher `medium`, browser `low`, planner, reviewer
+and debugger `high`. A helper's cost is its steps times a context that grows
+every step, so its effort multiplies across all of them; Opus 5 at `medium`
+gave up about 2 points on SWE-bench Pro for half the cost (Anthropic,
+optimizing-for-cost-and-intelligence). Built-in `Explore` and `general-purpose`
+take the session's effort. Haiku takes none.
 
 ## Choosing between them
 

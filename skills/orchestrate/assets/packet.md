@@ -4,6 +4,11 @@ A packet is the whole context the agent will ever have. It sees nothing of the
 conversation. So the four fields below are the packet; everything after them is
 added only when it applies to this task.
 
+The packet is re-read on every step the agent takes, so size is cost: point at
+`path:line` ranges instead of pasting content, and keep it under about 6,000
+characters. One verifiable change per packet; a task that needs more steps than
+the role's `maxTurns` is two packets.
+
 ## Author packet (implementer, researcher, browser, debugger, planner)
 
 Always:

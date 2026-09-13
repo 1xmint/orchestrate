@@ -101,11 +101,10 @@ retried costs more than the right one once.
 
 Pass it on the `Agent` call (`model: sonnet | opus | haiku | fable`).
 
-**Effort is not a per-call lever, and the role files no longer set it.** They
-used to: planner and debugger at `xhigh`, the rest at `high`, which overrode
-whatever the user had chosen for the session and spent their quota on a setting
-they never picked. A role agent now inherits the session's effort. The model is
-the per-call lever, and it overrides the file.
+**Effort is not a per-call lever; the role files set it, at or below `high`**
+(`models.md`). The old pins went the wrong way — planner and debugger at
+`xhigh` — and were removed; the current ones exist to spend less than a session
+at `xhigh` would. The model is the per-call lever, and it overrides the file.
 
 **Host facts worth knowing.** A `/model` switch mid-session rebuilds the whole
 prompt cache; an effort change on Fable 5.1 keeps it (2.1.260+), a model switch

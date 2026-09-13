@@ -53,9 +53,21 @@ test('no role agent can dispatch another one', () => {
   }
 });
 
-test('no role agent pins an effort level over the one the user chose', () => {
+test('every role pins a quota-first effort and a step cap', () => {
+  // A helper's cost is steps × a context that grows every step, so an uncapped
+  // helper was the largest cost on record (Opus implementers re-reading ~49M
+  // tokens each over ~190 calls). Effort is the other lever: Opus 5 at medium
+  // gave up about 2 points for half the cost. Never xhigh or max on a helper.
+  const want = {
+    'orch-implementer': ['medium', 50], 'orch-debugger': ['high', 80], 'orch-researcher': ['medium', 40],
+    'orch-browser': ['low', 40], 'orch-planner': ['high', 40], 'orch-reviewer': ['high', 30],
+  };
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
-    assert.doesNotMatch(frontmatter(readFileSync(join(AGENTS, f), 'utf8')), /^effort:/m, f);
+    const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
+    const [effort, turns] = want[f.replace(/\.md$/, '')];
+    assert.match(fm, new RegExp(`^effort: ${effort}$`, 'm'), f);
+    assert.match(fm, new RegExp(`^maxTurns: ${turns}$`, 'm'), f);
+    assert.doesNotMatch(fm, /^effort: (xhigh|max)$/m, f);
   }
 });
 

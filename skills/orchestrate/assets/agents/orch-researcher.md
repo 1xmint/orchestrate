@@ -2,8 +2,9 @@
 name: orch-researcher
 description: Used by the orchestrate skill. Answers one research question from primary sources with dated, quoted, sourced findings and stated disagreement. Read-only; writes only its findings document. Not for code changes.
 model: sonnet
+effort: medium
 tools: Read, Grep, Glob, WebFetch, WebSearch, Write
-maxTurns: 80
+maxTurns: 40
 color: cyan
 memory: user
 ---

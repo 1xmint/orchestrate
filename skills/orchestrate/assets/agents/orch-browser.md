@@ -2,8 +2,9 @@
 name: orch-browser
 description: Used by the orchestrate skill. Drives the session's browser for one bounded task (a dashboard setting, a form, a visual check) and returns screenshot evidence. One at a time; never enters credentials.
 model: sonnet
+effort: low
 disallowedTools: Edit, Write, NotebookEdit, Agent, SendMessage, Artifact, Bash, WebFetch, WebSearch
-maxTurns: 120
+maxTurns: 40
 color: orange
 ---
 
