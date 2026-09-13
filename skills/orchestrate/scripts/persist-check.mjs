@@ -74,7 +74,7 @@ export function scanTurn(tail) {
       for (const b of content) {
         if (!b || b.type !== 'tool_result') continue;
         const t = textOf(b.content);
-        if (/orchestrate (budget|guard):/.test(t)) denied = true;
+        if (/orchestrate (budget|guard|quota):/.test(t)) denied = true;
         if (b.is_error) { const k = errorKey(t); if (k) errors.push(k); }
       }
     }

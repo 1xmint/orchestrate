@@ -3,9 +3,8 @@
 // mechanical: keep credentials out of packets, and record every dispatch so the
 // ledger can report what actually ran.
 //
-// It has no opinion about which model a task deserves, and it never rewrites a
-// dispatch. Model choice is the lead's judgment with the user's plan in front of
-// it; a number cannot do that job, so this file does not try.
+// It never rewrites a dispatch. It does refuse the few model choices the record
+// shows cost the most and were never deliberate — see the model rule below.
 //
 // Order matters here, and it did not used to. Deduplication ran first, so a
 // denied packet re-sent unchanged within five seconds was treated as "the same
@@ -23,8 +22,9 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
-import { priceTag, estimateDollars } from './lib/prices.mjs';
+import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens } from './lib/tier.mjs';
+import { priceTag, estimateDollars, family, normalizeRole } from './lib/prices.mjs';
+import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { readCosts } from './ledger.mjs';
 
 // Anything here means the packet is carrying a live secret. The list grew after
@@ -54,6 +54,71 @@ export function decide(input) {
     return { kind: 'deny', reason: 'the packet contains something that looks like a credential; remove it and refer to it by name instead' };
   }
   return { kind: 'pass' };
+}
+
+// ---- the model rule ----------------------------------------------------------
+// The one decision that set most of this machine's recorded helper spend: 56 of
+// 58 implementers ran on Opus against a written Sonnet default, and three
+// research sweeps ran on the lead's Opus because no model was named. A written
+// rule and a price tag did not change it, so this one is enforced. Every deny
+// says exactly what to send instead, so it costs one lead step, never the work.
+//
+// Executors start on Sonnet and move up only after a real attempt at the same
+// task; judgment roles (planner, reviewer, debugger) may use Opus. Built-in
+// sweepers take the lead's model unless told, so they must be told. A fork
+// copies the whole conversation into every step it takes. Fable on a plan that
+// does not include it spends the user's money. And near the user's plan limit,
+// a new helper is the one that gets cut off mid-edit.
+export const EXECUTORS = new Set(['orch-implementer', 'orch-researcher', 'orch-browser']);
+export const SWEEPERS = new Set(['Explore', 'general-purpose', 'claude']);
+export const FORK_MAX_CONTEXT = 100000;
+export const PACKET_WARN_CHARS = 8000;
+
+// What identifies "the same task" across a retry: the packet's TASK id when it
+// is an id, else its first real line.
+export function taskKey(prompt) {
+  const p = String(prompt || '');
+  const id = (/^\s*TASK:\s*(\S+)/m.exec(p) || [])[1];
+  if (id && /\d/.test(id)) return id;
+  const first = p.split('\n').map(l => l.trim()).find(Boolean) || '';
+  return first.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
+
+export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null } = {}) {
+  const role = normalizeRole(ti.subagent_type || 'general-purpose');
+  const model = String(ti.model || '');
+  const f = family(model);
+  const prompt = String(ti.prompt || '');
+
+  if (quota) {
+    const h = quota.fiveHour, w = quota.week;
+    if (h && h.pct >= HELPER_STOP_FIVE_HOUR) return { prefix: 'quota', reason: `the 5-hour usage window is at ${Math.round(h.pct)}%, so a new helper would likely be cut off mid-task. Finish what is in flight in this conversation, or stop and tell the user it resets at ${resetClock(h.resetsAt)}; Claude Code resumes on its own after the reset.` };
+    if (w && w.pct >= HELPER_STOP_WEEK) return { prefix: 'quota', reason: `the weekly limit is at ${Math.round(w.pct)}%. Do not start helpers; finish in this conversation and tell the user where things stand.` };
+  }
+
+  if (role === 'fork') {
+    if (leadContext != null && leadContext > FORK_MAX_CONTEXT) return { prefix: 'model', reason: `a fork copies this whole conversation (~${Math.round(leadContext / 1000)}k tokens) into every step it takes. Dispatch a named role agent with a short packet instead.` };
+    return null;
+  }
+
+  if (f === 'fable' && !['max5', 'max20', 'team'].includes(tier) && !/^\s*APPROVED BY USER:\s*fable/mi.test(prompt)) {
+    return { prefix: 'model', reason: `Fable is not included in this plan (${tier}) and spends the user's credits. Ask the user first; if they say yes, add the line "APPROVED BY USER: fable" to the packet.` };
+  }
+
+  if (SWEEPERS.has(role)) {
+    if (!f) return { prefix: 'model', reason: `${role} runs on this conversation's own model unless one is named. Resend with model: "haiku" for a read-only sweep, or "sonnet" if it must reason — or do a small search yourself with Grep and Glob.` };
+    if (rank(model) < rank('sonnet')) return { prefix: 'model', reason: `${role} on ${f} is a sweep on a judgment model. Resend with model: "sonnet" or "haiku".` };
+    return null;
+  }
+
+  if (EXECUTORS.has(role) && f && rank(model) < rank('sonnet')) {
+    const key = taskKey(prompt);
+    const tried = dispatches.some(d => d && normalizeRole(d.agent) === role && d.key === key && rank(d.model === 'inherit' ? 'sonnet' : d.model) >= rank('sonnet'));
+    if (!tried) return { prefix: 'model', reason: `${role} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead.` };
+  }
+  return null;
 }
 
 // Which invocation this is. The documented hook payload carries `tool_use_id`
@@ -217,6 +282,24 @@ function main() {
     return;
   }
 
+  // The model rule, on every invocation for the same reason: a retry of a denied
+  // dispatch must be denied again unless it changed.
+  let m = null;
+  try {
+    const state = loadSession(input.session_id) || {};
+    m = modelDecision(ti, {
+      tier: detectTier().tier,
+      dispatches: Array.isArray(state.dispatches) ? state.dispatches : [],
+      leadContext: normalizeRole(ti.subagent_type) === 'fork' ? lastContextTokens(input.transcript_path) : null,
+      quota: readQuota(),
+    });
+  } catch { m = null; }
+  if (m) {
+    if (!repeat) recordDenial(input, ti, `${m.prefix}: ${m.reason.split('.')[0]}`);
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${m.prefix}: ${m.reason}` } });
+    return;
+  }
+
   // The spend gate, a decision like the credential check: computed every time on
   // the live ceiling, so raising the budget in RUN.md lets the next attempt
   // through with no separate acknowledgement. It holds even inside an autonomous
@@ -232,7 +315,9 @@ function main() {
   // This hook can be registered twice (skill frontmatter plus settings.json).
   if (repeat) return;
   recordDispatch(input, ti);
-  const tag = tagFor(ti);
+  let tag = tagFor(ti);
+  const size = String(ti.prompt || '').length;
+  if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
 
@@ -260,6 +345,7 @@ function recordDispatch(input, ti) {
       // a guess.
       model: String(ti.model || 'inherit'),
       task: (/^\s*TASK:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
+      key: taskKey(ti.prompt),
       run: runFor(input, ti),
     });
     state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;
@@ -270,7 +356,7 @@ function recordDispatch(input, ti) {
 // dispatch, and counting it as one made the ledger claim work that never ran.
 // No packet text is stored — the reason a packet was denied is that it held
 // something that must not be written down.
-function recordDenial(input, ti) {
+function recordDenial(input, ti, reason = 'credential-shaped text in the packet') {
   withSession(input, state => {
     state.denials = Array.isArray(state.denials) ? state.denials : [];
     if (state.denials.length > 50) state.denials = state.denials.slice(-50);
@@ -278,7 +364,7 @@ function recordDenial(input, ti) {
       at: new Date().toISOString(),
       agent: String(ti.subagent_type || 'claude'),
       model: String(ti.model || 'inherit'),
-      reason: 'credential-shaped text in the packet',
+      reason,
     });
   });
 }

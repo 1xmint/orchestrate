@@ -534,6 +534,26 @@ export function selfModel(transcriptPath) {
   return null;
 }
 
+// How many tokens the conversation re-reads on each step right now: the input
+// side of the last real API call in the transcript. Every later step pays at
+// least this much again, which is the number a fork copies and a long session
+// keeps paying. Null when there is no call yet.
+export function lastContextTokens(transcriptPath, bytes = 262144) {
+  const tail = readTail(transcriptPath, bytes);
+  if (!tail) return null;
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].trim();
+    if (!l || l[0] !== '{') continue;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    const m = o && o.type === 'assistant' && o.message;
+    if (!m || !m.usage || m.model === '<synthetic>') continue;
+    const u = m.usage;
+    return (Number(u.input_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0);
+  }
+  return null;
+}
+
 // `claude-opus-5` and `claude-sonnet-5-20260101` are both "opus"/"sonnet" here;
 // the family is what the routing rule turns on.
 export function shortModel(id) {

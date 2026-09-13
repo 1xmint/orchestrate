@@ -288,17 +288,23 @@ test('guard: the credential list covers the shapes an audit fed it', () => {
   assert.equal(decide({ tool_input: { prompt: 'the token lives in the env var GITHUB_TOKEN' } }).kind, 'pass');
 });
 
-test('guard: it never blocks or rewrites a dispatch over its model, on any plan', () => {
+test('guard: an Opus implementer is refused with the exact retry, then allowed after a Sonnet attempt at the same task', () => {
   const home = sandbox();
-  for (const tier of ['pro', 'max5', 'max20', 'api']) {
-    writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier }));
-    const out = run('guard-agent.mjs', {
-      hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: `t-${tier}`, cwd: home,
-      tool_input: { subagent_type: 'orch-researcher', model: 'fable', prompt: `TASK: ${tier}` },
-    }, home);
-    assert.doesNotMatch(out.stdout, /permissionDecision/, tier);
-    assert.match(out.stdout, /price tag: orch-researcher on fable/, tier);
-  }
+  writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro' }));
+  const send = (model, sid = 'tm') => run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: sid, cwd: home, tool_use_id: `u-${model}-${Math.random()}`,
+    tool_input: { subagent_type: 'orchestrate:orch-implementer', model, prompt: 'TASK: 9-9-0007\nadd the flag' },
+  }, home);
+
+  const first = send('opus');
+  assert.equal(first.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(first.json.hookSpecificOutput.permissionDecisionReason, /^orchestrate model: .*model: "sonnet"/);
+  assert.doesNotMatch(first.json.hookSpecificOutput.permissionDecisionReason, /orchestrate (budget|guard|quota):/, 'a model refusal is a retry, not a stop for the persist loop');
+
+  assert.doesNotMatch(send('sonnet').stdout, /permissionDecision/, 'the Sonnet attempt goes through');
+  assert.doesNotMatch(send('opus').stdout, /permissionDecision/, 'escalating the same task after a real attempt is allowed');
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'tm.json'), 'utf8'));
+  assert.ok(state.denials.some(d => /^model:/.test(d.reason)), 'the refusal is recorded apart from dispatches');
 });
 
 test('guard: a non-Agent tool, garbage input and empty stdin all exit 0 silently', () => {

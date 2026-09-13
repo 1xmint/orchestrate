@@ -34,6 +34,14 @@ export function family(modelId) {
   return PRICES[f] ? f : null;
 }
 
+// One name per role, whatever the install path calls it. A plugin install
+// dispatches `orchestrate:orch-planner`, the ledger used to file it as
+// `orchestrate_orch-planner`, and the price table says `orch-planner`, so no
+// lookup ever matched and the budget gate never fired on a plugin install.
+export function normalizeRole(role) {
+  return String(role || '').replace(/^[A-Za-z0-9-]+[:_](?=orch-)/, '');
+}
+
 // List-price dollars for a usage total, or null when the model is unknown.
 export function dollars({ input = 0, output = 0, cacheRead = 0, cacheWrite = 0 } = {}, model = '') {
   const f = family(model);
@@ -58,7 +66,7 @@ export const REASONED = {
 export const REASONED_AS_OF = '2026-09-09';
 
 export function reasonedPrice(role, model) {
-  const row = REASONED[role];
+  const row = REASONED[normalizeRole(role)];
   if (!row) return null;
   const f = family(model);
   return f && row[f] != null ? row[f] : null;
@@ -71,7 +79,7 @@ export function reasonedPrice(role, model) {
 export function estimateDollars(role, model, rows) {
   const f = family(model);
   if (!f) return null;
-  const mine = (rows || []).filter(r => r && r.role === role && family(r.model) === f && Number.isFinite(Number(r.dollars)));
+  const mine = (rows || []).filter(r => r && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && Number.isFinite(Number(r.dollars)));
   if (mine.length) return mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
   return reasonedPrice(role, model);
 }
@@ -83,7 +91,7 @@ export function estimateDollars(role, model, rows) {
 export function priceTag(role, model, rows, tier, profile) {
   const f = family(model);
   if (!f) return `price tag: ${role} on an unnamed model — not priced, because nothing here knows which model it will run on`;
-  const mine = (rows || []).filter(r => r && r.role === role && family(r.model) === f && Number.isFinite(Number(r.dollars)));
+  const mine = (rows || []).filter(r => r && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && Number.isFinite(Number(r.dollars)));
   if (mine.length) {
     const avg = mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
     return `price tag: ${role} on ${f} ≈ $${avg.toFixed(2)} at list price, not subscription usage (measured here, n=${mine.length})`;
