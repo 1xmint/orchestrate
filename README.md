@@ -208,12 +208,32 @@ line count. The other blocked a turn when a recommendation had been answered
 from fewer than two source-reading calls, which two failed fetches satisfied
 and one authoritative document did not. Neither is something a hook can judge.
 
-First run: the skill reads your plan tier from your local Claude config. If it
-cannot, it asks once and remembers:
+### If it has your plan wrong
+
+Your plan decides what orchestrate lets helpers spend. On Pro it is strictest,
+and on Max it allows Fable and more room before stopping. It reads the plan from
+`~/.claude.json`. That file belongs to the account a terminal `claude` signed in
+with. The Claude app can be signed in to a different account, and then the plan
+it reads is the wrong one. On one machine the file said Pro, from a second
+account, while the app ran on Max 5x.
+
+Check what it read and where from:
 
 ```bash
-node ~/.claude/skills/orchestrate/scripts/profile.mjs --set tier=max5
+node skills/orchestrate/scripts/profile.mjs
 ```
+
+Set it if it is wrong (`pro`, `max5` for the $100 plan, `max20` for the $200
+plan, `team`, or `api`). Your setting wins over what the file says:
+
+```bash
+node skills/orchestrate/scripts/profile.mjs --set tier=max5
+```
+
+`--clear` goes back to reading the file. Your other choices, such as paid
+plugins, stay. From a plugin install the scripts live under
+`~/.claude/plugins/cache/orchestrate/orchestrate/<version>/skills/orchestrate/scripts/`,
+and from a script install under `~/.claude/skills/orchestrate/scripts/`.
 
 ## Plugins that make it better, and ones that cost you
 

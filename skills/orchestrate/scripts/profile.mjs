@@ -147,8 +147,9 @@ if (setIdx >= 0) {
   process.exit(0);
 }
 if (args.includes('--clear')) {
-  mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
-  writeFileSync(OVERRIDE_PATH, JSON.stringify({ tier: 'unknown', tierSource: 'cleared', setAt: new Date().toISOString() }, null, 2) + '\n');
+  // Only the plan goes back to automatic; the paid-service rule, paid plugins
+  // allowed by name and the manager answer are separate choices and stay.
+  saveProfile({ tier: 'unknown', tierSource: 'cleared', setAt: new Date().toISOString() });
   console.log('tier override cleared; automatic detection applies');
   process.exit(0);
 }

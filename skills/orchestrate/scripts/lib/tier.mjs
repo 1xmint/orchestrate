@@ -69,7 +69,9 @@ export function detectTier() {
     const found = findKeys(cfg, keys);
     for (const key of keys) {
       const t = mapTier(found[key]);
-      if (t) return { tier: t, source: `~/.claude.json ${key}="${found[key]}"` };
+      // This is the account a terminal `claude` signed in with; the Claude app
+      // can be signed in to another. Say so, so a wrong plan gets corrected.
+      if (t) return { tier: t, source: `~/.claude.json ${key}="${found[key]}" (the terminal sign-in; if your plan differs: profile.mjs --set tier=<pro|max5|max20|team|api>)` };
     }
   }
   if (process.env.ANTHROPIC_API_KEY) return { tier: 'api', source: 'ANTHROPIC_API_KEY is set' };
