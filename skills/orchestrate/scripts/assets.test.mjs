@@ -53,9 +53,21 @@ test('no role agent can dispatch another one', () => {
   }
 });
 
-test('no role agent pins an effort level over the one the user chose', () => {
+test('every role pins a quota-first effort and a step cap', () => {
+  // A helper's cost is steps × a context that grows every step, so an uncapped
+  // helper was the largest cost on record (Opus implementers re-reading ~49M
+  // tokens each over ~190 calls). Effort is the other lever: Opus 5 at medium
+  // gave up about 2 points for half the cost. Never xhigh or max on a helper.
+  const want = {
+    'orch-implementer': ['medium', 50], 'orch-debugger': ['high', 80], 'orch-researcher': ['medium', 40],
+    'orch-browser': ['low', 40], 'orch-planner': ['high', 40], 'orch-reviewer': ['high', 30],
+  };
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
-    assert.doesNotMatch(frontmatter(readFileSync(join(AGENTS, f), 'utf8')), /^effort:/m, f);
+    const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
+    const [effort, turns] = want[f.replace(/\.md$/, '')];
+    assert.match(fm, new RegExp(`^effort: ${effort}$`, 'm'), f);
+    assert.match(fm, new RegExp(`^maxTurns: ${turns}$`, 'm'), f);
+    assert.doesNotMatch(fm, /^effort: (xhigh|max)$/m, f);
   }
 });
 
@@ -67,9 +79,21 @@ test('memory is on the two roles that gain from it, and off the two that would b
   assert.ok(!has('orch-debugger'), 'a stale note must not steer a diagnosis');
 });
 
+test('the researcher can use installed skills and tool servers, but cannot edit code or dispatch', () => {
+  // It moved from an allowlist, which shut out every installed skill and tool
+  // server, to a denylist. Its instructions limit writing to its findings file.
+  const fm = frontmatter(readFileSync(join(AGENTS, 'orch-researcher.md'), 'utf8'));
+  assert.doesNotMatch(fm, /^tools:/m);
+  const deny = (/^disallowedTools: (.+)$/m.exec(fm) || [])[1] || '';
+  for (const t of ['Agent', 'SendMessage', 'Artifact', 'NotebookEdit']) assert.match(deny, new RegExp(`\\b${t}\\b`), t);
+  for (const n of ['orch-planner', 'orch-reviewer']) {
+    assert.match((/^tools: (.+)$/m.exec(readFileSync(join(AGENTS, `${n}.md`), 'utf8')) || [])[1], /\bSkill\b/, `${n} can use a skill`);
+  }
+});
+
 test('read-only roles keep read-only tool sets', () => {
   const tools = n => (/^tools: (.+)$/m.exec(readFileSync(join(AGENTS, `${n}.md`), 'utf8')) || [])[1] || '';
-  for (const n of ['orch-reviewer', 'orch-planner', 'orch-researcher']) {
+  for (const n of ['orch-reviewer', 'orch-planner']) {
     const t = tools(n);
     assert.ok(t, `${n} declares a tool set`);
     assert.doesNotMatch(t, /\bEdit\b|\bNotebookEdit\b/, `${n} cannot edit`);
@@ -376,7 +400,10 @@ test('every plugin hook names a script that exists, through the plugin root', ()
   const root = join(SKILL, '..', '..');
   const hooks = JSON.parse(readFileSync(join(root, 'hooks', 'hooks.json'), 'utf8')).hooks;
   const events = Object.keys(hooks);
-  assert.deepEqual(events.sort(), ['PreToolUse', 'SessionStart', 'SubagentStop', 'UserPromptSubmit']);
+  assert.deepEqual(events.sort(), ['PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
+  // The one plugin-wide Stop hook is the persist loop, because the direct work it
+  // exists for rarely loads the skill. It must stay a no-op for an unarmed session.
+  assert.deepEqual(hooks.Stop.flatMap(g => g.hooks.map(h => /scripts\/(\S+?\.mjs)/.exec(h.command)[1])), ['persist-check.mjs']);
 
   for (const groups of Object.values(hooks)) {
     for (const g of groups) {

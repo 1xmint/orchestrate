@@ -2,6 +2,131 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.12.0 — quota first, 2026-09-13
+
+Josh: quota always wins; speed only when it costs little or no extra quota.
+Validate by reasoning from evidence and data already on disk, then natural use —
+not staged A/B runs. 261 tests pass (up from 221 at v0.11.0).
+
+**What the plugin's own records showed.** Plan detection read "unknown" on a Pro
+account. 56 of 58 implementer runs were Opus against a Sonnet default, the bulk
+of recorded helper spend; the three largest helpers started each step at 36–59k
+tokens, grew to 305–382k, and re-read ~49M tokens each over ~190 API calls. A
+research sweep in the planning session itself ran three unnamed-model helpers on
+the lead's Opus to ~250–285k tokens each. The meter was wrong four ways (below).
+
+**Correction to numbers quoted during planning.** The host writes one API call as
+several records with the same `message.id`; counting records over-states
+re-reads 1.4× (a helper) to 2.8× (a long lead session). Output tokens are not
+over-stated: the last record of a call carries the full count (the planning note
+said 2.3×, from reading the first record). STATE.md v0.10.0's "84% of cost is lead
+re-reads" was computed on the old count; its share may hold, its tokens do not.
+
+Changes, one commit each on `feat/persist-loop`:
+1. **Helper caps.** Every role pins effort ≤ high (implementer/researcher medium,
+   browser low) and `maxTurns` (implementer 50, debugger 80, researcher, browser,
+   planner 40, reviewer 30); packets point at line ranges, under ~6k chars.
+2. **Model enforced at dispatch.** The guard refuses executors above Sonnet before
+   a real attempt at the same task, Explore/general-purpose without a cheap named
+   model, a fork of a >100k conversation, Fable off-plan, and any helper at ≥80% of
+   the 5-hour window or ≥90% of the week. Replayed over the 46 dispatches on
+   record, it refuses 30. Role names normalized, so the budget gate finally
+   matches plugin-installed roles (it never fired on a plugin install before).
+3. **Meter.** Each API call counted once; model from the helper's transcript;
+   one row per agent id; unpriced never $0; Fable 5.1 cache reads at 2.5%. The
+   ledger no longer emits SubagentStop context: the host delivers it into the
+   helper, which answered and re-stopped (nine times for one planner). measure.mjs
+   counts `[orchestrate` injections and queued task-notification returns.
+4. **Plan and live usage.** The plan is kept per Claude account. The desktop
+   app files each session under `claude-code-sessions/<account>/<org>/` and passes
+   `CLAUDE_CODE_HOST_SESSION_ID`, so the org is known without credentials.
+   `~/.claude.json` describes only the terminal's last sign-in: here a Pro account
+   used for one day, while the app runs on Max 5x. So the order is: a plan
+   remembered for this org, then an older global override, then the file when it
+   describes this session's account. Otherwise the plan reads unknown with the
+   reason, and the user is asked once. `statusline.mjs` is the only channel the
+   host gives for live 5-hour/weekly usage. It is installed here and works when
+   run by hand, but **the desktop app never ran it** in hours of use: live usage is
+   terminal-only. The brief says so and offers the install only outside the
+   desktop app. Transcripts record usage only when a limit rejects a request
+   (`quotaLimits.status: "rejected"`, 43 records here), never before. 265 tests.
+5. **Installed plugins.** A plugin check, said the first time the listings are
+   seen and then only for plugins added since: every plugin with its skills,
+   per-step tokens, how many skills arrived name-only, sign-in state and a
+   paid-service hint, and an instruction to sort them for the user into keep and
+   remove. Here: ~14k tokens per step, 356 skills from 35 plugins, **307 skills
+   listed by bare name** because too many are installed — so extra plugins also
+   hide the useful ones' descriptions. It does not recommend installing anything
+   at setup (each plugin is re-read on every step); the lead searches the catalog
+   when a task needs what the built-ins cannot do. Desktop-app plugins live in
+   the Claude account, not `~/.claude/plugins`, and do not show in `/plugin`.
+   Planner/reviewer get `Skill`; the researcher moves to a denylist.
+   `paidServices=never|ask|free` (Josh: never), plus `allowPaid=<plugin>` /
+   `denyPaid=<plugin>` for a paid plugin a user bought and wants used.
+6. **Lead facts without a Stop block.** Limits only from host `<synthetic>`
+   records (a quoted research report had reported two false limits); a line at
+   150k and 300k per-step context; a weekly note when lead effort is xhigh/max.
+7. **Stale plans.** Open but RUN.md untouched 48h: never auto-bound, reported,
+   budgeted or filed into; said once; `run-init --reopen <id>`. Only an edit to
+   RUN.md counts as activity — a return filed by an automatic binding kept this
+   repo's v0.7 plan alive in the first cut.
+8. **models.md / routing.md / SKILL.md** rewritten on verified 2026-09-13 facts:
+   cost shape `steps × base + growth × steps²/2`, effort evidence, escalation as a
+   fresh dispatch, resume only within a helper's 5-minute cache, Sonnet-first
+   executors on every plan. Dropped a false claim that an Opus lead turn costs
+   little more than Sonnet (its cache re-read is 2.5×).
+9. **Recoverable helpers.** PROGRESS files kept current by implementer, debugger,
+   researcher and planner; the router lists dispatches that never returned on
+   resume, compaction or a usage limit, with their PROGRESS paths.
+
+10. **Plugins in practice.** Josh's account had 34 plugins. 29 were removed and 7
+    standalone skills with them, leaving Modern Web Guidance, Data, Design, PDF
+    Viewer and Security Guidance. The README now names a short free set: a
+    language-server plugin, context7, frontend-design, session-report. It lists
+    plugins that duplicate orchestrate's own helper flows. `security-guidance`
+    (on by default) calls Opus on every turn end, commit and push whenever it
+    finds credentials. Its log here shows every review skipped for lack of them
+    (37 turn-end, 31 commit); `ENABLE_CODE_SECURITY_REVIEW=0` keeps only its free
+    pattern warnings.
+
+Deliberately not built: a per-tool-call context tripwire (plugin agents cannot
+carry hooks; a plugin-wide PreToolUse would start a process on every step of every
+session), the OAuth usage endpoint (login token, terms), advisor by default,
+forced `CLAUDE_CODE_SUBAGENT_MODEL`. Not moving to Pi. Pi's own subscription
+sign-in bills as extra usage (pi.dev/docs/latest/providers). The
+`pi-claude-code-provider` package instead drives the installed `claude -p` and
+does draw on plan limits today (support.claude.com 15036540, 2026-09-13), but: it
+re-sends the whole history as one message per request; `claude -p` was named in
+Anthropic's paused plan to move headless use onto a $20/month credit on Pro; the
+package has 13 stars; and orchestrate would lose helpers, hooks, skills and the
+installed plugins. Revisit if headless use is confirmed on plan limits for good
+and a need appears that Claude Code hooks cannot meet.
+
+## Keep going without idling, 2026-09-13 (in v0.12.0)
+
+The stall: "keep coding until it's done" did one turn, started CI or an agent,
+and handed back. The only thing that keeps a turn alive is a Stop hook that
+refuses the stop, and `turn-check.mjs` fired only for a bound ledger run — and
+only while the skill was loaded, which direct work rarely does. So nothing
+covered the common case. 232 tests pass (up from 221).
+
+- `persist-check.mjs`, a new plugin-wide Stop hook (in `hooks/hooks.json`, and
+  with the router flag on a script install). Armed only by the router on an
+  explicit ask ("keep going", "until it's done", "execute the plan"; never a
+  question). Continues while each step does real work; stops and disarms on a
+  done report, a question to the user, a denied dispatch, a repeated error, a
+  step with no work, or 25 steps. Check-in line every 6 steps, cost warning on a
+  long session. Unarmed sessions: one small file read, no output.
+- Deliberately not in `turn-check.mjs` as first planned: a frontmatter hook is
+  dead exactly where the stall happens.
+- No PostCompact hook, also a change from the plan: the router's existing
+  `SessionStart:compact` handler already restores the run after compaction. It
+  now restores the pinned goal verbatim too.
+- `Monitor` is the lead's default way to wait (`lanes.md`), matching the worker
+  rule.
+- Not measured live yet. Owed: one armed run on a small real goal, with
+  `measure.mjs --latest --dollars` before and after.
+
 ## v0.11.0 — most coherent, reliable, Claude-native, 2026-09-10
 
 Three read-only scouts placed v0.10.0 at or near the front of the field on

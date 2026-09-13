@@ -51,8 +51,9 @@ test('a price tag is measured when there is anything to measure, reasoned when t
   assert.match(none, /≈ \$10\.00/);
 
   const rows = [
-    { role: 'orch-researcher', model: 'claude-fable-5-1', dollars: 9.0 },
-    { role: 'orch-researcher', model: 'fable', dollars: 9.4 },
+    { agent: 'a1', role: 'orch-researcher', model: 'claude-fable-5-1', dollars: 9.0 },
+    { agent: 'a2', role: 'orchestrate_orch-researcher', model: 'fable', dollars: 9.4 },
+    { role: 'orch-researcher', model: 'fable', dollars: 40, note: 'written before the meter counted each call once, so not a measurement' },
     { role: 'orch-implementer', model: 'sonnet', dollars: 1.1 },
   ];
   const tag = priceTag('orch-researcher', 'fable', rows, 'max5', null);

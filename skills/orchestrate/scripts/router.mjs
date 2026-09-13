@@ -28,7 +28,11 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
+  DIR, readJson, writeJsonAtomic, lastContextTokens, staleRunsUnder,
 } from './lib/tier.mjs';
+import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
+import { normalizeRole } from './lib/prices.mjs';
+import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -43,7 +47,7 @@ const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // summary that silently fell two paragraphs behind the real card.
 export const FALLBACK_CARD = [
   'orchestrate is loaded. Do ordinary bounded work yourself, including long work and work across several files. Delegate one substantial separable task when isolation, parallel progress, a specialist, or independent scrutiny buys something concrete. Open a run ledger only when several tracks run at once or the work outlives this session.',
-  'Answer a settled question from the record and say where. Answer a question about the world from the world: search it, open the source that settles it, stop when nothing further could change the answer. One authoritative source can be enough. Answer a judgment question with a recommendation and what would change it.',
+  'Answer a settled question from the record and say where. Answer a question about the world from the world: search it, open the source that settles it, stop when nothing further could change the answer. One authoritative source can be enough. Answer a judgment question with a recommendation and what would change it. An installed skill that does what a built-in tool cannot (a blocked page, platform data, a design review) beats rebuilding it; name it in the packet of any helper that needs it. A plain page fetch already comes back summarised.',
   'Before adding a dependency, an abstraction, another research wave or another worker, name the unresolved problem it solves now. A future possibility is not one.',
   'Evidence decides done: reuse a check that already passed, add a test for a real uncovered behaviour, drive a user flow when reading it cannot settle it. Independent review is for money, auth, destructive data, a contract others consume, or real architectural doubt.',
   'Stop and ask, recommendation first, only for money, a public surface, credentials, or a destructive or irreversible action. Authorisation already given is not asked for twice. Mute this card: type "router off".',
@@ -67,7 +71,24 @@ export function stateLine(ctx, prefix) {
     : 'you: model not known here';
   const agents = `orch-agents ${ctx.agents}/6`;
   const limits = ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none';
-  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}`;
+  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
+}
+
+// Live plan usage, when the status line has reported it. Past the caution line
+// it says what that means for the next choice, once per crossing.
+export function quotaPhrase(q) {
+  if (!q) return '';
+  const parts = [];
+  if (q.fiveHour) parts.push(`5h ${Math.round(q.fiveHour.pct)}%`);
+  if (q.week) parts.push(`wk ${Math.round(q.week.pct)}%`);
+  return parts.length ? ` · usage ${parts.join(' ')}` : '';
+}
+
+export function quotaBand(q) {
+  if (!q || !q.fiveHour) return 'none';
+  if (q.fiveHour.pct >= HELPER_STOP_FIVE_HOUR) return 'stop';
+  if (q.fiveHour.pct >= CAUTION_FIVE_HOUR) return 'caution';
+  return 'ok';
 }
 
 // Which planned tasks have nothing left to wait for. This is a fact the model
@@ -155,6 +176,8 @@ export function stateHash(ctx) {
     focus ? `${focus.done || 0}/${focus.rows || 0}` : '',
     focus && focus.edgesMissing ? 'edges?' : '',
     ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : '',
+    // The band, not the number: a line every percent would be noise.
+    quotaBand(ctx.quota),
   ].join('|');
 }
 
@@ -182,18 +205,60 @@ export function resumeExcerpt(runMd, cap = RESUME_CAP) {
 }
 
 // ---- local context ----------------------------------------------------------
+// Only the host's own limit messages count: they arrive as assistant records
+// with the model "<synthetic>". Matching the phrase anywhere in the tail
+// counted a research report that quoted it, and told the lead the user had hit
+// two limits they had not. "Today" means today: the set resets with the date.
+export function limitsFromTail(tail) {
+  const found = new Set();
+  for (const l of String(tail || '').split('\n')) {
+    if (!l.includes('<synthetic>') && !l.includes('isApiErrorMessage')) continue;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    const m = o && o.type === 'assistant' && o.message;
+    if (!m || !(m.model === '<synthetic>' || o.isApiErrorMessage)) continue;
+    const text = (Array.isArray(m.content) ? m.content : []).map(b => (b && b.text) || '').join(' ');
+    for (const hit of text.matchAll(/hit your (Opus|Sonnet|Haiku|Fable) limit/gi)) found.add(hit[1].toLowerCase());
+    if (/hit your (session|weekly) limit/i.test(text)) found.add('session');
+  }
+  return found;
+}
+
 function scanLimits(transcriptPath, state) {
   try {
-    if (!transcriptPath || !existsSync(transcriptPath)) return state.limits || [];
+    const day = new Date().toISOString().slice(0, 10);
+    if (state.limitsDay !== day || state.limitsV !== 2) { state.limits = []; state.limitsDay = day; state.limitsV = 2; state.limitsScanMtime = null; }
+    if (!transcriptPath || !existsSync(transcriptPath)) return state.limits;
     const mt = statSync(transcriptPath).mtimeMs;
-    if (state.limitsScanMtime === mt) return state.limits || [];
-    const tail = readTail(transcriptPath, 65536);
-    const found = new Set(state.limits || []);
-    for (const m of tail.matchAll(/hit your (Opus|Sonnet|Haiku|Fable) limit/gi)) found.add(m[1].toLowerCase());
-    if (/hit your (session|weekly) limit/i.test(tail)) found.add('session');
+    if (state.limitsScanMtime === mt) return state.limits;
+    const found = new Set([...state.limits, ...limitsFromTail(readTail(transcriptPath, 65536))]);
     state.limitsScanMtime = mt;
     return [...found];
   } catch { return state.limits || []; }
+}
+
+// The lead's own cost per step, said when it crosses a line, once per line.
+export const CONTEXT_LINES = [150000, 300000];
+
+export function contextNote(tokensNow, warnedUpTo = 0) {
+  const line = [...CONTEXT_LINES].reverse().find(t => tokensNow >= t && t > warnedUpTo);
+  if (!line) return null;
+  return {
+    upTo: line,
+    text: `[orchestrate · context] this conversation now re-reads ~${Math.round(tokensNow / 1000)}k tokens on every step. If the rest of the work can resume from files (the plan, the commits, a Pickup line), tell the user once that a fresh session would cost less per step, and write down where to resume.`,
+  };
+}
+
+// Once a week per plan, model and effort: the lead running above what
+// quota-first work needs. The user chose it, so this is said, never changed.
+export const LEAD_NOTE_PATH = join(DIR, 'lead-note.json');
+
+export function leadNote(self, tier, now = Date.now(), path = LEAD_NOTE_PATH) {
+  if (!self || !self.effort || !['xhigh', 'max'].includes(self.effort)) return '';
+  const key = `${tier}|${self.model}|${self.effort}`;
+  const seen = readJson(path) || {};
+  if (seen[key] && now - Number(seen[key]) < 7 * 86400000) return '';
+  try { writeJsonAtomic(path, { ...seen, [key]: now }); } catch {}
+  return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. For quota-first work, high or medium is the better default. Mention it to the user once: it takes effect in a new session, because switching mid-session re-reads everything uncached.`;
 }
 
 function gatherContext(input, state) {
@@ -223,7 +288,35 @@ function gatherContext(input, state) {
     candidates: r.candidates || [],
     limits,
     self: self || state.self || null,
+    persist: Boolean(state.persist && state.persist.armed),
+    quota: readQuota(),
   };
+}
+
+// ---- persistence intent -----------------------------------------------------
+// The one place this file still reads wording, kept deliberately narrow: an
+// explicit ask to keep going toward a goal, never the shape of the work. A
+// false arm is cheap, because persist-check.mjs stops on the first step that
+// does no work. A question never arms it, and "persist off" turns it off for
+// the session.
+export const PERSIST_INTENT = /\b(keep (going|coding|working|building|at it)|don'?t stop|until (it'?s |it is |they'?re |the [\w-]+( [\w-]+)? (is|are) |everything is |all (of it |of them )?(is |are )?)?(done|finished|complete|working|green|passing|shipped|live)\b|(execute|implement|carry out|work through|finish) (the|this|that|my) (whole |full |entire |rest of the )?(plan|roadmap|spec|checklist|task list|todo list|backlog)|finish (it|everything|all of it|the rest)\b|build (out )?the (whole|entire|full) )/i;
+
+export function persistIntent(text) {
+  const t = String(text || '').trim();
+  if (!t || /\?\s*$/.test(t)) return false;
+  return PERSIST_INTENT.test(t);
+}
+
+export const GOAL_CAP = 600;
+
+export function persistLine(persist) {
+  if (!persist || !persist.armed) return '';
+  const g = String(persist.goal || '').replace(/\s+/g, ' ').trim();
+  return `auto-continue is on toward: "${g.length > GOAL_CAP ? `${g.slice(0, GOAL_CAP - 3)}...` : g}". A Stop is refused while each step does real work; it ends when you say the goal is met, ask the user something, a dispatch is denied, the same error repeats, a step does nothing, or after 25 steps. Waiting on CI or an agent: Monitor it and keep doing independent work. "persist off" turns it off.`;
+}
+
+function transcriptSize(p) {
+  try { return p ? statSync(p).size : 0; } catch { return 0; }
 }
 
 function newState(input) {
@@ -263,6 +356,24 @@ function handlePrompt(input) {
 
   const trimmed = text.trim();
   if (/^router (off|on)$/i.test(trimmed)) { state.muted = /off$/i.test(trimmed); saveSession(state); return; }
+  if (/^persist (off|on)$/i.test(trimmed)) {
+    const off = /off$/i.test(trimmed);
+    state.persistMuted = off;
+    if (off && state.persist) state.persist = { ...state.persist, armed: false, endedAt: new Date().toISOString(), endReason: 'the user said persist off' };
+    saveSession(state);
+    return;
+  }
+
+  // Armed before the mute check: "router off" silences the card, not a loop
+  // the user asked for by name.
+  let armedNow = false;
+  if (!state.persistMuted && persistIntent(trimmed)) {
+    // A bare "keep going" names no goal; it means the one already pinned.
+    const prior = state.persist && state.persist.goal;
+    const goal = prior && trimmed.split(/\s+/).length < 4 ? prior : trimmed.slice(0, 4000);
+    state.persist = { armed: true, goal, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
+    armedNow = true;
+  }
   if (state.muted) { saveSession(state); return; }
 
   // A slash command, a paste or a two-word reply is not the start of a session's
@@ -286,10 +397,121 @@ function handlePrompt(input) {
     state.lastStateHash = hash;
   }
 
+  // What a usage band means for the next choice, said once per band.
+  const band = quotaBand(ctx.quota);
+  if (band !== (state.quotaBand || 'none') && (band === 'caution' || band === 'stop')) {
+    const h = ctx.quota.fiveHour;
+    out.push(band === 'stop'
+      ? `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}% (resets ${resetClock(h.resetsAt)}). No new helpers will start. Finish what is in flight here, keep steps few, and tell the user where things stand if the work will not fit.`
+      : `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}%. Work serially, on the cheapest model that can do each step, and do small things yourself rather than starting helpers.`);
+  }
+  state.quotaBand = band;
+
+  // Which installed plugins fit, when the set is first seen or grows; the lead's
+  // own per-step size; and a lead setting above quota-first.
+  if (substantive) {
+    const line = pluginFitReport(input.transcript_path);
+    if (line) out.push(`[orchestrate · plugins] ${line}`);
+    const size = lastContextTokens(input.transcript_path);
+    const note = size != null ? contextNote(size, Number(state.contextWarnedUpTo) || 0) : null;
+    if (note) { out.push(note.text); state.contextWarnedUpTo = note.upTo; }
+    const lead = leadNote(ctx.self, ctx.tier);
+    if (lead) out.push(lead);
+    const hidden = staleNote(ctx.repoRoot);
+    if (hidden) out.push(hidden);
+    // A usage limit just landed: the moment helpers may have died mid-task.
+    const limitKey = ctx.limits.join(',');
+    if (limitKey && state.recoverShownFor !== limitKey) {
+      const lost = unreturnedNote(state);
+      if (lost) out.push(lost);
+      state.recoverShownFor = limitKey;
+    }
+  }
+
+  if (armedNow) {
+    out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);
+    // The existing budget and readiness machinery only engages for a run. Point
+    // at it once, for work big enough to deserve it, rather than rebuild it.
+    if (!ctx.run) out.push('If this goal is several separable tracks, or will outlive this session, open a run with a budget first (run-init.mjs --budget) so readiness and spend are tracked; for direct work, just start.');
+  }
+
   if (substantive) state.prompts++;
   saveSession(state);
   maybePrune();
   emit('UserPromptSubmit', out.join('\n'));
+}
+
+// Dispatches with no matching return. Matched in order, by role and, when both
+// sides carry one, by task id. Said only at the moments work may have died —
+// a resume, a compaction, a usage limit — because a helper still running looks
+// exactly the same from here.
+export function unreturned(state) {
+  const returns = (state && Array.isArray(state.returned) ? state.returned : []).map(r => ({ ...r, used: false }));
+  const out = [];
+  for (const d of (state && Array.isArray(state.dispatches) ? state.dispatches : [])) {
+    const role = normalizeRole(d.agent);
+    const hit = returns.find(r => !r.used && r.agent === role && (!d.task || !r.task || r.task === d.task));
+    if (hit) hit.used = true;
+    else out.push({ role, task: d.task || d.key || null, progress: d.progress || null, at: d.at });
+  }
+  return out;
+}
+
+export function unreturnedNote(state, max = 5) {
+  const list = unreturned(state);
+  if (!list.length) return '';
+  const shown = list.slice(-max).map(u => `${u.role}${u.task ? ` ${u.task}` : ''}${u.progress ? ` — progress ${u.progress}` : ' — no PROGRESS file named'}`).join('; ');
+  return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session never returned: ${shown}. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
+}
+
+// Plans set aside as stale, said once per plan on this machine, so a user who
+// wanted one back knows the one command, and nobody is told twice.
+export const STALE_SEEN_PATH = join(DIR, 'stale-announced.json');
+
+export function staleNote(repoRoot, path = STALE_SEEN_PATH, now = Date.now()) {
+  if (!repoRoot) return '';
+  try {
+    const seen = readJson(path) || {};
+    const fresh = staleRunsUnder(repoRoot).filter(r => !seen[r.runMd]);
+    if (!fresh.length) return '';
+    for (const r of fresh) seen[r.runMd] = now;
+    writeJsonAtomic(path, seen);
+    const days = r => Math.max(2, Math.round((now - r.lastActivity) / 86400000));
+    const list = fresh.map(r => `${r.runId} (untouched ${days(r)} days, ${r.done}/${r.rows} done)`).join(', ');
+    return `[orchestrate · plans] set aside ${fresh.length === 1 ? 'a plan' : `${fresh.length} plans`} nobody has touched in two days or more: ${list}. They are not bound, reported or filed into. If the user wants one back: node "${join(SKILL_DIR, 'scripts', 'run-init.mjs')}" --reopen <id>.`;
+  } catch { return ''; }
+}
+
+export const LISTING_REPORT_PATH = join(DIR, 'listing-report.json');
+export const LISTING_REPORT_MIN_TOKENS = 4000;
+export const PROFILE_PATH = join(DIR, 'profile.json');
+
+// Machine-wide, not per session: the plugins are the same in every session. The
+// full check is said the first time the listings are seen, and after that only
+// when plugins are added — a reminder of a choice the user already made is
+// noise, and a plugin they just installed is the moment its fit matters. A small
+// setup gets no full check. The stamp is written only once the listings were
+// actually read, so a session whose listings are not in the transcript yet tries
+// again on its next prompt.
+export function pluginFitReport(transcriptPath, { path = LISTING_REPORT_PATH, profilePath = PROFILE_PATH, now = Date.now() } = {}) {
+  try {
+    if (!transcriptPath) return '';
+    const l = parseListing(readHead(transcriptPath));
+    if (!l.found) return '';
+    const stamp = readJson(path);
+    const known = stamp && Array.isArray(stamp.plugins) ? stamp.plugins : null;
+    const names = pluginNames(l);
+    if (known && names.length === known.length && names.every(p => known.includes(p))) return '';
+    writeJsonAtomic(path, { at: now, plugins: names });
+    if (!known && tokens(l.skillChars + l.toolChars + l.serverChars) < LISTING_REPORT_MIN_TOKENS) return '';
+    const profile = readJson(profilePath) || {};
+    return pluginFitLine(l, {
+      known,
+      paidMode: profile.paidServices || 'ask',
+      paidAllowed: Array.isArray(profile.paidAllowed) ? profile.paidAllowed : [],
+      profileScript: join(SKILL_DIR, 'scripts', 'profile.mjs'),
+    });
+  } catch { return ''; }
 }
 
 // Resume and compaction are the two moments the goal is actually at risk, so
@@ -312,6 +534,12 @@ function handleSessionStart(input) {
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
   }
+  // A summary can paraphrase the goal away while the loop keeps going, and in an
+  // unattended loop there may be no user prompt to bring it back. Restore it
+  // verbatim here, the same moment the run excerpt is restored.
+  if (state.persist && state.persist.armed) out.push(`[orchestrate · ${word}] ${persistLine(state.persist)}`);
+  const lost = unreturnedNote(state);
+  if (lost) out.push(lost);
 
   state.cardSent = true;
   state.lastStateHash = stateHash(ctx);

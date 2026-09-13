@@ -13,17 +13,21 @@
 
 import { shortModel } from './tier.mjs';
 
-// Per million tokens, from references/models.md (cached 2026-06-24). Cache read
-// is 10% of input; a 5-minute cache write is 125% of input. How a 1-hour cache
-// write lands on plan usage is undocumented, so it is priced as a 5-minute one
-// and the number is a floor, not a bound.
+// Per million tokens (platform.claude.com pricing, checked 2026-09-13). A
+// 5-minute cache write is 125% of input. Cache read is 10% of input, except
+// Fable 5.1 at 2.5%. How a 1-hour cache write lands on plan usage is
+// undocumented, so it is priced as a 5-minute one and the number is a floor.
 export const PRICES = {
   fable: { in: 10, out: 50 },
   opus: { in: 5, out: 25 },
   sonnet: { in: 2, out: 10 },
   haiku: { in: 1, out: 5 },
 };
-export const PRICES_AS_OF = '2026-06-24';
+export const PRICES_AS_OF = '2026-09-13';
+
+export function cacheReadShare(modelId) {
+  return /fable-5[-.]1/i.test(String(modelId || '')) ? 0.025 : 0.1;
+}
 
 // The family a model id belongs to, or null when it is not one of the four.
 // It used to answer `sonnet` for anything it did not recognise, so a dispatch
@@ -34,13 +38,21 @@ export function family(modelId) {
   return PRICES[f] ? f : null;
 }
 
+// One name per role, whatever the install path calls it. A plugin install
+// dispatches `orchestrate:orch-planner`, the ledger used to file it as
+// `orchestrate_orch-planner`, and the price table says `orch-planner`, so no
+// lookup ever matched and the budget gate never fired on a plugin install.
+export function normalizeRole(role) {
+  return String(role || '').replace(/^[A-Za-z0-9-]+[:_](?=orch-)/, '');
+}
+
 // List-price dollars for a usage total, or null when the model is unknown.
 export function dollars({ input = 0, output = 0, cacheRead = 0, cacheWrite = 0 } = {}, model = '') {
   const f = family(model);
   if (!f) return null;
   const p = PRICES[f];
   const m = 1e6;
-  return (input * p.in + output * p.out + cacheRead * p.in * 0.1 + cacheWrite * p.in * 1.25) / m;
+  return (input * p.in + output * p.out + cacheRead * p.in * cacheReadShare(model) + cacheWrite * p.in * 1.25) / m;
 }
 
 // The starting table, for a role and model nobody has measured here yet. Every
@@ -58,7 +70,7 @@ export const REASONED = {
 export const REASONED_AS_OF = '2026-09-09';
 
 export function reasonedPrice(role, model) {
-  const row = REASONED[role];
+  const row = REASONED[normalizeRole(role)];
   if (!row) return null;
   const f = family(model);
   return f && row[f] != null ? row[f] : null;
@@ -71,7 +83,7 @@ export function reasonedPrice(role, model) {
 export function estimateDollars(role, model, rows) {
   const f = family(model);
   if (!f) return null;
-  const mine = (rows || []).filter(r => r && r.role === role && family(r.model) === f && Number.isFinite(Number(r.dollars)));
+  const mine = (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && r.dollars != null && Number.isFinite(Number(r.dollars)));
   if (mine.length) return mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
   return reasonedPrice(role, model);
 }
@@ -83,7 +95,7 @@ export function estimateDollars(role, model, rows) {
 export function priceTag(role, model, rows, tier, profile) {
   const f = family(model);
   if (!f) return `price tag: ${role} on an unnamed model — not priced, because nothing here knows which model it will run on`;
-  const mine = (rows || []).filter(r => r && r.role === role && family(r.model) === f && Number.isFinite(Number(r.dollars)));
+  const mine = (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && r.dollars != null && Number.isFinite(Number(r.dollars)));
   if (mine.length) {
     const avg = mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
     return `price tag: ${role} on ${f} ≈ $${avg.toFixed(2)} at list price, not subscription usage (measured here, n=${mine.length})`;

@@ -4,6 +4,11 @@ A packet is the whole context the agent will ever have. It sees nothing of the
 conversation. So the four fields below are the packet; everything after them is
 added only when it applies to this task.
 
+The packet is re-read on every step the agent takes, so size is cost: point at
+`path:line` ranges instead of pasting content, and keep it under about 6,000
+characters. One verifiable change per packet; a task that needs more steps than
+the role's `maxTurns` is two packets.
+
 ## Author packet (implementer, researcher, browser, debugger, planner)
 
 Always:
@@ -24,6 +29,15 @@ out: <what a helpful agent would be tempted to do here; say no>
 
 DONE WHEN (evidence)
 - <a command and its expected result, a file that exists, a page state>
+
+PROGRESS: <absolute path — <run dir>/progress/<task>.md, or
+          .orchestrator/progress/<task>.md with no run>. Implementer,
+          debugger, researcher and planner keep it current as they go (the
+          browser's saved screenshots and the reviewer's short read are theirs),
+          so a usage limit or a step cap loses nothing: a
+          fresh agent resumes from this file and the branch, never by resuming
+          the stopped one (its cache is gone, so that re-reads everything at
+          full price).
 ```
 
 Add a field only when the answer is not "none":

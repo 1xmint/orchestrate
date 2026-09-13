@@ -1,141 +1,128 @@
-# Models: what each one is for
+# Models: what each one is for, and what it costs to run
 
-First-party API rates and windows, cached 2026-06-24, re-verified against
-claude.com/pricing 2026-09-10 (unchanged). They move; re-check before a run
-that will spend heavily. On a Max plan you are not paying these dollars, you
-are spending a share of a weekly window, so read the ratios.
+Rates from platform.claude.com pricing, checked 2026-09-13. They move; re-check
+before a run that will spend heavily. On a subscription you are not paying these
+dollars, you are spending a share of a 5-hour and a weekly window, and Opus draws
+on it meaningfully faster than Sonnet (support.claude.com, "models, usage and
+limits"). Read the ratios.
 
 ## The four
 
-| Model | Window | In / Out per 1M | Effort | Pick it for |
-|---|---|---|---|---|
-| Fable 5.1 | 1M | $10 / $50 | low–max, thinking always on | work that is hard to check and expensive to get wrong |
-| Opus 5 | 1M | $5 / $25 | low–max | judgment: planning, grading, deciding. Half Fable's price |
-| Sonnet 5 | 1M | $2 / $10 | low–max | bounded work with a strong oracle. A quarter of Fable |
-| Haiku 4.5 | **200K** | $1 / $5 | **none: effort errors** | reading, sweeping, extracting |
+| Model | Window | In / Out per 1M | Cache read | Effort | Pick it for |
+|---|---|---|---|---|---|
+| Fable 5.1 | 1M | $10 / $50 | $0.25 | low–max | work that is hard to check and expensive to get wrong |
+| Opus 5 | 1M | $5 / $25 | $0.50 | low–max | judgment: planning, grading, deciding, diagnosing |
+| Sonnet 5 | 1M | $2 / $10 | $0.20 | low–max | bounded work with a strong oracle |
+| Haiku 4.5 | **200K** | $1 / $5 | $0.10 | **none** | reading, sweeping, extracting |
 
-Two things in that table catch people out. **Haiku's window is 200K, not 1M**, so
-a sweep that fits anywhere else can overflow it, and the failure looks like a bad
-answer rather than an error. **Haiku takes no effort setting**: passing one is an
-error, so if Haiku is not enough the answer is a different model, not a different
-setting.
+What catches people out:
+- **Haiku's window is 200K** and it takes **no effort setting**; it retires no
+  sooner than 2026-10-15. If Haiku is not enough, change the model.
+- **Opus 4.7 and later, and Sonnet 5, use a tokenizer that makes ~30% more tokens**
+  for the same text.
+- **Built-in `Explore` and `general-purpose` run on this conversation's model**
+  (Explore capped at Opus) unless the dispatch names one. The guard refuses them
+  without a cheap named model.
+
+## The cost shape: task size beats model choice
+
+Every step re-reads everything before it. A helper that starts at `B` tokens and
+adds `g` per step costs about `steps × B + g × steps² / 2` in re-reads. Measured on
+this machine: Opus implementers started at ~50k, grew ~1.7k a step, ran ~190
+steps, and re-read ~49M tokens each. Half the steps is roughly a third of the
+re-reads; Sonnet instead of Opus is 40% of the per-token price. So:
+
+1. **Size first.** One verifiable change per packet, named files and line ranges.
+   The role step caps (`maxTurns`: implementer 50, debugger 80, researcher,
+   browser and planner 40, reviewer 30) end a run that grew too big.
+2. **Then model.** Executors (implementer, researcher, browser) start on Sonnet;
+   the guard refuses anything higher before a real attempt at the same task.
+   Planner, reviewer and debugger may use Opus.
+3. **Then effort.** Pinned per role, never above `high` (below).
 
 ## Effort
 
-Five levels: `low`, `medium`, `high`, `xhigh`, `max`. The API default is `high`;
-`xhigh` is Claude Code's default and is documented as best for most coding and
-agentic work. It changes how much the model thinks before acting, and with it the
-shape of the output: **lower effort gives fewer, more consolidated tool calls,
-less preamble, terser confirmations.**
+Five levels: `low`, `medium`, `high`, `xhigh`, `max`. The default is `high` (Opus
+4.7: `xhigh`). Effort changes every output token — thinking, text and tool calls —
+and lower effort gives fewer, more consolidated tool calls.
 
-- `low` — simple subagent work, classification, high-volume routes.
-- `medium` — the cost-saving step down from `high`, where quality holds.
-- `high` — the sweet spot. Minimum for anything intelligence-sensitive.
-- `xhigh` — long-horizon agentic work and hard coding.
-- `max` — only when correctness matters more than cost, and only once
-  measurement shows headroom left at `xhigh`. Otherwise it over-thinks.
+- Opus 5 at `medium` scored about 2 points below `high` on SWE-bench Pro at half
+  the cost; `low` about 8 points below at a quarter. Running at `low` and re-running
+  only failures at the default passed ~93% at half the default's cost.
+- Sonnet 5 at `medium` is roughly Sonnet 4.6 at `high`.
+- `max` shows diminishing returns and can over-think.
+(platform.claude.com, optimizing-for-cost-and-intelligence and effort, 2026-09-13)
 
-Which workloads repay effort is a property of the work, not a preference. Coding
-and long-horizon agentic work respond strongly; chat and classification do not.
+The six `orch-*` roles pin their own: implementer and researcher `medium`, browser
+`low`, planner, reviewer and debugger `high`. There is no per-call effort; the
+model is the per-call lever.
 
-Every agent inherits the session's effort, including the six `orch-*` roles.
-Haiku ignores effort entirely. The role files used to pin their own — planner
-and debugger at `xhigh` — which quietly overrode the level the user chose and
-spent their quota at it. If a role genuinely needs more thinking than the
-session is set to, that is a thing to say to the user, not to set behind them.
+## Choosing, and escalating
 
-## Choosing between them
+1. **Is there an oracle?** A test, type checker, schema or exact spec. A smaller
+   model plus an oracle beats a larger model without one.
+2. **Can the work be checked at all?** If only a human can tell, the capable model
+   earns its price. That is the Fable case, and it is rare.
+3. **Escalate on evidence, one step, in a fresh context.** Sonnet `medium` fails its
+   check → the same task on Opus, as a new dispatch with a three-line note of what
+   failed, never the failed context → still stuck: `orch-debugger`. A task too big
+   for Sonnet is two tasks, not an Opus task.
+4. **Resume a stopped helper only if its cache is warm and the rest is short.** A
+   helper's cache lives 5 minutes (the main conversation's, an hour). Within that
+   and for two or three more steps, resume; otherwise start fresh from its PROGRESS
+   file and branch — a cold resume re-writes its whole context at 1.25× input.
 
-Four questions, in order; the first that answers settles it.
+Judge cost per finished task, not per request: a cheap call that needs three
+retries is not cheap.
 
-1. **Is there an oracle?** A test, type checker, schema or exact spec that can
-   prove the answer wrong. A smaller model plus an oracle beats a larger model
-   without one.
-2. **Can the work be checked at all?** If only a human reading it can tell
-   whether it is right, that is where the capable model earns its price. This is
-   the Fable case, and it is rare.
-3. **Has a smaller model already failed, on evidence?** Escalate on a failed
-   attempt, never on a feeling that a task looks hard.
-4. **Try lower effort on the better model before a cheaper model.** Caches are
-   model-scoped, so every switch throws away the cached prefix.
+**Verification instructions are model-specific.** On Opus 5, never add
+"double-check": it verifies already and the words cost tokens. On Fable 5.1 at low
+effort the risk runs the other way — it answers current facts from memory — so say
+that recognising a name is not knowing its current state.
+(`docs/research/0004-loops-and-stopping.md` (e))
 
-The rule that settles arguments: **judge cost per finished task, not per
-request.** A cheap call that needs three retries is not cheap.
+## When a helper is worth it at all
 
-**Verification instructions are model-specific, and neither direction carries.**
-On Opus 5, never add "double-check" or "re-verify": it verifies its own work
-already and the instruction costs tokens with no gain. On Fable 5.1 at low effort
-the risk runs the other way — it answers current facts from memory — so it is
-worth saying that recognising a name is not knowing its current state. Never move
-either instruction to a different model without checking which way that model
-fails. Both measurements: `docs/research/0004-loops-and-stopping.md` (e).
+For work that fits one context or is a dependent chain, the coordinator's own
+model at lower effort won every measured case; delegation pays past one context
+window, or for about ten files or three independent pieces (Anthropic,
+optimizing-for-cost-and-intelligence; "How and when to use subagents", 2026-04-07).
+Parallel helpers save wall-clock, not quota — each pays its own fixed load every
+step — so run them only for independent, read-heavy work on cheap models. A
+helper never waits on CI: past 5 idle minutes its next step re-writes its cache.
 
 ## Context
 
-A million tokens is only useful if you are willing to pay to re-read them, since
-every later turn reads the whole conversation again from cache. So the practical
-limit is what you will re-read, not the ceiling. Give a wide read to a subagent,
-whose context dies with it, rather than to the conversation, whose context is
-re-read on every later turn. That is the whole reason this skill dispatches. A
-subagent that fills its window was usually a task that should have been two.
+A million tokens is only useful if you will pay to re-read them. Give a wide read
+to a helper, whose context dies with it, rather than to the conversation, which is
+re-read on every later turn — but only a read that returns far less than it reads.
+The Messages API can clear old tool results and compact server-side for an
+SDK-hosted agent; no Claude Code session can ask for that, so the Pickup-line
+handoff is the mechanism here.
 
-**The SDK-hosted path has its own answer to the same problem.** The Messages
-API can clear old tool results and thinking blocks server-side
-(`anthropic-beta: context-management-2025-06-27`, `clear_tool_uses_20250919` —
-100K-token default trigger, keeps the 3 most recent) and, separately, can
-summarize the whole earlier history into one compaction block as a long
-session nears its limit (`anthropic-beta: compact-2026-01-12`,
-`compact_20260112` — 150K-token default trigger, 50K minimum), on Opus 5,
-Sonnet 5 and Fable 5.1 among others (platform.claude.com/docs/en/build-with-
-claude/context-editing and .../compaction, both read 2026-09-10). This is
-the platform's own version of the relay-across-fresh-sessions move `SKILL.md
-§4` asks the lead to do by hand — for an SDK-hosted agent it can be set once
-as a request parameter instead. **Inferred, not verified here**: nothing in
-`code.claude.com/docs` names either beta header as something a Claude Code
-session can set, and no tool in this build exposes one — so treat the lead's
-own Pickup-line handoff as the only mechanism available in this host until
-someone finds a way to ask for one from inside a session.
+## The lead's model and effort
 
-## If the user asks what to run the lead on
-
-Answer this when they ask. Do not raise it yourself, and never ask them to
-change it mid-run: the skill used to inject that advice unprompted, which is a
-session interrupting the user about the user's own settings.
+The user chose them. The router mentions it once a week when effort is `xhigh` or
+`max`; otherwise answer when asked, and never ask to change it mid-run — a switch
+rebuilds the whole prompt cache (Fable 5.1 keeps it across an effort change).
 
 | Plan | Model | Effort |
 |---|---|---|
-| Pro $20 | Sonnet | high |
+| Pro $20 | Sonnet | high, or Opus at medium |
 | Max 5x $100 | Opus | high |
 | Max 20x $200 | Opus | high |
 
-Why, in the part that survives a new plan appearing: a lead takes many short
-turns and effort multiplies across all of them, while a worker takes one long
-turn and stops. `max` needs a measurement nobody has made for a multi-turn lead.
-Fable never leads: its cost across a hundred short turns buys nothing `high` on
-Opus does not.
-
-Cost is not a reason to stay low. A lead's turn is mostly cached re-reads, so
-Opus at high costs little more per turn than Sonnet; what costs money is a
-shallow grade that sends a task round again.
-
-Changing either mid-run rebuilds the whole prompt cache on Opus and Sonnet.
-Fable 5.1 is the exception: it keeps the cache across an effort change.
-`profile.mjs --set-default model=opus effort=high` sets the default for *new*
-sessions; the running conversation changes only with the picker.
-
-Nobody has published a measurement of effort on a multi-turn lead. The model
-rows are the plan defaults; the `high` column is reasoning, marked as reasoning
-on purpose.
+A lead takes many short turns, each mostly a cached re-read: on Opus that re-read
+is 2.5× Sonnet's price, and effort multiplies across every turn. Fable never leads.
+`profile.mjs --set-default model=… effort=…` sets the default for new sessions.
 
 ## Price tags
 
-Every dispatch gets a price before it happens, in list-price dollars — the same
-unit `/usage` computes its Session figure in. The guard prints it,
-`lib/prices.mjs` works it out, and once the ledger has priced two runs of the
-same role and model the tag says `measured here, n=2` instead of guessing.
-
-Until then, this table. **Every number is reasoned, not measured**, from the
-per-million prices above and one observation of a real fan-out:
+Every dispatch gets a price before it happens, in list-price dollars — the unit
+`/usage` computes its Session figure in, not what a subscription bills. Once the
+ledger has priced runs of the same role and model (one row per helper, each API
+call counted once, since 2026-09-13), the tag says `measured here, n=…`. Until then,
+this reasoned table:
 
 | Role | Fable | Opus | Sonnet | Haiku |
 |---|---|---|---|---|
@@ -147,21 +134,7 @@ per-million prices above and one observation of a real fan-out:
 | `orch-browser` | — | $3 | $1 | — |
 | `Explore` | — | — | $0.50 | $0.10 |
 
-There is no weekly figure here any more, and so no "% of your week" on a price
-tag. The one that used to be printed — Pro about $30, Max 5x about $150, Max 20x
-about $600 — came from a single observation on 2026-09-09 scaled by what the
-plans cost. A percentage computed from that reads like a measurement, and a
-reader has no way to tell it is not one.
-
-List price is not what a subscription is billed. It is the only unit a
-subscription dispatch can be priced in, and the unit the host already shows the
-user. Say so whenever a figure is printed.
-
-A model nobody named is not priced. An inherited model used to be priced as
-Sonnet, which is a number invented about a dispatch whose model was unknown.
-
-## Sources
-
-Model IDs, windows, prices and effort behaviour: the bundled `claude-api`
-reference, cached 2026-06-24, read 2026-09-09. Plan inclusions: `routing.md`,
-checked 2026-09-08.
+No "% of your week": no weekly dollar figure has been measured. Live usage comes
+from the status line instead (`scripts/statusline.mjs`), in a terminal only: the
+desktop app does not run status lines. A model nobody named is
+not priced.

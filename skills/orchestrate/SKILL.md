@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.11.0"
+  version: "0.12.0"
 hooks:
   PreToolUse:
     - matcher: "Agent|Task"
@@ -65,8 +65,10 @@ saved whole under the run and indexed). Two more ask for the Pickup line to be
 honest, only for a coordinated run this session is bound to: `turn-check.mjs`
 before a turn ends, and `precompact-check.mjs` before compaction summarizes
 the conversation away, which is the one moment a stale Pickup line is gone for
-good rather than just out of date. Nothing mechanical decides what a task
-deserves.
+good rather than just out of date. `persist-check.mjs` keeps a turn going when
+the user asked you to keep going and your last step did real work; its stops
+are in `lanes.md`. Wait on CI or an agent with `Monitor`, never by ending the
+turn. Nothing mechanical decides what a task deserves.
 
 ## 0. Profile
 
@@ -81,7 +83,8 @@ the plugin's own.
 
 The user picked this session's model and effort before you existed. Work at
 what they chose. If they ask what to run a manager on, `models.md` has the
-answer; do not volunteer it, and never ask them to change it mid-run.
+answer. Volunteer it only when the router's weekly line about a lead at `xhigh`
+or `max` says to, and never ask them to change it mid-run.
 
 Pick the model each task needs, then check whether this plan includes it. If it
 does, dispatch. If not, it spends the user's own money, so recommend it, price
@@ -111,7 +114,13 @@ only the tasks it actually touches.
 Facts about the world come from the world, not from memory: the repo's rules,
 whether it has a remote and `gh` is signed in, the current docs of a service,
 the `--help` of a CLI, the live state of a page. Read the files the goal names
-yourself; a sweep wider than about three files goes to `Explore` on haiku.
+yourself, and sweep with Grep and Glob, reading line ranges; when a language
+server tool is loaded, ask it for definitions and callers first. For a library's
+API, current docs (a docs tool such as context7 when installed) beat memory and
+beat reading its source. Delegate a sweep
+only when it would read far more than it returns, and name `model: "haiku"`:
+an unnamed `Explore` runs on your own model, and every page it reads stays in
+its context for every later step.
 
 For anything outside this checkout — how an API behaves, an unfamiliar tool,
 whether the thing already exists, what is currently recommended — search, then
@@ -230,12 +239,18 @@ evidence that means done — and the rest only when they apply. A field that sto
 nothing on this task is cost with no benefit.
 
 A dispatch's result carries the agent's id; keep it. To continue that agent
-with a delta — a reviewer's finding sent back to the implementer that produced
-it, a short follow-up — `SendMessage` the id (or the agent's name, once it has
-one) rather than dispatching fresh: it resumes from the agent's own transcript,
-a cache-warm read, instead of reloading CLAUDE.md, the git snapshot and the
-whole packet cold (proven 2026-09-10; `hosts.md`, `lanes.md`). Start fresh when
-the model must change or the earlier attempt would bias it. In plan mode a
+with a short delta — a reviewer's finding for the implementer that produced it —
+`SendMessage` the id while its cache is warm: within about five minutes of its
+last step, for two or three more steps. After that, or for anything longer,
+dispatch fresh with the diff, the finding and its PROGRESS file: a cold resume
+re-writes the agent's whole grown context at full price (`models.md`). Start
+fresh too when the model must change or the earlier attempt would bias it.
+
+The guard refuses, with the exact retry, an executor above Sonnet before a real
+attempt at the same task, an `Explore` or `general-purpose` without a cheap
+named model, a fork of a large conversation, Fable on a plan without it, and
+any new helper near the user's usage limit. A refusal costs one step; send what
+it says. In plan mode a
 subagent inherits the write restriction, so dispatch only read-only tasks whose
 packet says "return the findings inline, write nothing".
 
@@ -289,9 +304,14 @@ finding. Never resend the same packet, and never escalate a model just because a
 reviewer disagreed. Three attempts per task, then stop with the evidence. No
 progress in three rounds, or the same error twice, ends the loop.
 
+An escalation is a fresh dispatch on the next model up with a three-line note of
+what failed, never the failed agent's context carried forward.
+
 A per-family limit moves that family one step down for the run; a session or
 weekly limit ends the run cleanly at a written ledger. Never shrink the plan
-quietly to fit.
+quietly to fit. After a limit, recover from disk, not from the stopped agents:
+each packet named a PROGRESS file and a branch, and a fresh agent continues
+from those at a fraction of what resuming the old context costs.
 
 ## 8. Integrate, finish, report
 

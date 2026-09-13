@@ -57,7 +57,9 @@ function makeRepo(withRun, opts = {}) {
 function run(home, payload) {
   const r = spawnSync(process.execPath, [ROUTER], {
     input: JSON.stringify(payload), encoding: 'utf8', windowsHide: true,
-    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '' },
+    // CLAUDE_EFFORT is cleared so a test run inside a Claude Code session does
+    // not hand the router that session's own effort.
+    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '', CLAUDE_EFFORT: '' },
   });
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`);
   const out = r.stdout.trim();
@@ -136,7 +138,11 @@ test('a state change is worth a line; a change of wording is not', () => {
   assert.equal(prompt(home, repo, 'and one for list as well please', { session_id: 's-state' }), '');
   // A family limit hit mid-session is a fact the model cannot see.
   const tr = join(repo, 't.jsonl');
-  writeFileSync(tr, JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', content: [{ type: 'text', text: "You've hit your Opus limit" }] } }));
+  // The host writes its limit message as a "<synthetic>" assistant record.
+  writeFileSync(tr, [
+    JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', content: [{ type: 'text', text: 'working on it' }] } }),
+    JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: "You've hit your Opus limit" }] } }),
+  ].join('\n'));
   const after = prompt(home, repo, 'carry on with the list command now', { session_id: 's-state', transcript_path: tr });
   assert.match(after, /\[orchestrate · changed\]/);
   assert.match(after, /limits today: opus/);

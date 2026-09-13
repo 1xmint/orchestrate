@@ -185,7 +185,8 @@ install. You should not need to type them.
 | Hook | When | What it holds |
 |---|---|---|
 | `router.mjs` | every prompt, and on resume or compact | once a session, the local state the model cannot see: plan tier, your own model, the run this session is bound to, agents installed, a family limit hit today, plus a short card on how work gets shaped. While a run is open it also names the returns still waiting to be graded and the tasks whose blockers have all landed, so a session stops waiting on one agent when there is work it could start. On resume it brings back the run's goal, constraints and next step. After that, silence unless one of those facts changes. Turn it off for a session by typing `router off` |
-| `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It has no opinion about which model a task deserves: that is the manager's judgment, and when the right model is not included in your plan it asks you rather than spending or downgrading quietly |
+| `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It refuses, with the exact retry: a coding, research or browser helper above Sonnet before a cheaper attempt at the same task; a search helper with no cheap model named; a copy of a conversation already past ~100k tokens; Fable on a plan where it costs credits; and any new helper once the 5-hour window is at 80% or the week at 90% |
+| `persist-check.mjs` | when a turn ends | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refusal, the same error twice, 25 steps, or 90% of the 5-hour window |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run this session is bound to, prices it, and records which run and task it belongs to in `returns/returns.jsonl`. It does not touch the task rows: two returns landing together each rewrote the whole file, and the second erased the first |
 | `turn-check.mjs` | when a turn ends | one rule, and only for a run this session is bound to: it asks once for the Pickup line when that line has not moved since the last dispatch, so a session that dies is still resumable |
 | `precompact-check.mjs` | just before the conversation is compacted | the same Pickup rule as `turn-check.mjs`, fired one moment earlier: a long session can auto-compact mid-turn, and a stale Pickup line does not just age, it is gone. Asks once per unwritten line, then lets compaction proceed either way so it can never block the very thing that frees up context |
@@ -207,12 +208,119 @@ line count. The other blocked a turn when a recommendation had been answered
 from fewer than two source-reading calls, which two failed fetches satisfied
 and one authoritative document did not. Neither is something a hook can judge.
 
-First run: the skill reads your plan tier from your local Claude config. If it
-cannot, it asks once and remembers:
+### If it has your plan wrong
+
+Your plan decides what orchestrate lets helpers spend. On Pro it is strictest,
+and on Max it allows Fable and more room before stopping.
+
+**It works out the plan per Claude account.**
+- **In a terminal**, it reads the plan from `~/.claude.json`, which is refreshed
+  when you sign in. Switching accounts there needs nothing from you.
+- **In the Claude app**, it first checks which account the session runs on. The
+  app can be signed in to a different account than the terminal. On one machine
+  the file described a Pro account used for a day, while the app ran on Max 5x.
+  - If the file describes the app's account, it uses the file's plan.
+  - If not, it does not borrow the other account's plan. It asks you once, and
+    remembers the answer for that account. After that, switching back and forth
+    between accounts picks the right plan on its own.
+
+Check what it read and where from:
 
 ```bash
-node ~/.claude/skills/orchestrate/scripts/profile.mjs --set tier=max5
+node skills/orchestrate/scripts/profile.mjs
 ```
+
+Set it for the account you are on (`pro`, `max5` for the $100 plan, `max20` for
+the $200 plan, `team`, or `api`):
+
+```bash
+node skills/orchestrate/scripts/profile.mjs --set tier=max5
+```
+
+`--clear` forgets the setting for this account and goes back to detecting it.
+Your other choices, such as paid plugins, stay. From a plugin install the scripts live under
+`~/.claude/plugins/cache/orchestrate/orchestrate/<version>/skills/orchestrate/scripts/`,
+and from a script install under `~/.claude/skills/orchestrate/scripts/`.
+
+### Live usage: terminal sessions only
+
+Orchestrate can see how much of your 5-hour and weekly limits you have used, and
+act on it:
+- at 60% of the 5-hour window, it works one step at a time on cheaper models;
+- at 80% of the 5-hour window, or 90% of the week, it stops starting helpers;
+- at 90% of the 5-hour window, it stops continuing on its own.
+
+Claude Code gives those numbers to exactly one place: the status line, the bar
+under the prompt in a terminal. A plugin is not allowed to install a status line
+itself, so this is a one-time step you choose:
+
+```bash
+node skills/orchestrate/scripts/statusline.mjs --install
+```
+
+It backs up `~/.claude/settings.json` first. If you already had a status line,
+yours keeps running, with the usage shown after it. `--uninstall` puts back what
+was there.
+
+**The Claude desktop app does not run status lines.** On one machine the status
+line was installed and working when run by hand, yet the desktop app never ran
+it once in hours of use. So in the desktop app the usage stops above never fire.
+Orchestrate still stops when an actual limit message arrives, and helpers on
+Sonnet with step caps keep usage low either way.
+
+## Plugins that make it better, and ones that cost you
+
+**Every installed plugin is re-read on every step of every session**, whether
+the work needs it or not. It is like carrying every tool you own to every job.
+On one machine, 35 plugins added ~14k tokens to every step. They also pushed
+307 of 356 skills down to a bare name with no description, so Claude could not
+tell when the useful ones applied. Fewer plugins means less usage and better
+choices. Orchestrate tells you once which of yours look unrelated to your work,
+and again when you add one.
+
+**Worth adding.** All four are free and in Anthropic's official catalog:
+
+| Plugin | What it gives | Why it helps quota or quality |
+|---|---|---|
+| A language-server plugin for your language: `typescript-lsp`, `pyright-lsp`, `rust-analyzer-lsp`, `gopls-lsp`, … | Claude can jump to a definition, list every caller, and see type errors right after an edit | Answers "where is this used" without reading file after file, and catches a broken edit before a build or test run. Adds no skills to the per-step list. Needs the language server itself installed (for TypeScript: `npm i -g typescript-language-server typescript`; for Rust: `rustup component add rust-analyzer`) |
+| `context7` | Current documentation for the library version you actually use | Fewer attempts written against an old API and then fixed. Works with no account; a free key only raises its rate limit |
+| `frontend-design` | One skill for web pages that look designed rather than generated | Only if you build web front ends |
+| `session-report` | A local HTML report of where your tokens went, by session, helper and prompt | Built from the files already on your disk; the report itself costs no usage. Useful to bring numbers to a planning session |
+
+Install from a terminal with `/plugin install <name>@claude-plugins-official`,
+or from the Claude app under Customize → Plugins → Discover.
+
+**For web pages, use what is built in first.** A page fetch comes back already
+summarised, web search is included in your plan, and the browser handles pages
+that need JavaScript. Scraping plugins (Bright Data, Firecrawl, Tavily, Exa,
+Nimble, TinyFish, Zyte) bill their own service by the request. Orchestrate never
+uses a paid one unless you allow it. If you already pay for one and want it
+used, name it once:
+
+```bash
+node skills/orchestrate/scripts/profile.mjs --set allowPaid=brightdata-plugin
+```
+
+`--set denyPaid=<plugin>` takes it back, and `--set paidServices=never|ask|free`
+sets the rule for every other paid plugin (default: ask once per job).
+
+**Leave these out when orchestrate is on.** They run their own multi-helper
+workflows for the same jobs, so you would pay for the work twice:
+`superpowers`, `feature-dev`, `code-review` and `pr-review-toolkit` (several
+review helpers per review), `ralph-loop` (the same job as orchestrate's keep-going
+loop), and `code-simplifier` (Claude Code's built-in `/simplify` covers it).
+
+**`security-guidance`** is on by default in Claude Code. Its warnings while
+editing are free: pattern checks run on your machine. Its reviews at the end of
+each turn and on every commit and push call Opus whenever it finds credentials.
+On one machine every review was skipped for lack of credentials, so they
+cost nothing there. To make sure only the free warnings ever run, add this to
+`~/.claude/settings.json` under `"env"`: `"ENABLE_CODE_SECURITY_REVIEW": "0"`.
+
+Business plugins (sales, finance, legal, HR, marketing, bio research, ads,
+market data) are fine if that is your work. For a coding session they are pure
+per-step cost. Remove them in the Claude app under Customize → Plugins → Yours.
+Plugins added there live in your Claude account and do not show in `/plugin`.
 
 ## Stay up to date
 

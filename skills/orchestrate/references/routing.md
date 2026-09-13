@@ -83,29 +83,31 @@ what a finished run actually cost, when that can change the next decision.
 
 ## Routing table
 
-Pick the smallest model whose chance of a first-time-right result clears the
-task's bar; then total quota including rework; then wall clock. A cheap model
-retried costs more than the right one once.
+Quota first, on every plan: executors start on Sonnet with a step cap, and a
+task moves up only after it fails a check on Sonnet. The evidence for starting
+cheap: running at a lower setting and re-running only the failures passed ~93%
+of tasks at half the cost of running everything at the default (Anthropic,
+optimizing-for-cost-and-intelligence). A cheap attempt is bounded by its step
+cap; an uncapped expensive one is not. The guard enforces the executor rows.
 
 | Role | Pro | Max 5x | Max 20x |
 |---|---|---|---|
 | Orchestrator | the session's model | same | same |
-| `orch-planner` | opus | fable when ambiguous, cross-module or multi-sitting; else opus | fable |
-| `orch-implementer` | sonnet | sonnet; opus across several files or a shared contract | opus |
+| `orch-planner` | opus | opus; fable when ambiguous, cross-module or multi-sitting | same as Max 5x |
+| `orch-implementer` | sonnet | sonnet | sonnet |
 | `Explore` (`model: haiku`) | haiku | haiku | haiku |
-| `orch-researcher` | sonnet | sonnet; opus to reconcile conflicts | opus |
-| `orch-browser` | sonnet | sonnet | opus |
-| `orch-reviewer` | opus | opus | fable for security, release, public, money; else opus |
-| `orch-debugger` | opus | fable | fable |
+| `orch-researcher` | sonnet | sonnet | sonnet |
+| `orch-browser` | sonnet | sonnet | sonnet |
+| `orch-reviewer` | opus | opus | opus; fable for security, release, public, money |
+| `orch-debugger` | opus | opus | opus; fable after Opus is stuck |
 | any Fable dispatch | **the user's call each time** | judge each on its merits | judge each on its merits |
 
 Pass it on the `Agent` call (`model: sonnet | opus | haiku | fable`).
 
-**Effort is not a per-call lever, and the role files no longer set it.** They
-used to: planner and debugger at `xhigh`, the rest at `high`, which overrode
-whatever the user had chosen for the session and spent their quota on a setting
-they never picked. A role agent now inherits the session's effort. The model is
-the per-call lever, and it overrides the file.
+**Effort is not a per-call lever; the role files set it, at or below `high`**
+(`models.md`). The old pins went the wrong way — planner and debugger at
+`xhigh` — and were removed; the current ones exist to spend less than a session
+at `xhigh` would. The model is the per-call lever, and it overrides the file.
 
 **Host facts worth knowing.** A `/model` switch mid-session rebuilds the whole
 prompt cache; an effort change on Fable 5.1 keeps it (2.1.260+), a model switch
@@ -141,7 +143,8 @@ asked to look for gaps will find some in any change.
 ## Escalation triggers (fixed list)
 
 Escalate the *author* one step (sonnet → opus → fable), naming the trigger in
-the ledger, when:
+the ledger, as a fresh dispatch carrying a three-line note of what failed —
+never by resuming the failed agent — when:
 
 1. one attempt failed on a complete packet (not a context gap);
 2. two competent results disagree;

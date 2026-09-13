@@ -37,7 +37,7 @@ export function mapTier(raw) {
   const s = raw.toLowerCase();
   if (/max[_-]?20x|max20/.test(s)) return 'max20';
   if (/max[_-]?5x|max5/.test(s)) return 'max5';
-  if (/\bmax\b/.test(s)) return 'max5';
+  if (/(^|[^a-z])max([^a-z]|$)/.test(s)) return 'max5';
   if (/enterprise|team/.test(s)) return 'team';
   if (/\bpro\b|claude_pro|_pro_/.test(s)) return 'pro';
   return null;
@@ -54,21 +54,79 @@ export function findKeys(obj, names, depth = 0, out = {}) {
   return out;
 }
 
-export function detectTier() {
-  const override = readJson(PROFILE_PATH);
-  if (override && override.tier && override.tier !== 'unknown' && TIERS.includes(override.tier)) {
-    return { tier: override.tier, source: `user override set ${String(override.setAt || '').slice(0, 10)} (${PROFILE_PATH})` };
-  }
-  const cfg = readJson(join(HOME, '.claude.json'));
-  if (cfg) {
-    const found = findKeys(cfg, ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']);
-    for (const key of ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']) {
-      const t = mapTier(found[key]);
-      if (t) return { tier: t, source: `~/.claude.json ${key}="${found[key]}"` };
+// Which Claude account this session runs on. `~/.claude.json` describes the
+// account a terminal `claude` last signed in with, and the Claude app keeps its
+// own sign-in: on one machine the file described a Pro account used for a day
+// while every desktop session ran on Max 5x. The desktop app names each
+// session's account in its own folders (`claude-code-sessions/<account>/<org>/
+// <host session id>.json`) and passes the host session id to hooks, so the org
+// is known without reading any credential. Terminal sessions have no such
+// record, and there the file is the account in use.
+function appDirs() {
+  const dirs = [];
+  if (process.env.APPDATA) dirs.push(join(process.env.APPDATA, 'Claude'));
+  dirs.push(join(HOME, 'AppData', 'Roaming', 'Claude'));
+  dirs.push(join(HOME, 'Library', 'Application Support', 'Claude'));
+  dirs.push(join(process.env.XDG_CONFIG_HOME || join(HOME, '.config'), 'Claude'));
+  return [...new Set(dirs)];
+}
+
+export function sessionAccount(hostSessionId = process.env.CLAUDE_CODE_HOST_SESSION_ID) {
+  if (!hostSessionId || !/^[\w-]{8,80}$/.test(hostSessionId)) return null;
+  for (const dir of appDirs()) {
+    const base = join(dir, 'claude-code-sessions');
+    let accounts; try { accounts = readdirSync(base); } catch { continue; }
+    for (const account of accounts) {
+      let orgs; try { orgs = readdirSync(join(base, account)); } catch { continue; }
+      for (const org of orgs) {
+        if (existsSync(join(base, account, org, `${hostSessionId}.json`))) return { accountUuid: account, orgUuid: org };
+      }
     }
   }
-  if (process.env.ANTHROPIC_API_KEY) return { tier: 'api', source: 'ANTHROPIC_API_KEY is set' };
-  return { tier: 'unknown', source: 'no signal; ask the user once, then --set tier=...' };
+  return null;
+}
+
+const PLAN_KEYS = ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier', 'organizationType'];
+
+// The org this session runs on, and whether ~/.claude.json describes it.
+export function currentAccount() {
+  const cfg = readJson(join(HOME, '.claude.json'));
+  const fileOrg = cfg ? findKeys(cfg, ['organizationUuid']).organizationUuid || null : null;
+  const session = sessionAccount();
+  const org = (session && session.orgUuid) || fileOrg;
+  return { org: org || null, via: session ? 'desktop' : (fileOrg ? 'file' : null), fileOrg, fileDescribesSession: !session || !fileOrg || session.orgUuid === fileOrg, cfg };
+}
+
+export function detectTier() {
+  const profile = readJson(PROFILE_PATH) || {};
+  const acct = currentAccount();
+  const plans = profile.plans && typeof profile.plans === 'object' ? profile.plans : {};
+  const remembered = acct.org && plans[acct.org];
+  if (remembered && remembered.tier !== 'unknown' && TIERS.includes(remembered.tier)) {
+    return { tier: remembered.tier, source: `you set it for this Claude account (${acct.org.slice(0, 8)}) on ${String(remembered.setAt || '').slice(0, 10)}`, account: acct.org };
+  }
+  // A plan set by an older version, before plans were kept per account.
+  if (profile.tier && profile.tier !== 'unknown' && TIERS.includes(profile.tier)) {
+    return { tier: profile.tier, source: `user override set ${String(profile.setAt || '').slice(0, 10)} (${PROFILE_PATH})`, account: acct.org };
+  }
+  // `organizationType` ("claude_pro", "claude_max") is where current hosts put
+  // the plan; the rate-limit tier can be a generic "default_claude_ai" that says
+  // nothing. These fields are undocumented, so the source is always shown, and
+  // the credentials file is never read.
+  let filePlan = null;
+  if (acct.cfg) {
+    const found = findKeys(acct.cfg, PLAN_KEYS);
+    for (const key of PLAN_KEYS) {
+      const t = mapTier(found[key]);
+      if (t) { filePlan = { tier: t, source: `~/.claude.json ${key}="${found[key]}"` }; break; }
+    }
+  }
+  if (filePlan && acct.fileDescribesSession) return { ...filePlan, account: acct.org };
+  if (!acct.fileDescribesSession) {
+    return { tier: 'unknown', account: acct.org, source: `this session runs on a different Claude account (${acct.org.slice(0, 8)}) than ~/.claude.json describes${filePlan ? ` (that one is ${filePlan.tier})` : ''}; ask the user once which plan this account has, then profile.mjs --set tier=<pro|max5|max20|team|api>, which is remembered for this account` };
+  }
+  if (process.env.ANTHROPIC_API_KEY) return { tier: 'api', source: 'ANTHROPIC_API_KEY is set', account: acct.org };
+  return { tier: 'unknown', source: 'no signal; ask the user once, then --set tier=...', account: acct.org };
 }
 
 export function routerSettings() {
@@ -162,7 +220,8 @@ export function runIdOf(runMd) {
 export function activeRunPointer() {
   const p = readJson(ACTIVE_RUN_PATH);
   if (!p || !p.root || !p.runMd || !existsSync(p.runMd)) return null;
-  return readRun(p.runMd, p.root);
+  const run = readRun(p.runMd, p.root);
+  return run && run.stale ? null : run;
 }
 
 // A cell, counted from the left. Task and acceptance text are free-form and can
@@ -263,14 +322,23 @@ export function hasBlocksColumn(header) {
 // the returns the ledger has already priced (returns/returns.jsonl). The lead
 // conversation's own cost is not here — no hook sees it — so this is subagent
 // spend, which is what the dispatch-time gate needs. Null when nothing priced.
+// One line per agent counts, the last one (each line is that agent's cumulative
+// total), and an unpriced line is unknown rather than $0.
 export function runSpend(dir) {
   let sum = null;
   try {
     const text = readFileSync(join(dir, 'returns', 'returns.jsonl'), 'utf8');
+    const last = new Map();
+    let n = 0;
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
-      const d = o && Number(o.dollars);
+      if (!o) continue;
+      last.set(o.agentId || `line-${n++}`, o);
+    }
+    for (const o of last.values()) {
+      if (o.dollars == null) continue;
+      const d = Number(o.dollars);
       if (Number.isFinite(d)) sum = (sum || 0) + d;
     }
   } catch {}
@@ -308,8 +376,18 @@ export function readRun(runMd, root) {
     const edgesMissing = plannedExist && !hasBlocksColumn(header);
     const budget = parseBudget(text);
     const spend = runSpend(dir);
-    const open = rows.some(l => OPEN_GLYPHS.test(l));
-    const done = rows.filter(l => /✅/.test(l)).length;
+    // The phase cell, not the whole row: a task description that mentions a
+    // glyph is not an open task.
+    const open = rows.some(l => OPEN_GLYPHS.test(cellAt(l, 2)));
+    const done = rows.filter(l => /✅/.test(cellAt(l, 2))).length;
+    // A plan nobody has touched in two days is not the work in front of this
+    // session. It stays on disk, and `run-init --reopen` makes it live again.
+    // Only RUN.md counts as touched: a lead working a plan writes its rows and
+    // Pickup. A return filed into it does not count, because an automatic
+    // binding files returns into abandoned plans, and counting those kept this
+    // repo's four-day-old plan alive.
+    const lastActivity = st.mtimeMs;
+    const stale = open && Date.now() - lastActivity > STALE_RUN_MS;
     const pickup = {};
     const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
     if (m) {
@@ -318,7 +396,7 @@ export function readRun(runMd, root) {
         if (kv && isWritten(kv[2])) pickup[kv[1]] = kv[2].trim();
       }
     }
-    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, open, rows: rows.length, done, ready, ungraded, edgesMissing, budget, spend, pickup };
+    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, lastActivity, open, stale, rows: rows.length, done, ready, ungraded, edgesMissing, budget, spend, pickup };
   } catch { return null; }
 }
 
@@ -343,8 +421,17 @@ export function runsUnder(root) {
   } catch { return []; }
 }
 
+export const STALE_RUN_MS = 48 * 3600 * 1000;
+
+// Open and live. A stale run is neither bound, reported, budgeted nor filed
+// into; it is listed by `staleRunsUnder` so the router can say once that it
+// was set aside.
 export function openRunsUnder(root) {
-  return runsUnder(root).filter(r => r.open);
+  return runsUnder(root).filter(r => r.open && !r.stale);
+}
+
+export function staleRunsUnder(root) {
+  return runsUnder(root).filter(r => r.stale);
 }
 
 // The newest run under this repo, or null. No cross-repo fallback: a caller
@@ -372,16 +459,21 @@ export function bindSessionRun(sessionId, run) {
   if (!sessionId || !run || !run.runMd) return null;
   const state = loadSession(sessionId) || { v: 1, session_id: sessionId, started: new Date().toISOString() };
   state.session_id = sessionId;
-  state.run = { root: run.root, runId: run.runId || runIdOf(run.runMd), runMd: run.runMd, boundAt: new Date().toISOString() };
+  state.run = { root: run.root, runId: run.runId || runIdOf(run.runMd), runMd: run.runMd, boundAt: new Date().toISOString(), explicit: true };
   try { saveSession(state); } catch { return null; }
   return state.run;
 }
 
+// A binding to a stale run holds only when someone bound it on purpose
+// recently; an automatic binding to an abandoned plan is what put this
+// session's helper return into a four-day-old ledger.
 export function sessionRun(sessionId) {
   const state = loadSession(sessionId);
   const r = state && state.run;
   if (!r || !r.runMd || !existsSync(r.runMd)) return null;
-  return readRun(r.runMd, r.root);
+  const run = readRun(r.runMd, r.root);
+  if (run && run.stale && !(r.explicit && Date.now() - Date.parse(r.boundAt || 0) < STALE_RUN_MS)) return null;
+  return run;
 }
 
 // Which run, if any, this session may act on.
@@ -517,19 +609,43 @@ export function selfModel(transcriptPath) {
   const tail = readTail(transcriptPath, 65536);
   if (!tail) return null;
   const lines = tail.split('\n');
+  // Hooks are handed the session's effort in their environment; it beats a
+  // transcript record, which lags a change by one step.
+  const envEffort = typeof process.env.CLAUDE_EFFORT === 'string' && process.env.CLAUDE_EFFORT ? process.env.CLAUDE_EFFORT : null;
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i].trim();
     if (!l || l[0] !== '{') continue;
     let o; try { o = JSON.parse(l); } catch { continue; }
-    const model = o && o.message && typeof o.message.model === 'string' ? o.message.model : null;
+    // A limit or error message is written as model "<synthetic>": not a model.
+    const model = o && o.message && typeof o.message.model === 'string' && o.message.model !== '<synthetic>' ? o.message.model : null;
     if (!model) continue;
     return {
       model: shortModel(model),
-      effort: typeof o.effort === 'string' ? o.effort : null,
+      effort: envEffort || (typeof o.effort === 'string' ? o.effort : null),
       // Which host this is, so the advice can name the actual click rather than
       // a slash command the desktop app does not have.
       entrypoint: typeof o.entrypoint === 'string' ? o.entrypoint : null,
     };
+  }
+  return null;
+}
+
+// How many tokens the conversation re-reads on each step right now: the input
+// side of the last real API call in the transcript. Every later step pays at
+// least this much again, which is the number a fork copies and a long session
+// keeps paying. Null when there is no call yet.
+export function lastContextTokens(transcriptPath, bytes = 262144) {
+  const tail = readTail(transcriptPath, bytes);
+  if (!tail) return null;
+  const lines = tail.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].trim();
+    if (!l || l[0] !== '{') continue;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    const m = o && o.type === 'assistant' && o.message;
+    if (!m || !m.usage || m.model === '<synthetic>') continue;
+    const u = m.usage;
+    return (Number(u.input_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0);
   }
   return null;
 }

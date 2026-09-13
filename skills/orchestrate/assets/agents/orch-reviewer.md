@@ -2,8 +2,9 @@
 name: orch-reviewer
 description: Used by the orchestrate skill. Independent read-only review of a change or plan against its objective and the repo's standards; returns PASS or FAIL with numbered findings. Never fixes anything.
 model: opus
-tools: Read, Grep, Glob, WebFetch, WebSearch, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git status:*)
-maxTurns: 60
+effort: high
+tools: Read, Grep, Glob, WebFetch, WebSearch, Skill, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git status:*)
+maxTurns: 30
 color: red
 memory: user
 ---

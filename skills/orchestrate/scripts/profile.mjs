@@ -9,6 +9,8 @@
 //   node profile.mjs                  human-readable, ~8 lines
 //   node profile.mjs --json           machine-readable
 //   node profile.mjs --set tier=max5  persist an override (pro|max5|max20|team|api|unknown)
+//   node profile.mjs --set paidServices=never|ask|free
+//   node profile.mjs --set allowPaid=<plugin> | denyPaid=<plugin>   a paid plugin allowed by name
 //   node profile.mjs --clear          remove the override
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
@@ -115,19 +117,60 @@ if (setIdx >= 0) {
     process.exit(0);
   }
 
+  // Skills that call an outside service bill that service, not the plan. The
+  // user decides once: never use them, ask once per job, or use them freely.
+  const paid = /^paidServices=(never|ask|free)$/.exec(kv);
+  if (paid) {
+    saveProfile({ paidServices: paid[1], paidServicesSetAt: new Date().toISOString() });
+    console.log(`paid outside services: ${paid[1]}`);
+    process.exit(0);
+  }
+
+  // A paid plugin the user bought and wants used, named once; it is allowed
+  // whatever the setting above says, and no other paid plugin is.
+  const byName = /^(allowPaid|denyPaid)=([\w.@-]+)$/.exec(kv);
+  if (byName) {
+    const list = new Set(Array.isArray(loadProfile().paidAllowed) ? loadProfile().paidAllowed : []);
+    if (byName[1] === 'allowPaid') list.add(byName[2]); else list.delete(byName[2]);
+    saveProfile({ paidAllowed: [...list].sort() });
+    console.log(`paid plugins allowed by name: ${list.size ? [...list].sort().join(', ') : 'none'}`);
+    process.exit(0);
+  }
+
   const m = /^tier=(\w+)$/.exec(kv);
   if (!m || !TIERS.has(m[1])) {
-    console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask`);
+    console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask | paidServices=never|ask|free | allowPaid=<plugin> | denyPaid=<plugin>`);
     process.exit(2);
   }
-  saveProfile({ tier: m[1], tierSource: 'user', setAt: new Date().toISOString() });
-  console.log(`tier override saved: ${m[1]} (${OVERRIDE_PATH})`);
+  // Kept per Claude account, so someone who switches accounts is not left on
+  // the other account's plan. Only when no account can be told apart does it
+  // fall back to one plan for every session.
+  const { org } = currentAccount();
+  const at = new Date().toISOString();
+  if (org && m[1] !== 'unknown') {
+    const prof = loadProfile();
+    const plans = { ...(prof.plans || {}), [org]: { tier: m[1], setAt: at } };
+    delete prof.tier; delete prof.tierSource; delete prof.setAt;
+    mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
+    writeFileSync(OVERRIDE_PATH, JSON.stringify({ ...prof, plans }, null, 2) + '\n');
+    console.log(`plan saved for this Claude account (${org.slice(0, 8)}): ${m[1]} (${OVERRIDE_PATH})`);
+  } else {
+    saveProfile({ tier: m[1], tierSource: 'user', setAt: at });
+    console.log(`tier override saved: ${m[1]} (${OVERRIDE_PATH})`);
+  }
   process.exit(0);
 }
 if (args.includes('--clear')) {
+  // Only the plan goes back to automatic, for this account and the old
+  // one-for-all setting; the paid-service rule, paid plugins allowed by name and
+  // the manager answer are separate choices and stay.
+  const prof = loadProfile();
+  const { org } = currentAccount();
+  if (org && prof.plans) delete prof.plans[org];
+  delete prof.tier; delete prof.tierSource; delete prof.setAt;
   mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
-  writeFileSync(OVERRIDE_PATH, JSON.stringify({ tier: 'unknown', tierSource: 'cleared', setAt: new Date().toISOString() }, null, 2) + '\n');
-  console.log('tier override cleared; automatic detection applies');
+  writeFileSync(OVERRIDE_PATH, JSON.stringify(prof, null, 2) + '\n');
+  console.log('plan setting cleared; automatic detection applies');
   process.exit(0);
 }
 
@@ -140,44 +183,8 @@ function detectHost() {
 }
 
 // ---- tier -------------------------------------------------------------------
-function mapTier(raw) {
-  if (!raw || typeof raw !== 'string') return null;
-  const s = raw.toLowerCase();
-  if (/max[_-]?20x|max20/.test(s)) return 'max20';
-  if (/max[_-]?5x|max5/.test(s)) return 'max5';
-  if (/\bmax\b/.test(s)) return 'max5'; // unversioned "max": assume the smaller Max
-  if (/enterprise|team/.test(s)) return 'team';
-  if (/\bpro\b|claude_pro|_pro_/.test(s)) return 'pro';
-  return null;
-}
-
-// The tier keys live under a nested account object whose shape has changed
-// between versions, so look for them anywhere in the file, shallowly.
-function findKeys(obj, names, depth = 0, out = {}) {
-  if (!obj || typeof obj !== 'object' || depth > 6) return out;
-  for (const [k, v] of Object.entries(obj)) {
-    if (names.includes(k) && v != null && !(k in out)) out[k] = v;
-    else if (v && typeof v === 'object') findKeys(v, names, depth + 1, out);
-  }
-  return out;
-}
-
-function detectTier() {
-  const override = readJson(OVERRIDE_PATH);
-  if (override && override.tier && override.tier !== 'unknown' && TIERS.has(override.tier)) {
-    return { tier: override.tier, source: `user override set ${String(override.setAt).slice(0, 10)} (${OVERRIDE_PATH})` };
-  }
-  const cfg = readJson(join(HOME, '.claude.json'));
-  if (cfg) {
-    const found = findKeys(cfg, ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']);
-    for (const key of ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']) {
-      const t = mapTier(found[key]);
-      if (t) return { tier: t, source: `~/.claude.json ${key}="${found[key]}"` };
-    }
-  }
-  if (process.env.ANTHROPIC_API_KEY) return { tier: 'api', source: 'ANTHROPIC_API_KEY is set' };
-  return { tier: 'unknown', source: 'no signal; ask the user once, then --set tier=...' };
-}
+// One detector for the whole plugin: lib/tier.mjs. This file used to carry its
+// own copy, which fell behind the host's current account fields.
 
 // ---- providers --------------------------------------------------------------
 function onPath(cmd) {
@@ -298,7 +305,9 @@ function detectSkills(repoRoot) {
 // One copy of this rule, in lib/tier.mjs, because it has to know about both
 // install paths: loose files in ~/.claude/agents, and a plugin that registers
 // them from its own folder without copying anything.
-import { agentsInstalled as detectAgents, latestRun } from './lib/tier.mjs';
+import { agentsInstalled as detectAgents, latestRun, detectTier, currentAccount } from './lib/tier.mjs';
+import { normalizeRole } from './lib/prices.mjs';
+import { latestPerAgent } from './ledger.mjs';
 
 // ---- repo + runs ------------------------------------------------------------
 function findRepoRoot(start) {
@@ -332,13 +341,13 @@ function pricesLine(tier) {
     const costsPath = join(HOME, '.claude', 'orchestrate', 'costs.jsonl');
     let rows = [];
     try {
-      rows = readFileSync(costsPath, 'utf8').split('\n').filter(Boolean)
-        .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      rows = latestPerAgent(readFileSync(costsPath, 'utf8').split('\n').filter(Boolean)
+        .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean));
     } catch {}
     const by = new Map();
     for (const r of rows) {
-      if (!r.role || !r.model || !Number.isFinite(Number(r.dollars))) continue;
-      const k = `${r.role.replace(/^orch-/, '')}/${r.model}`;
+      if (!r.agent || !r.role || !r.model || r.dollars == null || !Number.isFinite(Number(r.dollars))) continue;
+      const k = `${normalizeRole(r.role).replace(/^orch-/, '')}/${r.model}`;
       const v = by.get(k) || { n: 0, sum: 0 };
       v.n++; v.sum += Number(r.dollars);
       by.set(k, v);
@@ -378,6 +387,23 @@ if (brief) {
     console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')})` : ''}`);
     console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''}`);
     console.log(`this plan includes: ${included}`);
+    const paidMode = loadProfile().paidServices || 'ask';
+    const paidAllowed = Array.isArray(loadProfile().paidAllowed) ? loadProfile().paidAllowed : [];
+    console.log(`skills that call a paid outside service (they need their own API key or credits): ${{ never: 'never use them — the user said so', ask: 'ask the user once per job before using one', free: 'use them when they fit' }[paidMode] || 'ask first'}${paidAllowed.length ? `; except these, which the user allowed by name: ${paidAllowed.join(', ')}` : ''}`);
+    // Live usage exists only where the host runs the status line: a terminal.
+    // Said as a fact with the one-time command, never installed from here.
+    try {
+      const { readQuota } = await import('./lib/quota.mjs');
+      if (!readQuota()) {
+        const desktop = /desktop/i.test(process.env.CLAUDE_CODE_ENTRYPOINT || '');
+        const sl = (readJson(join(HOME, '.claude', 'settings.json')) || {}).statusLine;
+        const ours = sl && /orchestrate\/scripts\/statusline\.mjs/.test(String(sl.command || '').replace(/\\/g, '/'));
+        console.log(desktop
+          ? 'live usage: not available in the desktop app (it does not run status lines); usage stops fall back to the host\'s limit messages'
+          : ours ? 'live usage: status line installed, no reading in the last 10 minutes'
+            : `live usage: off. With the user's yes, once: node "${join(dirname(fileURLToPath(import.meta.url)), 'statusline.mjs')}" --install`);
+      }
+    } catch {}
     console.log(`providers: ${prov}`);
     console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none'}`);
     console.log(pricesLine(tier.tier));

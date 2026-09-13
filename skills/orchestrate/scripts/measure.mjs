@@ -36,27 +36,28 @@ export function measure(text) {
     stopBlocks: 0,
   };
   const marks = [];
+  // One API call is written as several records sharing `message.id`, each with
+  // a copy of the usage. Count each call once, from its last record; counting
+  // records made this session's re-reads look 2.8× what they were.
+  const calls = new Map();
+  let anon = 0;
 
   for (const line of String(text).split('\n')) {
     if (!line.trim()) continue;
     r.records++;
     let o; try { o = JSON.parse(line); } catch { r.skipped++; continue; }
     if (o.sessionId && !r.session) r.session = o.sessionId;
-    if (typeof o.effort === 'string') r.effort = o.effort;
     if (o.timestamp) { if (!r.started) r.started = o.timestamp; r.ended = o.timestamp; }
 
     const msg = o.message || {};
     if (o.type === 'assistant') {
-      for (const m of marks) m.after++;
-      const u = msg.usage;
-      if (u) {
-        r.turns++;
-        r.input += num(u.input_tokens);
-        r.output += num(u.output_tokens);
-        r.cacheRead += num(u.cache_read_input_tokens);
-        r.cacheWrite += num(u.cache_creation_input_tokens);
-      }
-      if (typeof msg.model === 'string') r.models[msg.model] = (r.models[msg.model] || 0) + 1;
+      const synthetic = msg.model === '<synthetic>';
+      if (typeof o.effort === 'string' && !synthetic) r.effort = o.effort;
+      const id = msg.id || `anon-${anon++}`;
+      const fresh = !calls.has(id);
+      if (fresh) for (const m of marks) m.after++;
+      if (msg.usage) calls.set(id, msg.usage);
+      if (fresh && typeof msg.model === 'string' && !synthetic) r.models[msg.model] = (r.models[msg.model] || 0) + 1;
       for (const b of Array.isArray(msg.content) ? msg.content : []) {
         if (b && b.type === 'tool_use' && (b.name === 'Agent' || b.name === 'Task')) {
           const i = b.input || {};
@@ -77,9 +78,13 @@ export function measure(text) {
     // transcript that plainly held four. Tool results stay skipped: a session
     // that greps its own fixtures would otherwise count them as injections.
     if (o.type === 'user' || o.type === 'attachment') {
-      const source = o.type === 'attachment' ? (o.attachment && o.attachment.content) : withoutToolResults(msg.content);
+      // A background helper's return arrives as a queued task notification
+      // whose text is in `prompt`, not `content`.
+      const a = o.attachment || {};
+      const source = o.type === 'attachment' ? (a.type === 'queued_command' ? a.prompt : a.content) : withoutToolResults(msg.content);
       for (const s of strings(source)) {
-        const at = s.indexOf('[orch-router');
+        const hit = /\[orch(?:-router|estrate)/.exec(s);
+        const at = hit ? hit.index : -1;
         if (at >= 0) { const bytes = s.length - at; r.routerInjections++; r.routerBytes += bytes; marks.push({ bytes, after: 0 }); }
         if (/orchestrate (guard|ledger):/.test(s)) r.hookContext += s.length;
         // A turn sent back by the one remaining Stop hook, counted by the fixed
@@ -97,6 +102,13 @@ export function measure(text) {
         if (m && /^\s*(RESTATED|STATUS):/m.test(s)) r.returns.push({ task: m[1], lines: s.trim().split('\n').length });
       }
     }
+  }
+  for (const u of calls.values()) {
+    r.turns++;
+    r.input += num(u.input_tokens);
+    r.output += num(u.output_tokens);
+    r.cacheRead += num(u.cache_read_input_tokens);
+    r.cacheWrite += num(u.cache_creation_input_tokens);
   }
   for (const m of marks) r.routerReread += m.bytes * m.after;
   return r;

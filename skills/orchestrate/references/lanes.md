@@ -106,10 +106,28 @@ condition is provable from output, and never as a substitute for the plan.
 
 ## Waiting without polling
 
-`Monitor` watches a process, log or WebSocket and wakes Claude on new lines. `ScheduleWakeup`
-paces a `/loop`. `CronCreate` schedules a one-off or recurring prompt in this session (restored
-on resume). Routines (`RemoteTrigger`) run in the cloud with no session open. A Bash sleep loop
-spends a turn per check and is never the answer.
+`Monitor` watches a process, log or WebSocket and wakes Claude on new lines. It is the default
+way the lead waits on CI, a build, a deploy or any long step: start the watch, then do other
+independent work, and the completion wakes you. Zero turns are spent waiting, and an idle turn
+re-reads the whole conversation for nothing. Workers already may not wait on an async check; this
+is the same rule for the lead. `ScheduleWakeup` paces a `/loop`. `CronCreate` schedules a one-off
+or recurring prompt in this session (restored on resume). Routines (`RemoteTrigger`) run in the
+cloud with no session open. A Bash sleep loop spends a turn per check and is never the answer.
+
+## Keep going: the persist loop
+
+When the user asks in plain words to keep going toward a goal ("keep coding until the site is
+done", "execute the plan"), the router pins that goal and `persist-check.mjs` refuses a Stop while
+each step does real work (an edit, a command, a dispatch). It needs no run ledger. It ends, and
+disarms, on the first of: you say the goal is met; your last message asks the user something; a
+dispatch is denied; the same error comes back twice; a step does no work; 25 steps. Every sixth
+step asks for a one-line check-in so the user can catch drift, and a long session gets a cost
+warning before each further step. After a compaction the goal is restored verbatim.
+`persist off` turns it off for the session.
+
+It saves quota by removing idle turns, not by running more in parallel: two agents cost what
+one after the other costs, and slightly more. Fan out only tasks a plan already proved
+independent.
 
 ## Side questions
 

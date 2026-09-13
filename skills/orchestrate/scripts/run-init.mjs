@@ -15,7 +15,7 @@
 // rather than against whichever run on the machine is newest. Without it the
 // run is still created, and an unbound session can claim it later with --bind.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, utimesSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,6 +28,20 @@ const opts = {};
 for (let i = 0; i < args.length; i++) {
   if (args[i].startsWith('--')) { opts[args[i].slice(2)] = args[i + 1] ?? ''; i++; }
   else positional.push(args[i]);
+}
+
+// Reopen mode: a plan set aside as stale (untouched for two days) becomes live
+// again. Touching RUN.md is the whole mechanism; nothing else records staleness.
+if (opts.reopen) {
+  const id = opts.reopen;
+  const base = join(findRepoRoot(opts.repo || process.cwd()) || process.cwd(), '.orchestrator', 'runs');
+  const runMd = /RUN\.md$/i.test(id) ? resolve(id) : join(base, id, 'RUN.md');
+  if (!existsSync(runMd)) { console.error(`no RUN.md for ${id} under ${base}`); process.exit(2); }
+  const now = new Date();
+  utimesSync(runMd, now, now);
+  console.log(`reopened ${readRun(runMd).runId}: it is live again for 48 hours of inactivity`);
+  if (opts['session-id']) bindSessionRun(opts['session-id'], readRun(runMd));
+  process.exit(0);
 }
 
 // Bind mode: claim an existing run for this session and stop.

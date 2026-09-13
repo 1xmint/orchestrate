@@ -10,8 +10,8 @@ same folder but its dispatch path is documented, not exercised.
 **Dispatch** is the `Agent` tool: `subagent_type` (a role agent, or `Explore` /
 `general-purpose`), `model` (`sonnet | opus | haiku | fable`; overrides the agent file), `prompt`
 (the packet), `isolation: "worktree"`, `run_in_background` (default true), `description` (3–5
-words the user sees). There is **no per-call effort**; a role agent inherits the session's effort
-(`routing.md`), and the role files no longer pin their own.
+words the user sees). There is **no per-call effort**; each role file pins its own, at or below `high`
+(`models.md`), and built-in agents take the session's.
 
 **Background is the default** in an interactive session and the caller cannot ask for the
 foreground. A background subagent keeps every MCP tool and these built-in tools: Read, Grep,
@@ -63,10 +63,10 @@ The full field list also has `model: inherit` (run on whatever the session is on
 named family), `permissionMode`, `skills` (preloaded at startup; a subagent can still invoke an
 unlisted one through the Skill tool), `mcpServers` (per-subagent, including inline server
 definitions), `background` (stay backgrounded even if Claude asks to run it in the foreground),
-`effort` (overrides the session's effort for that subagent only — unused here on purpose, see
-`routing.md`'s "Effort is not a per-call lever"), `initialPrompt`, and `experimental.cacheTtl`
-(`5m` or `1h`, the file-level form of `subagentPromptCacheTtl`). **None of the six role agents
-here uses any of these**, and one is worth naming why: **a plugin-installed subagent ignores
+`effort` (overrides the session's effort for that subagent only — every role here sets it, see
+`models.md`; it is honoured on a plugin install), `initialPrompt`, and `experimental.cacheTtl`
+(`5m` or `1h`, the file-level form of `subagentPromptCacheTtl`). **The six role agents use only
+`effort` among these**, and one omission is worth naming why: **a plugin-installed subagent ignores
 `hooks`, `mcpServers` and `permissionMode` in its own frontmatter entirely** (documented
 2026-09-10). Since the plugin path is this skill's primary distribution channel, per-role
 `permissionMode` narrowing is not a lever available here — `tools`/`disallowedTools` (which

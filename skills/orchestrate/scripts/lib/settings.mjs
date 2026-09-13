@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 
-export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs'];
+export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'persist-check.mjs'];
 
 export function toPosix(p) {
   return String(p).replace(/\\/g, '/');
@@ -100,6 +100,9 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
     const cmd = commandFor(join(scriptsDir, 'router.mjs'));
     out.push({ event: 'UserPromptSubmit', matcher: null, command: cmd, timeout: 5 });
     out.push({ event: 'SessionStart', matcher: 'resume|compact|clear', command: cmd, timeout: 5 });
+    // The other half of the router's "keep going" arming: without it the router
+    // pins a goal nothing ever acts on.
+    out.push({ event: 'Stop', matcher: null, command: commandFor(join(scriptsDir, 'persist-check.mjs')), timeout: 5 });
   }
   if (guard) {
     out.push({ event: 'PreToolUse', matcher: 'Agent|Task', command: commandFor(join(scriptsDir, 'guard-agent.mjs')), timeout: 10 });
