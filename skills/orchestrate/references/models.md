@@ -135,5 +135,6 @@ this reasoned table:
 | `Explore` | — | — | $0.50 | $0.10 |
 
 No "% of your week": no weekly dollar figure has been measured. Live usage comes
-from the status line instead (`scripts/statusline.mjs`). A model nobody named is
+from the status line instead (`scripts/statusline.mjs`), in a terminal only: the
+desktop app does not run status lines. A model nobody named is
 not priced.

@@ -37,12 +37,19 @@ Changes, one commit each on `feat/persist-loop`:
    ledger no longer emits SubagentStop context: the host delivers it into the
    helper, which answered and re-stopped (nine times for one planner). measure.mjs
    counts `[orchestrate` injections and queued task-notification returns.
-4. **Plan and live usage.** `organizationType` gives the plan (reads "pro" here).
-   `statusline.mjs` is the only channel the host gives live 5-hour/weekly usage;
-   installed on Josh's machine with his yes. **Not yet seen writing a snapshot in
-   the desktop app** — either it starts with a new session or the desktop app does
-   not run custom status lines; unverified. Without a snapshot every usage stop is
-   inert, never wrong. 264 tests after step 10.
+4. **Plan and live usage.** The plan is kept per Claude account. The desktop
+   app files each session under `claude-code-sessions/<account>/<org>/` and passes
+   `CLAUDE_CODE_HOST_SESSION_ID`, so the org is known without credentials.
+   `~/.claude.json` describes only the terminal's last sign-in: here a Pro account
+   used for one day, while the app runs on Max 5x. So the order is: a plan
+   remembered for this org, then an older global override, then the file when it
+   describes this session's account. Otherwise the plan reads unknown with the
+   reason, and the user is asked once. `statusline.mjs` is the only channel the
+   host gives for live 5-hour/weekly usage. It is installed here and works when
+   run by hand, but **the desktop app never ran it** in hours of use: live usage is
+   terminal-only. The brief says so and offers the install only outside the
+   desktop app. Transcripts record usage only when a limit rejects a request
+   (`quotaLimits.status: "rejected"`, 43 records here), never before. 265 tests.
 5. **Installed plugins.** A plugin check, said the first time the listings are
    seen and then only for plugins added since: every plugin with its skills,
    per-step tokens, how many skills arrived name-only, sign-in state and a
@@ -71,6 +78,16 @@ Changes, one commit each on `feat/persist-loop`:
 9. **Recoverable helpers.** PROGRESS files kept current by implementer, debugger,
    researcher and planner; the router lists dispatches that never returned on
    resume, compaction or a usage limit, with their PROGRESS paths.
+
+10. **Plugins in practice.** Josh's account had 34 plugins. 29 were removed and 7
+    standalone skills with them, leaving Modern Web Guidance, Data, Design, PDF
+    Viewer and Security Guidance. The README now names a short free set: a
+    language-server plugin, context7, frontend-design, session-report. It lists
+    plugins that duplicate orchestrate's own helper flows. `security-guidance`
+    (on by default) calls Opus on every turn end, commit and push whenever it
+    finds credentials. Its log here shows every review skipped for lack of them
+    (37 turn-end, 31 commit); `ENABLE_CODE_SECURITY_REVIEW=0` keeps only its free
+    pattern warnings.
 
 Deliberately not built: a per-tool-call context tripwire (plugin agents cannot
 carry hooks; a plugin-wide PreToolUse would start a process on every step of every

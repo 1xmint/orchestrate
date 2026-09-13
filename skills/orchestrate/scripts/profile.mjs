@@ -390,6 +390,20 @@ if (brief) {
     const paidMode = loadProfile().paidServices || 'ask';
     const paidAllowed = Array.isArray(loadProfile().paidAllowed) ? loadProfile().paidAllowed : [];
     console.log(`skills that call a paid outside service (they need their own API key or credits): ${{ never: 'never use them — the user said so', ask: 'ask the user once per job before using one', free: 'use them when they fit' }[paidMode] || 'ask first'}${paidAllowed.length ? `; except these, which the user allowed by name: ${paidAllowed.join(', ')}` : ''}`);
+    // Live usage exists only where the host runs the status line: a terminal.
+    // Said as a fact with the one-time command, never installed from here.
+    try {
+      const { readQuota } = await import('./lib/quota.mjs');
+      if (!readQuota()) {
+        const desktop = /desktop/i.test(process.env.CLAUDE_CODE_ENTRYPOINT || '');
+        const sl = (readJson(join(HOME, '.claude', 'settings.json')) || {}).statusLine;
+        const ours = sl && /orchestrate\/scripts\/statusline\.mjs/.test(String(sl.command || '').replace(/\\/g, '/'));
+        console.log(desktop
+          ? 'live usage: not available in the desktop app (it does not run status lines); usage stops fall back to the host\'s limit messages'
+          : ours ? 'live usage: status line installed, no reading in the last 10 minutes'
+            : `live usage: off. With the user's yes, once: node "${join(dirname(fileURLToPath(import.meta.url)), 'statusline.mjs')}" --install`);
+      }
+    } catch {}
     console.log(`providers: ${prov}`);
     console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none'}`);
     console.log(pricesLine(tier.tier));

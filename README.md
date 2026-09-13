@@ -242,6 +242,32 @@ Your other choices, such as paid plugins, stay. From a plugin install the script
 `~/.claude/plugins/cache/orchestrate/orchestrate/<version>/skills/orchestrate/scripts/`,
 and from a script install under `~/.claude/skills/orchestrate/scripts/`.
 
+### Live usage: terminal sessions only
+
+Orchestrate can see how much of your 5-hour and weekly limits you have used, and
+act on it:
+- at 60% of the 5-hour window, it works one step at a time on cheaper models;
+- at 80% of the 5-hour window, or 90% of the week, it stops starting helpers;
+- at 90% of the 5-hour window, it stops continuing on its own.
+
+Claude Code gives those numbers to exactly one place: the status line, the bar
+under the prompt in a terminal. A plugin is not allowed to install a status line
+itself, so this is a one-time step you choose:
+
+```bash
+node skills/orchestrate/scripts/statusline.mjs --install
+```
+
+It backs up `~/.claude/settings.json` first. If you already had a status line,
+yours keeps running, with the usage shown after it. `--uninstall` puts back what
+was there.
+
+**The Claude desktop app does not run status lines.** On one machine the status
+line was installed and working when run by hand, yet the desktop app never ran
+it once in hours of use. So in the desktop app the usage stops above never fire.
+Orchestrate still stops when an actual limit message arrives, and helpers on
+Sonnet with step caps keep usage low either way.
+
 ## Plugins that make it better, and ones that cost you
 
 **Every installed plugin is re-read on every step of every session**, whether
