@@ -167,7 +167,8 @@ export function runIdOf(runMd) {
 export function activeRunPointer() {
   const p = readJson(ACTIVE_RUN_PATH);
   if (!p || !p.root || !p.runMd || !existsSync(p.runMd)) return null;
-  return readRun(p.runMd, p.root);
+  const run = readRun(p.runMd, p.root);
+  return run && run.stale ? null : run;
 }
 
 // A cell, counted from the left. Task and acceptance text are free-form and can
@@ -322,8 +323,15 @@ export function readRun(runMd, root) {
     const edgesMissing = plannedExist && !hasBlocksColumn(header);
     const budget = parseBudget(text);
     const spend = runSpend(dir);
-    const open = rows.some(l => OPEN_GLYPHS.test(l));
-    const done = rows.filter(l => /✅/.test(l)).length;
+    // The phase cell, not the whole row: a task description that mentions a
+    // glyph is not an open task.
+    const open = rows.some(l => OPEN_GLYPHS.test(cellAt(l, 2)));
+    const done = rows.filter(l => /✅/.test(cellAt(l, 2))).length;
+    // A plan nobody has touched in two days is not the work in front of this
+    // session. It stays on disk, and `run-init --reopen` makes it live again.
+    let lastActivity = st.mtimeMs;
+    try { lastActivity = Math.max(lastActivity, statSync(join(dir, 'returns', 'returns.jsonl')).mtimeMs); } catch {}
+    const stale = open && Date.now() - lastActivity > STALE_RUN_MS;
     const pickup = {};
     const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
     if (m) {
@@ -332,7 +340,7 @@ export function readRun(runMd, root) {
         if (kv && isWritten(kv[2])) pickup[kv[1]] = kv[2].trim();
       }
     }
-    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, open, rows: rows.length, done, ready, ungraded, edgesMissing, budget, spend, pickup };
+    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, lastActivity, open, stale, rows: rows.length, done, ready, ungraded, edgesMissing, budget, spend, pickup };
   } catch { return null; }
 }
 
@@ -357,8 +365,17 @@ export function runsUnder(root) {
   } catch { return []; }
 }
 
+export const STALE_RUN_MS = 48 * 3600 * 1000;
+
+// Open and live. A stale run is neither bound, reported, budgeted nor filed
+// into; it is listed by `staleRunsUnder` so the router can say once that it
+// was set aside.
 export function openRunsUnder(root) {
-  return runsUnder(root).filter(r => r.open);
+  return runsUnder(root).filter(r => r.open && !r.stale);
+}
+
+export function staleRunsUnder(root) {
+  return runsUnder(root).filter(r => r.stale);
 }
 
 // The newest run under this repo, or null. No cross-repo fallback: a caller
@@ -386,16 +403,21 @@ export function bindSessionRun(sessionId, run) {
   if (!sessionId || !run || !run.runMd) return null;
   const state = loadSession(sessionId) || { v: 1, session_id: sessionId, started: new Date().toISOString() };
   state.session_id = sessionId;
-  state.run = { root: run.root, runId: run.runId || runIdOf(run.runMd), runMd: run.runMd, boundAt: new Date().toISOString() };
+  state.run = { root: run.root, runId: run.runId || runIdOf(run.runMd), runMd: run.runMd, boundAt: new Date().toISOString(), explicit: true };
   try { saveSession(state); } catch { return null; }
   return state.run;
 }
 
+// A binding to a stale run holds only when someone bound it on purpose
+// recently; an automatic binding to an abandoned plan is what put this
+// session's helper return into a four-day-old ledger.
 export function sessionRun(sessionId) {
   const state = loadSession(sessionId);
   const r = state && state.run;
   if (!r || !r.runMd || !existsSync(r.runMd)) return null;
-  return readRun(r.runMd, r.root);
+  const run = readRun(r.runMd, r.root);
+  if (run && run.stale && !(r.explicit && Date.now() - Date.parse(r.boundAt || 0) < STALE_RUN_MS)) return null;
+  return run;
 }
 
 // Which run, if any, this session may act on.

@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
-  DIR, readJson, writeJsonAtomic, lastContextTokens,
+  DIR, readJson, writeJsonAtomic, lastContextTokens, staleRunsUnder,
 } from './lib/tier.mjs';
 import { readHead, parseListing, listingLine, tokens } from './lib/listing.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
@@ -416,6 +416,8 @@ function handlePrompt(input) {
     if (note) { out.push(note.text); state.contextWarnedUpTo = note.upTo; }
     const lead = leadNote(ctx.self, ctx.tier);
     if (lead) out.push(lead);
+    const hidden = staleNote(ctx.repoRoot);
+    if (hidden) out.push(hidden);
   }
 
   if (armedNow) {
@@ -429,6 +431,24 @@ function handlePrompt(input) {
   saveSession(state);
   maybePrune();
   emit('UserPromptSubmit', out.join('\n'));
+}
+
+// Plans set aside as stale, said once per plan on this machine, so a user who
+// wanted one back knows the one command, and nobody is told twice.
+export const STALE_SEEN_PATH = join(DIR, 'stale-announced.json');
+
+export function staleNote(repoRoot, path = STALE_SEEN_PATH, now = Date.now()) {
+  if (!repoRoot) return '';
+  try {
+    const seen = readJson(path) || {};
+    const fresh = staleRunsUnder(repoRoot).filter(r => !seen[r.runMd]);
+    if (!fresh.length) return '';
+    for (const r of fresh) seen[r.runMd] = now;
+    writeJsonAtomic(path, seen);
+    const days = r => Math.max(2, Math.round((now - r.lastActivity) / 86400000));
+    const list = fresh.map(r => `${r.runId} (untouched ${days(r)} days, ${r.done}/${r.rows} done)`).join(', ');
+    return `[orchestrate · plans] set aside ${fresh.length === 1 ? 'a plan' : `${fresh.length} plans`} nobody has touched in two days or more: ${list}. They are not bound, reported or filed into. If the user wants one back: node "${join(SKILL_DIR, 'scripts', 'run-init.mjs')}" --reopen <id>.`;
+  } catch { return ''; }
 }
 
 export const LISTING_REPORT_PATH = join(DIR, 'listing-report.json');
