@@ -30,7 +30,7 @@ import {
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, lastContextTokens, staleRunsUnder,
 } from './lib/tier.mjs';
-import { readHead, parseListing, listingLine, tokens } from './lib/listing.mjs';
+import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
@@ -407,11 +407,11 @@ function handlePrompt(input) {
   }
   state.quotaBand = band;
 
-  // The fixed load every step pays for installed plugins, once a week at most;
-  // the lead's own per-step size; and a lead setting above quota-first.
+  // Which installed plugins fit, when the set is first seen or grows; the lead's
+  // own per-step size; and a lead setting above quota-first.
   if (substantive) {
-    const line = weeklyListingReport(input.transcript_path);
-    if (line) out.push(`[orchestrate · fixed load] ${line}`);
+    const line = pluginFitReport(input.transcript_path);
+    if (line) out.push(`[orchestrate · plugins] ${line}`);
     const size = lastContextTokens(input.transcript_path);
     const note = size != null ? contextNote(size, Number(state.contextWarnedUpTo) || 0) : null;
     if (note) { out.push(note.text); state.contextWarnedUpTo = note.upTo; }
@@ -483,22 +483,34 @@ export function staleNote(repoRoot, path = STALE_SEEN_PATH, now = Date.now()) {
 }
 
 export const LISTING_REPORT_PATH = join(DIR, 'listing-report.json');
-export const LISTING_REPORT_EVERY_MS = 7 * 86400000;
 export const LISTING_REPORT_MIN_TOKENS = 4000;
+export const PROFILE_PATH = join(DIR, 'profile.json');
 
-// Machine-wide, not per session: the plugins are the same in every session, and
-// a weekly reminder is enough for a choice only the user can make. The stamp is
-// written only when something was actually reported, so a session whose
-// listings are not in the transcript yet tries again on its next prompt.
-export function weeklyListingReport(transcriptPath, now = Date.now()) {
+// Machine-wide, not per session: the plugins are the same in every session. The
+// full check is said the first time the listings are seen, and after that only
+// when plugins are added — a reminder of a choice the user already made is
+// noise, and a plugin they just installed is the moment its fit matters. A small
+// setup gets no full check. The stamp is written only once the listings were
+// actually read, so a session whose listings are not in the transcript yet tries
+// again on its next prompt.
+export function pluginFitReport(transcriptPath, { path = LISTING_REPORT_PATH, profilePath = PROFILE_PATH, now = Date.now() } = {}) {
   try {
-    const stamp = readJson(LISTING_REPORT_PATH);
-    if (stamp && now - Number(stamp.at) < LISTING_REPORT_EVERY_MS) return '';
     if (!transcriptPath) return '';
     const l = parseListing(readHead(transcriptPath));
-    if (!l.found || tokens(l.skillChars + l.toolChars + l.serverChars) < LISTING_REPORT_MIN_TOKENS) return '';
-    writeJsonAtomic(LISTING_REPORT_PATH, { at: now });
-    return listingLine(l);
+    if (!l.found) return '';
+    const stamp = readJson(path);
+    const known = stamp && Array.isArray(stamp.plugins) ? stamp.plugins : null;
+    const names = pluginNames(l);
+    if (known && names.length === known.length && names.every(p => known.includes(p))) return '';
+    writeJsonAtomic(path, { at: now, plugins: names });
+    if (!known && tokens(l.skillChars + l.toolChars + l.serverChars) < LISTING_REPORT_MIN_TOKENS) return '';
+    const profile = readJson(profilePath) || {};
+    return pluginFitLine(l, {
+      known,
+      paidMode: profile.paidServices || 'ask',
+      paidAllowed: Array.isArray(profile.paidAllowed) ? profile.paidAllowed : [],
+      profileScript: join(SKILL_DIR, 'scripts', 'profile.mjs'),
+    });
   } catch { return ''; }
 }
 

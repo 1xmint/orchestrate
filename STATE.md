@@ -42,11 +42,20 @@ Changes, one commit each on `feat/persist-loop`:
    installed on Josh's machine with his yes. **Not yet seen writing a snapshot in
    the desktop app** — either it starts with a new session or the desktop app does
    not run custom status lines; unverified. Without a snapshot every usage stop is
-   inert, never wrong.
-5. **Installed plugins.** The router reports once a week the listing load every
-   step re-reads (~14k tokens here; Bright Data alone ~1.7k) and the largest
-   plugins; only the user can turn a plugin off. Planner/reviewer get `Skill`; the
-   researcher moves to a denylist. `paidServices=never|ask|free` (Josh: never).
+   inert, never wrong. 264 tests after step 10.
+5. **Installed plugins.** A plugin check, said the first time the listings are
+   seen and then only for plugins added since: every plugin with its skills,
+   per-step tokens, how many skills arrived name-only, sign-in state and a
+   paid-service hint, and an instruction to sort them for the user into keep and
+   remove. Here: ~14k tokens per step, 356 skills from 35 plugins, **307 skills
+   listed by bare name** because too many are installed — so extra plugins also
+   hide the useful ones' descriptions. It does not recommend installing anything
+   at setup (each plugin is re-read on every step); the lead searches the catalog
+   when a task needs what the built-ins cannot do. Desktop-app plugins live in
+   the Claude account, not `~/.claude/plugins`, and do not show in `/plugin`.
+   Planner/reviewer get `Skill`; the researcher moves to a denylist.
+   `paidServices=never|ask|free` (Josh: never), plus `allowPaid=<plugin>` /
+   `denyPaid=<plugin>` for a paid plugin a user bought and wants used.
 6. **Lead facts without a Stop block.** Limits only from host `<synthetic>`
    records (a quoted research report had reported two false limits); a line at
    150k and 300k per-step context; a weekly note when lead effort is xhigh/max.
@@ -66,9 +75,15 @@ Changes, one commit each on `feat/persist-loop`:
 Deliberately not built: a per-tool-call context tripwire (plugin agents cannot
 carry hooks; a plugin-wide PreToolUse would start a process on every step of every
 session), the OAuth usage endpoint (login token, terms), advisor by default,
-forced `CLAUDE_CODE_SUBAGENT_MODEL`. Not moving to Pi: Pi can sign in with a Claude
-subscription, but its own docs say that usage bills per token as extra usage, not
-against plan limits (pi.dev/docs/latest/providers, 2026-09-13).
+forced `CLAUDE_CODE_SUBAGENT_MODEL`. Not moving to Pi. Pi's own subscription
+sign-in bills as extra usage (pi.dev/docs/latest/providers). The
+`pi-claude-code-provider` package instead drives the installed `claude -p` and
+does draw on plan limits today (support.claude.com 15036540, 2026-09-13), but: it
+re-sends the whole history as one message per request; `claude -p` was named in
+Anthropic's paused plan to move headless use onto a $20/month credit on Pro; the
+package has 13 stars; and orchestrate would lose helpers, hooks, skills and the
+installed plugins. Revisit if headless use is confirmed on plan limits for good
+and a need appears that Claude Code hooks cannot meet.
 
 ## Keep going without idling, 2026-09-13 (in v0.12.0)
 

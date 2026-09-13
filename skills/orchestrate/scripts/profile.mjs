@@ -9,6 +9,8 @@
 //   node profile.mjs                  human-readable, ~8 lines
 //   node profile.mjs --json           machine-readable
 //   node profile.mjs --set tier=max5  persist an override (pro|max5|max20|team|api|unknown)
+//   node profile.mjs --set paidServices=never|ask|free
+//   node profile.mjs --set allowPaid=<plugin> | denyPaid=<plugin>   a paid plugin allowed by name
 //   node profile.mjs --clear          remove the override
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
@@ -124,9 +126,20 @@ if (setIdx >= 0) {
     process.exit(0);
   }
 
+  // A paid plugin the user bought and wants used, named once; it is allowed
+  // whatever the setting above says, and no other paid plugin is.
+  const byName = /^(allowPaid|denyPaid)=([\w.@-]+)$/.exec(kv);
+  if (byName) {
+    const list = new Set(Array.isArray(loadProfile().paidAllowed) ? loadProfile().paidAllowed : []);
+    if (byName[1] === 'allowPaid') list.add(byName[2]); else list.delete(byName[2]);
+    saveProfile({ paidAllowed: [...list].sort() });
+    console.log(`paid plugins allowed by name: ${list.size ? [...list].sort().join(', ') : 'none'}`);
+    process.exit(0);
+  }
+
   const m = /^tier=(\w+)$/.exec(kv);
   if (!m || !TIERS.has(m[1])) {
-    console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask`);
+    console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask | paidServices=never|ask|free | allowPaid=<plugin> | denyPaid=<plugin>`);
     process.exit(2);
   }
   saveProfile({ tier: m[1], tierSource: 'user', setAt: new Date().toISOString() });
@@ -354,7 +367,8 @@ if (brief) {
     console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''}`);
     console.log(`this plan includes: ${included}`);
     const paidMode = loadProfile().paidServices || 'ask';
-    console.log(`skills that call a paid outside service (they need their own API key or credits): ${{ never: 'never use them — the user said so', ask: 'ask the user once per job before using one', free: 'use them when they fit' }[paidMode] || 'ask first'}`);
+    const paidAllowed = Array.isArray(loadProfile().paidAllowed) ? loadProfile().paidAllowed : [];
+    console.log(`skills that call a paid outside service (they need their own API key or credits): ${{ never: 'never use them — the user said so', ask: 'ask the user once per job before using one', free: 'use them when they fit' }[paidMode] || 'ask first'}${paidAllowed.length ? `; except these, which the user allowed by name: ${paidAllowed.join(', ')}` : ''}`);
     console.log(`providers: ${prov}`);
     console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none'}`);
     console.log(pricesLine(tier.tier));
