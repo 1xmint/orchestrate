@@ -299,6 +299,8 @@ function detectSkills(repoRoot) {
 // install paths: loose files in ~/.claude/agents, and a plugin that registers
 // them from its own folder without copying anything.
 import { agentsInstalled as detectAgents, latestRun } from './lib/tier.mjs';
+import { normalizeRole } from './lib/prices.mjs';
+import { latestPerAgent } from './ledger.mjs';
 
 // ---- repo + runs ------------------------------------------------------------
 function findRepoRoot(start) {
@@ -332,13 +334,13 @@ function pricesLine(tier) {
     const costsPath = join(HOME, '.claude', 'orchestrate', 'costs.jsonl');
     let rows = [];
     try {
-      rows = readFileSync(costsPath, 'utf8').split('\n').filter(Boolean)
-        .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      rows = latestPerAgent(readFileSync(costsPath, 'utf8').split('\n').filter(Boolean)
+        .map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean));
     } catch {}
     const by = new Map();
     for (const r of rows) {
-      if (!r.role || !r.model || !Number.isFinite(Number(r.dollars))) continue;
-      const k = `${r.role.replace(/^orch-/, '')}/${r.model}`;
+      if (!r.role || !r.model || r.dollars == null || !Number.isFinite(Number(r.dollars))) continue;
+      const k = `${normalizeRole(r.role).replace(/^orch-/, '')}/${r.model}`;
       const v = by.get(k) || { n: 0, sum: 0 };
       v.n++; v.sum += Number(r.dollars);
       by.set(k, v);

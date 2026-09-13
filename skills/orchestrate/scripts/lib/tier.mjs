@@ -263,14 +263,23 @@ export function hasBlocksColumn(header) {
 // the returns the ledger has already priced (returns/returns.jsonl). The lead
 // conversation's own cost is not here — no hook sees it — so this is subagent
 // spend, which is what the dispatch-time gate needs. Null when nothing priced.
+// One line per agent counts, the last one (each line is that agent's cumulative
+// total), and an unpriced line is unknown rather than $0.
 export function runSpend(dir) {
   let sum = null;
   try {
     const text = readFileSync(join(dir, 'returns', 'returns.jsonl'), 'utf8');
+    const last = new Map();
+    let n = 0;
     for (const line of text.split('\n')) {
       if (!line.trim()) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
-      const d = o && Number(o.dollars);
+      if (!o) continue;
+      last.set(o.agentId || `line-${n++}`, o);
+    }
+    for (const o of last.values()) {
+      if (o.dollars == null) continue;
+      const d = Number(o.dollars);
       if (Number.isFinite(d)) sum = (sum || 0) + d;
     }
   } catch {}

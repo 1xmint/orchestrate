@@ -26,7 +26,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DIR, sanitizeId, loadSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
-import { dollars, family } from './lib/prices.mjs';
+import { dollars, family, normalizeRole } from './lib/prices.mjs';
 
 // Lenient on purpose, and it stays lenient: a return that got the shape almost
 // right is still the work. Anything absent is reported as absent, never
@@ -52,21 +52,37 @@ export function parseReturn(text) {
 
 // Assistant records in a transcript carry `message.usage`. Sum the four fields
 // that a subscription bills against; absent fields count as zero.
+//
+// The host writes one API call as several records, one per content block, each
+// carrying a copy of the call's usage under the same `message.id`. Adding every
+// record counted a helper's re-reads 1.4× and a long session's 2.8×. So each id
+// counts once, from its last record (the earlier ones carry partial output
+// counts). The model is read here too: the transcript knows what actually ran,
+// and the dispatch record only knows what was asked for.
 export function sumUsage(transcriptPath) {
   const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 };
   try {
     if (!transcriptPath || !existsSync(transcriptPath)) return totals;
+    const byId = new Map();
+    let anon = 0;
+    let model = null;
     for (const line of readFileSync(transcriptPath, 'utf8').split('\n')) {
       if (!line.trim()) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
-      const u = o && o.message && o.message.usage;
+      const m = o && o.message;
+      const u = m && m.usage;
       if (!u) continue;
+      if (typeof m.model === 'string' && m.model !== '<synthetic>') model = m.model;
+      byId.set(m.id || `anon-${anon++}`, u);
+    }
+    for (const u of byId.values()) {
       totals.turns++;
       totals.input += Number(u.input_tokens) || 0;
       totals.output += Number(u.output_tokens) || 0;
       totals.cacheRead += Number(u.cache_read_input_tokens) || 0;
       totals.cacheWrite += Number(u.cache_creation_input_tokens) || 0;
     }
+    if (model) totals.model = model;
   } catch {}
   return totals;
 }
@@ -79,17 +95,32 @@ export function sumUsage(transcriptPath) {
 export const COSTS_PATH = join(DIR, 'costs.jsonl');
 export const COSTS_MAX = 500;
 
-export function costLine(role, model, usage) {
+export function costLine(role, model, usage, agentId = null) {
   const fam = family(model);
   const d = dollars(usage, model);
   return {
     at: new Date().toISOString(),
-    role: String(role || 'claude'),
+    role: normalizeRole(role || 'claude'),
     model: fam || String(model || 'unknown'),
     priced: Boolean(fam),
+    ...(agentId ? { agent: String(agentId) } : {}),
     input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite,
     dollars: d == null ? null : Number(d.toFixed(4)),
   };
+}
+
+// One row per agent: the last one written. A helper can stop more than once
+// (an older version of this hook restarted it by answering its stop), and each
+// stop wrote the agent's cumulative total again, so summing rows counted the
+// same work two to nine times. Rows from before `agent` was recorded are kept.
+export function latestPerAgent(rows) {
+  const last = new Map();
+  const loose = [];
+  for (const r of rows || []) {
+    if (r && r.agent) last.set(r.agent, r);
+    else if (r) loose.push(r);
+  }
+  return [...loose, ...last.values()];
 }
 
 // R1: this used to read the whole file, push one line, and write the whole
@@ -111,7 +142,7 @@ export function appendCost(row, path = COSTS_PATH) {
 
 export function readCosts(path = COSTS_PATH) {
   try {
-    return readFileSync(path, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    return latestPerAgent(readFileSync(path, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean));
   } catch { return []; }
 }
 
@@ -188,10 +219,6 @@ function appendIndex(dir, rec) {
   } catch {}
 }
 
-function emit(text) {
-  if (text) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SubagentStop', additionalContext: text } }));
-}
-
 export const DEDUPE_MS = 10000;
 export const SEEN_RETURNS_PATH = join(DIR, 'returns-seen.jsonl');
 export const SEEN_RETURNS_MAX = 400;
@@ -246,8 +273,10 @@ function main() {
   const r = parseReturn(text);
   const usage = sumUsage(input.agent_transcript_path);
   const dispatch = dispatchFor(input.session_id, r.task);
-  const ranModel = (dispatch && dispatch.model) || 'inherit';
-  const cost = appendCost(costLine(agent, ranModel === 'inherit' ? '' : ranModel, usage));
+  const asked = dispatch && dispatch.model !== 'inherit' ? dispatch.model : '';
+  const ranModel = usage.model || asked || 'inherit';
+  const agentId = input.agent_id || input.tool_use_id || null;
+  const cost = appendCost(costLine(agent, ranModel === 'inherit' ? '' : ranModel, usage, agentId));
 
   const { run, how, candidates } = resolveReturnRun(input, r, dispatch);
   const dir = run ? join(run.dir, 'returns') : orphanDir(input.session_id);
@@ -266,6 +295,7 @@ function main() {
     run: run ? run.runId : null,
     task: r.task || null,
     agent,
+    agentId,
     model: ranModel,
     status: r.status || null,
     verdict: r.verdict || null,
@@ -274,22 +304,10 @@ function main() {
     dollars: cost.dollars,
   });
 
-  emit(note({ run, how, candidates, file, parsed: r, usage, priced }));
-}
-
-// One line back to the lead: where the return is, what it claims, and the one
-// thing to do about it. It never asks for the work to be done again.
-export function note({ run, how, candidates, file, parsed, usage, priced }) {
-  const parts = [`return saved to ${file} (${formatUsage(usage)}, ${priced})`];
-  if (!run) {
-    const list = (candidates || []).map(c => c.runMd).join(', ');
-    parts.push(`no run owns it (${how})${list ? `; candidates: ${list}` : ''}. Bind this session to the right run before the next dispatch: node scripts/run-init.mjs --bind <RUN.md> --session-id <this session>`);
-  }
-  const id = parsed.task ? `task ${parsed.task}` : 'no TASK line, so no row is keyed to it';
-  const status = parsed.status ? `STATUS ${parsed.status}` : 'no STATUS line';
-  const ev = parsed.evidence ? '' : ' with no EVIDENCE section, so it cannot be graded Done from the return alone';
-  parts.push(`${id}, ${status}${ev}. Read the file, then set the row yourself.`);
-  return `orchestrate ledger: ${parts.join('. ')}`;
+  // Deliberately silent. SubagentStop context is delivered into the helper that
+  // stopped, not to the lead: a note here made the helper answer it, stop again,
+  // and get filed again — nine times over for one planner. The lead already
+  // receives the return as a task notification, and the file is on disk.
 }
 
 // Only when run as a hook, not when a test imports the pure functions above.

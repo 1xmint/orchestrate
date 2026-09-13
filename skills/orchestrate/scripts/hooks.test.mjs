@@ -10,11 +10,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseReturn, sumUsage, describeDispatch, returnFilename, note, costLine, appendCost, readCosts, COSTS_MAX } from './ledger.mjs';
+import { parseReturn, sumUsage, describeDispatch, returnFilename, costLine, appendCost, readCosts, latestPerAgent, COSTS_MAX } from './ledger.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
 import { decide as precompactDecide } from './precompact-check.mjs';
 import { decide, eventId, markSeen } from './guard-agent.mjs';
-import { trimLog } from './lib/tier.mjs';
+import { trimLog, runSpend } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const script = n => join(HERE, n);
@@ -382,6 +382,39 @@ test('ledger: usage is summed from the agent transcript, absent fields as zero',
   assert.deepEqual(sumUsage('/no/such/file'), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, turns: 0 });
 });
 
+test('ledger: one API call written as several records counts once, and the model comes from the transcript', () => {
+  // The host writes a call per content block (thinking, text, tool_use), each
+  // with a copy of the call's usage; early blocks carry a partial output count.
+  const dir = mkdtempSync(join(tmpdir(), 'orch-tr-'));
+  const p = join(dir, 't.jsonl');
+  const rec = (id, out, model = 'claude-opus-5') => JSON.stringify({ type: 'assistant', message: { id, model, usage: { input_tokens: 2, output_tokens: out, cache_read_input_tokens: 200000 } } });
+  writeFileSync(p, [rec('msg_1', 1), rec('msg_1', 3), rec('msg_1', 420), rec('msg_2', 1), rec('msg_2', 90), rec('msg_x', 0, '<synthetic>')].join('\n'));
+  const u = sumUsage(p);
+  assert.equal(u.turns, 3);
+  assert.equal(u.cacheRead, 600000, 'not 1,200,000');
+  assert.equal(u.output, 510, 'the last record of each call carries its output');
+  assert.equal(u.model, 'claude-opus-5', 'a synthetic record is not a model');
+});
+
+test('ledger: readers keep one row per agent and never read unpriced as $0', () => {
+  const rows = [
+    { agent: 'a1', role: 'orchestrate_orch-planner', model: 'opus', dollars: 7 },
+    { agent: 'a1', role: 'orchestrate_orch-planner', model: 'opus', dollars: 7.2 },
+    { agent: 'a2', role: 'Explore', model: 'unknown', dollars: null },
+    { role: 'orch-reviewer', model: 'opus', dollars: 3 },
+  ];
+  const kept = latestPerAgent(rows);
+  assert.equal(kept.length, 3);
+  assert.equal(kept.find(r => r.agent === 'a1').dollars, 7.2);
+  assert.equal(costLine('orchestrate:orch-planner', 'opus', { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, 'a9').role, 'orch-planner');
+  const dir = mkdtempSync(join(tmpdir(), 'orch-spend-'));
+  mkdirSync(join(dir, 'returns'));
+  writeFileSync(join(dir, 'returns', 'returns.jsonl'), [
+    { agentId: 'a1', dollars: 1 }, { agentId: 'a1', dollars: 1.5 }, { agentId: 'a2', dollars: null },
+  ].map(o => JSON.stringify(o)).join('\n'));
+  assert.equal(runSpend(dir), 1.5);
+});
+
 test('ledger: an unnamed model is left unpriced rather than priced as the cheap one', () => {
   const usage = { input: 1000, output: 500, cacheRead: 0, cacheWrite: 0, turns: 1 };
   const known = costLine('orch-implementer', 'sonnet', usage);
@@ -460,7 +493,7 @@ test('ledger: the task rows are left exactly as they were', () => {
     agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
   }, home);
   assert.equal(readFileSync(repo.runMd, 'utf8'), before, 'RUN.md is byte-identical');
-  assert.match(out.json.hookSpecificOutput.additionalContext, /set the row yourself/);
+  assert.equal(out.stdout.trim(), '', 'SubagentStop context lands in the helper and restarts it, so the ledger says nothing');
 });
 
 test('ledger: two returns arriving together are both kept', () => {
@@ -522,8 +555,7 @@ test('ledger: an unowned return is kept where the note says, not guessed into a 
   const kept = join(home, '.claude', 'orchestrate', 'returns', 'sz');
   assert.ok(existsSync(kept), 'the return is kept somewhere real');
   assert.equal(readdirSync(kept).filter(f => f.endsWith('.md')).length, 1);
-  assert.match(out.json.hookSpecificOutput.additionalContext, /no run owns it/);
-  assert.match(out.json.hookSpecificOutput.additionalContext, /--bind/);
+  assert.equal(out.stdout.trim(), '');
 });
 
 test('ledger: an empty message is a silent no-op', () => {
@@ -588,15 +620,10 @@ test('ledger: the model is reported as dispatched, or as inherited', () => {
   assert.equal(describeDispatch(null), null);
 });
 
-test('ledger: the note says where the return is and never asks for the work again', () => {
-  const text = note({
-    run: { runId: 'r1', runMd: '/r/RUN.md' }, how: 'bound to this session', candidates: [],
-    file: '/r/returns/orch-implementer-abc.md', parsed: parseReturn(GOOD_RETURN),
-    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, turns: 1 }, priced: '$0.01 at list price',
-  });
-  assert.match(text, /return saved to/);
-  assert.match(text, /task 9-9-0001/);
-  assert.doesNotMatch(text, /re-dispatch|rewrite the return|grade this return Failed/i);
+test('ledger: a helper that stops is never handed context that would restart it', () => {
+  const src = readFileSync(script('ledger.mjs'), 'utf8');
+  const live = src.split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+  assert.doesNotMatch(live, /additionalContext/);
 });
 
 // -------------------------------------------------------------- turn check --

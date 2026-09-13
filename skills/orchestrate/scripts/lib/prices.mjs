@@ -13,17 +13,21 @@
 
 import { shortModel } from './tier.mjs';
 
-// Per million tokens, from references/models.md (cached 2026-06-24). Cache read
-// is 10% of input; a 5-minute cache write is 125% of input. How a 1-hour cache
-// write lands on plan usage is undocumented, so it is priced as a 5-minute one
-// and the number is a floor, not a bound.
+// Per million tokens (platform.claude.com pricing, checked 2026-09-13). A
+// 5-minute cache write is 125% of input. Cache read is 10% of input, except
+// Fable 5.1 at 2.5%. How a 1-hour cache write lands on plan usage is
+// undocumented, so it is priced as a 5-minute one and the number is a floor.
 export const PRICES = {
   fable: { in: 10, out: 50 },
   opus: { in: 5, out: 25 },
   sonnet: { in: 2, out: 10 },
   haiku: { in: 1, out: 5 },
 };
-export const PRICES_AS_OF = '2026-06-24';
+export const PRICES_AS_OF = '2026-09-13';
+
+export function cacheReadShare(modelId) {
+  return /fable-5[-.]1/i.test(String(modelId || '')) ? 0.025 : 0.1;
+}
 
 // The family a model id belongs to, or null when it is not one of the four.
 // It used to answer `sonnet` for anything it did not recognise, so a dispatch
@@ -48,7 +52,7 @@ export function dollars({ input = 0, output = 0, cacheRead = 0, cacheWrite = 0 }
   if (!f) return null;
   const p = PRICES[f];
   const m = 1e6;
-  return (input * p.in + output * p.out + cacheRead * p.in * 0.1 + cacheWrite * p.in * 1.25) / m;
+  return (input * p.in + output * p.out + cacheRead * p.in * cacheReadShare(model) + cacheWrite * p.in * 1.25) / m;
 }
 
 // The starting table, for a role and model nobody has measured here yet. Every
