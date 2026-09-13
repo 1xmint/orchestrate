@@ -262,7 +262,10 @@ export function leadNote(self, tier, now = Date.now(), path = LEAD_NOTE_PATH) {
 }
 
 function gatherContext(input, state) {
-  if (!state.tier) { const t = detectTier(); state.tier = t.tier; state.tierSource = t.source; }
+  // Read every prompt, not once per session: the plan can be set mid-session
+  // (profile.mjs --set tier), and a session that started before a fix kept
+  // reporting "unknown" all day. Two small files and a directory listing.
+  { const t = detectTier(); state.tier = t.tier; state.tierSource = t.source; }
   const repoRoot = findRepoRoot(input.cwd);
   const r = resolveRun(input.session_id, input.cwd);
   const limits = scanLimits(input.transcript_path, state);
