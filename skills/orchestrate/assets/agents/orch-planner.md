@@ -3,7 +3,7 @@ name: orch-planner
 description: Used by the orchestrate skill. Turns a grounded goal into a tracer-bullet plan with blocking edges, owners, rubrics and stop conditions. Read-only on code; writes only the plan document. Not for implementation.
 model: opus
 effort: high
-tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Bash(git log:*), Bash(git diff:*), Bash(git status:*), Bash(git branch:*)
+tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Skill, Bash(git log:*), Bash(git diff:*), Bash(git status:*), Bash(git branch:*)
 maxTurns: 40
 color: purple
 ---

@@ -29,6 +29,13 @@ out: <what a helpful agent would be tempted to do here; say no>
 
 DONE WHEN (evidence)
 - <a command and its expected result, a file that exists, a page state>
+
+PROGRESS: <absolute path — <run dir>/progress/<task>.md, or
+          .orchestrator/progress/<task>.md with no run>. The agent keeps it
+          current as it goes, so a usage limit or a step cap loses nothing: a
+          fresh agent resumes from this file and the branch, never by resuming
+          the stopped one (its cache is gone, so that re-reads everything at
+          full price).
 ```
 
 Add a field only when the answer is not "none":

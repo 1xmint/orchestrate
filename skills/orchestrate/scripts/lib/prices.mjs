@@ -83,7 +83,7 @@ export function reasonedPrice(role, model) {
 export function estimateDollars(role, model, rows) {
   const f = family(model);
   if (!f) return null;
-  const mine = (rows || []).filter(r => r && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && Number.isFinite(Number(r.dollars)));
+  const mine = (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && r.dollars != null && Number.isFinite(Number(r.dollars)));
   if (mine.length) return mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
   return reasonedPrice(role, model);
 }
@@ -95,7 +95,7 @@ export function estimateDollars(role, model, rows) {
 export function priceTag(role, model, rows, tier, profile) {
   const f = family(model);
   if (!f) return `price tag: ${role} on an unnamed model — not priced, because nothing here knows which model it will run on`;
-  const mine = (rows || []).filter(r => r && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && Number.isFinite(Number(r.dollars)));
+  const mine = (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && r.dollars != null && Number.isFinite(Number(r.dollars)));
   if (mine.length) {
     const avg = mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
     return `price tag: ${role} on ${f} ≈ $${avg.toFixed(2)} at list price, not subscription usage (measured here, n=${mine.length})`;

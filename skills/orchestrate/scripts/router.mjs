@@ -28,7 +28,9 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
+  DIR, readJson, writeJsonAtomic,
 } from './lib/tier.mjs';
+import { readHead, parseListing, listingLine, tokens } from './lib/listing.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -44,7 +46,7 @@ const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // summary that silently fell two paragraphs behind the real card.
 export const FALLBACK_CARD = [
   'orchestrate is loaded. Do ordinary bounded work yourself, including long work and work across several files. Delegate one substantial separable task when isolation, parallel progress, a specialist, or independent scrutiny buys something concrete. Open a run ledger only when several tracks run at once or the work outlives this session.',
-  'Answer a settled question from the record and say where. Answer a question about the world from the world: search it, open the source that settles it, stop when nothing further could change the answer. One authoritative source can be enough. Answer a judgment question with a recommendation and what would change it.',
+  'Answer a settled question from the record and say where. Answer a question about the world from the world: search it, open the source that settles it, stop when nothing further could change the answer. One authoritative source can be enough. Answer a judgment question with a recommendation and what would change it. An installed skill that does what a built-in tool cannot (a blocked page, platform data, a design review) beats rebuilding it; name it in the packet of any helper that needs it. A plain page fetch already comes back summarised.',
   'Before adding a dependency, an abstraction, another research wave or another worker, name the unresolved problem it solves now. A future possibility is not one.',
   'Evidence decides done: reuse a check that already passed, add a test for a real uncovered behaviour, drive a user flow when reading it cannot settle it. Independent review is for money, auth, destructive data, a contract others consume, or real architectural doubt.',
   'Stop and ask, recommendation first, only for money, a public surface, credentials, or a destructive or irreversible action. Authorisation already given is not asked for twice. Mute this card: type "router off".',
@@ -362,6 +364,12 @@ function handlePrompt(input) {
   }
   state.quotaBand = band;
 
+  // The fixed load every step pays for installed plugins, once a week at most.
+  if (substantive) {
+    const line = weeklyListingReport(input.transcript_path);
+    if (line) out.push(`[orchestrate · fixed load] ${line}`);
+  }
+
   if (armedNow) {
     out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);
     // The existing budget and readiness machinery only engages for a run. Point
@@ -373,6 +381,26 @@ function handlePrompt(input) {
   saveSession(state);
   maybePrune();
   emit('UserPromptSubmit', out.join('\n'));
+}
+
+export const LISTING_REPORT_PATH = join(DIR, 'listing-report.json');
+export const LISTING_REPORT_EVERY_MS = 7 * 86400000;
+export const LISTING_REPORT_MIN_TOKENS = 4000;
+
+// Machine-wide, not per session: the plugins are the same in every session, and
+// a weekly reminder is enough for a choice only the user can make. The stamp is
+// written only when something was actually reported, so a session whose
+// listings are not in the transcript yet tries again on its next prompt.
+export function weeklyListingReport(transcriptPath, now = Date.now()) {
+  try {
+    const stamp = readJson(LISTING_REPORT_PATH);
+    if (stamp && now - Number(stamp.at) < LISTING_REPORT_EVERY_MS) return '';
+    if (!transcriptPath) return '';
+    const l = parseListing(readHead(transcriptPath));
+    if (!l.found || tokens(l.skillChars + l.toolChars + l.serverChars) < LISTING_REPORT_MIN_TOKENS) return '';
+    writeJsonAtomic(LISTING_REPORT_PATH, { at: now });
+    return listingLine(l);
+  } catch { return ''; }
 }
 
 // Resume and compaction are the two moments the goal is actually at risk, so

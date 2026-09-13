@@ -115,6 +115,15 @@ if (setIdx >= 0) {
     process.exit(0);
   }
 
+  // Skills that call an outside service bill that service, not the plan. The
+  // user decides once: never use them, ask once per job, or use them freely.
+  const paid = /^paidServices=(never|ask|free)$/.exec(kv);
+  if (paid) {
+    saveProfile({ paidServices: paid[1], paidServicesSetAt: new Date().toISOString() });
+    console.log(`paid outside services: ${paid[1]}`);
+    process.exit(0);
+  }
+
   const m = /^tier=(\w+)$/.exec(kv);
   if (!m || !TIERS.has(m[1])) {
     console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask`);
@@ -140,44 +149,8 @@ function detectHost() {
 }
 
 // ---- tier -------------------------------------------------------------------
-function mapTier(raw) {
-  if (!raw || typeof raw !== 'string') return null;
-  const s = raw.toLowerCase();
-  if (/max[_-]?20x|max20/.test(s)) return 'max20';
-  if (/max[_-]?5x|max5/.test(s)) return 'max5';
-  if (/\bmax\b/.test(s)) return 'max5'; // unversioned "max": assume the smaller Max
-  if (/enterprise|team/.test(s)) return 'team';
-  if (/\bpro\b|claude_pro|_pro_/.test(s)) return 'pro';
-  return null;
-}
-
-// The tier keys live under a nested account object whose shape has changed
-// between versions, so look for them anywhere in the file, shallowly.
-function findKeys(obj, names, depth = 0, out = {}) {
-  if (!obj || typeof obj !== 'object' || depth > 6) return out;
-  for (const [k, v] of Object.entries(obj)) {
-    if (names.includes(k) && v != null && !(k in out)) out[k] = v;
-    else if (v && typeof v === 'object') findKeys(v, names, depth + 1, out);
-  }
-  return out;
-}
-
-function detectTier() {
-  const override = readJson(OVERRIDE_PATH);
-  if (override && override.tier && override.tier !== 'unknown' && TIERS.has(override.tier)) {
-    return { tier: override.tier, source: `user override set ${String(override.setAt).slice(0, 10)} (${OVERRIDE_PATH})` };
-  }
-  const cfg = readJson(join(HOME, '.claude.json'));
-  if (cfg) {
-    const found = findKeys(cfg, ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']);
-    for (const key of ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']) {
-      const t = mapTier(found[key]);
-      if (t) return { tier: t, source: `~/.claude.json ${key}="${found[key]}"` };
-    }
-  }
-  if (process.env.ANTHROPIC_API_KEY) return { tier: 'api', source: 'ANTHROPIC_API_KEY is set' };
-  return { tier: 'unknown', source: 'no signal; ask the user once, then --set tier=...' };
-}
+// One detector for the whole plugin: lib/tier.mjs. This file used to carry its
+// own copy, which fell behind the host's current account fields.
 
 // ---- providers --------------------------------------------------------------
 function onPath(cmd) {
@@ -298,7 +271,7 @@ function detectSkills(repoRoot) {
 // One copy of this rule, in lib/tier.mjs, because it has to know about both
 // install paths: loose files in ~/.claude/agents, and a plugin that registers
 // them from its own folder without copying anything.
-import { agentsInstalled as detectAgents, latestRun } from './lib/tier.mjs';
+import { agentsInstalled as detectAgents, latestRun, detectTier } from './lib/tier.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { latestPerAgent } from './ledger.mjs';
 
@@ -339,7 +312,7 @@ function pricesLine(tier) {
     } catch {}
     const by = new Map();
     for (const r of rows) {
-      if (!r.role || !r.model || r.dollars == null || !Number.isFinite(Number(r.dollars))) continue;
+      if (!r.agent || !r.role || !r.model || r.dollars == null || !Number.isFinite(Number(r.dollars))) continue;
       const k = `${normalizeRole(r.role).replace(/^orch-/, '')}/${r.model}`;
       const v = by.get(k) || { n: 0, sum: 0 };
       v.n++; v.sum += Number(r.dollars);
@@ -380,6 +353,8 @@ if (brief) {
     console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')})` : ''}`);
     console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''}`);
     console.log(`this plan includes: ${included}`);
+    const paidMode = loadProfile().paidServices || 'ask';
+    console.log(`skills that call a paid outside service (they need their own API key or credits): ${{ never: 'never use them — the user said so', ask: 'ask the user once per job before using one', free: 'use them when they fit' }[paidMode] || 'ask first'}`);
     console.log(`providers: ${prov}`);
     console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none'}`);
     console.log(pricesLine(tier.tier));

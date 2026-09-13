@@ -79,9 +79,21 @@ test('memory is on the two roles that gain from it, and off the two that would b
   assert.ok(!has('orch-debugger'), 'a stale note must not steer a diagnosis');
 });
 
+test('the researcher can use installed skills and tool servers, but cannot edit code or dispatch', () => {
+  // It moved from an allowlist, which shut out every installed skill and tool
+  // server, to a denylist. Its instructions limit writing to its findings file.
+  const fm = frontmatter(readFileSync(join(AGENTS, 'orch-researcher.md'), 'utf8'));
+  assert.doesNotMatch(fm, /^tools:/m);
+  const deny = (/^disallowedTools: (.+)$/m.exec(fm) || [])[1] || '';
+  for (const t of ['Agent', 'SendMessage', 'Artifact', 'NotebookEdit']) assert.match(deny, new RegExp(`\\b${t}\\b`), t);
+  for (const n of ['orch-planner', 'orch-reviewer']) {
+    assert.match((/^tools: (.+)$/m.exec(readFileSync(join(AGENTS, `${n}.md`), 'utf8')) || [])[1], /\bSkill\b/, `${n} can use a skill`);
+  }
+});
+
 test('read-only roles keep read-only tool sets', () => {
   const tools = n => (/^tools: (.+)$/m.exec(readFileSync(join(AGENTS, `${n}.md`), 'utf8')) || [])[1] || '';
-  for (const n of ['orch-reviewer', 'orch-planner', 'orch-researcher']) {
+  for (const n of ['orch-reviewer', 'orch-planner']) {
     const t = tools(n);
     assert.ok(t, `${n} declares a tool set`);
     assert.doesNotMatch(t, /\bEdit\b|\bNotebookEdit\b/, `${n} cannot edit`);
