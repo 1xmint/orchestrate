@@ -2,6 +2,31 @@
 
 Resume point for building the `orchestrate` skill.
 
+## Unreleased — keep going without idling, 2026-09-13
+
+The stall: "keep coding until it's done" did one turn, started CI or an agent,
+and handed back. The only thing that keeps a turn alive is a Stop hook that
+refuses the stop, and `turn-check.mjs` fired only for a bound ledger run — and
+only while the skill was loaded, which direct work rarely does. So nothing
+covered the common case. 232 tests pass (up from 221).
+
+- `persist-check.mjs`, a new plugin-wide Stop hook (in `hooks/hooks.json`, and
+  with the router flag on a script install). Armed only by the router on an
+  explicit ask ("keep going", "until it's done", "execute the plan"; never a
+  question). Continues while each step does real work; stops and disarms on a
+  done report, a question to the user, a denied dispatch, a repeated error, a
+  step with no work, or 25 steps. Check-in line every 6 steps, cost warning on a
+  long session. Unarmed sessions: one small file read, no output.
+- Deliberately not in `turn-check.mjs` as first planned: a frontmatter hook is
+  dead exactly where the stall happens.
+- No PostCompact hook, also a change from the plan: the router's existing
+  `SessionStart:compact` handler already restores the run after compaction. It
+  now restores the pinned goal verbatim too.
+- `Monitor` is the lead's default way to wait (`lanes.md`), matching the worker
+  rule.
+- Not measured live yet. Owed: one armed run on a small real goal, with
+  `measure.mjs --latest --dollars` before and after.
+
 ## v0.11.0 — most coherent, reliable, Claude-native, 2026-09-10
 
 Three read-only scouts placed v0.10.0 at or near the front of the field on

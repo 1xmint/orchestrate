@@ -67,7 +67,7 @@ export function stateLine(ctx, prefix) {
     : 'you: model not known here';
   const agents = `orch-agents ${ctx.agents}/6`;
   const limits = ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none';
-  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}`;
+  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}${ctx.persist ? ' · auto-continue on' : ''}`;
 }
 
 // Which planned tasks have nothing left to wait for. This is a fact the model
@@ -223,7 +223,34 @@ function gatherContext(input, state) {
     candidates: r.candidates || [],
     limits,
     self: self || state.self || null,
+    persist: Boolean(state.persist && state.persist.armed),
   };
+}
+
+// ---- persistence intent -----------------------------------------------------
+// The one place this file still reads wording, kept deliberately narrow: an
+// explicit ask to keep going toward a goal, never the shape of the work. A
+// false arm is cheap, because persist-check.mjs stops on the first step that
+// does no work. A question never arms it, and "persist off" turns it off for
+// the session.
+export const PERSIST_INTENT = /\b(keep (going|coding|working|building|at it)|don'?t stop|until (it'?s |it is |they'?re |the [\w-]+( [\w-]+)? (is|are) |everything is |all (of it |of them )?(is |are )?)?(done|finished|complete|working|green|passing|shipped|live)\b|(execute|implement|carry out|work through|finish) (the|this|that|my) (whole |full |entire |rest of the )?(plan|roadmap|spec|checklist|task list|todo list|backlog)|finish (it|everything|all of it|the rest)\b|build (out )?the (whole|entire|full) )/i;
+
+export function persistIntent(text) {
+  const t = String(text || '').trim();
+  if (!t || /\?\s*$/.test(t)) return false;
+  return PERSIST_INTENT.test(t);
+}
+
+export const GOAL_CAP = 600;
+
+export function persistLine(persist) {
+  if (!persist || !persist.armed) return '';
+  const g = String(persist.goal || '').replace(/\s+/g, ' ').trim();
+  return `auto-continue is on toward: "${g.length > GOAL_CAP ? `${g.slice(0, GOAL_CAP - 3)}...` : g}". A Stop is refused while each step does real work; it ends when you say the goal is met, ask the user something, a dispatch is denied, the same error repeats, a step does nothing, or after 25 steps. Waiting on CI or an agent: Monitor it and keep doing independent work. "persist off" turns it off.`;
+}
+
+function transcriptSize(p) {
+  try { return p ? statSync(p).size : 0; } catch { return 0; }
 }
 
 function newState(input) {
@@ -263,6 +290,24 @@ function handlePrompt(input) {
 
   const trimmed = text.trim();
   if (/^router (off|on)$/i.test(trimmed)) { state.muted = /off$/i.test(trimmed); saveSession(state); return; }
+  if (/^persist (off|on)$/i.test(trimmed)) {
+    const off = /off$/i.test(trimmed);
+    state.persistMuted = off;
+    if (off && state.persist) state.persist = { ...state.persist, armed: false, endedAt: new Date().toISOString(), endReason: 'the user said persist off' };
+    saveSession(state);
+    return;
+  }
+
+  // Armed before the mute check: "router off" silences the card, not a loop
+  // the user asked for by name.
+  let armedNow = false;
+  if (!state.persistMuted && persistIntent(trimmed)) {
+    // A bare "keep going" names no goal; it means the one already pinned.
+    const prior = state.persist && state.persist.goal;
+    const goal = prior && trimmed.split(/\s+/).length < 4 ? prior : trimmed.slice(0, 4000);
+    state.persist = { armed: true, goal, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
+    armedNow = true;
+  }
   if (state.muted) { saveSession(state); return; }
 
   // A slash command, a paste or a two-word reply is not the start of a session's
@@ -284,6 +329,13 @@ function handlePrompt(input) {
     const hash = stateHash(ctx);
     if (state.lastStateHash && hash !== state.lastStateHash) out.push(stateLine(ctx, '[orchestrate · changed]'));
     state.lastStateHash = hash;
+  }
+
+  if (armedNow) {
+    out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);
+    // The existing budget and readiness machinery only engages for a run. Point
+    // at it once, for work big enough to deserve it, rather than rebuild it.
+    if (!ctx.run) out.push('If this goal is several separable tracks, or will outlive this session, open a run with a budget first (run-init.mjs --budget) so readiness and spend are tracked; for direct work, just start.');
   }
 
   if (substantive) state.prompts++;
@@ -312,6 +364,10 @@ function handleSessionStart(input) {
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
   }
+  // A summary can paraphrase the goal away while the loop keeps going, and in an
+  // unattended loop there may be no user prompt to bring it back. Restore it
+  // verbatim here, the same moment the run excerpt is restored.
+  if (state.persist && state.persist.armed) out.push(`[orchestrate · ${word}] ${persistLine(state.persist)}`);
 
   state.cardSent = true;
   state.lastStateHash = stateHash(ctx);

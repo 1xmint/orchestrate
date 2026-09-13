@@ -65,8 +65,10 @@ saved whole under the run and indexed). Two more ask for the Pickup line to be
 honest, only for a coordinated run this session is bound to: `turn-check.mjs`
 before a turn ends, and `precompact-check.mjs` before compaction summarizes
 the conversation away, which is the one moment a stale Pickup line is gone for
-good rather than just out of date. Nothing mechanical decides what a task
-deserves.
+good rather than just out of date. `persist-check.mjs` keeps a turn going when
+the user asked you to keep going and your last step did real work; its stops
+are in `lanes.md`. Wait on CI or an agent with `Monitor`, never by ending the
+turn. Nothing mechanical decides what a task deserves.
 
 ## 0. Profile
 
