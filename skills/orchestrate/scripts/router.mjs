@@ -31,6 +31,7 @@ import {
   DIR, readJson, writeJsonAtomic, lastContextTokens, staleRunsUnder,
 } from './lib/tier.mjs';
 import { readHead, parseListing, listingLine, tokens } from './lib/listing.mjs';
+import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -418,6 +419,13 @@ function handlePrompt(input) {
     if (lead) out.push(lead);
     const hidden = staleNote(ctx.repoRoot);
     if (hidden) out.push(hidden);
+    // A usage limit just landed: the moment helpers may have died mid-task.
+    const limitKey = ctx.limits.join(',');
+    if (limitKey && state.recoverShownFor !== limitKey) {
+      const lost = unreturnedNote(state);
+      if (lost) out.push(lost);
+      state.recoverShownFor = limitKey;
+    }
   }
 
   if (armedNow) {
@@ -431,6 +439,29 @@ function handlePrompt(input) {
   saveSession(state);
   maybePrune();
   emit('UserPromptSubmit', out.join('\n'));
+}
+
+// Dispatches with no matching return. Matched in order, by role and, when both
+// sides carry one, by task id. Said only at the moments work may have died —
+// a resume, a compaction, a usage limit — because a helper still running looks
+// exactly the same from here.
+export function unreturned(state) {
+  const returns = (state && Array.isArray(state.returned) ? state.returned : []).map(r => ({ ...r, used: false }));
+  const out = [];
+  for (const d of (state && Array.isArray(state.dispatches) ? state.dispatches : [])) {
+    const role = normalizeRole(d.agent);
+    const hit = returns.find(r => !r.used && r.agent === role && (!d.task || !r.task || r.task === d.task));
+    if (hit) hit.used = true;
+    else out.push({ role, task: d.task || d.key || null, progress: d.progress || null, at: d.at });
+  }
+  return out;
+}
+
+export function unreturnedNote(state, max = 5) {
+  const list = unreturned(state);
+  if (!list.length) return '';
+  const shown = list.slice(-max).map(u => `${u.role}${u.task ? ` ${u.task}` : ''}${u.progress ? ` — progress ${u.progress}` : ' — no PROGRESS file named'}`).join('; ');
+  return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session never returned: ${shown}. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
 }
 
 // Plans set aside as stale, said once per plan on this machine, so a user who
@@ -495,6 +526,8 @@ function handleSessionStart(input) {
   // unattended loop there may be no user prompt to bring it back. Restore it
   // verbatim here, the same moment the run excerpt is restored.
   if (state.persist && state.persist.armed) out.push(`[orchestrate · ${word}] ${persistLine(state.persist)}`);
+  const lost = unreturnedNote(state);
+  if (lost) out.push(lost);
 
   state.cardSent = true;
   state.lastStateHash = stateHash(ctx);

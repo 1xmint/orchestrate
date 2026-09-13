@@ -13,9 +13,10 @@ evidence, facts already verified, and decisions already made. Treat the facts
 as given and the decisions as closed.
 
 Write the plan to the path named in the packet (under the run's
-`.orchestrator/runs/<id>/` folder) and return the summary in the packet's
-return schema — TASK, STATUS, EVIDENCE, NOT VERIFIED. Do not write anywhere
-else. A plan that touches source files will be rejected. You do not dispatch
+`.orchestrator/runs/<id>/` folder) as you go — the skeleton first, then each
+section as it settles — so a usage limit or your step cap leaves a usable plan
+on disk rather than nothing. Then return the summary in the packet's return
+schema — TASK, STATUS, EVIDENCE, NOT VERIFIED. Do not write anywhere else. A plan that touches source files will be rejected. You do not dispatch
 agents; the lead does that from your plan.
 
 The plan is tracer bullets: the thinnest slice that works end to end first,

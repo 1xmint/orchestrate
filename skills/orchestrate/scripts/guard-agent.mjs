@@ -346,6 +346,9 @@ function recordDispatch(input, ti) {
       model: String(ti.model || 'inherit'),
       task: (/^\s*TASK:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
       key: taskKey(ti.prompt),
+      // Where the agent keeps its progress, so work stopped by a usage limit is
+      // found from disk rather than by resuming the stopped agent.
+      progress: (/^\s*PROGRESS:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
       run: runFor(input, ti),
     });
     state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;

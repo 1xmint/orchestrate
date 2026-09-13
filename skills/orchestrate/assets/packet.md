@@ -31,8 +31,10 @@ DONE WHEN (evidence)
 - <a command and its expected result, a file that exists, a page state>
 
 PROGRESS: <absolute path — <run dir>/progress/<task>.md, or
-          .orchestrator/progress/<task>.md with no run>. The agent keeps it
-          current as it goes, so a usage limit or a step cap loses nothing: a
+          .orchestrator/progress/<task>.md with no run>. Implementer,
+          debugger, researcher and planner keep it current as they go (the
+          browser's saved screenshots and the reviewer's short read are theirs),
+          so a usage limit or a step cap loses nothing: a
           fresh agent resumes from this file and the branch, never by resuming
           the stopped one (its cache is gone, so that re-reads everything at
           full price).

@@ -25,7 +25,7 @@ import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } fr
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { DIR, sanitizeId, loadSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
+import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
 
 // Lenient on purpose, and it stays lenient: a return that got the shape almost
@@ -303,6 +303,17 @@ function main() {
     file,
     dollars: cost.dollars,
   });
+
+  // What came back, against this session's dispatch records, so the router can
+  // say which helpers never returned after a usage limit stopped them.
+  try {
+    const state = input.session_id && loadSession(input.session_id);
+    if (state) {
+      state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), task: r.task || null, status: r.status || null });
+      saveSession(state);
+    }
+  } catch {}
 
   // Deliberately silent. SubagentStop context is delivered into the helper that
   // stopped, not to the lead: a note here made the helper answer it, stop again,

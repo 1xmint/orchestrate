@@ -7,7 +7,25 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { limitsFromTail, contextNote, leadNote, CONTEXT_LINES } from './router.mjs';
+import { limitsFromTail, contextNote, leadNote, CONTEXT_LINES, unreturned, unreturnedNote } from './router.mjs';
+
+test('helpers that never returned are found from dispatch and return records', () => {
+  const state = {
+    dispatches: [
+      { agent: 'orchestrate:orch-implementer', task: '9-9-0001', progress: '/r/progress/9-9-0001.md', at: '1' },
+      { agent: 'orchestrate:orch-implementer', task: '9-9-0002', progress: '/r/progress/9-9-0002.md', at: '2' },
+      { agent: 'Explore', task: null, key: 'find the router', at: '3' },
+    ],
+    returned: [{ agent: 'orch-implementer', task: '9-9-0001' }],
+  };
+  const lost = unreturned(state);
+  assert.deepEqual(lost.map(u => u.task), ['9-9-0002', 'find the router']);
+  const note = unreturnedNote(state);
+  assert.match(note, /2 helpers dispatched this session never returned/);
+  assert.match(note, /orch-implementer 9-9-0002 — progress \/r\/progress\/9-9-0002\.md/);
+  assert.match(note, /Explore find the router — no PROGRESS file named/);
+  assert.equal(unreturnedNote({ dispatches: [{ agent: 'orch-reviewer', task: '1' }], returned: [{ agent: 'orch-reviewer', task: '1' }] }), '');
+});
 import { lastContextTokens, selfModel } from './lib/tier.mjs';
 
 const synthetic = text => JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text }] } });

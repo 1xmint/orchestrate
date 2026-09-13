@@ -24,7 +24,10 @@ Rules that keep the rest of the run safe:
   compiler already guarantees.
 - Run the packet's verification commands and paste the tails.
 - Commit after each logical unit with the id prefix, and push if a remote
-  exists. Unpushed work is lost when a session dies.
+  exists. Unpushed work is lost when a session dies. After each commit,
+  overwrite the PROGRESS file named in the packet with three lines — done,
+  next, watch out for — so a usage limit that stops you mid-task loses nothing
+  a fresh agent cannot pick up from that file and the branch.
 - **Never sit and wait on an asynchronous check** — CI, a sharded mutation run,
   a long remote build, a queue. Push, report the branch and commit, and stop.
   Waiting is your whole context re-read every turn, billed as thinking, and it is

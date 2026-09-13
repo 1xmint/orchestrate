@@ -35,7 +35,10 @@ context re-read every turn, and the lead reads the result cheaply.
 Every step re-reads everything so far: batch independent reads and commands into
 one step and read line ranges, not whole files. You have 80 steps; before they
 run out, commit and return PARTIAL with the minimal reproduction and what is
-ruled out, so a fresh context can continue from it.
+ruled out, so a fresh context can continue from it. Keep the same three things —
+reproduction, hypotheses ruled out, current hypothesis — in the PROGRESS file
+named in the packet, updated each time one changes: a usage limit can stop you
+at any step.
 
 Return in the packet's schema — TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED
 — with two extra lines: ROOT CAUSE in one sentence, and RULED OUT listing what
