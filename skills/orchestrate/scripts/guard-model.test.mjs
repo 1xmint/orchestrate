@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { modelDecision, taskKey, FORK_MAX_CONTEXT } from './guard-agent.mjs';
 import { normalizeRole, estimateDollars } from './lib/prices.mjs';
 import { snapshotFrom, readQuota } from './lib/quota.mjs';
+import { quotaPhrase, quotaBand } from './router.mjs';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -74,6 +75,16 @@ test('near the plan limit no helper starts, whatever its model', () => {
   assert.equal(modelDecision({ subagent_type: 'orch-planner', model: 'opus', prompt: 'x' }, { ...pro, quota: week }).prefix, 'quota');
   const calm = snapshotFrom({ rate_limits: { five_hour: { used_percentage: 20 } } });
   assert.equal(modelDecision({ subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'x' }, { ...pro, quota: calm }), null);
+});
+
+test('the router shows usage and names the band, not every percent', () => {
+  const q = pct => snapshotFrom({ rate_limits: { five_hour: { used_percentage: pct }, seven_day: { used_percentage: 12 } } });
+  assert.equal(quotaPhrase(q(23.4)), ' · usage 5h 23% wk 12%');
+  assert.equal(quotaPhrase(null), '');
+  assert.equal(quotaBand(q(30)), 'ok');
+  assert.equal(quotaBand(q(65)), 'caution');
+  assert.equal(quotaBand(q(85)), 'stop');
+  assert.equal(quotaBand(null), 'none');
 });
 
 test('a stale or empty quota snapshot reads as absent', () => {

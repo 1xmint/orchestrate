@@ -93,6 +93,14 @@ test('every hardstop fires', () => {
   assert.equal(persistDecision({ rec: first.rec, scan: { ...base, errors: ['Error: y'] } }).kind, 'continue');
 });
 
+test('the loop stops near the 5-hour limit, and only there', () => {
+  const at = pct => ({ fiveHour: { pct, resetsAt: null }, week: null });
+  assert.equal(persistDecision({ scan: base, quota: at(91) }).kind, 'stop');
+  assert.match(persistDecision({ scan: base, quota: at(91) }).why, /91%/);
+  assert.equal(persistDecision({ scan: base, quota: at(70) }).kind, 'continue');
+  assert.equal(persistDecision({ scan: base, quota: null }).kind, 'continue', 'no status line means no usage stop');
+});
+
 test('the check-in comes at its cadence, the cost flag only on a large session', () => {
   assert.match(persistDecision({ rec: { steps: PERSIST_CHECKIN_EVERY - 1 }, scan: base }).why, /Check-in/);
   assert.doesNotMatch(persistDecision({ rec: { steps: PERSIST_CHECKIN_EVERY }, scan: base }).why, /Check-in/);

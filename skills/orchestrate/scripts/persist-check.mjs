@@ -27,6 +27,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
+import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -88,7 +89,7 @@ export function scanTurn(tail) {
 
 // Continue or stop, from the scan and the loop's own record. Pure: returns the
 // next record rather than writing it.
-export function persistDecision({ rec = {}, scan, transcriptSize = 0, goal = '' }) {
+export function persistDecision({ rec = {}, scan, transcriptSize = 0, goal = '', quota = null }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -96,7 +97,8 @@ export function persistDecision({ rec = {}, scan, transcriptSize = 0, goal = '' 
   const g = shortGoal(goal);
   const stop = why => ({ rec: out, kind: 'stop', why });
 
-  if (scan.denied) return stop('a dispatch was denied (budget or credential)');
+  if (quota && quota.fiveHour && quota.fiveHour.pct >= PERSIST_STOP_FIVE_HOUR) return stop(`the 5-hour usage window is at ${Math.round(quota.fiveHour.pct)}% (resets ${resetClock(quota.fiveHour.resetsAt)})`);
+  if (scan.denied) return stop('a dispatch was denied (budget, credential or usage limit)');
   if (repeat) return stop(`the same error came back twice: ${repeat}`);
   if (scan.asked) return stop('the last message asks the user something');
   if (scan.goalMet) return stop('the last message says the goal is met');
@@ -133,7 +135,7 @@ export function check(input) {
   // Exactly the bytes since the last check: any floor here re-reads the previous
   // step's work and counts it again, which is a loop that never sees "no work".
   const tail = input.transcript_path && size > from ? readTail(input.transcript_path, Math.min(size - from, PERSIST_SCAN_CAP)) : '';
-  const dec = persistDecision({ rec, scan: scanTurn(tail), transcriptSize: size, goal: p.goal });
+  const dec = persistDecision({ rec, scan: scanTurn(tail), transcriptSize: size, goal: p.goal, quota: readQuota() });
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };
   try { writeJsonAtomic(path, store); } catch {}

@@ -29,6 +29,7 @@ import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
 } from './lib/tier.mjs';
+import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -67,7 +68,24 @@ export function stateLine(ctx, prefix) {
     : 'you: model not known here';
   const agents = `orch-agents ${ctx.agents}/6`;
   const limits = ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none';
-  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}${ctx.persist ? ' · auto-continue on' : ''}`;
+  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
+}
+
+// Live plan usage, when the status line has reported it. Past the caution line
+// it says what that means for the next choice, once per crossing.
+export function quotaPhrase(q) {
+  if (!q) return '';
+  const parts = [];
+  if (q.fiveHour) parts.push(`5h ${Math.round(q.fiveHour.pct)}%`);
+  if (q.week) parts.push(`wk ${Math.round(q.week.pct)}%`);
+  return parts.length ? ` · usage ${parts.join(' ')}` : '';
+}
+
+export function quotaBand(q) {
+  if (!q || !q.fiveHour) return 'none';
+  if (q.fiveHour.pct >= HELPER_STOP_FIVE_HOUR) return 'stop';
+  if (q.fiveHour.pct >= CAUTION_FIVE_HOUR) return 'caution';
+  return 'ok';
 }
 
 // Which planned tasks have nothing left to wait for. This is a fact the model
@@ -155,6 +173,8 @@ export function stateHash(ctx) {
     focus ? `${focus.done || 0}/${focus.rows || 0}` : '',
     focus && focus.edgesMissing ? 'edges?' : '',
     ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : '',
+    // The band, not the number: a line every percent would be noise.
+    quotaBand(ctx.quota),
   ].join('|');
 }
 
@@ -224,6 +244,7 @@ function gatherContext(input, state) {
     limits,
     self: self || state.self || null,
     persist: Boolean(state.persist && state.persist.armed),
+    quota: readQuota(),
   };
 }
 
@@ -330,6 +351,16 @@ function handlePrompt(input) {
     if (state.lastStateHash && hash !== state.lastStateHash) out.push(stateLine(ctx, '[orchestrate · changed]'));
     state.lastStateHash = hash;
   }
+
+  // What a usage band means for the next choice, said once per band.
+  const band = quotaBand(ctx.quota);
+  if (band !== (state.quotaBand || 'none') && (band === 'caution' || band === 'stop')) {
+    const h = ctx.quota.fiveHour;
+    out.push(band === 'stop'
+      ? `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}% (resets ${resetClock(h.resetsAt)}). No new helpers will start. Finish what is in flight here, keep steps few, and tell the user where things stand if the work will not fit.`
+      : `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}%. Work serially, on the cheapest model that can do each step, and do small things yourself rather than starting helpers.`);
+  }
+  state.quotaBand = band;
 
   if (armedNow) {
     out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);

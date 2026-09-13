@@ -406,6 +406,20 @@ test('a profile file from an older version still reads', () => {
   assert.equal(out.router.enabled, true);
 });
 
+test('the plan is read from the account type when the rate-limit tier is generic', () => {
+  // The shape a current host writes for a Pro account: the rate-limit tier says
+  // nothing ("default_claude_ai"), the organization type says Pro.
+  const read = oauthAccount => JSON.parse(inFakeHome(`
+    const { detectTier } = await import(${JSON.stringify(TIER)});
+    console.log(JSON.stringify(detectTier()));
+  `, home => writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount }))));
+  const pro = read({ billingType: 'stripe_subscription', seatTier: null, organizationType: 'claude_pro', organizationRateLimitTier: 'default_claude_ai', userRateLimitTier: null });
+  assert.equal(pro.tier, 'pro');
+  assert.match(pro.source, /organizationType="claude_pro"/);
+  assert.equal(read({ organizationType: 'claude_max', organizationRateLimitTier: 'default_claude_max_20x' }).tier, 'max20');
+  assert.equal(read({ organizationType: 'claude_max' }).tier, 'max5');
+});
+
 // ---- which task could start right now ---------------------------------------
 // The question a session could not answer, which is why one was watched sitting
 // idle on a single agent with a finished plan on the board.

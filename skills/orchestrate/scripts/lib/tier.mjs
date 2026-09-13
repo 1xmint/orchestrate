@@ -37,7 +37,7 @@ export function mapTier(raw) {
   const s = raw.toLowerCase();
   if (/max[_-]?20x|max20/.test(s)) return 'max20';
   if (/max[_-]?5x|max5/.test(s)) return 'max5';
-  if (/\bmax\b/.test(s)) return 'max5';
+  if (/(^|[^a-z])max([^a-z]|$)/.test(s)) return 'max5';
   if (/enterprise|team/.test(s)) return 'team';
   if (/\bpro\b|claude_pro|_pro_/.test(s)) return 'pro';
   return null;
@@ -59,10 +59,15 @@ export function detectTier() {
   if (override && override.tier && override.tier !== 'unknown' && TIERS.includes(override.tier)) {
     return { tier: override.tier, source: `user override set ${String(override.setAt || '').slice(0, 10)} (${PROFILE_PATH})` };
   }
+  // `organizationType` ("claude_pro", "claude_max") is where current hosts put
+  // the plan; the rate-limit tier can be a generic "default_claude_ai" that says
+  // nothing. These fields are undocumented, so the source is always shown, and
+  // the credentials file is never read.
   const cfg = readJson(join(HOME, '.claude.json'));
   if (cfg) {
-    const found = findKeys(cfg, ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']);
-    for (const key of ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier']) {
+    const keys = ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier', 'organizationType'];
+    const found = findKeys(cfg, keys);
+    for (const key of keys) {
       const t = mapTier(found[key]);
       if (t) return { tier: t, source: `~/.claude.json ${key}="${found[key]}"` };
     }
