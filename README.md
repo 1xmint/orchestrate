@@ -211,11 +211,18 @@ and one authoritative document did not. Neither is something a hook can judge.
 ### If it has your plan wrong
 
 Your plan decides what orchestrate lets helpers spend. On Pro it is strictest,
-and on Max it allows Fable and more room before stopping. It reads the plan from
-`~/.claude.json`. That file belongs to the account a terminal `claude` signed in
-with. The Claude app can be signed in to a different account, and then the plan
-it reads is the wrong one. On one machine the file said Pro, from a second
-account, while the app ran on Max 5x.
+and on Max it allows Fable and more room before stopping.
+
+**It works out the plan per Claude account.**
+- **In a terminal**, it reads the plan from `~/.claude.json`, which is refreshed
+  when you sign in. Switching accounts there needs nothing from you.
+- **In the Claude app**, it first checks which account the session runs on. The
+  app can be signed in to a different account than the terminal. On one machine
+  the file described a Pro account used for a day, while the app ran on Max 5x.
+  - If the file describes the app's account, it uses the file's plan.
+  - If not, it does not borrow the other account's plan. It asks you once, and
+    remembers the answer for that account. After that, switching back and forth
+    between accounts picks the right plan on its own.
 
 Check what it read and where from:
 
@@ -223,15 +230,15 @@ Check what it read and where from:
 node skills/orchestrate/scripts/profile.mjs
 ```
 
-Set it if it is wrong (`pro`, `max5` for the $100 plan, `max20` for the $200
-plan, `team`, or `api`). Your setting wins over what the file says:
+Set it for the account you are on (`pro`, `max5` for the $100 plan, `max20` for
+the $200 plan, `team`, or `api`):
 
 ```bash
 node skills/orchestrate/scripts/profile.mjs --set tier=max5
 ```
 
-`--clear` goes back to reading the file. Your other choices, such as paid
-plugins, stay. From a plugin install the scripts live under
+`--clear` forgets the setting for this account and goes back to detecting it.
+Your other choices, such as paid plugins, stay. From a plugin install the scripts live under
 `~/.claude/plugins/cache/orchestrate/orchestrate/<version>/skills/orchestrate/scripts/`,
 and from a script install under `~/.claude/skills/orchestrate/scripts/`.
 

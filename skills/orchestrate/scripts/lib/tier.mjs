@@ -54,28 +54,79 @@ export function findKeys(obj, names, depth = 0, out = {}) {
   return out;
 }
 
+// Which Claude account this session runs on. `~/.claude.json` describes the
+// account a terminal `claude` last signed in with, and the Claude app keeps its
+// own sign-in: on one machine the file described a Pro account used for a day
+// while every desktop session ran on Max 5x. The desktop app names each
+// session's account in its own folders (`claude-code-sessions/<account>/<org>/
+// <host session id>.json`) and passes the host session id to hooks, so the org
+// is known without reading any credential. Terminal sessions have no such
+// record, and there the file is the account in use.
+function appDirs() {
+  const dirs = [];
+  if (process.env.APPDATA) dirs.push(join(process.env.APPDATA, 'Claude'));
+  dirs.push(join(HOME, 'AppData', 'Roaming', 'Claude'));
+  dirs.push(join(HOME, 'Library', 'Application Support', 'Claude'));
+  dirs.push(join(process.env.XDG_CONFIG_HOME || join(HOME, '.config'), 'Claude'));
+  return [...new Set(dirs)];
+}
+
+export function sessionAccount(hostSessionId = process.env.CLAUDE_CODE_HOST_SESSION_ID) {
+  if (!hostSessionId || !/^[\w-]{8,80}$/.test(hostSessionId)) return null;
+  for (const dir of appDirs()) {
+    const base = join(dir, 'claude-code-sessions');
+    let accounts; try { accounts = readdirSync(base); } catch { continue; }
+    for (const account of accounts) {
+      let orgs; try { orgs = readdirSync(join(base, account)); } catch { continue; }
+      for (const org of orgs) {
+        if (existsSync(join(base, account, org, `${hostSessionId}.json`))) return { accountUuid: account, orgUuid: org };
+      }
+    }
+  }
+  return null;
+}
+
+const PLAN_KEYS = ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier', 'organizationType'];
+
+// The org this session runs on, and whether ~/.claude.json describes it.
+export function currentAccount() {
+  const cfg = readJson(join(HOME, '.claude.json'));
+  const fileOrg = cfg ? findKeys(cfg, ['organizationUuid']).organizationUuid || null : null;
+  const session = sessionAccount();
+  const org = (session && session.orgUuid) || fileOrg;
+  return { org: org || null, via: session ? 'desktop' : (fileOrg ? 'file' : null), fileOrg, fileDescribesSession: !session || !fileOrg || session.orgUuid === fileOrg, cfg };
+}
+
 export function detectTier() {
-  const override = readJson(PROFILE_PATH);
-  if (override && override.tier && override.tier !== 'unknown' && TIERS.includes(override.tier)) {
-    return { tier: override.tier, source: `user override set ${String(override.setAt || '').slice(0, 10)} (${PROFILE_PATH})` };
+  const profile = readJson(PROFILE_PATH) || {};
+  const acct = currentAccount();
+  const plans = profile.plans && typeof profile.plans === 'object' ? profile.plans : {};
+  const remembered = acct.org && plans[acct.org];
+  if (remembered && remembered.tier !== 'unknown' && TIERS.includes(remembered.tier)) {
+    return { tier: remembered.tier, source: `you set it for this Claude account (${acct.org.slice(0, 8)}) on ${String(remembered.setAt || '').slice(0, 10)}`, account: acct.org };
+  }
+  // A plan set by an older version, before plans were kept per account.
+  if (profile.tier && profile.tier !== 'unknown' && TIERS.includes(profile.tier)) {
+    return { tier: profile.tier, source: `user override set ${String(profile.setAt || '').slice(0, 10)} (${PROFILE_PATH})`, account: acct.org };
   }
   // `organizationType` ("claude_pro", "claude_max") is where current hosts put
   // the plan; the rate-limit tier can be a generic "default_claude_ai" that says
   // nothing. These fields are undocumented, so the source is always shown, and
   // the credentials file is never read.
-  const cfg = readJson(join(HOME, '.claude.json'));
-  if (cfg) {
-    const keys = ['userRateLimitTier', 'organizationRateLimitTier', 'seatTier', 'organizationType'];
-    const found = findKeys(cfg, keys);
-    for (const key of keys) {
+  let filePlan = null;
+  if (acct.cfg) {
+    const found = findKeys(acct.cfg, PLAN_KEYS);
+    for (const key of PLAN_KEYS) {
       const t = mapTier(found[key]);
-      // This is the account a terminal `claude` signed in with; the Claude app
-      // can be signed in to another. Say so, so a wrong plan gets corrected.
-      if (t) return { tier: t, source: `~/.claude.json ${key}="${found[key]}" (the terminal sign-in; if your plan differs: profile.mjs --set tier=<pro|max5|max20|team|api>)` };
+      if (t) { filePlan = { tier: t, source: `~/.claude.json ${key}="${found[key]}"` }; break; }
     }
   }
-  if (process.env.ANTHROPIC_API_KEY) return { tier: 'api', source: 'ANTHROPIC_API_KEY is set' };
-  return { tier: 'unknown', source: 'no signal; ask the user once, then --set tier=...' };
+  if (filePlan && acct.fileDescribesSession) return { ...filePlan, account: acct.org };
+  if (!acct.fileDescribesSession) {
+    return { tier: 'unknown', account: acct.org, source: `this session runs on a different Claude account (${acct.org.slice(0, 8)}) than ~/.claude.json describes${filePlan ? ` (that one is ${filePlan.tier})` : ''}; ask the user once which plan this account has, then profile.mjs --set tier=<pro|max5|max20|team|api>, which is remembered for this account` };
+  }
+  if (process.env.ANTHROPIC_API_KEY) return { tier: 'api', source: 'ANTHROPIC_API_KEY is set', account: acct.org };
+  return { tier: 'unknown', source: 'no signal; ask the user once, then --set tier=...', account: acct.org };
 }
 
 export function routerSettings() {

@@ -15,11 +15,13 @@ const TIER = new URL('./tier.mjs', import.meta.url).href;
 // Run a snippet against this module with a HOME of its own. The active-run
 // pointer lives under the real ~/.claude/orchestrate, so a test that wrote it
 // in process would repoint the developer's own machine at a temp directory.
-function inFakeHome(code, setup) {
+function inFakeHome(code, setup, env = {}) {
   const home = mkdtempSync(join(tmpdir(), 'orch-fakehome-'));
   if (setup) { mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true }); setup(home); }
+  // The desktop app's own folders and session id are the developer's; a test
+  // that inherited them would read the real account.
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
-    encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home },
+    encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, APPDATA: join(home, 'AppData', 'Roaming'), XDG_CONFIG_HOME: join(home, '.config'), CLAUDE_CODE_HOST_SESSION_ID: '', ...env },
   });
   if (r.status !== 0) throw new Error(r.stderr);
   return r.stdout.trim();
@@ -418,6 +420,33 @@ test('the plan is read from the account type when the rate-limit tier is generic
   assert.match(pro.source, /organizationType="claude_pro"/);
   assert.equal(read({ organizationType: 'claude_max', organizationRateLimitTier: 'default_claude_max_20x' }).tier, 'max20');
   assert.equal(read({ organizationType: 'claude_max' }).tier, 'max5');
+});
+
+test('the plan follows the account the session runs on, and is remembered per account', () => {
+  const PROFILE = new URL('../profile.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  const home = mkdtempSync(join(tmpdir(), 'orch-acct-'));
+  mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
+  // The terminal last signed in to a Pro org; the desktop app runs this session
+  // on another org.
+  writeFileSync(join(home, '.claude.json'), JSON.stringify({ oauthAccount: { accountUuid: 'aaaa1111-pro', organizationUuid: 'org-pro-1111', organizationType: 'claude_pro' } }));
+  const desktopOrg = join(home, 'AppData', 'Roaming', 'Claude', 'claude-code-sessions', 'bbbb2222-max', 'org-max-2222');
+  mkdirSync(desktopOrg, { recursive: true });
+  writeFileSync(join(desktopOrg, 'local_desk-1234.json'), '{}');
+  const env = host => ({ ...process.env, HOME: home, USERPROFILE: home, APPDATA: join(home, 'AppData', 'Roaming'), XDG_CONFIG_HOME: join(home, '.config'), CLAUDE_CODE_HOST_SESSION_ID: host });
+  const tier = host => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e',
+    `const { detectTier } = await import(${JSON.stringify(TIER)}); console.log(JSON.stringify(detectTier()));`],
+  { encoding: 'utf8', env: env(host) }).stdout.trim());
+
+  assert.equal(tier('').tier, 'pro', 'a terminal session is the account in the file');
+  const desk = tier('local_desk-1234');
+  assert.equal(desk.tier, 'unknown', 'the file describes another account, so its plan is not borrowed');
+  assert.match(desk.source, /different Claude account \(org-max-\).*that one is pro/);
+
+  const set = spawnSync(process.execPath, [PROFILE, '--set', 'tier=max5'], { encoding: 'utf8', env: env('local_desk-1234') });
+  assert.match(set.stdout, /plan saved for this Claude account \(org-max-\): max5/);
+  assert.equal(tier('local_desk-1234').tier, 'max5', 'remembered for the desktop account');
+  assert.equal(tier('').tier, 'pro', 'and not applied to the other account');
+  assert.equal(tier('../../etc').tier, 'pro', 'an id shaped like a path is ignored');
 });
 
 // ---- which task could start right now ---------------------------------------

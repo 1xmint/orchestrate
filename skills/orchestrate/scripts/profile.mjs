@@ -142,15 +142,35 @@ if (setIdx >= 0) {
     console.error(`usage: --set tier=<${[...TIERS].join('|')}> | manager=<model>[/<effort>]|accept|ask | paidServices=never|ask|free | allowPaid=<plugin> | denyPaid=<plugin>`);
     process.exit(2);
   }
-  saveProfile({ tier: m[1], tierSource: 'user', setAt: new Date().toISOString() });
-  console.log(`tier override saved: ${m[1]} (${OVERRIDE_PATH})`);
+  // Kept per Claude account, so someone who switches accounts is not left on
+  // the other account's plan. Only when no account can be told apart does it
+  // fall back to one plan for every session.
+  const { org } = currentAccount();
+  const at = new Date().toISOString();
+  if (org && m[1] !== 'unknown') {
+    const prof = loadProfile();
+    const plans = { ...(prof.plans || {}), [org]: { tier: m[1], setAt: at } };
+    delete prof.tier; delete prof.tierSource; delete prof.setAt;
+    mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
+    writeFileSync(OVERRIDE_PATH, JSON.stringify({ ...prof, plans }, null, 2) + '\n');
+    console.log(`plan saved for this Claude account (${org.slice(0, 8)}): ${m[1]} (${OVERRIDE_PATH})`);
+  } else {
+    saveProfile({ tier: m[1], tierSource: 'user', setAt: at });
+    console.log(`tier override saved: ${m[1]} (${OVERRIDE_PATH})`);
+  }
   process.exit(0);
 }
 if (args.includes('--clear')) {
-  // Only the plan goes back to automatic; the paid-service rule, paid plugins
-  // allowed by name and the manager answer are separate choices and stay.
-  saveProfile({ tier: 'unknown', tierSource: 'cleared', setAt: new Date().toISOString() });
-  console.log('tier override cleared; automatic detection applies');
+  // Only the plan goes back to automatic, for this account and the old
+  // one-for-all setting; the paid-service rule, paid plugins allowed by name and
+  // the manager answer are separate choices and stay.
+  const prof = loadProfile();
+  const { org } = currentAccount();
+  if (org && prof.plans) delete prof.plans[org];
+  delete prof.tier; delete prof.tierSource; delete prof.setAt;
+  mkdirSync(dirname(OVERRIDE_PATH), { recursive: true });
+  writeFileSync(OVERRIDE_PATH, JSON.stringify(prof, null, 2) + '\n');
+  console.log('plan setting cleared; automatic detection applies');
   process.exit(0);
 }
 
@@ -285,7 +305,7 @@ function detectSkills(repoRoot) {
 // One copy of this rule, in lib/tier.mjs, because it has to know about both
 // install paths: loose files in ~/.claude/agents, and a plugin that registers
 // them from its own folder without copying anything.
-import { agentsInstalled as detectAgents, latestRun, detectTier } from './lib/tier.mjs';
+import { agentsInstalled as detectAgents, latestRun, detectTier, currentAccount } from './lib/tier.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { latestPerAgent } from './ledger.mjs';
 
