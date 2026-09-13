@@ -2,7 +2,75 @@
 
 Resume point for building the `orchestrate` skill.
 
-## Unreleased — keep going without idling, 2026-09-13
+## v0.12.0 — quota first, 2026-09-13
+
+Josh: quota always wins; speed only when it costs little or no extra quota.
+Validate by reasoning from evidence and data already on disk, then natural use —
+not staged A/B runs. 261 tests pass (up from 221 at v0.11.0).
+
+**What the plugin's own records showed.** Plan detection read "unknown" on a Pro
+account. 56 of 58 implementer runs were Opus against a Sonnet default, the bulk
+of recorded helper spend; the three largest helpers started each step at 36–59k
+tokens, grew to 305–382k, and re-read ~49M tokens each over ~190 API calls. A
+research sweep in the planning session itself ran three unnamed-model helpers on
+the lead's Opus to ~250–285k tokens each. The meter was wrong four ways (below).
+
+**Correction to numbers quoted during planning.** The host writes one API call as
+several records with the same `message.id`; counting records over-states
+re-reads 1.4× (a helper) to 2.8× (a long lead session). Output tokens are not
+over-stated: the last record of a call carries the full count (the planning note
+said 2.3×, from reading the first record). STATE.md v0.10.0's "84% of cost is lead
+re-reads" was computed on the old count; its share may hold, its tokens do not.
+
+Changes, one commit each on `feat/persist-loop`:
+1. **Helper caps.** Every role pins effort ≤ high (implementer/researcher medium,
+   browser low) and `maxTurns` (implementer 50, debugger 80, researcher, browser,
+   planner 40, reviewer 30); packets point at line ranges, under ~6k chars.
+2. **Model enforced at dispatch.** The guard refuses executors above Sonnet before
+   a real attempt at the same task, Explore/general-purpose without a cheap named
+   model, a fork of a >100k conversation, Fable off-plan, and any helper at ≥80% of
+   the 5-hour window or ≥90% of the week. Replayed over the 46 dispatches on
+   record, it refuses 30. Role names normalized, so the budget gate finally
+   matches plugin-installed roles (it never fired on a plugin install before).
+3. **Meter.** Each API call counted once; model from the helper's transcript;
+   one row per agent id; unpriced never $0; Fable 5.1 cache reads at 2.5%. The
+   ledger no longer emits SubagentStop context: the host delivers it into the
+   helper, which answered and re-stopped (nine times for one planner). measure.mjs
+   counts `[orchestrate` injections and queued task-notification returns.
+4. **Plan and live usage.** `organizationType` gives the plan (reads "pro" here).
+   `statusline.mjs` is the only channel the host gives live 5-hour/weekly usage;
+   installed on Josh's machine with his yes. **Not yet seen writing a snapshot in
+   the desktop app** — either it starts with a new session or the desktop app does
+   not run custom status lines; unverified. Without a snapshot every usage stop is
+   inert, never wrong.
+5. **Installed plugins.** The router reports once a week the listing load every
+   step re-reads (~14k tokens here; Bright Data alone ~1.7k) and the largest
+   plugins; only the user can turn a plugin off. Planner/reviewer get `Skill`; the
+   researcher moves to a denylist. `paidServices=never|ask|free` (Josh: never).
+6. **Lead facts without a Stop block.** Limits only from host `<synthetic>`
+   records (a quoted research report had reported two false limits); a line at
+   150k and 300k per-step context; a weekly note when lead effort is xhigh/max.
+7. **Stale plans.** Open but RUN.md untouched 48h: never auto-bound, reported,
+   budgeted or filed into; said once; `run-init --reopen <id>`. Only an edit to
+   RUN.md counts as activity — a return filed by an automatic binding kept this
+   repo's v0.7 plan alive in the first cut.
+8. **models.md / routing.md / SKILL.md** rewritten on verified 2026-09-13 facts:
+   cost shape `steps × base + growth × steps²/2`, effort evidence, escalation as a
+   fresh dispatch, resume only within a helper's 5-minute cache, Sonnet-first
+   executors on every plan. Dropped a false claim that an Opus lead turn costs
+   little more than Sonnet (its cache re-read is 2.5×).
+9. **Recoverable helpers.** PROGRESS files kept current by implementer, debugger,
+   researcher and planner; the router lists dispatches that never returned on
+   resume, compaction or a usage limit, with their PROGRESS paths.
+
+Deliberately not built: a per-tool-call context tripwire (plugin agents cannot
+carry hooks; a plugin-wide PreToolUse would start a process on every step of every
+session), the OAuth usage endpoint (login token, terms), advisor by default,
+forced `CLAUDE_CODE_SUBAGENT_MODEL`. Not moving to Pi: Pi can sign in with a Claude
+subscription, but its own docs say that usage bills per token as extra usage, not
+against plan limits (pi.dev/docs/latest/providers, 2026-09-13).
+
+## Keep going without idling, 2026-09-13 (in v0.12.0)
 
 The stall: "keep coding until it's done" did one turn, started CI or an agent,
 and handed back. The only thing that keeps a turn alive is a Stop hook that

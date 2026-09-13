@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.11.0"
+  version: "0.12.0"
 hooks:
   PreToolUse:
     - matcher: "Agent|Task"
@@ -83,7 +83,8 @@ the plugin's own.
 
 The user picked this session's model and effort before you existed. Work at
 what they chose. If they ask what to run a manager on, `models.md` has the
-answer; do not volunteer it, and never ask them to change it mid-run.
+answer. Volunteer it only when the router's weekly line about a lead at `xhigh`
+or `max` says to, and never ask them to change it mid-run.
 
 Pick the model each task needs, then check whether this plan includes it. If it
 does, dispatch. If not, it spends the user's own money, so recommend it, price
