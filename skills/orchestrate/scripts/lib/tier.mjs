@@ -329,8 +329,11 @@ export function readRun(runMd, root) {
     const done = rows.filter(l => /✅/.test(cellAt(l, 2))).length;
     // A plan nobody has touched in two days is not the work in front of this
     // session. It stays on disk, and `run-init --reopen` makes it live again.
-    let lastActivity = st.mtimeMs;
-    try { lastActivity = Math.max(lastActivity, statSync(join(dir, 'returns', 'returns.jsonl')).mtimeMs); } catch {}
+    // Only RUN.md counts as touched: a lead working a plan writes its rows and
+    // Pickup. A return filed into it does not count, because an automatic
+    // binding files returns into abandoned plans, and counting those kept this
+    // repo's four-day-old plan alive.
+    const lastActivity = st.mtimeMs;
     const stale = open && Date.now() - lastActivity > STALE_RUN_MS;
     const pickup = {};
     const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
