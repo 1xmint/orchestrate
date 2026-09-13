@@ -531,15 +531,19 @@ export function selfModel(transcriptPath) {
   const tail = readTail(transcriptPath, 65536);
   if (!tail) return null;
   const lines = tail.split('\n');
+  // Hooks are handed the session's effort in their environment; it beats a
+  // transcript record, which lags a change by one step.
+  const envEffort = typeof process.env.CLAUDE_EFFORT === 'string' && process.env.CLAUDE_EFFORT ? process.env.CLAUDE_EFFORT : null;
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i].trim();
     if (!l || l[0] !== '{') continue;
     let o; try { o = JSON.parse(l); } catch { continue; }
-    const model = o && o.message && typeof o.message.model === 'string' ? o.message.model : null;
+    // A limit or error message is written as model "<synthetic>": not a model.
+    const model = o && o.message && typeof o.message.model === 'string' && o.message.model !== '<synthetic>' ? o.message.model : null;
     if (!model) continue;
     return {
       model: shortModel(model),
-      effort: typeof o.effort === 'string' ? o.effort : null,
+      effort: envEffort || (typeof o.effort === 'string' ? o.effort : null),
       // Which host this is, so the advice can name the actual click rather than
       // a slash command the desktop app does not have.
       entrypoint: typeof o.entrypoint === 'string' ? o.entrypoint : null,

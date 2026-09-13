@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
-  DIR, readJson, writeJsonAtomic,
+  DIR, readJson, writeJsonAtomic, lastContextTokens,
 } from './lib/tier.mjs';
 import { readHead, parseListing, listingLine, tokens } from './lib/listing.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
@@ -204,18 +204,60 @@ export function resumeExcerpt(runMd, cap = RESUME_CAP) {
 }
 
 // ---- local context ----------------------------------------------------------
+// Only the host's own limit messages count: they arrive as assistant records
+// with the model "<synthetic>". Matching the phrase anywhere in the tail
+// counted a research report that quoted it, and told the lead the user had hit
+// two limits they had not. "Today" means today: the set resets with the date.
+export function limitsFromTail(tail) {
+  const found = new Set();
+  for (const l of String(tail || '').split('\n')) {
+    if (!l.includes('<synthetic>') && !l.includes('isApiErrorMessage')) continue;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    const m = o && o.type === 'assistant' && o.message;
+    if (!m || !(m.model === '<synthetic>' || o.isApiErrorMessage)) continue;
+    const text = (Array.isArray(m.content) ? m.content : []).map(b => (b && b.text) || '').join(' ');
+    for (const hit of text.matchAll(/hit your (Opus|Sonnet|Haiku|Fable) limit/gi)) found.add(hit[1].toLowerCase());
+    if (/hit your (session|weekly) limit/i.test(text)) found.add('session');
+  }
+  return found;
+}
+
 function scanLimits(transcriptPath, state) {
   try {
-    if (!transcriptPath || !existsSync(transcriptPath)) return state.limits || [];
+    const day = new Date().toISOString().slice(0, 10);
+    if (state.limitsDay !== day || state.limitsV !== 2) { state.limits = []; state.limitsDay = day; state.limitsV = 2; state.limitsScanMtime = null; }
+    if (!transcriptPath || !existsSync(transcriptPath)) return state.limits;
     const mt = statSync(transcriptPath).mtimeMs;
-    if (state.limitsScanMtime === mt) return state.limits || [];
-    const tail = readTail(transcriptPath, 65536);
-    const found = new Set(state.limits || []);
-    for (const m of tail.matchAll(/hit your (Opus|Sonnet|Haiku|Fable) limit/gi)) found.add(m[1].toLowerCase());
-    if (/hit your (session|weekly) limit/i.test(tail)) found.add('session');
+    if (state.limitsScanMtime === mt) return state.limits;
+    const found = new Set([...state.limits, ...limitsFromTail(readTail(transcriptPath, 65536))]);
     state.limitsScanMtime = mt;
     return [...found];
   } catch { return state.limits || []; }
+}
+
+// The lead's own cost per step, said when it crosses a line, once per line.
+export const CONTEXT_LINES = [150000, 300000];
+
+export function contextNote(tokensNow, warnedUpTo = 0) {
+  const line = [...CONTEXT_LINES].reverse().find(t => tokensNow >= t && t > warnedUpTo);
+  if (!line) return null;
+  return {
+    upTo: line,
+    text: `[orchestrate · context] this conversation now re-reads ~${Math.round(tokensNow / 1000)}k tokens on every step. If the rest of the work can resume from files (the plan, the commits, a Pickup line), tell the user once that a fresh session would cost less per step, and write down where to resume.`,
+  };
+}
+
+// Once a week per plan, model and effort: the lead running above what
+// quota-first work needs. The user chose it, so this is said, never changed.
+export const LEAD_NOTE_PATH = join(DIR, 'lead-note.json');
+
+export function leadNote(self, tier, now = Date.now(), path = LEAD_NOTE_PATH) {
+  if (!self || !self.effort || !['xhigh', 'max'].includes(self.effort)) return '';
+  const key = `${tier}|${self.model}|${self.effort}`;
+  const seen = readJson(path) || {};
+  if (seen[key] && now - Number(seen[key]) < 7 * 86400000) return '';
+  try { writeJsonAtomic(path, { ...seen, [key]: now }); } catch {}
+  return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. For quota-first work, high or medium is the better default. Mention it to the user once: it takes effect in a new session, because switching mid-session re-reads everything uncached.`;
 }
 
 function gatherContext(input, state) {
@@ -364,10 +406,16 @@ function handlePrompt(input) {
   }
   state.quotaBand = band;
 
-  // The fixed load every step pays for installed plugins, once a week at most.
+  // The fixed load every step pays for installed plugins, once a week at most;
+  // the lead's own per-step size; and a lead setting above quota-first.
   if (substantive) {
     const line = weeklyListingReport(input.transcript_path);
     if (line) out.push(`[orchestrate · fixed load] ${line}`);
+    const size = lastContextTokens(input.transcript_path);
+    const note = size != null ? contextNote(size, Number(state.contextWarnedUpTo) || 0) : null;
+    if (note) { out.push(note.text); state.contextWarnedUpTo = note.upTo; }
+    const lead = leadNote(ctx.self, ctx.tier);
+    if (lead) out.push(lead);
   }
 
   if (armedNow) {
