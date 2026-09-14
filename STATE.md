@@ -57,6 +57,31 @@ transition, so the worker always passes `-m`.
   files on this machine (84 at 1, 4 at 2, those 4 also carry `parentAgentId`).
   `policy.workers.nested` defaults to `coordinator`; the concurrency limit is 3
   while a coordinator is live. Nested returns carry `parent` in the ledger.
+- Part B, context discipline: `profile.mjs --autocompact 200k [--dry-run]`
+  writes `CLAUDE_CODE_AUTO_COMPACT_WINDOW` through `lib/settings.mjs`;
+  `precompact-check.mjs` asks an unbound session for
+  `~/.claude/orchestrate/context/<session>/checkpoint-<epoch>.md` once per
+  epoch; SessionStart after compaction injects it (1,200 chars); armed
+  auto-continue stops on `compact`/`investigate` advice; the plugin-wide Stop
+  refuses once per epoch at `compactAt` until the checkpoint exists;
+  `policy.context.hardAt` 300k; `ctx` band in the state line.
+  **Replay on `059154a1`** (throwaway HOME, unarmed Stop): the transcript cut
+  at line 92 → silent; cut at line 93, the first response ≥ 150k → "context is
+  ~159k: write the checkpoint …"; full transcript → blocks once at ~473k, the
+  second Stop passes; with the checkpoint file present → silent. PreCompact on
+  an unbound session → one block naming the path, then passes.
+- Part E1: `measure.mjs --growth <transcript>`. On `059154a1` it prints Write
+  276,180 input chars, the 63,858-char `Read` of `lib.rs` as the largest
+  result, 29,000 chars of hook attachments (all plugins), and $25.57 at Opus:
+  the hand measurement, reproduced in one command.
+
+**Found while building.** (1) The Codex sandbox refuses child processes, so
+`node --test` fails there with `spawn EPERM`; `--test-isolation=none` runs
+single files, and the lead runs the full suite. Every Codex packet says so now.
+(2) A Claude helper stopped by its turn limit kept its concurrency slot until
+the 10-minute silence rule released it, and a Codex dispatch was refused
+meanwhile. (3) The router read a blocks-on cell of short ids (`0001 0002`) as
+nothing to wait for; the table needs full ids.
 
 **How this release was built.** The lead wrote packets and graded returns; the
 code parts ran as Codex workers (terra medium for B, D, E1; sol high for C).
