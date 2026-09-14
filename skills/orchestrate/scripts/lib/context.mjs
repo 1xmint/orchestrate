@@ -222,10 +222,22 @@ export function thresholds(reading, policy = loadPolicy()) {
   return { checkpointAt, compactAt };
 }
 
+export function contextEpoch(reading) {
+  return reading && reading.compaction ? (reading.compaction.uuid || reading.compaction.at || 'c') : 'none';
+}
+
+export function checkpointPath(session, reading, dir = CONTEXT_DIR) {
+  return join(dir, idPart(session || 'nosession'), `checkpoint-${idPart(contextEpoch(reading))}.md`);
+}
+
+export function hasCheckpoint(session, reading, dir = CONTEXT_DIR) {
+  try { return existsSync(checkpointPath(session, reading, dir)); } catch { return false; }
+}
+
 // What to do about the current size. The key changes only when the advice
 // does, and it carries the compaction epoch, so a compaction resets it.
 export function adviseContext(reading, policy = loadPolicy()) {
-  const epoch = reading && reading.compaction ? (reading.compaction.uuid || reading.compaction.at || 'c') : 'none';
+  const epoch = contextEpoch(reading);
   const key = action => `${epoch}|${action}`;
   if (!reading || reading.state === 'unknown' || reading.tokens == null) {
     return { action: 'unknown', key: key('unknown'), why: reading && reading.stale ? 'the last measurement is stale' : 'no model response has reported usage yet' };
@@ -238,6 +250,7 @@ export function adviseContext(reading, policy = loadPolicy()) {
   }
   const just = reading.compaction && reading.responsesSinceCompaction != null && reading.responsesSinceCompaction <= JUST_COMPACTED_RESPONSES;
   if (just && reading.tokens >= compactAt) return { action: 'investigate', key: key('investigate'), why: `${k(reading.tokens)} right after compaction` };
+  if (reading.tokens >= policy.context.hardAt) return { action: 'hard', key: key('hard'), why: `${k(reading.tokens)} is at or above ${k(policy.context.hardAt)}` };
   if (reading.tokens >= compactAt) return { action: 'compact', key: key('compact'), why: `${k(reading.tokens)} is at or above ${k(compactAt)}` };
   if (reading.tokens >= checkpointAt) return { action: 'checkpoint', key: key('checkpoint'), why: `${k(reading.tokens)} is at or above ${k(checkpointAt)}` };
   return { action: 'none', key: key('none'), why: `${k(reading.tokens)} is below ${k(checkpointAt)}` };
@@ -250,6 +263,8 @@ export function contextNotice(reading, advice) {
   if (!reading || !advice) return '';
   const k = n => `~${Math.round(n / 1000)}k`;
   const cap = reading.capacity ? ` of a ${Math.round(reading.capacity / 1000)}k window` : '';
+  if (advice.action === 'compact') return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. Finish this step only, write the checkpoint (${CHECKPOINT_WHAT}), and end the turn with the recommendation to compact or start fresh.`;
+  if (advice.action === 'hard') return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. Do not start new work here: write the checkpoint (${CHECKPOINT_WHAT}) and end the turn with the recommendation to compact or start fresh.`;
   switch (advice.action) {
     case 'checkpoint':
       return `[orchestrate · context] this conversation re-reads ${k(reading.tokens)} tokens${cap} on every step (measured from the last response). Prepare a checkpoint now: write down ${CHECKPOINT_WHAT}, where a later session can find it.`;

@@ -21,7 +21,7 @@
 //   node router.mjs --cost <transcript.jsonl>     what the router cost that session
 //   node router.mjs --prune                       delete session state older than 7 days
 
-import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,7 +30,7 @@ import {
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, staleRunsUnder,
 } from './lib/tier.mjs';
-import { sampleContext } from './lib/context.mjs';
+import { sampleContext, storedContext, CONTEXT_DIR } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
@@ -73,8 +73,21 @@ export function stateLine(ctx, prefix) {
     ? `you: ${ctx.self.model}${ctx.self.effort ? ` @ ${ctx.self.effort} effort` : ''}`
     : 'you: model not known here';
   const agents = `orch-agents ${ctx.agents}/6`;
-  const limits = ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none';
+  const limits = (ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none') + contextPhrase(ctx.context);
   return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
+}
+
+export function contextBand(reading) {
+  const n = reading && reading.tokens;
+  if (!Number.isFinite(n)) return 'none';
+  if (n >= 300000) return 'hard';
+  if (n >= 150000) return 'compact';
+  if (n >= 120000) return 'checkpoint';
+  return 'none';
+}
+
+export function contextPhrase(reading) {
+  return contextBand(reading) === 'none' ? '' : ` · ctx ~${Math.round(reading.tokens / 1000)}k`;
 }
 
 // Live plan usage, when the status line has reported it. Past the caution line
@@ -180,7 +193,7 @@ export function stateHash(ctx) {
     focus && focus.edgesMissing ? 'edges?' : '',
     ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : '',
     // The band, not the number: a line every percent would be noise.
-    quotaBand(ctx.quota),
+    quotaBand(ctx.quota), contextBand(ctx.context),
   ].join('|');
 }
 
@@ -205,6 +218,17 @@ export function resumeExcerpt(runMd, cap = RESUME_CAP) {
   let out = parts.join('\n');
   if (out.length > cap) out = `${out.slice(0, cap - 3)}...`;
   return out;
+}
+
+export function checkpointExcerpt(session, cap = RESUME_CAP) {
+  try {
+    const dir = join(CONTEXT_DIR, String(session || 'nosession').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120));
+    const paths = readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)).map(n => join(dir, n));
+    const path = paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+    if (!path) return '';
+    const text = readFileSync(path, 'utf8').trim();
+    return text.length > cap ? `${text.slice(0, cap - 3)}...` : text;
+  } catch { return ''; }
 }
 
 // ---- local context ----------------------------------------------------------
@@ -294,6 +318,7 @@ function gatherContext(input, state) {
     self: self || state.self || null,
     persist: Boolean(state.persist && state.persist.armed),
     quota: readQuota(),
+    context: storedContext(input.session_id || null),
   };
 }
 
@@ -543,6 +568,9 @@ function handleSessionStart(input) {
   if (ctx.run) {
     const ex = resumeExcerpt(ctx.run.runMd);
     out.push(`[orchestrate · ${word}] run ${ctx.run.runMd}${ex ? `\n${ex}` : ' — nothing written under Goal or Pickup yet'}`);
+  } else if (source === 'compact') {
+    const ex = checkpointExcerpt(input.session_id);
+    if (ex) out.push(`[orchestrate · compacted] checkpoint\n${ex}`);
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
   }

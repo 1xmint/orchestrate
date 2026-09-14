@@ -82,6 +82,24 @@ if (defIdx >= 0) {
   process.exit(0);
 }
 
+const autoIdx = args.findIndex(a => a === '--autocompact');
+if (autoIdx >= 0) {
+  const raw = String(args[autoIdx + 1] || '');
+  const m = /^(\d+)(k)?$/i.exec(raw);
+  if (!m || Number(m[1]) <= 0) { console.error('usage: --autocompact <tokens|Nk> [--dry-run]'); process.exit(2); }
+  const tokens = Number(m[1]) * (m[2] ? 1000 : 1);
+  const { setEnv, readSettings, backupSettings, writeSettings } = await import('./lib/settings.mjs');
+  const settingsPath = join(HOME, '.claude', 'settings.json');
+  const edit = `settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=${tokens}`;
+  if (args.includes('--dry-run')) { console.log(`would write ${edit}`); process.exit(0); }
+  const s = readSettings(settingsPath);
+  const backup = backupSettings(settingsPath, join(HOME, '.claude', 'orchestrate'));
+  setEnv(s, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: tokens });
+  writeSettings(settingsPath, s);
+  console.log(`saved ${edit} (${settingsPath}${backup ? `; backup ${backup}` : ''})`);
+  process.exit(0);
+}
+
 // --policy [key=value ...]: the efficiency thresholds (lib/policy.mjs). With no
 // pair it prints the policy in effect; each pair is validated against the
 // defaults' keys, and only `policy` in profile.json is written.
@@ -414,6 +432,8 @@ if (brief) {
     // from, and measure.mjs reports what a finished run cost.
     const included = { max5: 'Opus, Sonnet, Haiku and Fable', max20: 'Opus, Sonnet, Haiku and Fable', pro: 'Opus, Sonnet and Haiku; Fable costs credits, so ask first', team: 'Opus, Sonnet and Haiku; Fable costs credits, so ask first', api: 'all, billed per token; ask before Fable' }[tier.tier] || 'unknown, ask the user once';
     console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')})` : ''}`);
+    const auto = (readJson(join(HOME, '.claude', 'settings.json')) || {}).env || {};
+    if (!auto.CLAUDE_CODE_AUTO_COMPACT_WINDOW) console.log('auto-compact is at the window limit; run `profile.mjs --autocompact 200k`');
     console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''}`);
     console.log(`this plan includes: ${included}`);
     const paidMode = loadProfile().paidServices || 'ask';

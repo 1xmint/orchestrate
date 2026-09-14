@@ -23,6 +23,7 @@ export const DEFAULT_POLICY = Object.freeze({
     // here, or at `windowFraction` of a known smaller window, whichever is lower.
     checkpointAt: 120000,
     compactAt: 150000,
+    hardAt: 300000,
     windowFraction: 0.75,
     // A known window size, when the user wants to state one; otherwise it is
     // read from the status line for the session, or left unknown.
@@ -72,6 +73,7 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
     context: {
       checkpointAt: posNum(c.checkpointAt, D.context.checkpointAt),
       compactAt: posNum(c.compactAt, D.context.compactAt),
+      hardAt: posNum(c.hardAt, D.context.hardAt),
       windowFraction: frac > 0 && frac <= 1 ? frac : D.context.windowFraction,
       window: c.window == null ? null : posNum(c.window, null),
       staleMs: posNum(c.staleMs, D.context.staleMs),

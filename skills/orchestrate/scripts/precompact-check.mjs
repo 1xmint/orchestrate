@@ -24,6 +24,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession } from './lib/tier.mjs';
 import { pickupSection, pickupHash, shouldBlock } from './turn-check.mjs';
+import { readContext, checkpointPath, contextEpoch, hasCheckpoint } from './lib/context.mjs';
 
 const STORE = () => join(DIR, 'precompact-checks.json');
 
@@ -52,6 +53,16 @@ export function decide({ run, lastDispatchAt, prev }) {
   };
 }
 
+export function unboundDecision({ session, reading, prev = {}, checkpoint = false }) {
+  const epoch = contextEpoch(reading);
+  if (checkpoint || prev.blockedFor === epoch) return { block: false, epoch };
+  const path = checkpointPath(session, reading);
+  return {
+    block: true, epoch,
+    reason: `orchestrate: write the checkpoint to ${path} (goal, decisions, files changed, verification, next action), then compaction proceeds.`,
+  };
+}
+
 function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
@@ -67,10 +78,16 @@ function main() {
   const rec = store[key] || {};
 
   let d;
-  try { d = decide({ run, lastDispatchAt: state.lastDispatchAt || null, prev: rec }); } catch { return; }
+  try {
+    if (run) d = decide({ run, lastDispatchAt: state.lastDispatchAt || null, prev: rec });
+    else {
+      const reading = readContext(input.transcript_path, { session: input.session_id || null });
+      d = unboundDecision({ session: input.session_id || null, reading, prev: rec, checkpoint: hasCheckpoint(input.session_id || null, reading) });
+    }
+  } catch { return; }
   if (!d) return;
 
-  store[key] = d.block ? { ...rec, hash: d.hash, blockedFor: d.hash } : { ...rec, hash: d.hash };
+  store[key] = d.block ? { ...rec, hash: d.hash, blockedFor: d.epoch || d.hash } : { ...rec, hash: d.hash };
   try { writeJsonAtomic(path, store); } catch {}
 
   if (d.block) emit(d.reason);

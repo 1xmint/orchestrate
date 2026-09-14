@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   registrations, applyRegistrations, readSettings, writeSettings, backupSettings,
-  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys, OUR_SCRIPTS,
+  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys, setEnv, OUR_SCRIPTS,
 } from './settings.mjs';
 
 // A settings file shaped like Josh's: an unrelated PreToolUse hook that must
@@ -29,6 +29,13 @@ const REAL_SHAPE = {
 
 const clone = o => JSON.parse(JSON.stringify(o));
 const SCRIPTS = 'C:/Users/Josh/.claude/skills/orchestrate/scripts';
+
+test('autocompact settings merge writes only the env key', () => {
+  const s = clone(REAL_SHAPE);
+  setEnv(s, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: 200000 });
+  assert.equal(s.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
+  assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
+});
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), 'orch-settings-'));
