@@ -48,6 +48,15 @@ transition, so the worker always passes `-m`.
 
 - Card and version: the router card carries the delegation rule (1,547 chars);
   `codex-worker.mjs --model --effort --approved`, Astra refused without approval.
+- Part C, the coordinator: `assets/agents/orch-coordinator.md` (opus, high,
+  maxTurns 40). `guard-agent.mjs workflowDecision` allows a dispatch carrying
+  `agent_id` only when the parent's recorded role is `orch-coordinator`, the
+  child is implementer/researcher/reviewer/Explore with a model named, and depth
+  ≤ 2; anything it cannot attribute is denied. The parent's depth comes from the
+  host's `subagents/*.meta.json` `spawnDepth`, confirmed present in all 88 meta
+  files on this machine (84 at 1, 4 at 2, those 4 also carry `parentAgentId`).
+  `policy.workers.nested` defaults to `coordinator`; the concurrency limit is 3
+  while a coordinator is live. Nested returns carry `parent` in the ledger.
 
 **How this release was built.** The lead wrote packets and graded returns; the
 code parts ran as Codex workers (terra medium for B, D, E1; sol high for C).
