@@ -156,6 +156,20 @@ test('quota exhaustion is scoped by provider, account and run; unidentified entr
   assert.equal(exhaustedFor({ provider: 'claude', account: 'acct1', scope: 'run:r1' }, dir), null);
   assert.equal(markExhausted({ provider: 'codex', account: null, scope: 'run:r1' }, dir), false);
   assert.equal(exhaustedFor({ provider: 'codex', account: null, scope: 'run:r1' }, dir), null);
+  // The block lifts at the reset time the provider stated, and not before.
+  const t0 = new Date(2026, 8, 14, 12, 48).getTime();
+  markExhausted({ provider: 'codex', account: 'acct3', scope: 'run:r3', message: "You've hit your usage limit. ... or try again at 2:31 PM.", now: t0 }, dir);
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'acct3', scope: 'run:r3' }, dir, t0 + 60 * 60000));
+  assert.equal(exhaustedFor({ provider: 'codex', account: 'acct3', scope: 'run:r3' }, dir, t0 + 104 * 60000), null);
+});
+
+test('reset times are read from the provider message', async () => {
+  const { parseResetTime } = await import('./lib/workers.mjs');
+  const noon = new Date(2026, 8, 14, 12, 48).getTime();
+  assert.equal(new Date(parseResetTime('try again at 2:31 PM.', noon)).getHours(), 14);
+  assert.equal(new Date(parseResetTime('try again at 11:00 AM', noon)).getDate(), 15, 'a clock time already past means tomorrow');
+  assert.equal(parseResetTime('try again in 3 days 4 hours.', noon), noon + 3 * 86400000 + 4 * 3600000);
+  assert.equal(parseResetTime('usage limit reached', noon), null, 'no time stated, no expiry');
 });
 
 test('capped returns are partial, and the recovery note is said once', () => {

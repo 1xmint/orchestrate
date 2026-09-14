@@ -364,7 +364,7 @@ export async function runWorker(opts, deps = {}) {
   if (!login.ok) return finish({ status: 'auth-failed', why: `Codex is not signed in: ${login.text}`, evidence: { edited: false } }, EXIT.fallback);
   report.account = login.account;
   const exhausted = exhaustedFor({ provider: 'codex', account: login.account, scope }, workersDir);
-  if (exhausted) return finish({ status: 'quota-exhausted', why: `Codex hit its usage limit earlier in this ${scope.split(':')[0]} (${exhausted.at}); not trying the account again`, evidence: { edited: false, skipped: true } }, EXIT.fallback);
+  if (exhausted) return finish({ status: 'quota-exhausted', why: `Codex hit its usage limit earlier in this ${scope.split(':')[0]} (${exhausted.at}); not trying the account again${exhausted.resetsAt ? ` before ${exhausted.resetsAt}` : ''}`, evidence: { edited: false, skipped: true, resetsAt: exhausted.resetsAt || null } }, EXIT.fallback);
 
   // Two at once, across providers.
   const external = runningExternal(workersDir);

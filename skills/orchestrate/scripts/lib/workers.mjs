@@ -172,23 +172,49 @@ export function accountKey(raw) {
   return raw ? createHash('sha256').update(String(raw)).digest('hex').slice(0, 12) : null;
 }
 
+// When the limit lifts, from the provider's own message: "try again at 2:31 PM"
+// (the next such clock time) or "try again in 3 days 4 hours". Null when the
+// message names no time; then the block lasts for the whole run.
+export function parseResetTime(message, now = Date.now()) {
+  const t = String(message || '');
+  const at = /try again at (\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?/.exec(t);
+  if (at) {
+    let h = Number(at[1]) % (at[3] ? 12 : 24);
+    if (at[3] && /p/i.test(at[3])) h += 12;
+    const d = new Date(now);
+    d.setHours(h, Number(at[2] || 0), 0, 0);
+    if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }
+  const inPart = /try again in ([^.]+)/i.exec(t);
+  if (inPart) {
+    const unit = { day: 86400000, hour: 3600000, minute: 60000, min: 60000, second: 1000, sec: 1000 };
+    let ms = 0;
+    for (const m of inPart[1].matchAll(/(\d+(?:\.\d+)?)\s*(day|hour|minute|min|second|sec)s?/gi)) ms += Number(m[1]) * unit[m[2].toLowerCase()];
+    return ms > 0 ? now + ms : null;
+  }
+  return null;
+}
+
 export function markExhausted({ provider, account, scope, message = '', now = Date.now() }, dir = WORKERS_DIR) {
   if (!provider || !account || !scope) return false;
   const p = providerStatePath(dir);
   const s = readJson(p) || { v: WORKERS_V, exhausted: [] };
   s.v = WORKERS_V;
   s.exhausted = (Array.isArray(s.exhausted) ? s.exhausted : []).filter(e => !(e.provider === provider && e.account === account && e.scope === scope)).slice(-50);
-  s.exhausted.push({ provider, account, scope, at: new Date(now).toISOString(), message: String(message).slice(0, 300) });
+  const resets = parseResetTime(message, now);
+  s.exhausted.push({ provider, account, scope, at: new Date(now).toISOString(), resetsAt: resets ? new Date(resets).toISOString() : null, message: String(message).slice(0, 300) });
   writeJsonAtomic(p, s);
   return true;
 }
 
-// Unidentified entries (no account or scope) are ignored rather than enforced.
-export function exhaustedFor({ provider, account, scope }, dir = WORKERS_DIR) {
+// Unidentified entries (no account or scope) are ignored rather than enforced,
+// and so is an entry whose stated reset time has passed.
+export function exhaustedFor({ provider, account, scope }, dir = WORKERS_DIR, now = Date.now()) {
   if (!provider || !account || !scope) return null;
   const s = readJson(providerStatePath(dir));
   const list = s && Array.isArray(s.exhausted) ? s.exhausted : [];
-  return list.find(e => e && e.provider === provider && e.account && e.scope && e.account === account && e.scope === scope) || null;
+  return list.find(e => e && e.provider === provider && e.account && e.scope && e.account === account && e.scope === scope && !(e.resetsAt && Date.parse(e.resetsAt) <= now)) || null;
 }
 
 // ---- the provider-neutral packet and report -------------------------------------
