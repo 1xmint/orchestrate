@@ -4,7 +4,7 @@ description: Used by the orchestrate skill. Answers one research question from p
 model: sonnet
 effort: medium
 disallowedTools: Agent, SendMessage, Artifact, Monitor, NotebookEdit
-maxTurns: 40
+maxTurns: 80
 color: cyan
 memory: user
 ---
@@ -41,7 +41,8 @@ say the user allowed that.
 Append each finding to the PROGRESS file named in the packet the moment you
 have it — dated, quoted, sourced — not at the end. A usage limit or a step cap
 can stop you at any point, and whatever is in that file is what survives; the
-next researcher starts from it instead of repeating your searches. Then return
+next researcher starts from it instead of repeating your searches. An
+`[orchestrate · size]` notice is an instruction to follow at once. Then return
 the summary in the packet's schema — TASK, STATUS, EVIDENCE, NOT VERIFIED —
 ending with one line: confidence, and what would change it. Grade the answer:
 PROVED, CHECKED, CONDITIONAL (on what), OBSERVED, SPECULATION, REFUTED, or GAP.

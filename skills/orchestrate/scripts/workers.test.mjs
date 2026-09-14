@@ -11,12 +11,12 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workflowDecision, PLAN_READ_ROLES } from './guard-agent.mjs';
-import { runningNative, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal } from './lib/workers.mjs';
+import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal } from './lib/workers.mjs';
 import { modeTransition, modeNote, PLAN_NOTE, APPROVED_NOTE } from './lib/modes.mjs';
 import { cappedReturn, roleMaxTurns, sumUsage } from './ledger.mjs';
-import { loadPolicy } from './lib/policy.mjs';
+import { loadPolicy, setPolicyValue, sizeBudget } from './lib/policy.mjs';
 import { measure, measureTree } from './measure.mjs';
-import { check as contextCheck } from './context-check.mjs';
+import { check as contextCheck, helperSizeNotice } from './context-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const policy = loadPolicy({});
@@ -97,6 +97,43 @@ test('the tool-boundary hook delivers the approval handoff mid-turn', () => {
   assert.equal(contextCheck({ session_id: 'x', agent_id: 'helper' }), '', 'a helper is never told to compact or plan');
 });
 
+test('helperSizeNotice: a size budget said once per helper, return outranking warn', () => {
+  const budget = { warnAt: 80000, returnAt: 120000 };
+  assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 79000, budget, announced: null }), null);
+  const warn = helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: null });
+  assert.equal(warn.key, 'size-warn');
+  assert.match(warn.text, /\[orchestrate · size\] your context is ~81k of a ~80k budget/);
+  assert.match(warn.text, /write your progress file now/);
+  assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: 'size-warn' }), null, 'said once');
+  const ret = helperSizeNotice({ role: 'orch-implementer', tokens: 125000, budget, announced: 'size-warn' });
+  assert.equal(ret.key, 'size-return');
+  assert.match(ret.text, /past your ~120k budget/);
+  assert.match(ret.text, /return STATUS: PARTIAL/);
+  // A jump straight past returnAt hears only the return notice.
+  const jump = helperSizeNotice({ role: 'orch-implementer', tokens: 205000, budget, announced: null });
+  assert.equal(jump.key, 'size-return');
+  const cbudget = { warnAt: 150000, returnAt: 200000 };
+  assert.equal(helperSizeNotice({ role: 'orch-coordinator', tokens: 125000, budget: cbudget, announced: null }), null);
+  const cret = helperSizeNotice({ role: 'orch-coordinator', tokens: 205000, budget: cbudget, announced: null });
+  assert.match(cret.text, /return PARTIAL now with the handoff/);
+  assert.equal(helperSizeNotice({ role: 'x', tokens: null, budget, announced: null }), null, 'unknown size says nothing');
+  assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 130000, budget, announced: 'size-return' }), null, 'no warn after return');
+});
+
+test('size budgets: defaults per role, a user override per field, a bad pair falls back', () => {
+  assert.deepEqual(sizeBudget('orchestrate:orch-implementer', policy), { warnAt: 80000, returnAt: 120000 });
+  assert.deepEqual(sizeBudget('orchestrate:orch-coordinator', policy), { warnAt: 150000, returnAt: 200000 });
+  assert.deepEqual(sizeBudget(null, policy), { warnAt: 80000, returnAt: 120000 }, 'an unresolved role uses default');
+  const custom = loadPolicy(setPolicyValue({}, 'workers.size.orch-debugger.returnAt', '160000'));
+  assert.deepEqual(sizeBudget('orch-debugger', custom), { warnAt: 80000, returnAt: 160000 });
+  const coord = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAt: 170000 } } } } });
+  assert.deepEqual(sizeBudget('orch-coordinator', coord), { warnAt: 170000, returnAt: 200000 });
+  const bad = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAt: 250000 } } } } });
+  assert.deepEqual(sizeBudget('orch-coordinator', bad), { warnAt: 150000, returnAt: 200000 }, 'warnAt >= returnAt keeps the role default');
+  assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.limit', '1'), /workers\.size\.<role>\.warnAt/);
+  assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.warnAt', '0'), /positive token count/);
+});
+
 test('context-check tells a coordinator to write PROGRESS and then return PARTIAL', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-coord-context-'));
   const env = { ...process.env, HOME: home, USERPROFILE: home };
@@ -117,13 +154,13 @@ test('context-check tells a coordinator to write PROGRESS and then return PARTIA
     type: 'assistant', timestamp: new Date().toISOString(),
     message: { id, model: 'claude-opus-5', usage: { input_tokens: tokens, output_tokens: 1 } },
   }) + '\n';
-  writeFileSync(transcript, response('checkpoint', 120000));
+  writeFileSync(transcript, response('checkpoint', 150000));
   const payload = { session_id: 'coord-context', agent_id: 'coord', transcript_path: lead, agent_transcript_path: transcript };
   const first = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
   assert.equal(first.status, 0, first.stderr);
   assert.match(JSON.parse(first.stdout).hookSpecificOutput.additionalContext, /write PROGRESS/);
 
-  writeFileSync(transcript, response('checkpoint', 120000) + response('compact', 150000));
+  writeFileSync(transcript, response('checkpoint', 150000) + response('compact', 205000));
   const second = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
   assert.equal(second.status, 0, second.stderr);
   assert.match(JSON.parse(second.stdout).hookSpecificOutput.additionalContext, /return PARTIAL now with the handoff/);
@@ -162,6 +199,31 @@ test('running helpers: dispatched and not returned and still alive', () => {
   assert.deepEqual(live.map(w => w.task || w.role), ['1', 'Explore'], 'writing recently or just dispatched; the silent, returned and stale ones do not count');
   // A return recorded without an agent id still matches by role and task.
   assert.deepEqual(runningNative([{ agent: 'orch-researcher', task: '7', at: ago(1) }], { returned: [{ agent: 'orch-researcher', task: '7', at: ago(0) }], now: NOW }), []);
+});
+
+test('running helpers: one that used every turn its role allows has stopped, even with no return recorded', () => {
+  const files = new Map([
+    ['tu_cap', { agentId: 'cap', mtimeMs: NOW - 30000, path: 'cap.jsonl' }],
+    ['tu_mid', { agentId: 'mid', mtimeMs: NOW - 30000, path: 'mid.jsonl' }],
+  ]);
+  const dispatches = [
+    { agent: 'orchestrate:orch-implementer', task: '1', at: ago(3), toolUseId: 'tu_cap' },
+    { agent: 'orchestrate:orch-implementer', task: '2', at: ago(3), toolUseId: 'tu_mid' },
+  ];
+  const turnsOf = p => (p === 'cap.jsonl' ? 100 : 12);
+  const live = runningNative(dispatches, { files, now: NOW, staleMin: 45, turnsOf });
+  assert.deepEqual(live.map(w => w.task), ['2'], 'the capped helper frees its slot at once; the one mid-work still counts');
+  assert.equal(roleMaxTurns('orchestrate:orch-implementer'), 100);
+  assert.match(concurrencyDecision('orch-implementer', { native: live, policy: loadPolicy() }) || 'free', /free/);
+});
+
+test('transcriptTurns counts one turn per model message, however many records it was written as', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-turns-'));
+  const tr = join(dir, 'agent.jsonl');
+  const msg = id => JSON.stringify({ type: 'assistant', message: { id, usage: { input_tokens: 1 } } });
+  writeFileSync(tr, [msg('a'), msg('a'), msg('b'), JSON.stringify({ type: 'user' })].join('\n'));
+  assert.equal(transcriptTurns(tr), 2);
+  assert.equal(transcriptTurns(join(dir, 'missing.jsonl')), 0);
 });
 
 test('helper transcripts are found by the tool call that started them', () => {
@@ -230,8 +292,8 @@ test('reset times are read from the provider message', async () => {
 });
 
 test('capped returns are partial, and the recovery note is said once', () => {
-  assert.equal(roleMaxTurns('orchestrate:orch-implementer'), 50);
-  assert.equal(roleMaxTurns('orch-reviewer'), 30);
+  assert.equal(roleMaxTurns('orchestrate:orch-implementer'), 100);
+  assert.equal(roleMaxTurns('orch-reviewer'), 60);
   assert.equal(roleMaxTurns('general-purpose'), null);
   assert.deepEqual(cappedReturn(50, 50, 'DONE'), { capped: true, status: 'PARTIAL', claimed: 'DONE' });
   assert.deepEqual(cappedReturn(12, 50, 'DONE'), { capped: false, status: 'DONE', claimed: 'DONE' });

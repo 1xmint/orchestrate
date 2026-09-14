@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   readContext, sampleContext, adviseContext, contextNotice, scanSlice, inputSide, thresholds,
-  storedContext, markAnnounced, agentTranscriptPath, formatReading, writeStatusCapacity, statusCapacity, checkpointPath,
+  storedContext, markAnnounced, agentTranscriptPath, contextTick, formatReading, writeStatusCapacity, statusCapacity, checkpointPath,
 } from './lib/context.mjs';
 import { loadPolicy, setPolicyValue } from './lib/policy.mjs';
 import { persistDecision } from './persist-check.mjs';
@@ -317,4 +317,12 @@ test('the size line can be turned off, and only speaks for a measured size', () 
   assert.equal(sampleContext({ transcriptPath: p, session: 'q', policy: loadPolicy({ policy: { context: { tickEvery: 0 } } }), now: NOW, dir: store }).notice, '');
   const { p: p2, store: s2 } = file([user('hi', 0)]);
   assert.equal(sampleContext({ transcriptPath: p2, session: 'u', policy, now: NOW, dir: s2 }).notice, '', 'no usage yet: nothing to say');
+});
+
+test('the size line names the next step for where the size actually is', () => {
+  const line = tokens => contextTick({ state: 'measured', tokens, capacity: null, compaction: null, compactions: 0 }, policy).text;
+  assert.match(line(60000), /Nothing to do until ~120k/);
+  assert.match(line(145000), /Past the checkpoint line; the switch recommendation comes at ~150k/);
+  assert.doesNotMatch(line(145000), /Nothing to do/);
+  assert.match(line(175000), /Past the switch line/);
 });

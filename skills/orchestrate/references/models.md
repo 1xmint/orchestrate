@@ -33,8 +33,11 @@ steps, and re-read ~49M tokens each. Half the steps is roughly a third of the
 re-reads; Sonnet instead of Opus is 40% of the per-token price. So:
 
 1. **Size first.** One verifiable change per packet, named files and line ranges.
-   The role step caps (`maxTurns`: implementer 50, debugger 80, researcher,
-   browser and planner 40, reviewer 30) end a run that grew too big.
+   Each helper has a size budget: at ~80k tokens the hook tells it to write its
+   progress file, at ~120k to return PARTIAL (a coordinator 150k and 200k;
+   `workers.size` in the policy). The role step caps (`maxTurns`: implementer
+   100, debugger 120, coordinator 150, researcher, browser and planner 80,
+   reviewer 60) are only a backstop behind it.
 2. **Then model.** Executors (implementer, researcher, browser) start on Sonnet;
    the guard refuses anything higher before a real attempt at the same task.
    Planner, reviewer and debugger may use Opus.

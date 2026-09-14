@@ -27,6 +27,8 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
+import { roleMaxTurns } from './lib/workers.mjs';
+export { roleMaxTurns };
 
 // Lenient on purpose, and it stays lenient: a return that got the shape almost
 // right is still the work. Anything absent is reported as absent, never
@@ -146,17 +148,6 @@ export function readCosts(path = COSTS_PATH) {
   } catch { return []; }
 }
 
-// A role's turn cap, from its own agent file (assets/agents/<role>.md), so the
-// number has one home. Null for a role with no file or no cap.
-const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'agents');
-export function roleMaxTurns(role, dir = AGENTS_DIR) {
-  try {
-    const fm = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(dir, `${normalizeRole(role)}.md`), 'utf8').replace(/\r\n/g, '\n'));
-    const m = fm && /^maxTurns:\s*(\d+)/m.exec(fm[1]);
-    return m ? Number(m[1]) : null;
-  } catch { return null; }
-}
-
 // A helper that used every turn it was allowed stopped because of the cap, not
 // because it finished, whatever its last message claims. Its return is partial:
 // the lead continues only what is left, from its evidence and progress file.
@@ -256,7 +247,7 @@ export const SEEN_RETURNS_MAX = 400;
 // read-modify-write store: a concurrent stop only ever adds its own line.
 function alreadyHandled(input, agent, text) {
   try {
-    const sig = createHash('sha256').update(`${input.session_id || ''}|${agent}|${text}`).digest('hex').slice(0, 32);
+    const sig = createHash('sha256').update(`${input.session_id || ''}|${agent}|${input.agent_id || ''}|${text}`).digest('hex').slice(0, 32);
     const now = Date.now();
     const seen = seenRecently(SEEN_RETURNS_PATH, sig, now, DEDUPE_MS);
     recordSeen(SEEN_RETURNS_PATH, sig, now);
@@ -273,8 +264,7 @@ function main() {
   try { input = JSON.parse(payload); } catch { return; }
   if (!input || typeof input !== 'object') return;
 
-  const text = String(input.last_assistant_message || '');
-  if (!text.trim()) return;
+  let text = String(input.last_assistant_message || '');
 
   // Only a subagent's stop is a return, and only `agent_type` proves it is one.
   // `agent_id` does not: stops that are not subagent returns arrive carrying an
@@ -284,6 +274,12 @@ function main() {
   if (!agentType) return;
   const agent = String(agentType).replace(/[^A-Za-z0-9_-]/g, '_');
 
+  // A helper stopped at its turn cap usually ends on a tool call, so it has no
+  // final message. It has still stopped: record it, or it keeps its worker slot
+  // until the silence rule gives up on it.
+  const silent = !text.trim();
+  if (silent) text = '(stopped with no final message)\n';
+
   // The recommended install registers this hook twice: once globally in
   // settings.json, and once from SKILL.md's frontmatter while the skill is in
   // play. Both fire on the same stop. Act once.
@@ -292,7 +288,7 @@ function main() {
   const r = parseReturn(text);
   const usage = sumUsage(input.agent_transcript_path);
   const cap = cappedReturn(usage.turns, roleMaxTurns(agentType), r.status);
-  r.status = cap.status;
+  r.status = silent && !cap.capped ? 'PARTIAL' : cap.status;
   const dispatch = dispatchFor(input.session_id, r.task);
   const asked = dispatch && dispatch.model !== 'inherit' ? dispatch.model : '';
   const ranModel = usage.model || asked || 'inherit';

@@ -4,7 +4,7 @@ description: Used by the orchestrate skill. Independent read-only review of a ch
 model: opus
 effort: high
 tools: Read, Grep, Glob, WebFetch, WebSearch, Skill, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git status:*)
-maxTurns: 30
+maxTurns: 60
 color: red
 memory: user
 ---

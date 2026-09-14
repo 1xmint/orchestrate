@@ -120,6 +120,19 @@ transition, so the worker always passes `-m`.
     measured size owns that advice, so a just-compacted session is never told to
     hand off. 351/351.
   Takes effect from the next session. Applied on this machine by hand first.
+- A size budget for every helper, in tokens (Josh: longer runs are right for an
+  agent that manages agents). Found when two Sonnet implementers stopped at their
+  50-turn cap near 104k having saved nothing. The host has no token limit for
+  subagents (its docs name only `maxTurns`), so the PostToolUse hook is the
+  mechanism: at `warnAt` it tells the helper to write its progress file and keep
+  going, at `returnAt` to start no new work and return PARTIAL, each once.
+  `policy.workers.size`: 80k / 120k by default, orch-coordinator 150k / 200k;
+  set per role with `profile.mjs --policy workers.size.<role>.returnAt=160000`,
+  and a pair whose warnAt is not below returnAt keeps the role's defaults. Turn
+  caps are raised to a backstop: implementer 100, debugger 120, coordinator
+  150, researcher, planner and browser 80, reviewer 60. Helpers do not compact:
+  undocumented for subagents, and 0 of 89 helper transcripts on this machine
+  ever did; the progress file carries the work instead. 357/357.
 
 **Found while building.** (1) The Codex sandbox refuses child processes, so
 `node --test` fails there with `spawn EPERM`; `--test-isolation=none` runs
@@ -130,6 +143,10 @@ meanwhile. (3) The router read a blocks-on cell of short ids (`0001 0002`) as
 nothing to wait for; the table needs full ids. (4) A Codex start refused for a
 busy slot still wrote a `returns.jsonl` line, so three retries left three
 "blocked" returns to grade; only runs where Codex started are recorded now.
+(5) Fixed: (2) above. A capped helper ends on a tool call with no final
+message, and the ledger dropped any stop without one, so no capped return was
+ever recorded. Now that stop is filed as PARTIAL, and a helper whose transcript
+used every turn its role allows stops counting at once, even with no record.
 
 **Verification.** Full suite 344/344 on the branch. Hook replays on `059154a1`
 above. Worker-lane run on a scratch repo with three failing `slugify` tests:

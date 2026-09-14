@@ -111,7 +111,7 @@ if (autoIdx >= 0) {
 const polIdx = args.findIndex(a => a === '--policy');
 if (polIdx >= 0) {
   const { loadPolicy, setPolicyValue } = await import('./lib/policy.mjs');
-  const pairs = args.slice(polIdx + 1).filter(a => /^[\w]+\.[\w]+=/.test(a));
+  const pairs = args.slice(polIdx + 1).filter(a => /^[\w.-]+=/.test(a));
   if (pairs.length) {
     let p = loadProfile();
     try { for (const kv of pairs) { const i = kv.indexOf('='); p = setPolicyValue(p, kv.slice(0, i), kv.slice(i + 1)); } } catch (e) { console.error(String(e.message)); process.exit(2); }

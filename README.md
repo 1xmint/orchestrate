@@ -198,8 +198,8 @@ install. You should not need to type them.
 |---|---|---|
 | `router.mjs` | every prompt, and on resume or compact | once a session, the local state the model cannot see: plan tier, your own model, the run this session is bound to, agents installed, a family limit hit today, plus a short card on how work gets shaped. While a run is open it also names the returns still waiting to be graded and the tasks whose blockers have all landed, so a session stops waiting on one agent when there is work it could start. On resume it brings back the run's goal, constraints and next step. After that, silence unless one of those facts changes. Turn it off for a session by typing `router off` |
 | `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It refuses, with the exact retry: nesting except a bounded child of `orch-coordinator`; built-in `general-purpose` (no turn cap) while the capped role agents are installed; more than two workers while the coordinator holds its third slot, or a second browser task; in Plan mode, any helper that could write, a worktree or a progress file; a Claude helper aimed at a worktree a live Codex worker holds; a coding, research or browser helper above Sonnet before a cheaper attempt at the same task; a search helper with no cheap model named; a copy of a conversation already past ~100k measured tokens; Fable on a plan where it costs credits; and any new helper once the 5-hour window is at 80% or the week at 90% |
-| `context-check.mjs` | after each tool call | reads only what the conversation added since last time and says something only when the advice changes: prepare a checkpoint, recommend compacting or a fresh conversation at the next safe point, or look for what stayed large after a compaction. It also notices when the app enters or leaves Plan mode, and when a helper stopped at its turn cap. Inside a helper it records that helper's size and says nothing |
-| `persist-check.mjs` | when a turn ends | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refusal, the same error twice, 25 steps, or 90% of the 5-hour window. It no longer warns about transcript size; the context reader's advice rides along when it changes |
+| `context-check.mjs` | after each tool call | reads only what the conversation added since last time and says something only when the advice changes: prepare a checkpoint, recommend compacting or a fresh conversation at the next safe point, or look for what stayed large after a compaction. It also notices when the app enters or leaves Plan mode, and when a helper stopped at its turn cap. Inside a helper it records that helper's size and speaks only at its size budget: write the progress file at ~80k, return PARTIAL at ~120k (a coordinator 150k and 200k) |
+| `persist-check.mjs` | when a turn ends | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refusal, the same error twice, 25 steps, or 90% of the 5-hour window. The context reader's advice rides along when it changes |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run this session is bound to, prices it, and records which run and task it belongs to in `returns/returns.jsonl`. It does not touch the task rows: two returns landing together each rewrote the whole file, and the second erased the first |
 | `turn-check.mjs` | when a turn ends | one rule, and only for a run this session is bound to: it asks once for the Pickup line when that line has not moved since the last dispatch, so a session that dies is still resumable |
 | `precompact-check.mjs` | just before the conversation is compacted | the same Pickup rule as `turn-check.mjs`, fired one moment earlier: a long session can auto-compact mid-turn, and a stale Pickup line does not just age, it is gone. Asks once per unwritten line, then lets compaction proceed either way so it can never block the very thing that frees up context |
@@ -214,12 +214,6 @@ keyed to be idempotent. **A script install (`--with-hook`) additionally
 registers the turn check in `settings.json`** with the interpreter's absolute
 path pinned in, the same way it pins the other two; only there does it not
 depend on `node` being on the launching app's PATH.
-
-Two hooks that used to be here are gone in v0.9.0. One refused a subagent's
-return over its shape, spending a real model turn to buy a restatement or a
-line count. The other blocked a turn when a recommendation had been answered
-from fewer than two source-reading calls, which two failed fetches satisfied
-and one authoritative document did not. Neither is something a hook can judge.
 
 ### If it has your plan wrong
 
@@ -332,7 +326,8 @@ node skills/orchestrate/scripts/profile.mjs --policy context.compactAt=180000 wo
 Keys: `context.checkpointAt`, `context.compactAt`, `context.hardAt`, `context.windowFraction`,
 `context.window`, `context.staleMs`, `context.freshAfterCompactions`, `context.tickEvery`, `context.autocompactDefault` (a positive token count or `off`), `workers.maxConcurrent`,
 `workers.browserConcurrent`, `workers.nested` (`coordinator`/`deny`/`allow`),
-`workers.generalPurpose` (`deny`/`allow`), `workers.staleMin`, `codex.enabled`,
+`workers.generalPurpose` (`deny`/`allow`), `workers.staleMin`,
+`workers.size.<role>.warnAt` and `.returnAt` (a helper's size budget in tokens; `default` covers any role without its own), `codex.enabled`,
 `codex.model`, `codex.effortImplement`, `codex.effortHard`, `codex.timeoutMin`.
 They are stored under `policy` in `~/.claude/orchestrate/profile.json`; an older
 version ignores that key. `profile.mjs --host` shows which Claude Code engine the
@@ -468,12 +463,9 @@ grep version ~/.claude/skills/orchestrate/SKILL.md
 You pick the conversation's model and effort before this skill exists, so it
 cannot set them for you.
 
-**It no longer offers an opinion unless you ask.** Until v0.9.0 it did: on the
-first message where it could see what it was running on, it told you what your
-plan deserved and the exact click to get there. That is a session interrupting
-you about your own settings, on a turn you started for some other reason, and it
-came out of the same pass that removed everything else here that spoke without
-being asked. Ask, and you get the table below. Do not ask, and it works at
+**It offers no opinion on them unless you ask.** A session that tells you what
+your plan deserves, on a turn you started for some other reason, is interrupting
+you about your own settings. Ask, and you get the table below. Do not ask, and it works at
 whatever you chose.
 
 | Your plan | Model | Effort |
@@ -501,9 +493,11 @@ turn and stops. And why to set it once: changing the model or effort mid-run
 makes Claude re-read the whole conversation on the next turn, which costs more
 than the setting saves.
 
-The dispatched agents inherit whatever you chose. They used to pin their own —
-the planner and debugger at `xhigh` — which quietly overrode your setting and
-spent your quota at a level you never picked. That went in v0.9.0 too.
+The helpers it dispatches do not use your choice. Each role sets its own, because
+a helper's cost is its steps times a context that grows every step: the
+implementer, researcher and browser run on Sonnet at medium or low effort; the
+planner, reviewer, debugger and coordinator run on Opus at high. None runs at
+`xhigh` or `max`.
 
 `skills/orchestrate/references/models.md` has the rest: what each of the four
 models is good and bad at, why Haiku's context window is a fifth of the others,
@@ -544,9 +538,7 @@ not what a subscription is billed.** A dispatch that names no model gets no
 price, because nothing knows what it will run on. There is no running counter,
 because a counter reads as an allowance and invites spending up to it.
 
-v0.9.0 removed the "% of your week" that used to travel with each price, and the
-two thresholds built on it (say it over 5%, ask over 25%). The weekly figure
-they divided by — Pro about $30, Max 5x about $150, Max 20x about $600 — came
+A price carries no "% of your week". The only weekly figure to divide by came
 from **one observation** on 2026-09-09, and a percentage computed from that
 reads like a measurement when it is not one. What is left is judgment: say a
 price once, before the spend, when it is big enough to change what you would
@@ -610,7 +602,7 @@ itself at the next session. To try a branch first, without touching the
 installed copy (terminal only; the app cannot pass the flag):
 
 ```bash
-git -C /path/to/orchestrate checkout release/v0.13.0
+git -C /path/to/orchestrate checkout <branch>
 ```
 
 ```bash
@@ -625,9 +617,9 @@ takes effect in a new session. To roll back:
 2. For everyone: revert the release's merge on `main` and push; auto-update
    installs the previous version again. Earlier versions stay in
    `~/.claude/plugins/cache/orchestrate/orchestrate/`.
-3. Data: v0.13.0 only adds files — `~/.claude/orchestrate/context/`,
+3. Data: a newer version only adds files — `~/.claude/orchestrate/context/`,
    `~/.claude/orchestrate/workers/`, and a `policy` key in `profile.json`.
-   Older versions ignore all three, and deleting them is safe.
+   An older version ignores what it does not know, and deleting them is safe.
 4. A script install: rerun the old version's `scripts/install.mjs`; it replaces
    this plugin's hook entries by script name instead of stacking them, but it
    does not know `context-check.mjs`, so delete that one entry by hand.
@@ -818,11 +810,12 @@ supported path. See `skills/orchestrate/references/hosts.md`.
 
 ```
 skills/orchestrate/
-  SKILL.md              the skill (403 body lines; stays in context)
+  SKILL.md              the skill (433 body lines; stays in context)
   references/           ladder, routing, evaluation, lanes, hosts, models
   scripts/              router, guard, ledger, turn-check, precompact-check, persist-check,
                         context-check, context, codex-worker, gate, profile, run-init,
-                        measure, diagnose, map, install-agents, install-project, batch
+                        measure, diagnose, map, install-agents, install-project, batch,
+                        smoke, statusline
   scripts/lib/          context (the one context reader), policy, workers, modes, host,
                         quota, tier, settings, prices, listing, template
   assets/               RUN.md template, packet template, worker report schema, seven role
@@ -847,11 +840,12 @@ by a repeat, the ledger's parsing and its attribution of a return to the right
 run, the Pickup check, which tasks are ready and which returns are still owed a
 grade, gate detection on three fixture repo layouts, the project kit, the
 installer's merge against a copy of a real `settings.json`, both package builds,
-and the eval file's shape. Since v0.13.0 they also cover the context reader on
+and the eval file's shape. They also cover the context reader on
 fixture transcripts (compaction, retained history, null usage, restored context,
 duplicate and half-written records, concurrent sessions, a long-session replay),
 the worker rules (nested helpers, Plan mode, concurrency, worktree locks, capped
-returns, a replay of the 274-call helper), and the Codex adapter against a fake
+returns and the slot a capped helper frees, size budgets, a replay of the
+274-call helper), and the Codex adapter against a fake
 Codex CLI (success, usage limit before and after edits, bad output, sign-in
 errors, throttling, timeout and the hand-off to Claude). The run prints the
 count; anything red is a regression.

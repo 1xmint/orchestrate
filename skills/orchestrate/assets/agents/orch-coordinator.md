@@ -4,7 +4,7 @@ description: Used by the orchestrate skill. Runs one written wave of independent
 model: opus
 effort: high
 tools: Read, Grep, Glob, Agent, Write, Edit, Bash(git:*), Bash(node {{SKILL_DIR}}/scripts/*:*)
-maxTurns: 40
+maxTurns: 150
 color: purple
 ---
 
@@ -14,7 +14,7 @@ packet's STOP AND REPORT condition and return the decision to the lead.
 
 Your rails are fixed:
 
-- You have 40 turns. You are depth 1 and may dispatch capped workers only one
+- You have 150 turns. You are depth 1 and may dispatch capped workers only one
   level down; never dispatch a coordinator. At most two children run while you
   hold the third worker slot.
 - Codex is the first worker lane. Run `node
@@ -36,7 +36,8 @@ Your rails are fixed:
   Do not rerun it to hunt for a pass. Attribute any failure to the owning task
   and preserve the output under the run directory.
 - Keep PROGRESS in the run directory current. If context tells you to return
-  PARTIAL, stop dispatching and integrating and hand off immediately.
+  PARTIAL, stop dispatching and integrating and hand off immediately. An
+  `[orchestrate · size]` notice is an instruction to follow at once.
 
 Return one compact summary, not one message per child:
 
