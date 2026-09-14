@@ -51,6 +51,31 @@ because that is what quota pays for. Implementer context at first edit: median
    repo languages with none (e.g. `heyvera-current`: 180 `.rs` files, no Rust
    server), Graphify, code-graph MCP servers by name.
 
+**Acceptance through Codex: no saving shown.** One small implementer packet (add
+map state to `codex-worker.mjs status`, with a test), gpt-6-astra at medium, each
+run in its own worktree at a512b51. All three finished, and each run's test file
+passes 12/12 when run outside the sandbox.
+
+| run | map | input (cached) | output | time | commands (before first edit) |
+|---|---|---|---|---|---|
+| A | none | 279,521 (240,000) | 2,249 | 109 s | 11 (7) |
+| B | map.md + note | 217,159 (177,280) | 2,240 | 123 s | 9 (6) |
+| B2 | same, queries fixed | 325,174 (283,776) | 2,480 | 125 s | 11 (8) |
+
+- Both map runs read `map.md` first (3,964 chars). In B, `map.mjs tests-for`
+  failed with "not inside a git repository": Codex's sandbox stops Node starting
+  git. Fixed in 84dadcd (queries answer from the saved map via `--repo`; the
+  note passes it). In B2, Codex did not run a query at all and searched with
+  `rg`/`Select-String` as in A.
+- B and B2 had the same setup and differ by half; that spread is larger than any
+  difference between A and B, so these runs show no effect either way. The task
+  was also a poor test of a map: the packet named the files, and the work was
+  about `map.mjs` itself, which every run had to read.
+- What this leaves standing: the map costs ~4k characters per worker and is
+  cheap to build; the case for it is the measured 21% of helper input spent on
+  lookups, not these runs. A fair test needs a task where finding the files is
+  the hard part, repeated several times per side.
+
 **Not built, and why.** Graphify or an MCP code graph by default (Python install,
 another per-step hook and CLAUDE.md, no coding evidence of its own); embeddings
 (measured worse for code search by the Claude Code team); tree-sitter (a native
