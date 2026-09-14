@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 export const MAP_V = 1;
 // Bumped whenever scan() or purposeOf() changes what they return, so cached
 // results from the older scanner are thrown away.
-export const SCAN_V = 2;
+export const SCAN_V = 3;
 export const MD_CAP = 4000;
 const MAX_BYTES = 512 * 1024;
 const SELF = fileURLToPath(import.meta.url);
@@ -80,7 +80,8 @@ export function purposeOf(text) {
     s = s ? `${s} ${m[1]}` : m[1].replace(/^[\w./-]+\.(?:[cm]?[jt]sx?|py|rs|go)\s*[—–:-]+\s*/, '');
     if (/[.!?:]$/.test(s) || s.length >= 100) break;
   }
-  s = s.trim();
+  // Divider rules (─── Section ───, ======) are decoration, not a purpose.
+  s = s.replace(/[─━═]{2,}|[-=*#~_]{4,}/g, ' ').replace(/\s+/g, ' ').trim();
   if (!s) return null;
   const sentence = /^(.+?[.!?])(?:\s|$)/.exec(s);
   if (sentence && sentence[1].length >= 20) s = sentence[1];
@@ -291,9 +292,15 @@ export function build(root, { now = new Date(), write = true } = {}) {
   return { map, md, ms: Date.now() - t0 };
 }
 
+// Folders a newcomer should not start from. They stay in map.json and answer
+// queries; the page leaves them out and says how many files that was.
+export const SIDELINED = /(?:^|\/)(?:archive[sd]?|legacy[\w-]*|reference|vendor(?:ed)?|third[_-]?party|deprecated|old|examples?|fixtures?|dist|build|out)\//i;
+
 export function markdown(map, root) {
   const files = map.files;
-  const src = Object.keys(files).filter(p => !files[p].test && !files[p].skipped);
+  const sidelined = Object.keys(files).filter(p => SIDELINED.test(p));
+  const shown = p => !SIDELINED.test(p);
+  const src = Object.keys(files).filter(p => !files[p].test && !files[p].skipped && shown(p));
   const head = [
     `# Repo map (${String(map.head || 'no commit').slice(0, 7)}, ${map.builtAt.slice(0, 10)})`,
     '',
@@ -304,7 +311,7 @@ export function markdown(map, root) {
   ];
   const sections = [];
   const folders = {};
-  for (const p of Object.keys(files)) { const d = posix.dirname(p); (folders[d] ||= []).push(p); }
+  for (const p of Object.keys(files).filter(shown)) { const d = posix.dirname(p); (folders[d] ||= []).push(p); }
   const purposeOfDir = d => {
     const hub = folders[d].filter(p => !files[p].test && files[p].purpose).sort((a, b) => (map.importers[b]?.length || 0) - (map.importers[a]?.length || 0))[0];
     return hub ? `${posix.basename(hub)}: ${files[hub].purpose}` : '';
@@ -317,7 +324,7 @@ export function markdown(map, root) {
   const gate = readJsonFile(join(root, '.orchestrator', 'gate.json'));
   if (gate && Array.isArray(gate.gate) && gate.gate.length) sections.push(['## Checks (from gate.json)', gate.gate.map(c => `- ${c.kind}: \`${c.cmd}\``)]);
   const c = map.counts;
-  const foot = `${c.code} code files of ${c.indexed} in the index, ${c.edges} import edges, tests linked to ${c.linkedSources} files.`;
+  const foot = `${c.code} code files of ${c.indexed} in the index, ${c.edges} import edges, tests linked to ${c.linkedSources} files.${sidelined.length ? ` Left off this page: ${sidelined.length} files under archive, legacy, vendor, example or build folders.` : ''}`;
 
   // Fill to the cap, cutting list items from the end of each section rather
   // than dropping a section.

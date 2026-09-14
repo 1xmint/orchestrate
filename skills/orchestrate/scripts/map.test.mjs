@@ -132,3 +132,16 @@ test('building the map never shows up as a change in git', () => {
   const excl = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
   assert.equal(excl.match(/^\.orchestrator\/$/gm).length, 1, 'added once, not per build');
 });
+
+test('archive, legacy, vendor and example folders stay queryable but off the page', () => {
+  const { root, put } = fixture();
+  for (const i of [1, 2, 3]) put(`archive/old-core/state${i}.mjs`, "import '../../src/lib/store.mjs';\n");
+  put('vendor/lib.mjs', '// ─── Vendored copy ─────────────\nexport const v = 1;\n');
+  git(root, 'add', '-A');
+  git(root, 'commit', '-q', '-m', 'archive');
+  const { map, md } = build(root);
+  assert.equal(map.importers['src/lib/store.mjs'].length, 4, 'still in the data, so who-uses sees them');
+  assert.doesNotMatch(md, /archive\/|vendor\//);
+  assert.match(md, /Left off this page: 4 files under archive, legacy, vendor, example or build folders\./);
+  assert.equal(map.files['vendor/lib.mjs'].purpose, 'Vendored copy');
+});

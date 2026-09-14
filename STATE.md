@@ -38,7 +38,10 @@ because that is what quota pays for. Implementer context at first edit: median
    `map.md` ≤ 4,000 chars. On this repo: 60 files, 119 edges, 0.3 s cold, 0.1 s
    cached; `who-uses lib/workers.mjs` matched grep exactly (6 importers).
    `.orchestrator/` goes into git's local exclude so the map never reads as a
-   change.
+   change. Tried read-only on `heyvera-current` (849 code files, Rust + TS):
+   0.6–0.8 s, 1,640 edges, but archived and reference copies filled the top of
+   the page, so archive/legacy/vendor/example/build folders now stay in the
+   data and off the page, with a count (407 files there).
 2. `run-init` builds the map and names it under Facts.
 3. `packet.md`: MAP, TESTS FOR SCOPE, reviewer CALLERS (PROGRESS and the CI note
    tightened to stay under the 6,500-byte cap). SKILL.md §2 and §5.
