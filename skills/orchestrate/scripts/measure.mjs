@@ -13,6 +13,7 @@
 //   node measure.mjs <t> --dollars               the same, priced at list price
 //   node measure.mjs <t> --tree [--json]         the lead, every helper and nested
 //                                                helper, and Codex worker runs
+//   node measure.mjs --growth <t> [--json]       where the lead's context went
 //
 // Transcripts live under ~/.claude/projects/<slugged cwd>/<session id>.jsonl.
 // Fields read: message.usage.{input_tokens, cache_creation_input_tokens,
@@ -126,6 +127,94 @@ function strings(v, out = []) {
   else if (Array.isArray(v)) v.forEach(x => strings(x, out));
   else if (v && typeof v === 'object') Object.values(v).forEach(x => strings(x, out));
   return out;
+}
+
+const toolInputChars = input => JSON.stringify(input || {}).length;
+const byTool = (rows, name, chars) => { rows[name] = (rows[name] || 0) + chars; };
+
+function toolLabel(name, input = {}) {
+  if (name === 'Bash') return String(input.command || '').replace(/\s+/g, ' ').slice(0, 80) || '(no command)';
+  if (['Write', 'Edit', 'Read', 'MultiEdit', 'NotebookEdit'].includes(name)) {
+    return String(input.file_path || input.path || input.notebook_path || '(no file path)');
+  }
+  return String(input.command || input.query || input.pattern || input.path || '').replace(/\s+/g, ' ').slice(0, 80) || '(no label)';
+}
+
+// The growth report deliberately only reads the lead's records. Helpers have
+// separate contexts; blending them into this answer would hide the reason the
+// manager got large. It shares the transcript shapes and pricing primitives
+// above rather than maintaining another JSONL reader.
+export function measureGrowth(text) {
+  const r = {
+    toolInputChars: {}, toolResultChars: {}, largestInputs: [], largestResults: [],
+    hookAttachmentChars: 0, contexts: [], input: 0, output: 0, cacheRead: 0,
+    cacheWrite: 0, turns: 0, price: null, priceModel: null,
+  };
+  const tools = new Map();
+  const calls = new Map();
+  const models = [];
+  const seenTools = new Set();
+  let anon = 0;
+  for (const line of String(text).split('\n')) {
+    if (!line.trim()) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (o.isSidechain === true) continue;
+    const msg = o.message || {};
+    if (o.type === 'assistant' && msg.model !== '<synthetic>') {
+      const id = msg.id || `anon-${anon++}`;
+      if (msg.usage) calls.set(id, msg.usage);
+      if (typeof msg.model === 'string') models.push(msg.model);
+      for (const b of Array.isArray(msg.content) ? msg.content : []) {
+        if (!b || b.type !== 'tool_use') continue;
+        const toolId = b.id || `tool-anon-${anon++}`;
+        if (seenTools.has(toolId)) continue;
+        seenTools.add(toolId);
+        const name = String(b.name || 'unknown');
+        const chars = toolInputChars(b.input);
+        const label = toolLabel(name, b.input || {});
+        tools.set(toolId, { name, label });
+        byTool(r.toolInputChars, name, chars);
+        r.largestInputs.push({ tool: name, chars, label });
+      }
+    }
+    if (o.type === 'user') {
+      for (const b of Array.isArray(msg.content) ? msg.content : []) {
+        if (!b || b.type !== 'tool_result' || !tools.has(b.tool_use_id)) continue;
+        const { name, label } = tools.get(b.tool_use_id);
+        const chars = resultChars(b.content);
+        byTool(r.toolResultChars, name, chars);
+        r.largestResults.push({ tool: name, chars, label });
+      }
+    }
+    if (o.type === 'attachment') r.hookAttachmentChars += strings((o.attachment || {}).content).reduce((n, s) => n + s.length, 0);
+    else if (o.additionalContext != null || msg.additionalContext != null) {
+      r.hookAttachmentChars += strings(o.additionalContext != null ? o.additionalContext : msg.additionalContext).reduce((n, s) => n + s.length, 0);
+    }
+  }
+  let response = 0;
+  for (const usage of calls.values()) {
+    response++;
+    r.turns++;
+    r.input += num(usage.input_tokens); r.output += num(usage.output_tokens);
+    r.cacheRead += num(usage.cache_read_input_tokens); r.cacheWrite += num(usage.cache_creation_input_tokens);
+    if (response % 10 === 0) r.contexts.push({ response, tokens: inputOf(usage) });
+  }
+  r.largestInputs.sort((a, b) => b.chars - a.chars);
+  r.largestResults.sort((a, b) => b.chars - a.chars);
+  r.largestInputs = r.largestInputs.slice(0, 10);
+  r.largestResults = r.largestResults.slice(0, 10);
+  const families = models.map(family).filter(Boolean);
+  r.priceModel = families.length ? families.sort((a, b) => families.filter(x => x === b).length - families.filter(x => x === a).length)[0] : null;
+  r.price = r.priceModel ? dollars(r, r.priceModel) : null;
+  return r;
+}
+
+export function growthReport(r) {
+  const chars = rows => Object.entries(rows).sort((a, b) => b[1] - a[1]).map(([tool, n]) => `${tool} ${n}`).join(', ') || 'none';
+  const largest = rows => rows.length ? rows.map(x => `  ${x.tool} ${x.chars} chars — ${x.label}`).join('\n') : '  none';
+  const L = ['main-session context growth', `tool input chars: ${chars(r.toolInputChars)}`, `tool result chars: ${chars(r.toolResultChars)}`, 'largest tool inputs:', largest(r.largestInputs), 'largest tool results:', largest(r.largestResults), `hook attachments: ${r.hookAttachmentChars} chars`, `context every 10th response: ${r.contexts.map(x => `#${x.response} ${x.tokens}`).join(', ') || 'fewer than 10 responses'}`, `tokens: ${r.input} input, ${r.cacheRead} cache-read, ${r.cacheWrite} cache-write, ${r.output} output`];
+  L.push(r.price == null ? 'list price: not priced — no known model' : `list price: $${r.price.toFixed(2)} on ${r.priceModel}`);
+  return L.join('\n');
 }
 
 // ---- the whole agent tree ------------------------------------------------------
@@ -273,7 +362,7 @@ export function measureTree(leadTranscript, { reportsPath = WORKER_REPORTS_PATH 
     let text = '';
     try { text = readFileSync(join(dir, f), 'utf8'); } catch { continue; }
     agents.push({
-      agentId, type: meta.agentType || 'unknown', depth: Number(meta.spawnDepth) || 1, parent: meta.parentAgentId || null,
+      agentId, type: meta.agentType === 'orch-coordinator' ? 'coordinator' : (meta.agentType || 'unknown'), depth: Number(meta.spawnDepth) || 1, parent: meta.parentAgentId || meta.parent || null,
       requestedModel: meta.model || null, toolUseId: meta.toolUseId || null,
       ...callsOf(text, { seen }),
     });
@@ -420,6 +509,11 @@ function main() {
   if (args.includes('--tree')) {
     const t = measureTree(path);
     console.log(args.includes('--json') ? JSON.stringify(t, null, 2) : treeReport(t));
+    return;
+  }
+  if (args.includes('--growth')) {
+    const r = measureGrowth(readFileSync(path, 'utf8'));
+    console.log(args.includes('--json') ? JSON.stringify(r, null, 2) : growthReport(r));
     return;
   }
   const r = measure(readFileSync(path, 'utf8'));

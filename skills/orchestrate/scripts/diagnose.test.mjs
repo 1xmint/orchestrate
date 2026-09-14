@@ -60,6 +60,15 @@ test('the home folder never appears in the diagnosis', () => {
   assert.equal(redactHome('C--Users-Pat-Desktop and C:\\Users\\Pat\\x', 'C:\\Users\\Pat'), '~-Desktop and ~\\x');
 });
 
+test('a large main context points to the growth report for this transcript', () => {
+  const d = {
+    at: 'now', versions: { installed: [] }, host: {}, policy: loadPolicy({}), hooks: {},
+    transcript: '~/project/sess.jsonl', context: { reading: { tokens: 120000, state: 'measured', stale: false }, advice: { action: 'checkpoint', why: 'large' } },
+    codex: 'skipped', claudeQuota: { fresh: false, note: 'n' }, errors: [],
+  };
+  assert.match(humanDiagnosis(d), /inspect growth: node measure\.mjs --growth ~\/project\/sess\.jsonl/);
+});
+
 test('a missing transcript still reports the machine, and a settings file with no hooks is empty', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-diag-'));
   const d = diagnose({ transcript: join(home, 'nope.jsonl'), env: {}, codex: false, home, now: NOW, policy: loadPolicy({}) });
