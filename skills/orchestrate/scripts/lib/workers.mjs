@@ -10,7 +10,10 @@
 // and is still showing signs of life: dispatched moments ago, or its own
 // transcript was written recently. Return records alone are not enough — older
 // sessions recorded none, and a helper the user refused at the permission
-// prompt never returns — so a silent helper stops counting on its own.
+// prompt never returns — so a silent helper stops counting on its own. A helper
+// whose transcript has used every turn its role allows has stopped too, whether
+// or not its return was recorded: the turn cap ends it mid-step, with no final
+// message.
 //
 // An external worker counts while its process is alive. Its registry entry is
 // also the lock on its worktree: no native helper is sent into a worktree a
@@ -20,7 +23,9 @@ import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileS
 import { homedir } from 'node:os';
 import { join, dirname, basename, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { loadPolicy } from './policy.mjs';
+import { normalizeRole } from './prices.mjs';
 
 export const WORKERS_V = 1;
 export const WORKERS_DIR = join(homedir(), '.claude', 'orchestrate', 'workers');
@@ -33,6 +38,33 @@ function writeJsonAtomic(p, obj) {
   const tmp = `${p}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
   renameSync(tmp, p);
+}
+
+// A role's turn cap, from its own agent file (assets/agents/<role>.md), so the
+// number has one home. Null for a role with no file or no cap.
+const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'agents');
+export function roleMaxTurns(role, dir = AGENTS_DIR) {
+  try {
+    const fm = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(dir, `${normalizeRole(role)}.md`), 'utf8').replace(/\r\n/g, '\n'));
+    const m = fm && /^maxTurns:\s*(\d+)/m.exec(fm[1]);
+    return m ? Number(m[1]) : null;
+  } catch { return null; }
+}
+
+// Model turns in a helper transcript: one per distinct message that carries
+// usage, the same count the ledger prices. Zero when unreadable.
+export function transcriptTurns(path) {
+  const ids = new Set();
+  let anon = 0;
+  try {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      if (!line.includes('"usage"')) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      const m = o && o.message;
+      if (m && m.usage) ids.add(m.id || `anon-${anon++}`);
+    }
+  } catch {}
+  return ids.size;
 }
 
 export const roleOf = a => String(a || 'general-purpose').replace(/^[\w-]+:/, '');
@@ -51,7 +83,7 @@ export function helperFiles(leadTranscript) {
     const agentId = n.replace(/^agent-/, '').replace(/\.meta\.json$/, '');
     let mtimeMs = null;
     try { mtimeMs = statSync(join(dir, `agent-${agentId}.jsonl`)).mtimeMs; } catch {}
-    out.set(meta.toolUseId, { agentId, mtimeMs, meta });
+    out.set(meta.toolUseId, { agentId, mtimeMs, meta, path: join(dir, `agent-${agentId}.jsonl`) });
   }
   return out;
 }
@@ -79,8 +111,9 @@ export function nativeAgent(dispatches, files, agentId) {
   return null;
 }
 
-// Pure: which dispatch records still count as running.
-export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin } = {}) {
+// Which dispatch records still count as running. Pure except that it reads the
+// transcript of a helper that otherwise looks alive, to see whether its turns ran out.
+export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin, capOf = roleMaxTurns, turnsOf = transcriptTurns } = {}) {
   const back = new Set((returned || []).map(r => r && r.agentId).filter(Boolean));
   const loose = (returned || []).filter(r => r && !r.agentId).map(r => ({ ...r, used: false }));
   const out = [];
@@ -95,7 +128,10 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
     const hit = loose.find(r => !r.used && roleOf(r.agent) === role && (!d.task || !r.task || r.task === d.task) && Date.parse(r.at || 0) >= Date.parse(d.at));
     if (hit) { hit.used = true; continue; }
     const alive = age < JUST_DISPATCHED_MS || (f && f.mtimeMs != null && now - f.mtimeMs < SILENT_MS);
-    if (alive) out.push({ provider: 'claude', role, task: d.task || null, at: d.at, agentId: f ? f.agentId : null });
+    if (!alive) continue;
+    const cap = f && f.path ? capOf(d.agent) : null;
+    if (cap && turnsOf(f.path) >= cap) continue;
+    out.push({ provider: 'claude', role, task: d.task || null, at: d.at, agentId: f ? f.agentId : null });
   }
   return out;
 }

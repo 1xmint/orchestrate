@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workflowDecision, PLAN_READ_ROLES } from './guard-agent.mjs';
-import { runningNative, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal } from './lib/workers.mjs';
+import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal } from './lib/workers.mjs';
 import { modeTransition, modeNote, PLAN_NOTE, APPROVED_NOTE } from './lib/modes.mjs';
 import { cappedReturn, roleMaxTurns, sumUsage } from './ledger.mjs';
 import { loadPolicy } from './lib/policy.mjs';
@@ -162,6 +162,31 @@ test('running helpers: dispatched and not returned and still alive', () => {
   assert.deepEqual(live.map(w => w.task || w.role), ['1', 'Explore'], 'writing recently or just dispatched; the silent, returned and stale ones do not count');
   // A return recorded without an agent id still matches by role and task.
   assert.deepEqual(runningNative([{ agent: 'orch-researcher', task: '7', at: ago(1) }], { returned: [{ agent: 'orch-researcher', task: '7', at: ago(0) }], now: NOW }), []);
+});
+
+test('running helpers: one that used every turn its role allows has stopped, even with no return recorded', () => {
+  const files = new Map([
+    ['tu_cap', { agentId: 'cap', mtimeMs: NOW - 30000, path: 'cap.jsonl' }],
+    ['tu_mid', { agentId: 'mid', mtimeMs: NOW - 30000, path: 'mid.jsonl' }],
+  ]);
+  const dispatches = [
+    { agent: 'orchestrate:orch-implementer', task: '1', at: ago(3), toolUseId: 'tu_cap' },
+    { agent: 'orchestrate:orch-implementer', task: '2', at: ago(3), toolUseId: 'tu_mid' },
+  ];
+  const turnsOf = p => (p === 'cap.jsonl' ? 50 : 12);
+  const live = runningNative(dispatches, { files, now: NOW, staleMin: 45, turnsOf });
+  assert.deepEqual(live.map(w => w.task), ['2'], 'the capped helper frees its slot at once; the one mid-work still counts');
+  assert.equal(roleMaxTurns('orchestrate:orch-implementer'), 50);
+  assert.match(concurrencyDecision('orch-implementer', { native: live, policy: loadPolicy() }) || 'free', /free/);
+});
+
+test('transcriptTurns counts one turn per model message, however many records it was written as', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-turns-'));
+  const tr = join(dir, 'agent.jsonl');
+  const msg = id => JSON.stringify({ type: 'assistant', message: { id, usage: { input_tokens: 1 } } });
+  writeFileSync(tr, [msg('a'), msg('a'), msg('b'), JSON.stringify({ type: 'user' })].join('\n'));
+  assert.equal(transcriptTurns(tr), 2);
+  assert.equal(transcriptTurns(join(dir, 'missing.jsonl')), 0);
 });
 
 test('helper transcripts are found by the tool call that started them', () => {

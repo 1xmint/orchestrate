@@ -517,6 +517,28 @@ test('ledger: the return is written under the bound run and indexed', () => {
   assert.equal(out.status, 0);
 });
 
+test('ledger: a helper stopped at its turn cap with no final message is still recorded', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'capped-stop', repo);
+  const tr = join(repo.dir, 'agent.jsonl');
+  writeFileSync(tr, Array.from({ length: 50 }, (_, i) => JSON.stringify({ type: 'assistant', message: { id: `m${i}`, usage: { input_tokens: 10, output_tokens: 5 } } })).join('\n'));
+
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'capped-stop', cwd: repo.dir, agent_id: 'capped-id',
+    agent_type: 'orchestrate:orch-implementer', agent_transcript_path: tr, last_assistant_message: '',
+  }, home);
+
+  assert.equal(out.status, 0);
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index.length, 1, 'a stop that ends on a tool call is a return, not nothing');
+  assert.equal(index[0].status, 'PARTIAL');
+  assert.equal(index[0].capped, true);
+  const returned = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'capped-stop.json'), 'utf8')).returned;
+  assert.equal(returned[0].agentId, 'capped-id', 'recorded against the helper, so its worker slot frees');
+  assert.equal(returned[0].turns, 50);
+});
+
 test('ledger: a nested SubagentStop is filed and indexed with its parent', () => {
   const home = sandbox();
   const repo = fixtureRepo();
@@ -619,12 +641,14 @@ test('ledger: an unowned return is kept where the note says, not guessed into a 
   assert.equal(out.stdout.trim(), '');
 });
 
-test('ledger: an empty message is a silent no-op', () => {
+test('ledger: an empty message says nothing, and is filed as a partial stop rather than dropped', () => {
   const home = sandbox();
   const repo = fixtureRepo();
-  const b = run('ledger.mjs', { hook_event_name: 'SubagentStop', cwd: repo.dir, agent_type: 'orch-implementer', last_assistant_message: '' }, home);
+  bind(home, 'empty', repo);
+  const b = run('ledger.mjs', { hook_event_name: 'SubagentStop', session_id: 'empty', cwd: repo.dir, agent_id: 'e1', agent_type: 'orch-implementer', last_assistant_message: '' }, home);
   assert.equal(b.stdout.trim(), '');
-  assert.equal(existsSync(join(repo.runDir, 'returns')), false);
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index[0].status, 'PARTIAL', 'a helper that stopped without saying anything did not finish');
 });
 
 test('ledger: a stop with no agent identity is not a return', () => {

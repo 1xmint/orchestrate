@@ -130,6 +130,10 @@ meanwhile. (3) The router read a blocks-on cell of short ids (`0001 0002`) as
 nothing to wait for; the table needs full ids. (4) A Codex start refused for a
 busy slot still wrote a `returns.jsonl` line, so three retries left three
 "blocked" returns to grade; only runs where Codex started are recorded now.
+(5) Fixed: (2) above. A capped helper ends on a tool call with no final
+message, and the ledger dropped any stop without one, so no capped return was
+ever recorded. Now that stop is filed as PARTIAL, and a helper whose transcript
+used every turn its role allows stops counting at once, even with no record.
 
 **Verification.** Full suite 344/344 on the branch. Hook replays on `059154a1`
 above. Worker-lane run on a scratch repo with three failing `slugify` tests:
