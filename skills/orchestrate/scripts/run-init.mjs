@@ -20,6 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, block } from './gate.mjs';
+import { build as buildMap } from './map.mjs';
 import { rememberActiveRun, bindSessionRun, readRun } from './lib/tier.mjs';
 
 const args = process.argv.slice(2);
@@ -112,8 +113,17 @@ try {
   gateBlock = block(g);
 } catch {}
 
-const withGate = gateBlock
-  ? body.replace('## Facts learned while grounding\n', `## Facts learned while grounding\n\n\`\`\`\n${gateBlock}\n\`\`\`\n`)
+// The repo map, after gate.json so its Checks section can quote it. A packet
+// points at map.md; a folder that is not a git checkout simply has none.
+let mapLine = '';
+try {
+  const { md } = buildMap(root);
+  mapLine = `MAP: ${join(root, '.orchestrator', 'map', 'map.md')} (${md.length} chars; any map.mjs query rebuilds it when HEAD moves)`;
+} catch {}
+
+const facts = [gateBlock, mapLine].filter(Boolean).join('\n');
+const withGate = facts
+  ? body.replace('## Facts learned while grounding\n', `## Facts learned while grounding\n\n\`\`\`\n${facts}\n\`\`\`\n`)
   : body;
 
 mkdirSync(dir, { recursive: true });
