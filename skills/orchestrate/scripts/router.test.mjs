@@ -17,6 +17,8 @@ test('state line and hash carry context bands', () => {
   const base = { self: null, tier: 'pro', agents: 0, limits: [], candidates: [], run: null, quota: null, persist: false };
   assert.match(stateLine({ ...base, context: { tokens: 151000 } }, '[x]'), /ctx ~151k/);
   assert.notEqual(stateHash({ ...base, context: { tokens: 121000 } }), stateHash({ ...base, context: { tokens: 151000 } }));
+  assert.match(stateLine({ ...base, codex: 'limit', context: null }, '[x]'), /codex: limit/);
+  assert.notEqual(stateHash({ ...base, codex: 'limit', context: null }), stateHash({ ...base, codex: 'ok', context: null }));
 });
 
 function makeHome() {
@@ -24,7 +26,7 @@ function makeHome() {
   mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'max5', tierSource: 'user', setAt: '2026-09-08T00:00:00Z' }));
   mkdirSync(join(home, '.claude', 'agents'), { recursive: true });
-  for (const n of ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger']) {
+  for (const n of ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger', 'orch-coordinator']) {
     writeFileSync(join(home, '.claude', 'agents', `${n}.md`), `---\nname: ${n}\n---\n`);
   }
   return home;
@@ -83,7 +85,7 @@ test('the first substantive prompt gets the state line and the card, once', () =
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
   assert.match(first, /\[orchestrate\]/);
   assert.match(first, /tier max5/);
-  assert.match(first, /orch-agents 6\/6/);
+  assert.match(first, /orch-agents 7\/7/);
   assert.match(first, /run: none/);
   assert.match(first, /orchestrate is loaded/);
 

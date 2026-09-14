@@ -230,7 +230,10 @@ export function markExhausted({ provider, account, scope, message = '', now = Da
   const s = readJson(p) || { v: WORKERS_V, exhausted: [] };
   s.v = WORKERS_V;
   s.exhausted = (Array.isArray(s.exhausted) ? s.exhausted : []).filter(e => !(e.provider === provider && e.account === account && e.scope === scope)).slice(-50);
-  const resets = parseResetTime(message, now);
+  // Codex sometimes says only that its allowance is exhausted.  That is a
+  // five-hour window, not a hold for the rest of the run; the next dispatch is
+  // deliberately the probe once this conservative expiry has passed.
+  const resets = parseResetTime(message, now) || (provider === 'codex' ? now + 5 * 3600000 : null);
   s.exhausted.push({ provider, account, scope, at: new Date(now).toISOString(), resetsAt: resets ? new Date(resets).toISOString() : null, message: String(message).slice(0, 300) });
   writeJsonAtomic(p, s);
   return true;

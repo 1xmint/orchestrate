@@ -372,7 +372,16 @@ export async function runWorker(opts, deps = {}) {
     // One line per finished run, for the meter's agent tree (measure.mjs --tree).
     try {
       mkdirSync(workersDir, { recursive: true });
-      appendFileSync(join(workersDir, 'reports.jsonl'), JSON.stringify({ at: report.endedAt, session, taskId: report.taskId, role, status: report.status, checkpoint, fallback: Boolean(report.fallback), model: report.model || null, usage: (report.evidence && report.evidence.usage) || null }) + '\n');
+      appendFileSync(join(workersDir, 'reports.jsonl'), JSON.stringify({ at: report.endedAt, session, taskId: report.taskId, role, status: report.status, checkpoint, fallback: Boolean(report.fallback), runtime: 'codex', model: report.model || null, effort: report.effort || null, usage: (report.evidence && report.evidence.usage) || null }) + '\n');
+      if (opts.run) {
+        const returns = join(resolve(opts.run), 'returns');
+        mkdirSync(returns, { recursive: true });
+        const file = join(returns, `${String(report.taskId).replace(/[^A-Za-z0-9_-]/g, '_')}-codex.md`);
+        const final = report.evidence && report.evidence.final;
+        const body = final ? JSON.stringify(final, null, 2) : `${report.status}: ${report.why || ''}`;
+        writeFileSync(file, `<!-- ${report.endedAt} · codex · ${report.model || 'model unknown'} · ${report.effort || 'effort unknown'} -->\n\n${body}\n`);
+        appendFileSync(join(returns, 'returns.jsonl'), JSON.stringify({ at: report.endedAt, session, run: packet.run || null, task: report.taskId, agent: 'codex', agentId: `codex-${report.taskId}`, runtime: 'codex', model: report.model || null, effort: report.effort || null, status: report.status, evidence: report.evidence || null, file, dollars: null }) + '\n');
+      }
     } catch {}
     return { report, code };
   };
