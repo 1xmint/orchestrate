@@ -94,7 +94,18 @@ single files, and the lead runs the full suite. Every Codex packet says so now.
 (2) A Claude helper stopped by its turn limit kept its concurrency slot until
 the 10-minute silence rule released it, and a Codex dispatch was refused
 meanwhile. (3) The router read a blocks-on cell of short ids (`0001 0002`) as
-nothing to wait for; the table needs full ids.
+nothing to wait for; the table needs full ids. (4) A Codex start refused for a
+busy slot still wrote a `returns.jsonl` line, so three retries left three
+"blocked" returns to grade; only runs where Codex started are recorded now.
+
+**Verification.** Full suite 344/344 on the branch. Hook replays on `059154a1`
+above. Worker-lane run on a scratch repo with three failing `slugify` tests:
+`codex-worker.mjs run --model gpt-5.6-luna --effort low --run <scratch run>` →
+done in 50 s, 86,521 input tokens (49,408 cached), 1,209 output; 3/3 pass when
+rerun outside the sandbox; one `returns.jsonl` line with model and effort; the
+router's state line in that repo reads `1 return to grade: 9-14-0001`. Astra
+without `--approved` is refused before Codex starts. Live acceptance on a real
+plan step was skipped for this release (Josh).
 
 **How this release was built.** The lead wrote packets and graded returns; the
 code parts ran as Codex workers (terra medium for B, D, E1; sol high for C).
