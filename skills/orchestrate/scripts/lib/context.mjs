@@ -304,10 +304,14 @@ export function contextTick(reading, policy = loadPolicy()) {
   const n = Number(reading.compactions) || 0;
   const cap = reading.capacity ? ` of a ${Math.round(reading.capacity / 1000)}k window` : '';
   const since = n ? ` · compacted ${n} time${n === 1 ? '' : 's'} this session` : '';
-  const { checkpointAt } = thresholds(reading, policy);
+  const { checkpointAt, compactAt } = thresholds(reading, policy);
+  const k = v => `~${Math.round(v / 1000)}k`;
+  const next = reading.tokens < checkpointAt ? `Nothing to do until ${k(checkpointAt)}`
+    : reading.tokens < compactAt ? `Past the checkpoint line; the switch recommendation comes at ${k(compactAt)}`
+    : 'Past the switch line; the compact-or-fresh advice already given stands';
   return {
     key: `${contextEpoch(reading)}|${Math.floor(reading.tokens / every)}`,
-    text: `[orchestrate · context] ~${Math.round(reading.tokens / 1000)}k tokens${cap} per step, measured${reading.state === 'provisional' ? ' from the compaction summary' : ''}${since}. Nothing to do until ~${Math.round(checkpointAt / 1000)}k; use this number, not an older one, when talking about size.`,
+    text: `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step, measured${reading.state === 'provisional' ? ' from the compaction summary' : ''}${since}. ${next}; use this number, not an older one, when talking about size.`,
   };
 }
 
