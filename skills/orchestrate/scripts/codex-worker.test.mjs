@@ -205,6 +205,7 @@ test('two workers already running: a third is not started', async () => {
   assert.equal(report.status, 'blocked');
   assert.match(report.why, /limit is 2/);
   assert.equal(calls().filter(c => c.argv[0] === 'exec').length, 0);
+  assert.ok(!existsSync(join(deps.workersDir, '..', 'run-20260914-x', 'returns', 'returns.jsonl')), 'a refused start is not a return to grade');
 });
 
 test('pure pieces: classification, events, final report, prompt', () => {

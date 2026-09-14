@@ -373,7 +373,9 @@ export async function runWorker(opts, deps = {}) {
     try {
       mkdirSync(workersDir, { recursive: true });
       appendFileSync(join(workersDir, 'reports.jsonl'), JSON.stringify({ at: report.endedAt, session, taskId: report.taskId, role, status: report.status, checkpoint, fallback: Boolean(report.fallback), runtime: 'codex', model: report.model || null, effort: report.effort || null, usage: (report.evidence && report.evidence.usage) || null }) + '\n');
-      if (opts.run) {
+      // Only a run where Codex started is a return to grade; a refused start
+      // (a busy slot, a missing approval) is retried and would stack duplicates.
+      if (opts.run && report.evidence && report.evidence.exitCode !== undefined) {
         const returns = join(resolve(opts.run), 'returns');
         mkdirSync(returns, { recursive: true });
         const file = join(returns, `${String(report.taskId).replace(/[^A-Za-z0-9_-]/g, '_')}-codex.md`);
