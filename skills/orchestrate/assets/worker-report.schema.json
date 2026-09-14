@@ -1,0 +1,26 @@
+{
+  "$comment": "The final message an external Codex worker must return (codex exec --output-schema). Every field is required so the strict structured-output mode accepts it; empty arrays and empty strings stand for none.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "summary", "changed", "checks", "remaining", "notes"],
+  "properties": {
+    "status": { "type": "string", "enum": ["done", "partial", "blocked"] },
+    "summary": { "type": "string" },
+    "changed": { "type": "array", "items": { "type": "string" } },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["command", "result", "evidence"],
+        "properties": {
+          "command": { "type": "string" },
+          "result": { "type": "string", "enum": ["pass", "fail", "not-run"] },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "remaining": { "type": "array", "items": { "type": "string" } },
+    "notes": { "type": "string" }
+  }
+}

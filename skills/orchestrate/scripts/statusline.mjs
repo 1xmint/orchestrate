@@ -23,7 +23,8 @@ import { readFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HOME, DIR, readJson, writeJsonAtomic } from './lib/tier.mjs';
+import { HOME, DIR, readJson, writeJsonAtomic, currentAccount } from './lib/tier.mjs';
+import { writeStatusCapacity } from './lib/context.mjs';
 import { QUOTA_PATH, snapshotFrom, resetClock } from './lib/quota.mjs';
 import { readSettings, backupSettings, writeSettings, commandFor } from './lib/settings.mjs';
 
@@ -57,8 +58,12 @@ function render(payload) {
     } catch {}
   }
   if (input && typeof input === 'object') {
-    const snap = snapshotFrom(input);
+    let account = null;
+    try { account = currentAccount().org; } catch {}
+    const snap = snapshotFrom(input, Date.now(), account);
     try { mkdirSync(DIR, { recursive: true }); writeJsonAtomic(QUOTA_PATH, snap); } catch {}
+    // The window size is a per-session fact for the context reader.
+    if (snap.session && snap.contextSize) writeStatusCapacity(snap.session, snap.contextSize);
     const line = footer(snap);
     if (line) out.push(line);
   }

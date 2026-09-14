@@ -56,10 +56,25 @@ test('buildBatch: one task per file, each owning exactly its own file', () => {
 
 test('buildBatch: waves split at the concurrency cap', () => {
   const files = Array.from({ length: 25 }, (_, i) => `f${i}.ts`);
-  const { waves } = buildBatch({ idPrefix: '9-10', startAt: 1, spec: 'x', files, concurrency: 20 });
+  const { waves } = buildBatch({ idPrefix: '9-10', startAt: 1, spec: 'x', files, concurrency: 20, perTask: 1 });
   assert.equal(waves.length, 2);
   assert.equal(waves[0].length, 20);
   assert.equal(waves[1].length, 5);
+});
+
+test('buildBatch: by default two workers, related files grouped, never one helper per file', () => {
+  const files = Array.from({ length: 20 }, (_, i) => `f${i}.ts`);
+  const { tasks, waves, concurrency } = buildBatch({ idPrefix: '9-10', startAt: 1, spec: 'x', files });
+  assert.equal(concurrency, 2);
+  assert.equal(tasks.length, 2, 'twenty files become two tasks, not twenty');
+  assert.deepEqual(waves, [['9-10-0001', '9-10-0002']]);
+  assert.equal(tasks[0].files.length, 10);
+  assert.match(tasks[0].packet, /^OWNS: f0\.ts, f1\.ts, .*f9\.ts$/m);
+  assert.deepEqual([...tasks[0].files, ...tasks[1].files], files, 'every file in exactly one task');
+  // A group is capped so one helper is not handed more than its turns can do.
+  const many = buildBatch({ idPrefix: '9-10', startAt: 1, spec: 'x', files: Array.from({ length: 100 }, (_, i) => `g${i}.ts`) });
+  assert.ok(many.tasks.every(t => t.files.length <= 15));
+  assert.ok(many.waves.every(w => w.length <= 2));
 });
 
 test('buildBatch: RUN: travels in the packet only when a run id is given', () => {
@@ -92,7 +107,7 @@ test('CLI: without --dry-run, one packet file per task is written under the run 
   const dir = mkdtempSync(join(tmpdir(), 'orch-batch-'));
   const runMd = join(dir, 'RUN.md');
   writeFileSync(runMd, RUN_WITH_TASKS);
-  const r = spawnSync(process.execPath, [SCRIPT, runMd, '--spec', 'add the header', '--files', 'a.ts,b.ts', '--concurrency', '1'], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [SCRIPT, runMd, '--spec', 'add the header', '--files', 'a.ts,b.ts', '--concurrency', '1', '--per-task', '1'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /2 task\(s\), 2 wave\(s\) at concurrency 1/);
   const batchDirs = readdirSync(join(dir, 'batch'));

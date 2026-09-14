@@ -310,7 +310,7 @@ function main() {
     const state = input.session_id && loadSession(input.session_id);
     if (state) {
       state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), task: r.task || null, status: r.status || null });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null });
       saveSession(state);
     }
   } catch {}

@@ -10,7 +10,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   registrations, applyRegistrations, readSettings, writeSettings, backupSettings,
-  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys,
+  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys, OUR_SCRIPTS,
 } from './settings.mjs';
 
 // A settings file shaped like Josh's: an unrelated PreToolUse hook that must
@@ -40,7 +40,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
   const report = applyRegistrations(s, entries);
 
   assert.equal(report.removed, 0);
-  assert.equal(report.added, 7);
+  assert.equal(report.added, 8);
   const gate = s.hooks.PreToolUse.find(g => JSON.stringify(g).includes('memory-write-gate.mjs'));
   assert.deepEqual(gate, REAL_SHAPE.hooks.PreToolUse[0], 'the memory-write-gate entry is untouched');
   assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
@@ -66,7 +66,8 @@ test('a second run replaces our entries instead of stacking them', () => {
   const once = clone(s);
   const report = applyRegistrations(s, registrations(SCRIPTS, { router: true, guard: true }));
 
-  assert.equal(report.removed, 7, 'the stale copies are found by basename and dropped');
+  assert.equal(report.removed, 8, 'the stale copies are found by basename and dropped');
+  assert.equal(s.hooks.PostToolUse.length, 1, 'the context sampler, once');
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.equal(s.hooks.SessionStart.length, 1);
   assert.equal(s.hooks.SubagentStop.length, 1);
@@ -153,7 +154,7 @@ test('the real settings.json on this machine survives a dry merge', { skip: !exi
   const s = readSettings(p);
   applyRegistrations(s, registrations(SCRIPTS, { router: true, guard: true }));
   // Every non-orchestrate hook group is still present, byte for byte.
-  const ours = new Set(['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'persist-check.mjs']);
+  const ours = new Set(OUR_SCRIPTS);
   const theirs = o => JSON.stringify(Object.fromEntries(Object.entries((o.hooks) || {}).map(([ev, gs]) => [ev, (gs || []).map(g => ({ ...g, hooks: (g.hooks || []).filter(h => !ours.has(commandBasename(h.command))) })).filter(g => g.hooks.length)]).filter(([, gs]) => gs.length)));
   assert.equal(theirs(s), theirs(before));
   for (const k of Object.keys(before)) if (k !== 'hooks') assert.deepEqual(s[k], before[k], `${k} is untouched`);

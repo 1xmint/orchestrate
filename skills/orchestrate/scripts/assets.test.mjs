@@ -400,7 +400,7 @@ test('every plugin hook names a script that exists, through the plugin root', ()
   const root = join(SKILL, '..', '..');
   const hooks = JSON.parse(readFileSync(join(root, 'hooks', 'hooks.json'), 'utf8')).hooks;
   const events = Object.keys(hooks);
-  assert.deepEqual(events.sort(), ['PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
+  assert.deepEqual(events.sort(), ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
   // The one plugin-wide Stop hook is the persist loop, because the direct work it
   // exists for rarely loads the skill. It must stay a no-op for an unarmed session.
   assert.deepEqual(hooks.Stop.flatMap(g => g.hooks.map(h => /scripts\/(\S+?\.mjs)/.exec(h.command)[1])), ['persist-check.mjs']);
@@ -420,4 +420,32 @@ test('every plugin hook names a script that exists, through the plugin root', ()
   // skill is, rather than on every turn of every session.
   const all = JSON.stringify(hooks);
   assert.doesNotMatch(all, /turn-check|return-check/);
+});
+
+// A plugin install gets its hooks from hooks.json plus SKILL.md's frontmatter; a
+// script install gets them from registrations(). The two must register the same
+// scripts on the same events, or one install path silently lacks a check — or,
+// worse, a script both register runs twice and injects twice.
+test('plugin hooks and script-install registrations name the same scripts on the same events', async () => {
+  const { registrations } = await import('./lib/settings.mjs');
+  const root = join(SKILL, '..', '..');
+  const pairs = new Set();
+  const plugin = JSON.parse(readFileSync(join(root, 'hooks', 'hooks.json'), 'utf8')).hooks;
+  for (const [ev, groups] of Object.entries(plugin)) for (const g of groups) for (const h of g.hooks) pairs.add(`${ev}:${/scripts\/(\S+?\.mjs)/.exec(h.command)[1]}`);
+  const fm = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'))[1];
+  let ev = null;
+  for (const line of fm.split('\n')) {
+    const e = /^  ([A-Z]\w+):\s*$/.exec(line);
+    if (e) ev = e[1];
+    const c = /scripts\/(\S+?\.mjs)/.exec(line);
+    if (c && ev) {
+      const pair = `${ev}:${c[1]}`;
+      // Only the guard and the ledger may be registered by both: each one
+      // deduplicates a repeat of the same event itself (eventId, alreadyHandled).
+      assert.ok(!pairs.has(pair) || /^(PreToolUse:guard-agent|SubagentStop:ledger)\.mjs$/.test(pair), `${pair} is registered by both hooks.json and SKILL.md, so it would run twice`);
+      pairs.add(pair);
+    }
+  }
+  const script = new Set(registrations('/x', { router: true, guard: true }).map(r => `${r.event}:${/([\w-]+\.mjs)/.exec(r.command)[1]}`));
+  assert.deepEqual([...pairs].sort(), [...script].sort());
 });
