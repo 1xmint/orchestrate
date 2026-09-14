@@ -49,3 +49,9 @@ test('the turn counter advances even on a quiet turn', () => {
   assert.equal(d.kind, null);
   assert.equal(d.rec.turns, 11);
 });
+
+test('a measured size owns the handoff advice: no marathon nudge on turn count alone', () => {
+  const rec = { turns: MARATHON_FIRST - 1 };
+  assert.equal(heartbeatDecision({ run: {}, rec, context: { tokens: 40000 } }).kind, null, 'just compacted to 40k: not a marathon');
+  assert.equal(heartbeatDecision({ run: {}, rec, context: { tokens: null } }).kind, 'marathon', 'unknown size: the turn count is the fallback');
+});

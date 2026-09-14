@@ -250,26 +250,41 @@ export function adviseContext(reading, policy = loadPolicy()) {
   }
   const just = reading.compaction && reading.responsesSinceCompaction != null && reading.responsesSinceCompaction <= JUST_COMPACTED_RESPONSES;
   if (just && reading.tokens >= compactAt) return { action: 'investigate', key: key('investigate'), why: `${k(reading.tokens)} right after compaction` };
-  if (reading.tokens >= policy.context.hardAt) return { action: 'hard', key: key('hard'), why: `${k(reading.tokens)} is at or above ${k(policy.context.hardAt)}` };
-  if (reading.tokens >= compactAt) return { action: 'compact', key: key('compact'), why: `${k(reading.tokens)} is at or above ${k(compactAt)}` };
+  // Compacting is the default answer to a full conversation, because it keeps
+  // the user where they are. Each summary drops detail, though, so once this
+  // session has been compacted `freshAfterCompactions` times the next full
+  // conversation is better served by a fresh one resuming from the checkpoint.
+  const fresh = (Number(reading.compactions) || 0) >= policy.context.freshAfterCompactions;
+  if (reading.tokens >= policy.context.hardAt) return { action: 'hard', fresh, key: key('hard'), why: `${k(reading.tokens)} is at or above ${k(policy.context.hardAt)}` };
+  if (reading.tokens >= compactAt) return { action: 'compact', fresh, key: key('compact'), why: `${k(reading.tokens)} is at or above ${k(compactAt)}` };
   if (reading.tokens >= checkpointAt) return { action: 'checkpoint', key: key('checkpoint'), why: `${k(reading.tokens)} is at or above ${k(checkpointAt)}` };
   return { action: 'none', key: key('none'), why: `${k(reading.tokens)} is below ${k(checkpointAt)}` };
 }
 
 const CHECKPOINT_WHAT = 'the goal, decisions made, files changed, verification results, outstanding work, and the next action';
 
+// Which switch to recommend when the conversation is full: compact by default,
+// a fresh conversation only when compacting has stopped paying.
+export function switchAdvice(reading, advice) {
+  const n = Number(reading && reading.compactions) || 0;
+  if (advice && advice.fresh) return `recommend a fresh conversation that resumes from the checkpoint: this one has already been compacted ${n} time${n === 1 ? '' : 's'}, and each summary drops detail`;
+  return 'recommend compacting if this same task continues; a fresh conversation only if the task changes or a finished phase will resume from saved files';
+}
+
 // The short notice for an advice change; empty when there is nothing to say.
+// Never recommend a switch from memory or an old number: only this notice,
+// measured from the last response, says the conversation is full.
 export function contextNotice(reading, advice) {
   if (!reading || !advice) return '';
   const k = n => `~${Math.round(n / 1000)}k`;
   const cap = reading.capacity ? ` of a ${Math.round(reading.capacity / 1000)}k window` : '';
-  if (advice.action === 'compact') return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. Finish this step only, write the checkpoint (${CHECKPOINT_WHAT}), and end the turn with the recommendation to compact or start fresh.`;
-  if (advice.action === 'hard') return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. Do not start new work here: write the checkpoint (${CHECKPOINT_WHAT}) and end the turn with the recommendation to compact or start fresh.`;
   switch (advice.action) {
     case 'checkpoint':
       return `[orchestrate · context] this conversation re-reads ${k(reading.tokens)} tokens${cap} on every step (measured from the last response). Prepare a checkpoint now: write down ${CHECKPOINT_WHAT}, where a later session can find it.`;
     case 'compact':
-      return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. At the next safe boundary (no edit half-done, no helper running), save the checkpoint (${CHECKPOINT_WHAT}), then recommend to the user: compact if this same task continues; start a fresh conversation if the task changes or a finished phase will resume from saved files. The user makes the switch.`;
+      return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. At the next safe boundary (no edit half-done, no helper running), save the checkpoint (${CHECKPOINT_WHAT}), then ${switchAdvice(reading, advice)}. The user makes the switch.`;
+    case 'hard':
+      return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. Do not start new work here: write the checkpoint (${CHECKPOINT_WHAT}), then ${switchAdvice(reading, advice)}. The user makes the switch.`;
     case 'investigate': {
       const c = reading.compaction || {};
       const was = c.preTokens != null && c.postTokens != null ? ` (compaction took it from ${k(c.preTokens)} to ${k(c.postTokens)})` : '';
@@ -278,6 +293,22 @@ export function contextNotice(reading, advice) {
     default:
       return '';
   }
+}
+
+// The measured size as a short line, keyed by compaction epoch and a step of
+// `tickEvery` tokens, so it is said once per step and again after a compaction.
+export function contextTick(reading, policy = loadPolicy()) {
+  const every = policy.context.tickEvery;
+  if (!every || !reading || reading.tokens == null || !Number.isFinite(reading.tokens)) return { key: null, text: '' };
+  if (reading.state !== 'measured' && reading.state !== 'provisional') return { key: null, text: '' };
+  const n = Number(reading.compactions) || 0;
+  const cap = reading.capacity ? ` of a ${Math.round(reading.capacity / 1000)}k window` : '';
+  const since = n ? ` · compacted ${n} time${n === 1 ? '' : 's'} this session` : '';
+  const { checkpointAt } = thresholds(reading, policy);
+  return {
+    key: `${contextEpoch(reading)}|${Math.floor(reading.tokens / every)}`,
+    text: `[orchestrate · context] ~${Math.round(reading.tokens / 1000)}k tokens${cap} per step, measured${reading.state === 'provisional' ? ' from the compaction summary' : ''}${since}. Nothing to do until ~${Math.round(checkpointAt / 1000)}k; use this number, not an older one, when talking about size.`,
+  };
 }
 
 // ---- incremental, per session and agent -------------------------------------
@@ -349,18 +380,33 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
     reading = readContext(transcriptPath, { session, agent, capacity, now, policy });
   }
 
+  // Count compactions this store has seen: a new epoch is one more. A first
+  // read sees only the last boundary, so the count can start low, never high.
+  const before = prev && prev.reading ? prev.reading : null;
+  const epoch = contextEpoch(reading);
+  const isNew = epoch !== 'none' && (!before || contextEpoch(before) !== epoch);
+  reading.compactions = (before ? Number(before.compactions) || 0 : 0) + (isNew ? 1 : 0);
+
   const advice = adviseContext(reading, policy);
   const lastKey = prev ? prev.advisedKey || null : null;
   const changed = advice.key !== lastKey;
-  const notice = changed ? contextNotice(reading, advice) : '';
+  let notice = changed ? contextNotice(reading, advice) : '';
+  // Between thresholds the lead still hears the measured size, one short line
+  // each `tickEvery` of growth and after each compaction, so it never has to
+  // guess the size from memory or an old summary.
+  const lastTick = prev ? prev.tickKey || null : null;
+  const tick = contextTick(reading, policy);
+  const ticked = Boolean(tick.key) && tick.key !== lastTick;
+  if (!notice && ticked) notice = tick.text;
   const { offset, size: sz, ...clean } = reading;
   writeStore(p, {
     v: CONTEXT_V, session, agent, transcript: transcriptPath || null,
     offset: offset || 0, size: sz || 0, reading: clean,
     advisedKey: announce && changed ? advice.key : lastKey,
+    tickKey: announce && ticked ? tick.key : lastTick,
     sampledAt: new Date(now).toISOString(),
   });
-  return { reading: clean, advice, changed, notice };
+  return { reading: clean, advice, changed, notice, tick: ticked ? tick.key : null };
 }
 
 // The stored reading, without sampling. For callers that must not read the
@@ -377,6 +423,13 @@ export function markAnnounced(session, agent = null, key = null, dir = CONTEXT_D
   const p = storePath(session, agent, dir);
   const s = readStore(p);
   if (s) writeStore(p, { ...s, advisedKey: key });
+}
+
+// Record that a size line was delivered, for a caller that sampled unannounced.
+export function markTicked(session, agent = null, tickKey = null, dir = CONTEXT_DIR) {
+  const p = storePath(session, agent, dir);
+  const s = readStore(p);
+  if (s) writeStore(p, { ...s, tickKey });
 }
 
 // Compatibility for callers that only want a number: the measured input side,

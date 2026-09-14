@@ -101,7 +101,8 @@ export function contextBand(reading) {
 }
 
 export function contextPhrase(reading) {
-  return contextBand(reading) === 'none' ? '' : ` · ctx ~${Math.round(reading.tokens / 1000)}k`;
+  // Always the measured number when there is one, so the lead never guesses it.
+  return reading && Number.isFinite(reading.tokens) ? ` · ctx ~${Math.round(reading.tokens / 1000)}k` : '';
 }
 
 // Live plan usage, when the status line has reported it. Past the caution line

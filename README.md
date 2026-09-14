@@ -297,7 +297,15 @@ is not used, because compaction keeps the file.
 - At **150k**, or 75% of a smaller window when the window is known, it
   recommends a change at the next safe point: **compact** if the same task
   continues, a **fresh conversation** if the task changes or a finished phase
-  will resume from saved files. You make the switch.
+  will resume from saved files. Compacting is the default, so you are not sent
+  to a new conversation every time. Once a session has been compacted twice
+  (`policy.context.freshAfterCompactions`), the next full conversation is told
+  to start fresh from its checkpoint instead, because each summary drops detail.
+  You make the switch.
+- Below those lines the model still hears the measured size, one short line
+  per 25k of growth and after each compaction (`policy.context.tickEvery`, `0`
+  turns it off), and the state line always carries it. The model talks about
+  size from that number, never from memory or an older summary.
 - At **300k** (`policy.context.hardAt`) it says not to start new work in that
   conversation. A checkpoint for an unbound session lives at
   `~/.claude/orchestrate/context/<session>/checkpoint-<epoch>.md`.
@@ -322,7 +330,7 @@ node skills/orchestrate/scripts/profile.mjs --policy context.compactAt=180000 wo
 ```
 
 Keys: `context.checkpointAt`, `context.compactAt`, `context.hardAt`, `context.windowFraction`,
-`context.window`, `context.staleMs`, `context.autocompactDefault` (a positive token count or `off`), `workers.maxConcurrent`,
+`context.window`, `context.staleMs`, `context.freshAfterCompactions`, `context.tickEvery`, `context.autocompactDefault` (a positive token count or `off`), `workers.maxConcurrent`,
 `workers.browserConcurrent`, `workers.nested` (`coordinator`/`deny`/`allow`),
 `workers.generalPurpose` (`deny`/`allow`), `workers.staleMin`, `codex.enabled`,
 `codex.model`, `codex.effortImplement`, `codex.effortHard`, `codex.timeoutMin`.

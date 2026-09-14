@@ -147,7 +147,8 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   const { p, store } = file([user('start', 0), assistant(100000, { min: 1 })]);
   const s1 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s1.reading.tokens, 100000);
-  assert.equal(s1.notice, '');
+  assert.match(s1.notice, /~100k tokens per step, measured. Nothing to do until ~120k/, 'below the thresholds the lead still hears the measured size');
+  assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store, force: true }).notice, '', 'once per 25k step');
 
   appendFileSync(p, `${user('x'.repeat(5000), 2)}\n${assistant(125000, { min: 3 })}\n`);
   const s2 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
@@ -162,13 +163,15 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   appendFileSync(p, `${user('z'.repeat(5000), 6)}\n${assistant(160000, { min: 7 })}\n`);
   const s4 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s4.advice.action, 'compact');
-  assert.match(s4.notice, /Finish this step only, write the checkpoint/);
+  assert.match(s4.notice, /save the checkpoint .*recommend compacting if this same task continues/);
+  assert.equal(s4.reading.compactions, 0);
 
   // Compaction keeps the file; the reading and the announced advice start over.
   appendFileSync(p, `${boundary(160000, 17000, 8)}\n${summary(8)}\n`);
   const s5 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s5.reading.state, 'provisional');
-  assert.equal(s5.notice, '');
+  assert.equal(s5.reading.compactions, 1, 'a new epoch is one more compaction');
+  assert.match(s5.notice, /~17k tokens per step, measured from the compaction summary · compacted 1 time this session/);
   appendFileSync(p, `${user('w'.repeat(5000), 9)}\n${assistant(22000, { min: 10 })}\n`);
   const s6 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s6.reading.tokens, 22000);
@@ -288,4 +291,30 @@ test('replay: long session with two compactions and a large retained transcript'
   const r2 = readContext(p, { now: now + 120000, policy, capacity: null });
   assert.equal(r2.tokens, 41000);
   assert.equal(adviseContext(r2, policy).action, 'none');
+});
+
+test('compact by default; a fresh conversation only after repeated compactions', () => {
+  const at = (tokens, compactions) => {
+    const r = { state: 'measured', tokens, capacity: null, compaction: compactions ? { uuid: `c${compactions}` } : null, responsesSinceCompaction: 10, compactions };
+    const a = adviseContext(r, policy);
+    return { a, notice: contextNotice(r, a) };
+  };
+  assert.equal(policy.context.freshAfterCompactions, 2);
+  const once = at(160000, 1);
+  assert.equal(once.a.fresh, false);
+  assert.match(once.notice, /recommend compacting if this same task continues/);
+  const twice = at(160000, 2);
+  assert.equal(twice.a.fresh, true);
+  assert.match(twice.notice, /recommend a fresh conversation that resumes from the checkpoint: this one has already been compacted 2 times/);
+  assert.match(at(310000, 2).notice, /Do not start new work here.*fresh conversation/);
+  assert.match(at(310000, 0).notice, /Do not start new work here.*recommend compacting/);
+  const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: 160000, compactions: 2 } });
+  assert.match(stop.why, /fresh conversation that resumes from the checkpoint/);
+});
+
+test('the size line can be turned off, and only speaks for a measured size', () => {
+  const { p, store } = file([assistant(60000, { min: 1 })]);
+  assert.equal(sampleContext({ transcriptPath: p, session: 'q', policy: loadPolicy({ policy: { context: { tickEvery: 0 } } }), now: NOW, dir: store }).notice, '');
+  const { p: p2, store: s2 } = file([user('hi', 0)]);
+  assert.equal(sampleContext({ transcriptPath: p2, session: 'u', policy, now: NOW, dir: s2 }).notice, '', 'no usage yet: nothing to say');
 });

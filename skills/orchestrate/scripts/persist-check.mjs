@@ -28,7 +28,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
 import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
-import { sampleContext, markAnnounced, checkpointPath, contextEpoch, hasCheckpoint, thresholds } from './lib/context.mjs';
+import { sampleContext, markAnnounced, markTicked, checkpointPath, contextEpoch, hasCheckpoint, thresholds, switchAdvice } from './lib/context.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -102,7 +102,7 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate' || contextAdvice.action === 'hard')) {
     const path = checkpointPath(contextReading && contextReading.session, contextReading);
     const n = contextReading && contextReading.tokens != null ? `~${Math.round(contextReading.tokens / 1000)}k` : 'high';
-    return stop(`context is ${n}: write the checkpoint at ${path} and tell the user to compact or start fresh`);
+    return stop(`context is ${n}: write the checkpoint at ${path}, then ${switchAdvice(contextReading, contextAdvice)}`);
   }
   if (quota && quota.fiveHour && quota.fiveHour.pct >= PERSIST_STOP_FIVE_HOUR) return stop(`the 5-hour usage window is at ${Math.round(quota.fiveHour.pct)}% (resets ${resetClock(quota.fiveHour.resetsAt)})`);
   if (scan.denied) return stop('a dispatch was denied (budget, credential or usage limit)');
@@ -143,7 +143,7 @@ export function check(input) {
     if (ctx.reading.tokens >= at && !hasCheckpoint(input.session_id || null, ctx.reading) && rec.contextBlockedFor !== epoch) {
       store[key] = { ...rec, contextBlockedFor: epoch, checkedAt: new Date().toISOString() };
       try { writeJsonAtomic(path, store); } catch {}
-      return { rec: store[key], kind: 'continue', why: `orchestrate: context is ~${Math.round(ctx.reading.tokens / 1000)}k: write the checkpoint at ${checkpointPath(input.session_id || null, ctx.reading)} and tell the user to compact or start fresh` };
+      return { rec: store[key], kind: 'continue', why: `orchestrate: context is ~${Math.round(ctx.reading.tokens / 1000)}k: write the checkpoint at ${checkpointPath(input.session_id || null, ctx.reading)}, then ${switchAdvice(ctx.reading, ctx.advice)}` };
     }
     return null;
   }
@@ -161,7 +161,7 @@ export function check(input) {
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
   const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: p.goal, quota: readQuota() });
-  if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); } catch {} }
+  if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };
   try { writeJsonAtomic(path, store); } catch {}

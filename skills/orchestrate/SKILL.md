@@ -226,7 +226,7 @@ conversation re-reads its whole self on every turn, and that re-read is the
 largest cost there is — bigger than any subagent. Do a wave or two, keep the
 Pickup line honest, and hand off: a fresh session resumes from the ledger and
 starts with a small, cheap context. The heartbeat reminds you when a run's
-session has gone long; `--max-budget-usd` at launch and
+session has gone long and its size is unknown; `--max-budget-usd` at launch and
 `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` are the host's own levers if the user wants a
 hard cap or fewer idle `/goal` check-ins.
 
@@ -239,7 +239,9 @@ comes first: the goal, decisions, changed files, verification results,
 outstanding work and the next action, written where a later session finds them.
 Then recommend **compact** when the same task continues, or a **fresh
 conversation** when the task changes or a finished phase resumes from saved
-files. The user makes the switch. A notice to investigate means the context was
+files; after two compactions in one session the notice says fresh. The user
+makes the switch. Talk about size only from the latest measured number (the
+state line and the short size lines carry it), never from memory or a summary. A notice to investigate means the context was
 still large right after compaction: look at restored instructions, plugin and
 tool listings and carried tool output rather than recommending compaction again.
 A size shown as unknown is unknown, not small.

@@ -105,6 +105,20 @@ transition, so the worker always passes `-m`.
   `~/.claude/orchestrate/autocompact-default.json` so it never runs again, even
   if the user removes the key. `policy.context.autocompactDefault: off` opts
   out; `profile.mjs --autocompact off` removes the key and keeps it removed.
+- Compact or start fresh, from measured size only (Josh). Found when the lead
+  told Josh to start a new conversation from a pre-compaction summary number
+  (~150k) right after compacting. Three changes:
+  - The lead hears the measured size smoothly: one short line per 25k of growth
+    and after each compaction (`policy.context.tickEvery`), and the state line
+    always carries `ctx ~Nk` once measured, not only at 120k and above.
+  - Compact is the default recommendation. The context reader counts
+    compactions per session; from `policy.context.freshAfterCompactions` (2) on,
+    the compact and hard notices, and the Stop hook's, say start fresh from the
+    checkpoint instead. A dead duplicate `compact` branch in `contextNotice`
+    that hid the compact-vs-fresh rule is gone.
+  - The turn-count "marathon" handoff fires only when the size is unknown; a
+    measured size owns that advice, so a just-compacted session is never told to
+    hand off. 351/351.
   Takes effect from the next session. Applied on this machine by hand first.
 
 **Found while building.** (1) The Codex sandbox refuses child processes, so

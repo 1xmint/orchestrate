@@ -30,6 +30,11 @@ export const DEFAULT_POLICY = Object.freeze({
     window: null,
     // A measurement older than this is not current.
     staleMs: 12 * 3600 * 1000,
+    // After this many compactions in one session, a full conversation is
+    // advised to start fresh from its checkpoint instead of compacting again.
+    freshAfterCompactions: 2,
+    // Say the measured size once per this much growth (0 turns it off).
+    tickEvery: 25000,
     // Written once into settings.json by orchestrate; "off" opts out.
     autocompactDefault: 200000,
   }),
@@ -85,6 +90,8 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
       windowFraction: frac > 0 && frac <= 1 ? frac : D.context.windowFraction,
       window: c.window == null ? null : posNum(c.window, null),
       staleMs: posNum(c.staleMs, D.context.staleMs),
+      freshAfterCompactions: Math.floor(posNum(c.freshAfterCompactions, D.context.freshAfterCompactions)),
+      tickEvery: c.tickEvery === 0 ? 0 : posNum(c.tickEvery, D.context.tickEvery),
       autocompactDefault: autocompact(c.autocompactDefault, D.context.autocompactDefault),
     },
     workers: {

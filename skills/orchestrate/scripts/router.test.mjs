@@ -16,6 +16,7 @@ const ROUTER = join(HERE, 'router.mjs');
 test('state line and hash carry context bands', () => {
   const base = { self: null, tier: 'pro', agents: 0, limits: [], candidates: [], run: null, quota: null, persist: false };
   assert.match(stateLine({ ...base, context: { tokens: 151000 } }, '[x]'), /ctx ~151k/);
+  assert.match(stateLine({ ...base, context: { tokens: 52000 } }, '[x]'), /ctx ~52k/, 'the measured size is always shown');
   assert.notEqual(stateHash({ ...base, context: { tokens: 121000 } }), stateHash({ ...base, context: { tokens: 151000 } }));
   assert.match(stateLine({ ...base, codex: 'limit', context: null }, '[x]'), /codex: limit/);
   assert.notEqual(stateHash({ ...base, codex: 'limit', context: null }), stateHash({ ...base, codex: 'ok', context: null }));
