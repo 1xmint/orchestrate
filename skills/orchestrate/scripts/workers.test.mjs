@@ -41,6 +41,7 @@ test('general-purpose is replaced by capped role agents while they are installed
   assert.match(d.reason, /orch-implementer/);
   assert.match(workflowDecision({}, ti('claude'), { policy, installed: 6 }).reason, /no turn cap/);
   assert.equal(workflowDecision({}, ti('general-purpose'), { policy, installed: 0 }), null, 'without the role agents it is the only choice');
+  assert.equal(workflowDecision({}, ti('general-purpose'), { policy, installed: 3 }), null, 'a partial install still falls back on it');
   assert.equal(workflowDecision({}, ti('orchestrate:orch-implementer'), { policy, installed: 6 }), null);
   assert.equal(workflowDecision({}, ti('Explore', 'x', { model: 'haiku' }), { policy, installed: 6 }), null);
 });

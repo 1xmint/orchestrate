@@ -166,7 +166,10 @@ another vendor's blind spots. Use one only when `profile.mjs` shows it installed
 dispatch. On any quota or auth error, drop that provider for the rest of the run.
 Never write a key or token anywhere.
 
-- `codex exec` with the prompt on stdin; `-m <model>`; `--json`; `codex login status`.
+- Codex has a supported adapter: `scripts/codex-worker.mjs` (SKILL.md §5,
+  `lanes.md`). It handles the worktree, the timeout, the structured report,
+  usage-limit detection and the Claude fallback packet; do not hand-roll
+  `codex exec` for a worker task.
 - `opencode run "<prompt>"` with `-m <provider/model>`; `opencode models`.
 - `claude -p "<prompt>" --model <alias> --output-format json` needs the CLI
   itself logged in; the desktop app's login does not carry over.

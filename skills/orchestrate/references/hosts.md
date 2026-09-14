@@ -39,6 +39,18 @@ filed under `returns/`.
 rule that only the lead dispatches is enforced in the role files themselves
 (`disallowedTools: Agent`, or a tool allowlist without it), because a nested dispatch hides both
 its cost and its return from the ledger. Up to 20 concurrent subagents by default.
+Built-in `general-purpose` has no such rule and no turn cap: one Sonnet helper on
+this machine made 274 model calls, reached 683k context and started six helpers
+of its own. So the guard also refuses any dispatch whose hook payload carries
+`agent_id` (present only when the hook fires inside a subagent), refuses
+`general-purpose` while the role agents are installed, and holds the plugin to
+two concurrent workers across Claude and Codex.
+
+**Which host.** The desktop app runs its own embedded engine: on one machine its
+transcripts said 2.1.270 while the terminal `claude --version` said 2.1.209.
+Capabilities are read from the running session's transcript records and hook
+payloads (`profile.mjs --host`), never from the CLI on PATH. Desktop sessions have
+not been seen running a status line, so nothing here depends on one.
 
 **Resume** a named agent with `SendMessage`; `Explore` and `Plan` are one-shot. Named subagents
 also see a roster of each other and can message each other. Caution: with agent teams enabled

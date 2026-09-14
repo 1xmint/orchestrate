@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, AGENT_NAMES } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { helperFiles, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision } from './lib/workers.mjs';
 import { priceTag, estimateDollars, family, normalizeRole } from './lib/prices.mjs';
@@ -151,7 +151,9 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
     if (/^\s*PROGRESS:/m.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: helpers write no progress files. Remove the PROGRESS line and ask for findings returned inline; only the lead maintains the plan.' };
   }
 
-  if (UNCAPPED.has(role) && installed > 0 && policy.workers.generalPurpose !== 'allow') {
+  // Only once all six role agents are present: a partial script install still
+  // falls back on general-purpose for a writing role (SKILL.md §0).
+  if (UNCAPPED.has(role) && installed >= AGENT_NAMES.length && policy.workers.generalPurpose !== 'allow') {
     return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orchestrate:orch-implementer (model "sonnet") to change code, orchestrate:orch-researcher or Explore (model "haiku") to find things, orchestrate:orch-reviewer to review. Or do a small task yourself.` };
   }
 

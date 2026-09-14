@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.12.1"
+  version: "0.13.0"
 hooks:
   PreToolUse:
     - matcher: "Agent|Task"
@@ -157,7 +157,21 @@ small high-risk change can get an independent review without becoming a project.
 
 Concurrent code writers each get a worktree. Read-only work does not need one. A
 single worker needs one only to protect an existing checkout, or because the
-task itself requires it.
+task itself requires it. **Two workers at once, across Claude and Codex**, and
+browser work one at a time; group related mechanical edits into one task rather
+than one helper per file. The guard enforces the limit
+(`profile.mjs --policy workers.maxConcurrent=N` changes it).
+
+**Plan mode is the user's switch, not yours.** After the first inspection, when
+it shows consequential ambiguity, an architectural choice, a migration, or
+acceptance criteria nobody has pinned down, recommend switching the app to Plan
+mode, with the reason, and wait for the switch. A clear, bounded fix proceeds
+directly. The hooks read the mode the host actually reports (`permission_mode`)
+and never pretend to change it. In Plan mode helpers only read and return their
+findings inline — no implementation, no worktrees, no progress files — and only
+you keep the plan: one grounded plan with scope, decisions, dependencies and
+acceptance checks. Once it is approved, execute it without restarting
+discovery unless new evidence changes the approach.
 
 Before a material architectural expansion, another research wave, or another
 worker, name the unresolved thing that makes it useful. Before adding a
@@ -197,9 +211,24 @@ A run this size is a **relay across fresh sessions, not one marathon.** A long
 conversation re-reads its whole self on every turn, and that re-read is the
 largest cost there is — bigger than any subagent. Do a wave or two, keep the
 Pickup line honest, and hand off: a fresh session resumes from the ledger and
-starts with a small, cheap context. The heartbeat reminds you when a session has
-run long; `--max-budget-usd` at launch and `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` are
-the host's own levers if the user wants a hard cap or fewer idle `/goal` check-ins.
+starts with a small, cheap context. The heartbeat reminds you when a run's
+session has gone long; `--max-budget-usd` at launch and
+`CLAUDE_CODE_GOAL_CHECKIN_MINUTES` are the host's own levers if the user wants a
+hard cap or fewer idle `/goal` check-ins.
+
+Context advice comes from one reader (`scripts/context.mjs` for a report, the
+hooks for notices), measured from the last model response after the last
+compaction, and said only when it changes. At **120k** prepare a checkpoint; at
+**150k**, or 75% of a known smaller window, recommend a change at the next safe
+boundary. These are efficiency thresholds, not an exact optimum. The checkpoint
+comes first: the goal, decisions, changed files, verification results,
+outstanding work and the next action, written where a later session finds them.
+Then recommend **compact** when the same task continues, or a **fresh
+conversation** when the task changes or a finished phase resumes from saved
+files. The user makes the switch. A notice to investigate means the context was
+still large right after compaction: look at restored instructions, plugin and
+tool listings and carried tool output rather than recommending compaction again.
+A size shown as unknown is unknown, not small.
 
 Plan as tracer bullets: the thinnest slice that works end to end, then the
 slices that widen it. Each row carries an id (`M-D-NNNN`), an owner, what it
@@ -224,7 +253,27 @@ attempt. `routing.md` has the model for each, by plan.
 
 `subagent_type` the role, `model` from the table, `isolation: "worktree"` for
 concurrent repo work, `run_in_background: true` unless the next step needs the
-result, `prompt` the packet. Role agents cannot dispatch: delegation is yours.
+result, `prompt` the packet. Role agents cannot dispatch: delegation is yours,
+and the guard refuses a helper that tries, through any agent type. Built-in
+`general-purpose` has no turn cap, so while the role agents are installed the
+guard sends you to the capped role instead.
+
+**Codex workers.** When Codex is installed and signed in, prefer it for bounded
+coding work and suitable independent reviews, so Claude's quota goes to the
+lead:
+`node "${CLAUDE_SKILL_DIR}/scripts/codex-worker.mjs" run --packet <file> --repo <repo> [--role implement|review|debug] [--hard] [--run <run dir>]`.
+It runs `codex exec` in its own worktree (reviews read-only in place) on the
+model in the user's Codex config, medium effort for bounded work and high for
+hard work and review, with a 20-minute limit, and returns a report plus a
+checkpoint folder. Run it in the background and keep working. Its exit code says
+what next: 0 done — review the diff and integrate; 3 follow up — continue only
+the remaining work from the checkpoint; 4 hand to Claude — Codex hit its usage
+limit, is signed out or is unavailable, so dispatch the role and model it names
+with the `fallback-claude.md` packet it wrote, which covers only the unfinished
+part; 5 both providers are unavailable — stop, the checkpoint is saved, tell the
+user. After a usage-limit stop it does not try Codex again for that run. Never
+send a Claude helper into a worktree a Codex worker still holds; the guard
+refuses it. `codex-worker.mjs status` shows the login, model and live workers.
 
 A background dispatch hands control straight back, so **do not sit and wait on
 it while the plan has a task whose blockers have all landed.** Start that task
@@ -247,12 +296,17 @@ re-writes the agent's whole grown context at full price (`models.md`). Start
 fresh too when the model must change or the earlier attempt would bias it.
 
 The guard refuses, with the exact retry, an executor above Sonnet before a real
-attempt at the same task, an `Explore` or `general-purpose` without a cheap
-named model, a fork of a large conversation, Fable on a plan without it, and
-any new helper near the user's usage limit. A refusal costs one step; send what
-it says. In plan mode a
-subagent inherits the write restriction, so dispatch only read-only tasks whose
-packet says "return the findings inline, write nothing".
+attempt at the same task, an `Explore` without a cheap named model, a fork of a
+large conversation, Fable on a plan without it, any new helper near the user's
+usage limit, a helper starting a helper, a third concurrent worker, and in Plan
+mode any helper that could write, a worktree or a PROGRESS line. A refusal
+costs one step; send what it says.
+
+A return that used every turn its role allows is **partial**, whatever it says;
+the ledger marks it and you are told once. Check what its evidence shows is
+done, then dispatch only the remaining work as a fresh, smaller packet from its
+PROGRESS file and branch. Do not keep resuming a large helper: every step it
+takes re-reads its whole grown context.
 
 Every dispatch arrives with a price tag from the guard, in list-price dollars,
 which is not what a subscription is billed. Say a price when it is large enough
@@ -315,8 +369,15 @@ from those at a fraction of what resuming the old context costs.
 
 ## 8. Integrate, finish, report
 
-Merge in dependency order, focused checks per branch, the full gate at the merge
-point. Done means the done-when evidence exists and you have seen it.
+Merge in dependency order, targeted checks while implementing, the full gate at
+the merge point. Done means the done-when evidence exists and you have seen it.
+Independent review is required for security, money, destructive data changes
+and consequential compatibility changes, not for every cosmetic edit.
+
+`measure.mjs <transcript> --tree` reports what a session actually consumed: the
+lead, every helper and nested helper, the models that ran, per-request context,
+retries, and Codex runs and fallbacks. List-price dollars are not a plan's
+usage, and never turn them into a percentage of a quota.
 
 **Local durability is not publication.** Commit and push a worker's branch so
 work survives; pushing to a shared branch, merging, releasing, tagging and
