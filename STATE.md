@@ -2,6 +2,18 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.13.1 — usage-limit entries expire, and the sandbox retry, 2026-09-14
+
+- Older usage-limit entries saved before v0.13.0 now expire from the reset time
+  in their saved message; `codex-worker.mjs status` marks lifted blocks.
+- **Retry of the v0.13.0 acceptance task** after Codex's limit reset at 2:31 PM
+  (same scratch repo, three failing `slugify` tests, gpt-6-astra at medium):
+  done in 58 s, 121,126 input tokens (78,336 cached), 939 output. Changed only
+  `slug.mjs`. The sandbox-blocked `node --test slug.test.mjs` came back
+  `not-run` instead of `checks-failed`; Codex found its own way to run the tests
+  (`node --test --test-isolation=none`, 3/3 pass), and `git diff --check` passed.
+  This confirms the v0.13.0 fix on a real run.
+
 ## v0.13.0 — accurate context, bounded workers, Codex with Claude fallback, 2026-09-14
 
 Quality per unit of quota. Claude Desktop stays the lead. 313 tests pass (up from
