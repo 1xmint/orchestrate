@@ -31,13 +31,10 @@ DONE WHEN (evidence)
 - <a command and its expected result, a file that exists, a page state>
 
 PROGRESS: <absolute path — <run dir>/progress/<task>.md, or
-          .orchestrator/progress/<task>.md with no run>. Implementer,
-          debugger, researcher and planner keep it current as they go (the
-          browser's saved screenshots and the reviewer's short read are theirs),
-          so a usage limit or a step cap loses nothing: a
-          fresh agent resumes from this file and the branch, never by resuming
-          the stopped one (its cache is gone, so that re-reads everything at
-          full price).
+          .orchestrator/progress/<task>.md with no run>. Author roles keep it
+          current, so a usage limit or step cap loses nothing: a fresh agent
+          resumes from this file and the branch, never the stopped one (its
+          cache is gone, so that re-reads everything at full price).
 ```
 
 Add a field only when the answer is not "none":
@@ -57,6 +54,9 @@ GATE: <the commands from .orchestrator/gate.json, verbatim, with where each
 VERIFY LIVE: <anything about an external service, CLI, library version or price
        the agent must confirm from a current source before relying on it>
 PRIOR ATTEMPTS: <what was tried, the literal error, what not to repeat>
+MAP: <abs path to map.md> — read before searching; `map.mjs who-uses|deps
+       <file>` for structure, LSP for exact references, grep for text
+TESTS FOR SCOPE: <`map.mjs tests-for` on the SCOPE files> — run these first
 PATTERNS: <path to an existing example of the shape wanted>
 SKILLS: <invoke `/name` through the Skill tool for step N, because it already
        does that procedure>
@@ -92,6 +92,7 @@ THE RISK: <the concrete thing that would be bad if this change is wrong —
 ACCEPTANCE: <what would make this change acceptable, as criteria you can check>
 OBJECTIVE THE AUTHOR HAD: <their OBJECTIVE and SCOPE, verbatim>
 DIFF: `git diff <base>..<sha>` in that worktree
+CALLERS: <`map.mjs who-uses` per changed file, if mapped>
 EVIDENCE: <the author's EVIDENCE section and any log paths>
 REPO STANDARDS: <path to AGENTS.md / CLAUDE.md>
 RETURN: TASK, STATUS: DONE, VERDICT: PASS|FAIL, FINDINGS (numbered, file:line,
@@ -122,11 +123,10 @@ writes when the ledger is created. Paste them; do not re-derive them by reading
 Cargo.toml and the CI file again.
 
 Do not write a DONE WHEN that makes the worker **wait on an asynchronous check** —
-CI mutation shards, a remote build, a queue. A worker that watches CI is billed
-for its whole context on every idle turn, which was the largest per-agent cost of
-the run this skill was tuned on. The worker's DONE WHEN is "pushed, and the local
-checks it can run are green"; reading the CI result and dispatching any fix is the
-lead's cheap step, not the worker's expensive wait.
+CI shards, a remote build, a queue. A worker that watches CI is billed for its
+whole context every idle turn, the largest per-agent cost of the run this skill
+was tuned on. Its DONE WHEN is "pushed, and the local checks it can run are
+green"; reading CI and dispatching a fix is the lead's cheap step.
 
 Never put in a packet:
 

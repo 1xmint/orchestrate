@@ -123,3 +123,12 @@ test('the CLI builds and answers from any folder inside the repo', () => {
   assert.match(cli('status').stdout, /^map: fresh/);
   assert.equal(cli('who-uses').status, 2);
 });
+
+test('building the map never shows up as a change in git', () => {
+  const { root } = fixture();
+  build(root);
+  build(root);
+  assert.equal(git(root, 'status', '--porcelain').stdout, '');
+  const excl = readFileSync(join(root, '.git', 'info', 'exclude'), 'utf8');
+  assert.equal(excl.match(/^\.orchestrator\/$/gm).length, 1, 'added once, not per build');
+});

@@ -252,3 +252,20 @@ test('findCodex prefers the override, then PATH, then the app bundle', () => {
   assert.equal(findCodex({ ORCH_CODEX_BIN: join(HERE, 'no-such-codex') }), null);
   assert.equal(findCodex({ PATH: '', LOCALAPPDATA: join(HERE, 'nowhere') }), null);
 });
+
+test('the worker is pointed at the repo map only when one exists, and a stale one is rebuilt first', async () => {
+  const { mapNote } = await import('./codex-worker.mjs');
+  const p = workerPrompt(PACKET, { role: 'implement', worktree: '/w', progress: null, map: { mdPath: '/r/.orchestrator/map/map.md', script: '/s/map.mjs' } });
+  assert.match(p, /Before searching, read \/r\/\.orchestrator\/map\/map\.md/);
+  assert.match(p, /node "\/s\/map\.mjs" who-uses <file>/);
+  assert.doesNotMatch(workerPrompt(PACKET, { role: 'implement', worktree: '/w' }), /Before searching/);
+
+  let built = 0;
+  const states = ['stale', 'fresh'];
+  const note = mapNote('/r', { build: () => { built++; }, status: () => ({ state: states.shift(), mdPath: '/r/.orchestrator/map/map.md' }) });
+  assert.equal(built, 1);
+  assert.equal(note.mdPath, '/r/.orchestrator/map/map.md');
+  assert.match(note.script, /map\.mjs$/);
+  assert.equal(mapNote('/r', { build: () => { throw new Error('should not build'); }, status: () => ({ state: 'missing' }) }), null, 'no map, no note, no build');
+  assert.equal(mapNote('/r', { build: () => { throw new Error('git broke'); }, status: () => ({ state: 'stale' }) }), null, 'a failed rebuild costs the note, not the run');
+});

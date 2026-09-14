@@ -23,8 +23,8 @@
 // still the tool for text; a language server, when loaded, for exact references.
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, resolve as resolvePath } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
+import { join, dirname, resolve as resolvePath } from 'node:path';
 import { posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -204,6 +204,19 @@ function readBlobs(root, blobs) {
 }
 
 export const mapDir = root => join(root, '.orchestrator', 'map');
+
+// The map must never show up as a change: .orchestrator/ goes in git's local
+// exclude file (shared by every worktree), as run-init does for the ledger.
+export function excludeOrchestrator(root) {
+  const rel = String(git(root, ['rev-parse', '--git-path', 'info/exclude']).stdout || '').trim();
+  if (!rel) return false;
+  const excl = resolvePath(root, rel);
+  mkdirSync(dirname(excl), { recursive: true });
+  const cur = existsSync(excl) ? readFileSync(excl, 'utf8') : '';
+  if (/^\.orchestrator\/?$/m.test(cur)) return true;
+  appendFileSync(excl, (cur === '' || cur.endsWith('\n') ? '' : '\n') + '.orchestrator/\n');
+  return true;
+}
 const readJsonFile = p => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; } };
 export const headOf = root => { const r = git(root, ['rev-parse', 'HEAD']); return r.status === 0 ? r.stdout.trim() : null; };
 
@@ -268,6 +281,7 @@ export function build(root, { now = new Date(), write = true } = {}) {
   const map = { v: MAP_V, head: headOf(root), builtAt: now.toISOString(), files, importers, testsFor, counts: { indexed: index.length, code: code.length, scanned, edges: Object.values(importers).reduce((n, l) => n + l.length, 0), linkedSources: Object.keys(testsFor).length } };
   const md = markdown(map, root);
   if (!write) return { map, md, ms: Date.now() - t0 };
+  excludeOrchestrator(root);
   mkdirSync(dir, { recursive: true });
   const keep = {};
   for (const f of code) keep[f.blob] = fresh[f.blob];
