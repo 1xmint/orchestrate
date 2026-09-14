@@ -2,6 +2,56 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.0 — the lead keeps judgment, workers carry the bulk, 2026-09-14
+
+Asked: does the plugin waste context, should the lead mostly manage workers,
+can the context thresholds be strict, and is Codex used and routed well?
+
+**What one plan step cost.** Session `059154a1` (repo realorrug, "Plan 0001
+step 6c", 19:46–20:40) ended at 472k context, 106 model calls, 0 compactions,
+0 helpers. Fixed overhead ~53k; orchestrate's own hook text ~1.5k. The rest was
+the lead doing bulk work itself: 17 `Write` calls totalling 276k chars (`lib.rs`
+written whole twice, 45k + 44k; `main.rs` twice; `tests.rs` 37k), a 64k `Read`
+of a file it had just written, `cat` of four Cargo.toml (15k), multi-file `sed`
+dumps (10k each). Context went 74k → 159k by response 20 → 470k by response
+106. The "compact now" notice fired at 159k and was ignored for ~250 responses:
+auto-continue kept the turn alive and only the user can compact. Re-read total
+35.0M tokens (34.6M cache reads), 226k output, ≈ $25.57 list at Opus. Same
+shape in `7d9adf10` (304k, 0 helpers) and `39341f01` (344k, 0 helpers). A
+Sonnet or Codex worker capped at 50 steps near 125k re-reads ~6M tokens at a
+fifth to a tenth of the price (≈ $3–4 list); arithmetic, not an A/B.
+
+**Codex before this release:** 7 runs ever, all from the plugin's acceptance
+tests. No reference said what any GPT model is good at.
+
+**Cause.** SKILL.md §3, ladder.md and the card said "Direct is most work,
+including long work. Six files is not a reason to delegate." True for a task
+of a few steps, wrong for "write a new module with tests".
+
+**Decisions (Josh).** Nesting engineered in as one bounded shape (the
+coordinator, depth 2). Context line enforced three ways: host auto-compact at
+200k, auto-continue stops at the line, a Stop past the line refused once until a
+checkpoint exists. Codex is the worker lane until it runs out; Claude workers
+only after that or for what Codex cannot reach; no Codex fallback when Claude
+is near its limit. Astra needs the user's yes each time. Codex tier is asked
+once and stored; `~/.codex/auth.json` is never read.
+
+**Sources (checked 2026-09-14).** code.claude.com/docs/en/model-config,
+/commands, /subagents, /costs; openai.com/index/gpt-6-astra (2026-09-03);
+developers.openai.com/codex/pricing; help.openai.com article 11369540;
+learn.chatgpt.com/docs/non-interactive-mode and config-file/config-reference;
+openai/codex release rust-v0.154.0 (2026-09-09). Unresolved: the gpt-5.4
+retirement date conflicts between sources; the no-flag default model is in
+transition, so the worker always passes `-m`.
+
+**Built** (this section is filled in as each part lands):
+
+- Card and version: the router card carries the delegation rule (1,547 chars);
+  `codex-worker.mjs --model --effort --approved`, Astra refused without approval.
+
+**How this release was built.** The lead wrote packets and graded returns; the
+code parts ran as Codex workers (terra medium for B, D, E1; sol high for C).
+
 ## v0.14.0 — a repo map helpers read before searching, 2026-09-14
 
 Asked: would a persistent codebase map (Graphify was the example) make the
