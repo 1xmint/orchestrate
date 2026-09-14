@@ -4,7 +4,7 @@ Resume point for building the `orchestrate` skill.
 
 ## v0.13.0 — accurate context, bounded workers, Codex with Claude fallback, 2026-09-14
 
-Quality per unit of quota. Claude Desktop stays the lead. 309 tests pass (up from
+Quality per unit of quota. Claude Desktop stays the lead. 313 tests pass (up from
 265 at v0.12.1), on Windows / Node 24 locally; CI runs Node 18/20/22.
 
 **What was wrong, from the records.**
@@ -48,7 +48,13 @@ Quality per unit of quota. Claude Desktop stays the lead. 309 tests pass (up fro
   limit. Sign-in checked with `codex login status`; credentials never read.
 - Quota snapshots carry provider, account and session; unidentified or other
   accounts are not enforced. `batch.mjs` defaults to concurrency 2 with grouped
-  files (≤15 per task). `profile.mjs --policy` and `--host`. `measure.mjs --tree`.
+  files (≤15 per task). `profile.mjs --policy` and `--host`. `measure.mjs --tree`
+  (per-request context for every agent).
+- Codex usage-limit blocks lift at the reset time the message states ("try again
+  at 2:31 PM", "in 3 days 4 hours"); with no stated time they hold for the run.
+- `diagnose.mjs`: versions, host, policy, settings-file hooks, context report,
+  agent tree, Codex state and quota freshness in one read-only snapshot, home
+  folder written as ~. Runs in 0.26 s on this session.
 
 **Acceptance on this machine (Desktop engine 2.1.270, Codex CLI 0.154.0-alpha.6.2).**
 A scratch repo with three failing `slugify` tests, sent through the adapter.
@@ -64,10 +70,20 @@ A scratch repo with three failing `slugify` tests, sent through the adapter.
   including reading the reports. This is not an A/B against a Claude helper
   (none was run, to spend no Claude quota on it), so no savings percentage is
   claimed.
+- Reference only, not a comparison: `costs.jsonl` holds 69 Claude implementer
+  returns from other, larger tasks; the smallest read 21M input tokens over its
+  life. Different tasks and tokenizers, so nothing is derived from it.
 
-**Not verified.** The PostToolUse sampler, Plan-mode notices and the new guard
-rules have not run inside a live Desktop session yet: the installed plugin is
-still 0.12.1 until this merges and auto-updates. Codex quota cannot be probed
+**Hook replay on live data.** This session's real 3.9 MB transcript and
+Desktop-shaped payloads, fed to the new scripts with a throwaway home folder:
+context-check measured 116,336 (below 120k, silent); the Plan-mode note on a
+`plan` payload, then the approval note when the mode became `acceptEdits`; the
+guard refused an implementer in Plan mode and a dispatch carrying `agent_id`;
+router and persist-check stayed silent below the thresholds. Nothing was written
+outside the throwaway folder.
+
+**Not verified.** The hooks have not run as the installed plugin inside Desktop:
+the installed plugin is still 0.12.1 until this merges and auto-updates. Codex quota cannot be probed
 before a run by design, so a limit is only learned from a real attempt.
 
 ## v0.12.0 — quota first, 2026-09-13
