@@ -87,6 +87,14 @@ transition, so the worker always passes `-m`.
   (the model shown is Codex's own configured default; dispatches name `-m`).
   The worker returned partial; the lead added `profile.test.mjs` (plan saved,
   bad plan refused, all five line shapes) and moved the agent count to seven.
+- Docs: SKILL.md §0 (ask the Codex plan once), §3 (context size decides, not
+  file count), §5 (the Codex recipe and "Codex for workers until it runs out;
+  Claude for judgment and for what Codex cannot reach", when to use the
+  coordinator), §6; ladder.md prose; lanes.md; models.md "The Codex side" and the
+  coordinator's cost; routing.md "Codex routing"; hosts.md "Host facts checked
+  2026-09-14" with `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` as a backstop;
+  README opening, setup note, seven agents. No "Direct. This is most work",
+  "Six files is not a reason" or "prefer Codex" remains.
 
 **Found while building.** (1) The Codex sandbox refuses child processes, so
 `node --test` fails there with `spawn EPERM`; `--test-isolation=none` runs
