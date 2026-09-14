@@ -53,9 +53,40 @@ and lower effort gives fewer, more consolidated tool calls.
 - `max` shows diminishing returns and can over-think.
 (platform.claude.com, optimizing-for-cost-and-intelligence and effort, 2026-09-13)
 
-The six `orch-*` roles pin their own: implementer and researcher `medium`, browser
-`low`, planner, reviewer and debugger `high`. There is no per-call effort; the
-model is the per-call lever.
+The seven `orch-*` roles pin their own: implementer and researcher `medium`,
+browser `low`, and planner, reviewer, debugger and coordinator `high`. Claude
+has no per-call effort lever; the model is the per-call lever.
+
+## The Codex side
+
+Checked 2026-09-14. Allowance ranges below are messages per five hours. A larger
+or harder task can consume more than one message's share.
+
+| Model id | Window | Effort values | Best at | Weak at | Plus / Pro 5x / Pro 20x allowance |
+|---|---:|---|---|---|---:|
+| `gpt-6-astra` | 1.05M | minimal, low, medium, high, xhigh | the hardest work that is expensive to get wrong | high allowance draw; needs the user's approval each time | 5–45 / 25–225 / 100–900 |
+| `gpt-5.6-sol` | not published | minimal, low, medium, high, xhigh | hard bounded reasoning and failures that resisted one attempt | routine mechanical work | 10–100 / 50–500 / 200–2,000 |
+| `gpt-5.6-terra` | not published | minimal, low, medium, high, xhigh | everyday bounded coding with tests or types | the hardest ambiguous work | 25–200 / 125–1,000 / 500–4,000 |
+| `gpt-5.6-luna` | not published | minimal, low, medium, high, xhigh | fast, focused edits, extraction, sweeps and running checks | hard or loosely checked reasoning | 250–2,000 / 1,250–10,000 / 5,000–40,000 |
+
+The four models draw from one shared account allowance across the five-hour and
+weekly windows. There is no scriptable read of what remains. `/status` is
+interactive, so a worker learns exhaustion from the error and its reset time.
+The default model is in transition; always pass `-m` through
+`codex-worker.mjs --model <id>` instead of relying on the Codex config.
+
+Codex has the same cost shape as Claude: size first, then model, then effort.
+Keep the packet bounded, choose the row that fits the task, and set effort for
+that dispatch. `routing.md` has the task table and one-step escalation path.
+
+Sources, all checked 2026-09-14: OpenAI's GPT-6 Astra announcement
+(`openai.com/index/gpt-6-astra`), Codex pricing
+(`developers.openai.com/codex/pricing`), ChatGPT plan allowance guide
+(`help.openai.com`, article 11369540), Codex non-interactive and configuration
+guides (`learn.chatgpt.com/docs/non-interactive-mode`,
+`learn.chatgpt.com/docs/config-file` and
+`learn.chatgpt.com/docs/config-reference`), and the Codex `rust-v0.154.0`
+release (`github.com/openai/codex/releases/tag/rust-v0.154.0`).
 
 ## Choosing, and escalating
 
@@ -83,13 +114,19 @@ that recognising a name is not knowing its current state.
 
 ## When a helper is worth it at all
 
-For work that fits one context or is a dependent chain, the coordinator's own
-model at lower effort won every measured case; delegation pays past one context
-window, or for about ten files or three independent pieces (Anthropic,
-optimizing-for-cost-and-intelligence; "How and when to use subagents", 2026-04-07).
-Parallel helpers save wall-clock, not quota — each pays its own fixed load every
-step — so run them only for independent, read-heavy work on cheap models. A
-helper never waits on CI: past 5 idle minutes its next step re-writes its cache.
+The manager's context is for judgment. Do a step there only when it fits in
+about eight tool calls with small outputs, or about 15k tokens of growth. Always
+use a worker for a file over about 150 lines, three or more changed files, a
+build or test suite, or a large read that returns a paragraph. The manager keeps
+only the packet and return. Workers still need tight packets and turn caps,
+because each step re-reads their own growing context.
+
+Use `orch-coordinator` for a wave of three or more independent tasks with
+`OWNS` and `DONE WHEN` already written, or for one plan step whose independent
+parts would otherwise be dispatched one by one. It buys one packet and one
+return in the lead's context, and the lead can grade another return while the
+wave runs. It costs about 40 steps near 60k on Opus, roughly $1–2 list price per
+wave, and is roughly neutral on quota. Do not use it for a single task.
 
 ## Context
 
