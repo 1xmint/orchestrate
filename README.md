@@ -72,7 +72,10 @@ seven role agents into `~/.claude/agents/`, and registers the hooks below in
 minute or so; a new session sees them at once. Type `/orchestrate <your
 goal>`, or just describe a multi-part goal; the skill triggers on its own.
 
-Recommended once after setup: run `profile.mjs --autocompact 200k`, and set
+Orchestrate sets auto-compact to 200k once on the first prompt (or a manual
+install), unless you already set it. Opt out before then with
+`profile.mjs --policy context.autocompactDefault=off`; use
+`profile.mjs --autocompact off` to remove it and keep it off. Also set
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` in the settings `env`. The first keeps
 the manager's context bounded. The second is a host backstop for coordinator
 nesting; the plugin guard still enforces the real limit.
@@ -319,7 +322,7 @@ node skills/orchestrate/scripts/profile.mjs --policy context.compactAt=180000 wo
 ```
 
 Keys: `context.checkpointAt`, `context.compactAt`, `context.hardAt`, `context.windowFraction`,
-`context.window`, `context.staleMs`, `workers.maxConcurrent`,
+`context.window`, `context.staleMs`, `context.autocompactDefault` (a positive token count or `off`), `workers.maxConcurrent`,
 `workers.browserConcurrent`, `workers.nested` (`coordinator`/`deny`/`allow`),
 `workers.generalPurpose` (`deny`/`allow`), `workers.staleMin`, `codex.enabled`,
 `codex.model`, `codex.effortImplement`, `codex.effortHard`, `codex.timeoutMin`.

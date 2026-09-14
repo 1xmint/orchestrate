@@ -14,6 +14,7 @@
 //   node profile.mjs --set paidServices=never|ask|free
 //   node profile.mjs --set allowPaid=<plugin> | denyPaid=<plugin>   a paid plugin allowed by name
 //   node profile.mjs --clear          remove the override
+//   node profile.mjs --autocompact <tokens|Nk|off> [--dry-run]
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -85,16 +86,20 @@ if (defIdx >= 0) {
 const autoIdx = args.findIndex(a => a === '--autocompact');
 if (autoIdx >= 0) {
   const raw = String(args[autoIdx + 1] || '');
-  const m = /^(\d+)(k)?$/i.exec(raw);
-  if (!m || Number(m[1]) <= 0) { console.error('usage: --autocompact <tokens|Nk> [--dry-run]'); process.exit(2); }
-  const tokens = Number(m[1]) * (m[2] ? 1000 : 1);
-  const { setEnv, readSettings, backupSettings, writeSettings } = await import('./lib/settings.mjs');
+  const { setEnv, readSettings, backupSettings, writeSettings, parseAutocompact, autocompactMarkerPath } = await import('./lib/settings.mjs');
+  const tokens = parseAutocompact(raw, { allowOff: true });
+  if (tokens == null) { console.error('usage: --autocompact <tokens|Nk|off> [--dry-run]'); process.exit(2); }
   const settingsPath = join(HOME, '.claude', 'settings.json');
-  const edit = `settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=${tokens}`;
-  if (args.includes('--dry-run')) { console.log(`would write ${edit}`); process.exit(0); }
+  const markerDir = join(HOME, '.claude', 'orchestrate');
+  const edit = tokens === 'off' ? 'remove settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW' : `settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=${tokens}`;
+  if (args.includes('--dry-run')) { console.log(tokens === 'off' ? `would ${edit}` : `would write ${edit}`); process.exit(0); }
   const s = readSettings(settingsPath);
-  const backup = backupSettings(settingsPath, join(HOME, '.claude', 'orchestrate'));
-  setEnv(s, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: tokens });
+  const backup = backupSettings(settingsPath, markerDir);
+  if (tokens === 'off') {
+    if (s.env && typeof s.env === 'object') delete s.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(autocompactMarkerPath(markerDir), JSON.stringify({ at: new Date().toISOString(), value: 'off', settingsPath, backup }, null, 2) + '\n');
+  } else setEnv(s, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: tokens });
   writeSettings(settingsPath, s);
   console.log(`saved ${edit} (${settingsPath}${backup ? `; backup ${backup}` : ''})`);
   process.exit(0);

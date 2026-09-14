@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,12 +25,26 @@ function makeHome() {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'max5', tierSource: 'user', setAt: '2026-09-08T00:00:00Z' }));
+  // Most router tests are about ordinary prompts, not this one-time migration.
+  writeFileSync(join(home, '.claude', 'orchestrate', 'autocompact-default.json'), '{}');
   mkdirSync(join(home, '.claude', 'agents'), { recursive: true });
   for (const n of ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger', 'orch-coordinator']) {
     writeFileSync(join(home, '.claude', 'agents', `${n}.md`), `---\nname: ${n}\n---\n`);
   }
   return home;
 }
+
+test('the first router prompt applies auto-compact once and carries its notice', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  const first = prompt(home, repo, 'short prompt');
+  assert.match(first, /set auto-compact to 200k/);
+  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
+  assert.match(first, /backup at/);
+  assert.equal(prompt(home, repo, 'another short prompt'), '', 'the marker makes later prompts cheap and silent');
+});
 
 function makeRepo(withRun, opts = {}) {
   const repo = mkdtempSync(join(tmpdir(), 'orch-repo-'));

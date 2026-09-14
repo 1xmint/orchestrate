@@ -30,6 +30,8 @@ export const DEFAULT_POLICY = Object.freeze({
     window: null,
     // A measurement older than this is not current.
     staleMs: 12 * 3600 * 1000,
+    // Written once into settings.json by orchestrate; "off" opts out.
+    autocompactDefault: 200000,
   }),
   workers: Object.freeze({
     // Across providers: native helpers and external Codex workers together.
@@ -61,6 +63,11 @@ function readProfile(path) {
 }
 
 const posNum = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
+const autocompact = (v, d) => {
+  if (v === 'off') return 'off';
+  const m = /^(\d+)(k)?$/i.exec(String(v));
+  return m && Number(m[1]) > 0 ? Number(m[1]) * (m[2] ? 1000 : 1) : d;
+};
 
 // The defaults with whatever valid values the profile overrides. An invalid
 // value falls back to the default rather than breaking a hook.
@@ -78,6 +85,7 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
       windowFraction: frac > 0 && frac <= 1 ? frac : D.context.windowFraction,
       window: c.window == null ? null : posNum(c.window, null),
       staleMs: posNum(c.staleMs, D.context.staleMs),
+      autocompactDefault: autocompact(c.autocompactDefault, D.context.autocompactDefault),
     },
     workers: {
       maxConcurrent: Math.floor(posNum(w.maxConcurrent, D.workers.maxConcurrent)),

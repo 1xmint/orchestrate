@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,6 +42,18 @@ test('--set codex.tier saves the plan and refuses a value that is not a plan', (
   assert.equal(bad.status, 2);
   assert.match(bad.stderr, /plus\|pro5\|pro20/);
   assert.equal(JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), 'utf8')).codex.tier, 'pro5');
+});
+
+test('--autocompact off removes the setting and leaves the opt-out marker', () => {
+  const home = sandbox();
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '200000', KEEP: 'yes' } }));
+  const r = profile(home, ['--autocompact', 'off']);
+  assert.equal(r.status, 0, r.stderr);
+  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
+  assert.equal(settings.env.KEEP, 'yes');
+  assert.ok(existsSync(join(home, '.claude', 'orchestrate', 'autocompact-default.json')));
+  assert.match(r.stdout, /remove/);
 });
 
 test('--brief prints the codex line in each shape from the cache', () => {
