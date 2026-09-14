@@ -63,9 +63,9 @@ test('every role pins a quota-first effort and a step cap', () => {
   // tokens each over ~190 calls). Effort is the other lever: Opus 5 at medium
   // gave up about 2 points for half the cost. Never xhigh or max on a helper.
   const want = {
-    'orch-implementer': ['medium', 50], 'orch-debugger': ['high', 80], 'orch-researcher': ['medium', 40],
-    'orch-browser': ['low', 40], 'orch-planner': ['high', 40], 'orch-reviewer': ['high', 30],
-    'orch-coordinator': ['high', 40],
+    'orch-implementer': ['medium', 100], 'orch-debugger': ['high', 120], 'orch-researcher': ['medium', 80],
+    'orch-browser': ['low', 80], 'orch-planner': ['high', 80], 'orch-reviewer': ['high', 60],
+    'orch-coordinator': ['high', 150],
   };
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));

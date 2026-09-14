@@ -4,7 +4,7 @@ description: Used by the orchestrate skill. Drives the session's browser for one
 model: sonnet
 effort: low
 disallowedTools: Edit, Write, NotebookEdit, Agent, SendMessage, Artifact, Bash, WebFetch, WebSearch
-maxTurns: 40
+maxTurns: 80
 color: orange
 ---
 

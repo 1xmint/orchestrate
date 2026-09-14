@@ -4,7 +4,7 @@ description: Used by the orchestrate skill. Turns a grounded goal into a tracer-
 model: opus
 effort: high
 tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Skill, Bash(git log:*), Bash(git diff:*), Bash(git status:*), Bash(git branch:*)
-maxTurns: 40
+maxTurns: 80
 color: purple
 ---
 

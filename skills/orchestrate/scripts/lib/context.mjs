@@ -420,6 +420,14 @@ export function storedContext(session, agent = null, dir = CONTEXT_DIR) {
   return s ? s.reading : null;
 }
 
+// The key last recorded as announced for this store, without sampling: what a
+// caller that gates its own notices (a helper's size budget, say) checks
+// before deciding whether to speak again.
+export function storedAdvisedKey(session, agent = null, dir = CONTEXT_DIR) {
+  const s = readStore(storePath(session, agent, dir));
+  return s ? s.advisedKey || null : null;
+}
+
 // Record which advice was actually delivered. A caller that sampled with
 // `announce: false` calls this once the notice really went out; null forgets,
 // so the next advice is said again.

@@ -522,7 +522,7 @@ test('ledger: a helper stopped at its turn cap with no final message is still re
   const repo = fixtureRepo();
   bind(home, 'capped-stop', repo);
   const tr = join(repo.dir, 'agent.jsonl');
-  writeFileSync(tr, Array.from({ length: 50 }, (_, i) => JSON.stringify({ type: 'assistant', message: { id: `m${i}`, usage: { input_tokens: 10, output_tokens: 5 } } })).join('\n'));
+  writeFileSync(tr, Array.from({ length: 100 }, (_, i) => JSON.stringify({ type: 'assistant', message: { id: `m${i}`, usage: { input_tokens: 10, output_tokens: 5 } } })).join('\n'));
 
   const out = run('ledger.mjs', {
     hook_event_name: 'SubagentStop', session_id: 'capped-stop', cwd: repo.dir, agent_id: 'capped-id',
@@ -536,7 +536,7 @@ test('ledger: a helper stopped at its turn cap with no final message is still re
   assert.equal(index[0].capped, true);
   const returned = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'capped-stop.json'), 'utf8')).returned;
   assert.equal(returned[0].agentId, 'capped-id', 'recorded against the helper, so its worker slot frees');
-  assert.equal(returned[0].turns, 50);
+  assert.equal(returned[0].turns, 100);
 });
 
 test('ledger: a nested SubagentStop is filed and indexed with its parent', () => {

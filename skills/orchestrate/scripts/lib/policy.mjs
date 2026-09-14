@@ -50,6 +50,14 @@ export const DEFAULT_POLICY = Object.freeze({
     generalPurpose: 'deny',
     // A dispatch with no return after this long no longer counts as running.
     staleMin: 45,
+    // Each helper's own size budget in tokens: at warnAt, the hook tells it to
+    // write its progress file and keep going; at returnAt, to start no new
+    // work and return PARTIAL. Keyed by normalized role name; "default" is the
+    // fallback for any role with no entry of its own.
+    size: Object.freeze({
+      default: Object.freeze({ warnAt: 80000, returnAt: 120000 }),
+      'orch-coordinator': Object.freeze({ warnAt: 150000, returnAt: 200000 }),
+    }),
   }),
   codex: Object.freeze({
     enabled: true,
@@ -68,6 +76,14 @@ function readProfile(path) {
 }
 
 const posNum = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
+// A {warnAt, returnAt} pair, valid only when warnAt < returnAt; an invalid or
+// missing pair falls back to that role's own defaults, not the generic one.
+const sizePair = (entry, fallback) => {
+  if (!entry || typeof entry !== 'object') return { ...fallback };
+  const warnAt = posNum(entry.warnAt, fallback.warnAt);
+  const returnAt = posNum(entry.returnAt, fallback.returnAt);
+  return warnAt < returnAt ? { warnAt, returnAt } : { ...fallback };
+};
 const autocompact = (v, d) => {
   if (v === 'off') return 'off';
   const m = /^(\d+)(k)?$/i.exec(String(v));
@@ -100,6 +116,15 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
       nested: ['deny', 'allow', 'coordinator'].includes(w.nested) ? w.nested : D.workers.nested,
       generalPurpose: w.generalPurpose === 'allow' ? 'allow' : 'deny',
       staleMin: posNum(w.staleMin, D.workers.staleMin),
+      size: (() => {
+        const userSize = w.size && typeof w.size === 'object' ? w.size : {};
+        const out = {};
+        for (const role of new Set([...Object.keys(D.workers.size), ...Object.keys(userSize)])) {
+          const fallback = D.workers.size[role] || D.workers.size.default;
+          out[role] = sizePair(userSize[role], fallback);
+        }
+        return out;
+      })(),
     },
     codex: {
       enabled: x.enabled !== false,
@@ -111,9 +136,33 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
   };
 }
 
+// A role's token budget: warnAt to write progress and keep going, returnAt to
+// start no new work and return PARTIAL. Pure; a role with no entry of its own
+// gets "default". Strips a plugin prefix such as "orchestrate:" from the role name.
+export function sizeBudget(role, policy = loadPolicy()) {
+  const key = String(role || '').replace(/^[\w-]+:/, '');
+  const size = (policy && policy.workers && policy.workers.size) || DEFAULT_POLICY.workers.size;
+  return size[key] || size.default;
+}
+
 // `context.compactAt=180000` style edits, validated against the defaults' keys.
 export function setPolicyValue(profile, dotted, raw) {
-  const [section, key, extra] = String(dotted || '').split('.');
+  const [section, key, ...rest] = String(dotted || '').split('.');
+  // A size budget is set per role and field: workers.size.<role>.warnAt|returnAt.
+  if (section === 'workers' && key === 'size') {
+    const [role, field] = rest;
+    if (rest.length !== 2 || !/^[\w-]+$/.test(role) || !['warnAt', 'returnAt'].includes(field) || !(Number(raw) > 0)) {
+      throw new Error(`policy key "${dotted}" takes the form workers.size.<role>.warnAt or .returnAt with a positive token count`);
+    }
+    const out = profile && typeof profile === 'object' ? profile : {};
+    out.policy = out.policy && typeof out.policy === 'object' ? out.policy : {};
+    out.policy.v = POLICY_V;
+    const w = out.policy.workers = out.policy.workers && typeof out.policy.workers === 'object' ? out.policy.workers : {};
+    const size = w.size = w.size && typeof w.size === 'object' ? w.size : {};
+    size[role] = { ...(size[role] && typeof size[role] === 'object' ? size[role] : {}), [field]: Number(raw) };
+    return out;
+  }
+  const extra = rest.length > 0;
   if (extra || !DEFAULT_POLICY[section] || typeof DEFAULT_POLICY[section] !== 'object' || !(key in DEFAULT_POLICY[section])) {
     throw new Error(`unknown policy key "${dotted}"; known: ${Object.entries(DEFAULT_POLICY).filter(([, v]) => typeof v === 'object').flatMap(([s, v]) => Object.keys(v).map(k => `${s}.${k}`)).join(', ')}`);
   }
