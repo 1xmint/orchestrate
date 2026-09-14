@@ -95,6 +95,17 @@ transition, so the worker always passes `-m`.
   2026-09-14" with `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` as a backstop;
   README opening, setup note, seven agents. No "Direct. This is most work",
   "Six files is not a reason" or "prefer Codex" remains.
+- Auto-compact at 200k is the plugin default (Josh). A plugin's own
+  settings.json supports only `agent` and `subagentStatusLine`
+  (code.claude.com/docs/en/plugins-reference, checked 2026-09-14), so orchestrate
+  writes `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` into `~/.claude/settings.json`
+  once: the router does it on the first prompt of a plugin install and says so
+  in that prompt's context; `install.mjs` does it too (`--no-autocompact` skips).
+  It never overwrites a value the user set, takes a backup, and leaves
+  `~/.claude/orchestrate/autocompact-default.json` so it never runs again, even
+  if the user removes the key. `policy.context.autocompactDefault: off` opts
+  out; `profile.mjs --autocompact off` removes the key and keeps it removed.
+  Takes effect from the next session. Applied on this machine by hand first.
 
 **Found while building.** (1) The Codex sandbox refuses child processes, so
 `node --test` fails there with `spawn EPERM`; `--test-isolation=none` runs
