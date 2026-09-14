@@ -214,7 +214,15 @@ export function exhaustedFor({ provider, account, scope }, dir = WORKERS_DIR, no
   if (!provider || !account || !scope) return null;
   const s = readJson(providerStatePath(dir));
   const list = s && Array.isArray(s.exhausted) ? s.exhausted : [];
-  return list.find(e => e && e.provider === provider && e.account && e.scope && e.account === account && e.scope === scope && !(e.resetsAt && Date.parse(e.resetsAt) <= now)) || null;
+  return list.find(e => e && e.provider === provider && e.account && e.scope && e.account === account && e.scope === scope && !lifted(e, now)) || null;
+}
+
+// An entry written before resetsAt existed works its reset out from the saved
+// message and the time it was recorded.
+function lifted(e, now) {
+  let reset = e.resetsAt ? Date.parse(e.resetsAt) : null;
+  if (e.resetsAt === undefined && Number.isFinite(Date.parse(e.at))) reset = parseResetTime(e.message, Date.parse(e.at));
+  return Number.isFinite(reset) && reset <= now;
 }
 
 // ---- the provider-neutral packet and report -------------------------------------

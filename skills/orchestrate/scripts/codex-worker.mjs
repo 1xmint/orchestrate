@@ -461,7 +461,7 @@ export function status({ env = process.env, workersDir = WORKERS_DIR } = {}) {
   const bin = findCodex(env);
   const login = bin ? loginStatus(bin, env) : { ok: false, text: 'Codex CLI not found', account: null };
   let exhausted = [];
-  try { exhausted = (JSON.parse(readFileSync(join(workersDir, 'provider-state.json'), 'utf8')).exhausted || []).slice(-10); } catch {}
+  try { exhausted = (JSON.parse(readFileSync(join(workersDir, 'provider-state.json'), 'utf8')).exhausted || []).slice(-10).map(e => ({ ...e, active: !!exhaustedFor(e, workersDir) })); } catch {}
   return { bin, login: { ok: login.ok, text: login.text }, model: loadPolicy().codex.model || configuredModel(env), running: runningExternal(workersDir), exhausted, policy: loadPolicy().codex };
 }
 
@@ -499,7 +499,7 @@ async function main() {
     console.log(`login: ${s.login.text}`);
     console.log(`model: ${s.model || 'unknown'} (effort ${s.policy.effortImplement} for bounded work, ${s.policy.effortHard} for hard work and review)`);
     console.log(`running: ${s.running.length ? s.running.map(w => `${w.task} (pid ${w.pid})`).join(', ') : 'none'}`);
-    if (s.exhausted.length) console.log(`usage limit hit: ${s.exhausted.map(e => `${e.scope} at ${e.at}`).join('; ')}`);
+    if (s.exhausted.length) console.log(`usage limit hit: ${s.exhausted.map(e => `${e.scope} at ${e.at}${e.active ? '' : ' (lifted)'}`).join('; ')}`);
     return 0;
   }
   if (cmd !== 'run' || !o.packet || !o.repo) {
