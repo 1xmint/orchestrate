@@ -669,6 +669,23 @@ The efficiency claims in this repo
 stay estimates until you run this on a real orchestration; the script exists so
 that costs nothing.
 
+## Report a problem
+
+```bash
+node ~/.claude/skills/orchestrate/scripts/diagnose.mjs
+```
+
+One snapshot of how orchestrate sees this machine and this session: the
+version in this copy and the installed one, the host and engine version it
+detected, the policy in force, which hooks your settings file registers, the
+context report, the agent-tree meter, Codex's login state and live workers, and
+whether a fresh Claude usage snapshot exists. It reads only; it changes no
+settings and no stored readings. Your home folder is written as `~`, and it
+holds no credentials, emails, prompts or file contents, so the output can be
+pasted into an issue as it is. `--session <id>` or a transcript path picks
+another session, `--no-codex` skips asking Codex, and `--json` gives the same
+as JSON for a before/after comparison.
+
 ## Install from the .skill file (no git)
 
 `orchestrate.skill` is a zip. Unzip it so that
@@ -733,11 +750,11 @@ supported path. See `skills/orchestrate/references/hosts.md`.
 
 ```
 skills/orchestrate/
-  SKILL.md              the skill (317 body lines; stays in context)
+  SKILL.md              the skill (400 body lines; stays in context)
   references/           ladder, routing, evaluation, lanes, hosts, models
   scripts/              router, guard, ledger, turn-check, precompact-check, persist-check,
                         context-check, context, codex-worker, gate, profile, run-init,
-                        measure, install-agents, install-project, batch
+                        measure, diagnose, install-agents, install-project, batch
   scripts/lib/          context (the one context reader), policy, workers, modes, host,
                         quota, tier, settings, prices, listing, template
   assets/               RUN.md template, packet template, worker report schema, six role

@@ -377,7 +377,9 @@ and consequential compatibility changes, not for every cosmetic edit.
 `measure.mjs <transcript> --tree` reports what a session actually consumed: the
 lead, every helper and nested helper, the models that ran, per-request context,
 retries, and Codex runs and fallbacks. List-price dollars are not a plan's
-usage, and never turn them into a percentage of a quota.
+usage, and never turn them into a percentage of a quota. For a problem report,
+`diagnose.mjs` puts versions, host, policy, hooks, context, the tree and Codex
+state in one pasteable snapshot.
 
 **Local durability is not publication.** Commit and push a worker's branch so
 work survives; pushing to a shared branch, merging, releasing, tagging and

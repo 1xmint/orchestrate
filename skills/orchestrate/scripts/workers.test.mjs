@@ -229,6 +229,9 @@ test('replay: the 274-call general-purpose helper is measured whole and would be
   const gp = tree.agents.find(a => a.agentId === 'gp1');
   assert.equal(gp.calls, 274, 'streaming duplicates are not extra calls');
   assert.equal(gp.maxContext, 683000);
+  assert.equal(gp.contexts.length, 274, 'one context figure per request, in order');
+  assert.equal(Math.max(...gp.contexts), 683000);
+  assert.equal(gp.contexts.at(-1), gp.lastContext);
   assert.deepEqual(gp.models, ['claude-sonnet-5']);
   assert.equal(gp.nestedDispatches, 3);
   assert.equal(gp.retries, 1);

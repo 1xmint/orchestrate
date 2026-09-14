@@ -140,7 +140,7 @@ function strings(v, out = []) {
 const inputOf = u => num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens);
 
 export function callsOf(text, { lead = false, seen = new Set() } = {}) {
-  const r = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, maxContext: 0, lastContext: null, models: [], retries: 0, nestedDispatches: 0, compactions: 0 };
+  const r = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, maxContext: 0, lastContext: null, contexts: [], models: [], retries: 0, nestedDispatches: 0, compactions: 0 };
   const byId = new Map();
   const models = new Set();
   const toolUses = new Set();
@@ -176,6 +176,7 @@ export function callsOf(text, { lead = false, seen = new Set() } = {}) {
     const c = inputOf(u);
     r.maxContext = Math.max(r.maxContext, c);
     r.lastContext = c;
+    r.contexts.push(c);
   }
   r.models = [...models];
   return r;
