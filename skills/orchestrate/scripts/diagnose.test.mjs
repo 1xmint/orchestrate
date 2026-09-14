@@ -70,3 +70,46 @@ test('a missing transcript still reports the machine, and a settings file with n
   assert.deepEqual(registeredHooks(join(home, 'missing.json')), {});
   assert.match(humanDiagnosis(d), /transcript: none found/);
 });
+
+import { codeIntel } from './diagnose.mjs';
+import { spawnSync } from 'node:child_process';
+
+test('code tools: a ready language server, one whose binary is missing, a repo language nothing covers, and a graph tool', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-diag-ci-'));
+  const plugins = join(home, '.claude', 'plugins');
+  const put = (p, text) => { mkdirSync(join(p, '..'), { recursive: true }); writeFileSync(p, text); };
+  const tsPath = join(plugins, 'cache', 'm', 'ts-lsp');
+  put(join(tsPath, '.lsp.json'), JSON.stringify({ typescript: { command: 'fake-tsls', extensionToLanguage: { '.mjs': 'javascript' } } }));
+  put(join(plugins, 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+    'ts-lsp@m': [{ scope: 'user', installPath: tsPath }],
+    'py-lsp@m': [{ scope: 'user', installPath: join(plugins, 'cache', 'm', 'py-lsp') }],
+  } }));
+  put(join(plugins, 'marketplaces', 'm', '.claude-plugin', 'marketplace.json'), JSON.stringify({ plugins: [
+    { name: 'py-lsp', lspServers: { pyright: { command: 'fake-pyright', extensionToLanguage: { '.py': 'python' } } } },
+    { name: 'rust-lsp', lspServers: { ra: { command: 'rust-analyzer', extensionToLanguage: { '.rs': 'rust' } } } },
+  ] }));
+  put(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'ts-lsp@m': true, 'py-lsp@m': true } }));
+  put(join(home, '.claude.json'), JSON.stringify({ mcpServers: { 'codebase-memory-mcp': { command: 'x' }, other: {} }, oauthAccount: { emailAddress: 'never@example.invalid' } }));
+  const bin = join(home, 'bin');
+  put(join(bin, process.platform === 'win32' ? 'fake-tsls.cmd' : 'fake-tsls'), '');
+  const repo = join(home, 'repo');
+  for (const f of ['a.rs', 'b.rs', 'c.rs', 'x.mjs', 'y.mjs', 'z.mjs']) put(join(repo, 'src', f), '// x\n');
+  put(join(repo, 'graphify-out', 'graph.json'), '{}');
+  spawnSync('git', ['init', '-q'], { cwd: repo });
+  spawnSync('git', ['add', '-A'], { cwd: repo });
+
+  const ci = codeIntel({ home, cwd: repo, env: { PATH: bin, PATHEXT: '.CMD' } });
+  const by = Object.fromEntries(ci.languageServers.map(s => [s.server, s]));
+  assert.equal(by.typescript.onPath, true);
+  assert.equal(by.typescript.enabled, true);
+  assert.equal(by.pyright.onPath, false, 'declared in the marketplace entry, binary not on PATH');
+  assert.deepEqual(ci.uncovered, [{ extension: '.rs', files: 3, plugins: ['rust-lsp@m'] }]);
+  assert.equal(ci.map.state, 'missing');
+  assert.equal(ci.graphify, 'graph.json present');
+  assert.deepEqual(ci.codeGraphMcp, ['codebase-memory-mcp']);
+  assert.doesNotMatch(JSON.stringify(ci), /never@example/);
+  const text = humanDiagnosis({ at: 'now', versions: { installed: [] }, host: {}, policy: loadPolicy({}), hooks: {}, codex: 'skipped', claudeQuota: { fresh: false, note: 'n' }, errors: [], codeIntel: ci });
+  assert.match(text, /language servers: typescript \(ready\), pyright \(fake-pyright not on PATH\)/);
+  assert.match(text, /no language server for \.rs \(3 files\); free and local: rust-lsp@m/);
+  assert.match(text, /repo map: none/);
+});
