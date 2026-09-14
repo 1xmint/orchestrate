@@ -161,6 +161,15 @@ test('quota exhaustion is scoped by provider, account and run; unidentified entr
   markExhausted({ provider: 'codex', account: 'acct3', scope: 'run:r3', message: "You've hit your usage limit. ... or try again at 2:31 PM.", now: t0 }, dir);
   assert.ok(exhaustedFor({ provider: 'codex', account: 'acct3', scope: 'run:r3' }, dir, t0 + 60 * 60000));
   assert.equal(exhaustedFor({ provider: 'codex', account: 'acct3', scope: 'run:r3' }, dir, t0 + 104 * 60000), null);
+  // An entry from before resetsAt was stored reads its reset from the message.
+  const legacy = mkdtempSync(join(tmpdir(), 'orch-prov-'));
+  writeFileSync(join(legacy, 'provider-state.json'), JSON.stringify({ v: 1, exhausted: [
+    { provider: 'codex', account: 'a', scope: 's', at: new Date(t0).toISOString(), message: 'try again at 2:31 PM.' },
+    { provider: 'codex', account: 'a', scope: 'held', at: new Date(t0).toISOString(), message: 'usage limit' },
+  ] }));
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 's' }, legacy, t0 + 60 * 60000));
+  assert.equal(exhaustedFor({ provider: 'codex', account: 'a', scope: 's' }, legacy, t0 + 104 * 60000), null);
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'held' }, legacy, t0 + 48 * 3600000), 'no stated time holds for the run');
 });
 
 test('reset times are read from the provider message', async () => {
