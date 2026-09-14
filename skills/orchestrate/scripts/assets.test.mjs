@@ -17,9 +17,9 @@ const frontmatter = text => {
   return m[1];
 };
 
-test('all six role agents ship, and each names itself', () => {
+test('all seven role agents ship, and each names itself', () => {
   const files = readdirSync(AGENTS).filter(f => f.endsWith('.md'));
-  assert.equal(files.length, 6);
+  assert.equal(files.length, 7);
   for (const f of files) {
     const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
     assert.match(fm, new RegExp(`^name: ${f.replace(/\.md$/, '')}$`, 'm'));
@@ -40,7 +40,7 @@ test('no role agent carries a Stop hook that can send a finished return back', (
   }
 });
 
-test('no role agent can dispatch another one', () => {
+test('only the coordinator role can dispatch another one', () => {
   // Delegation belongs to the lead: a nested dispatch spends quota the ledger
   // never sees and returns nothing anyone grades. Enforced by the host's own
   // tool restrictions, not by asking the agent nicely.
@@ -48,6 +48,10 @@ test('no role agent can dispatch another one', () => {
     const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
     const allow = (/^tools: (.+)$/m.exec(fm) || [])[1];
     const deny = (/^disallowedTools: (.+)$/m.exec(fm) || [])[1] || '';
+    if (f === 'orch-coordinator.md') {
+      assert.match(allow, /\bAgent\b/, 'the coordinator has the one nested dispatch lane');
+      continue;
+    }
     if (allow) assert.doesNotMatch(allow, /\bAgent\b/, `${f} allowlist must not include Agent`);
     else assert.match(deny, /\bAgent\b/, `${f} has no allowlist, so it must deny Agent`);
   }
@@ -61,6 +65,7 @@ test('every role pins a quota-first effort and a step cap', () => {
   const want = {
     'orch-implementer': ['medium', 50], 'orch-debugger': ['high', 80], 'orch-researcher': ['medium', 40],
     'orch-browser': ['low', 40], 'orch-planner': ['high', 40], 'orch-reviewer': ['high', 30],
+    'orch-coordinator': ['high', 40],
   };
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
@@ -69,6 +74,20 @@ test('every role pins a quota-first effort and a step cap', () => {
     assert.match(fm, new RegExp(`^maxTurns: ${turns}$`, 'm'), f);
     assert.doesNotMatch(fm, /^effort: (xhigh|max)$/m, f);
   }
+});
+
+test('the coordinator owns one bounded wave and one graded return', () => {
+  const text = readFileSync(join(AGENTS, 'orch-coordinator.md'), 'utf8').replace(/\s+/g, ' ');
+  assert.match(text, /^--- name: orch-coordinator .* model: opus effort: high /);
+  assert.match(text, /depth 1 and may dispatch capped workers only one level down/);
+  assert.match(text, /codex-worker\.mjs run --model <model> --effort <effort>/);
+  assert.match(text, /Claude workers only after Codex reports exhaustion, or when Codex cannot do the task/);
+  assert.match(text, /Write and Edit only files inside the run directory/);
+  assert.match(text, /Grade every return against that task's DONE WHEN/);
+  assert.match(text, /integrate their branches in dependency order/);
+  assert.match(text, /run the packet's gate once/);
+  assert.match(text, /Return one compact summary, not one message per child/);
+  assert.match(text, /Never turn the return into a question for the user/);
 });
 
 test('memory is on the two roles that gain from it, and off the two that would be steered by it', () => {
