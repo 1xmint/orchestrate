@@ -74,6 +74,19 @@ transition, so the worker always passes `-m`.
   276,180 input chars, the 63,858-char `Read` of `lib.rs` as the largest
   result, 29,000 chars of hook attachments (all plugins), and $25.57 at Opus:
   the hand measurement, reproduced in one command.
+- Part D, Codex as the worker lane: a finished Codex run now writes
+  `returns/<task>-codex.md` and a `returns.jsonl` line with model and effort, so
+  it is graded like a Claude return; `reports.jsonl` carries both too. A Codex
+  limit message with no reset time lifts after five hours instead of holding for
+  the run. `profile.mjs --set codex.tier=plus|pro5|pro20` stores the plan (set to
+  `plus` here). `profile.mjs` writes a Codex status cache; `--brief` reads it
+  (fresh for one hour) and prints `codex: <model> · <plan> · ok`, `limit until
+  <time>`, `not signed in`, `not installed`, or `not checked in the last hour`.
+  The router state line and its change-detection hash carry `codex: ok|limit|off`.
+  On this machine: `--brief` in 130 ms printing `codex: gpt-6-astra · plus · ok`
+  (the model shown is Codex's own configured default; dispatches name `-m`).
+  The worker returned partial; the lead added `profile.test.mjs` (plan saved,
+  bad plan refused, all five line shapes) and moved the agent count to seven.
 
 **Found while building.** (1) The Codex sandbox refuses child processes, so
 `node --test` fails there with `spawn EPERM`; `--test-isolation=none` runs
