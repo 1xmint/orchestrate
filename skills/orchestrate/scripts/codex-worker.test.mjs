@@ -202,6 +202,8 @@ test('two workers already running: a third is not started', async () => {
 
 test('pure pieces: classification, events, final report, prompt', () => {
   assert.equal(classifyFailure("You've hit your usage limit. Try again in 2 days."), 'quota-exhausted');
+  // Verbatim from a real run on 2026-09-14 (codex-cli 0.154.0-alpha.6.2).
+  assert.equal(classifyFailure("You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 2:31 PM."), 'quota-exhausted');
   assert.equal(classifyFailure('Quota exceeded. Check your plan and billing details. insufficient_quota'), 'quota-exhausted');
   assert.equal(classifyFailure('401 Unauthorized'), 'auth-failed');
   assert.equal(classifyFailure('stream disconnected before completion'), 'throttled');
@@ -215,6 +217,23 @@ test('pure pieces: classification, events, final report, prompt', () => {
   assert.equal(parseFinal('not json'), null);
   assert.equal(parseFinal('{"status":"weird","summary":"x"}'), null);
   assert.equal(parseFinal('{"status":"partial","summary":"half","changed":[],"checks":[],"remaining":["b"],"notes":""}').remaining[0], 'b');
+
+  // A check the sandbox would not run is unverified, not failed (first real
+  // acceptance run: `node --test` hit spawn EPERM and passed 3/3 outside).
+  const sandboxed = parseFinal(JSON.stringify({ status: 'done', summary: 'ok', changed: ['slug.mjs'], checks: [
+    { command: 'node --test slug.test.mjs', result: 'fail', evidence: 'Test runner blocked by sandbox: Error: spawn EPERM.' },
+    { command: 'node --test --test-isolation=none slug.test.mjs', result: 'pass', evidence: 'tests 3, pass 3' },
+  ], remaining: [], notes: '' }));
+  const d = decideStatus({ exitCode: 0, events: parseEvents(''), final: sandboxed });
+  assert.equal(d.status, 'done');
+  assert.deepEqual(d.blocked, ['node --test slug.test.mjs']);
+  const realFail = parseFinal(JSON.stringify({ status: 'done', summary: 'ok', changed: [], checks: [
+    { command: 'npm test', result: 'fail', evidence: 'AssertionError: expected 2, got 3' },
+    { command: 'node --test', result: 'fail', evidence: 'spawn EPERM' },
+  ], remaining: [], notes: '' }));
+  const f = decideStatus({ exitCode: 0, events: parseEvents(''), final: realFail });
+  assert.equal(f.status, 'checks-failed');
+  assert.equal(f.why, 'npm test', 'only the real failure is named as one');
 
   // An agent message that talks about rate limits is not a failure.
   const quiet = parseEvents('{"type":"item.completed","item":{"type":"agent_message","text":"added a rate limit of 429 per user"}}');

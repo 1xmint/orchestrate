@@ -176,8 +176,15 @@ export function decideStatus({ timedOut = false, exitCode = null, events, stderr
   if (cls && (failedRun || cls === 'quota-exhausted')) return { status: cls, why: (errText || stderr).split('\n').map(l => l.trim()).find(Boolean) || cls };
   if (failedRun) return { status: 'failed', why: (errText || stderr).split('\n').map(l => l.trim()).find(Boolean) || `exit ${exitCode}` };
   if (!final) return { status: 'malformed', why: 'the final message was not the structured report' };
-  if (final.checks.some(c => c.result === 'fail')) return { status: 'checks-failed', why: final.checks.filter(c => c.result === 'fail').map(c => c.command).join('; ') };
-  return { status: final.status, why: final.summary.split('\n')[0] };
+  // A check the sandbox stopped from running (a test runner denied spawning a
+  // process, say) did not fail: it was not verified. Seen on the first real
+  // acceptance run, where `node --test` hit spawn EPERM inside the sandbox and
+  // passed 3/3 outside it. Those go back to the lead to rerun, not to a fixer.
+  const failed = final.checks.filter(c => c.result === 'fail');
+  const blocked = failed.filter(c => classifyFailure(c.evidence) === 'permission-denied').map(c => c.command);
+  const real = failed.filter(c => !blocked.includes(c.command));
+  if (real.length) return { status: 'checks-failed', why: real.map(c => c.command).join('; '), blocked };
+  return { status: final.status, why: final.summary.split('\n')[0], blocked };
 }
 
 // What the lead should do next, by status.
@@ -233,6 +240,7 @@ export function workerPrompt(packetText, { role, worktree, progress }) {
       : '- Make the change, run the acceptance checks you can run locally, and leave the changes uncommitted in the worktree; the lead reviews and commits.',
     ...(progress ? [`- Keep a short progress note at ${progress} as you go (done so far, what is left), so an interruption loses nothing.`] : []),
     '- Do not wait on CI or other remote jobs.',
+    '- If the sandbox stops a check from running at all (for example spawn EPERM), report that check as not-run with the error as its evidence; it is not a failure of your change.',
     '- Your final message is the JSON report: status (done, partial or blocked), a short summary, the files changed, every check with its command, result and output tail, the remaining work, and notes.',
   ];
   return `${String(packetText || '').trimEnd()}\n${rules.join('\n')}\n`;
@@ -331,9 +339,12 @@ export async function runWorker(opts, deps = {}) {
         code = EXIT.fallback;
       }
     }
+    const rerun = report.evidence && report.evidence.blockedChecks && report.evidence.blockedChecks.length
+      ? ` Its sandbox blocked ${report.evidence.blockedChecks.join('; ')}, so run ${report.evidence.blockedChecks.length === 1 ? 'that' : 'those'} yourself in the worktree before trusting the result.`
+      : '';
     if (!report.next) {
       report.next = report.status === 'done'
-        ? `Review the diff${report.worktree ? ` in ${report.worktree}` : ''} against the acceptance checks, then integrate.`
+        ? `Review the diff${report.worktree ? ` in ${report.worktree}` : ''} against the acceptance checks, then integrate.${rerun}`
         : `Continue only the remaining work from ${checkpoint} (report.json, diff.patch${report.fallback ? `, ${basename(report.fallback.path)}` : ''}); do not rerun the whole task.`;
     }
     writeFileSync(join(checkpoint, 'report.json'), JSON.stringify(report, null, 2) + '\n');
@@ -437,7 +448,7 @@ export async function runWorker(opts, deps = {}) {
   const evidence = {
     exitCode: exit.code, signal: exit.signal, timedOut, durationMs: Date.now() - started,
     usage: parsed.usage, turns: parsed.turns, errors: parsed.errors.slice(-5), unreadableEvents: parsed.skipped,
-    threadId: parsed.threadId, final, ...diff, progressPath,
+    threadId: parsed.threadId, final, blockedChecks: decided.blocked || [], ...diff, progressPath,
     eventsPath, stderrPath, lastMessagePath,
   };
   const code = decided.status === 'done' ? EXIT.done : HAND_TO_CLAUDE.has(decided.status) ? EXIT.fallback : EXIT.followUp;
