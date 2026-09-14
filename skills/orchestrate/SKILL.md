@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.13.1"
+  version: "0.14.0"
 hooks:
   PreToolUse:
     - matcher: "Agent|Task"
@@ -114,8 +114,10 @@ only the tasks it actually touches.
 Facts about the world come from the world, not from memory: the repo's rules,
 whether it has a remote and `gh` is signed in, the current docs of a service,
 the `--help` of a CLI, the live state of a page. Read the files the goal names
-yourself, and sweep with Grep and Glob, reading line ranges; when a language
-server tool is loaded, ask it for definitions and callers first. For a library's
+yourself. Before sweeping, read `.orchestrator/map/map.md` (`scripts/map.mjs
+build` writes it; `who-uses`, `deps` and `tests-for` answer structure in a line
+each); when a language server tool is loaded, ask it for definitions and callers;
+then Grep and Glob for text, reading line ranges. For a library's
 API, current docs (a docs tool such as context7 when installed) beat memory and
 beat reading its source. Delegate a sweep
 only when it would read far more than it returns, and name `model: "haiku"`:
@@ -284,8 +286,9 @@ are any. If the right answer really is to wait, wait.
 
 `assets/packet.md` is the template. Four fields always — the task and its
 objective, the context and decisions it needs, the scope boundaries, the
-evidence that means done — and the rest only when they apply. A field that stops
-nothing on this task is cost with no benefit.
+evidence that means done — and the rest only when they apply. With a map, add
+MAP and the `tests-for` lines for the files in scope: finding its way was a fifth
+of what past helpers read. A field that stops nothing is cost with no benefit.
 
 A dispatch's result carries the agent's id; keep it. To continue that agent
 with a short delta — a reviewer's finding for the implementer that produced it —

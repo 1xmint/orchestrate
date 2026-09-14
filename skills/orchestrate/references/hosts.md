@@ -194,6 +194,18 @@ known value settles it.
 **Worktrees** need a git repo; the worktree is removed when the agent made no changes, so packets
 name an absolute run dir in the main checkout.
 
+**Code intelligence** (checked 2026-09-14). The **LSP tool** answers definitions, references
+and callers exactly once a language-server plugin is enabled (`lspServers` in plugin.json or
+`.lsp.json`) and its binary is on PATH; no environment variable is needed. `diagnose.mjs` lists
+which are ready and which repo languages have none. **`scripts/map.mjs`** is this skill's own
+map (imports found in text, tests per file, no dependencies). **Graphify**
+(github.com/safishamsi/graphify, Python) and code-graph MCP servers are optional and never
+installed by this skill: `graphify claude install` adds its own PreToolUse hook and CLAUDE.md
+text, which every step then re-reads; its code extraction makes no API calls, while docs and
+images go through the assistant and cost quota. The one independent coding measurement found
+(arXiv 2603.27277: Opus 4.6, 31 repos) put a graph agent at 0.83 answer quality against 0.92
+for grep-and-read, at about a tenth of the tokens: a map starts the search, reading confirms it.
+
 ## Codex CLI and the ChatGPT desktop app
 
 Skills load from `~/.agents/skills/<name>/` (user) and `.agents/skills/` in a repo, invoked as

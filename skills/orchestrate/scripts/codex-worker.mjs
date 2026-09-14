@@ -40,6 +40,7 @@ import {
   helperFiles, lockHolder, concurrencyDecision, markExhausted, exhaustedFor, accountKey, WORKERS_DIR,
 } from './lib/workers.mjs';
 import { loadSession } from './lib/tier.mjs';
+import { build as buildMap, status as mapStatus } from './map.mjs';
 import { readQuota, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
@@ -229,7 +230,23 @@ export function saveDiff(worktree, checkpoint) {
 
 // ---- the worker prompt and the Claude handoff ---------------------------------------
 
-export function workerPrompt(packetText, { role, worktree, progress }) {
+// Codex loads only AGENTS.md, so it starts colder than a Claude helper. When the
+// repo has a map, the worker is told to read it before searching.
+// A repo with no map gets none here: building one is run-init's or the user's
+// call, not a side effect of starting a worker.
+export function mapNote(repo, { build: doBuild = buildMap, status: doStatus = mapStatus } = {}) {
+  try {
+    let s = doStatus(repo);
+    if (s.state === 'missing') return null;
+    if (s.state !== 'fresh') { doBuild(repo); s = doStatus(repo); }
+    if (s.state !== 'fresh' || !s.mdPath) return null;
+    // --repo lets the queries answer from the saved map inside Codex's sandbox,
+    // where the script cannot start git to find the repo itself.
+    return { mdPath: s.mdPath, repo: resolve(repo), script: fileURLToPath(new URL('./map.mjs', import.meta.url)) };
+  } catch { return null; }
+}
+
+export function workerPrompt(packetText, { role, worktree, progress, map = null }) {
   const rules = [
     '',
     '---',
@@ -238,6 +255,7 @@ export function workerPrompt(packetText, { role, worktree, progress }) {
     role === 'review'
       ? '- Read only: do not modify any file. Review against the objective and acceptance checks above and report findings with file:line.'
       : '- Make the change, run the acceptance checks you can run locally, and leave the changes uncommitted in the worktree; the lead reviews and commits.',
+    ...(map ? [`- Before searching, read ${map.mdPath}: folders, most-imported files, entry points and checks. For who imports a file or which tests cover it, run \`node "${map.script}" who-uses <file> --repo "${map.repo}"\` or \`tests-for <file> --repo "${map.repo}"\`; grep for text. The map is found in the text, so confirm by reading before you rely on it.`] : []),
     ...(progress ? [`- Keep a short progress note at ${progress} as you go (done so far, what is left), so an interruption loses nothing.`] : []),
     '- Do not wait on CI or other remote jobs.',
     '- If the sandbox stops a check from running at all (for example spawn EPERM), report that check as not-run with the error as its evidence; it is not a failure of your change.',
@@ -426,7 +444,7 @@ export async function runWorker(opts, deps = {}) {
   process.once('SIGINT', onSignal);
   process.once('SIGTERM', onSignal);
   child.stdin.on('error', () => {});
-  child.stdin.end(workerPrompt(packetText, { role, worktree: wt.path, progress: progressPath }));
+  child.stdin.end(workerPrompt(packetText, { role, worktree: wt.path, progress: progressPath, map: deps.map !== undefined ? deps.map : mapNote(resolve(opts.repo || wt.path)) }));
 
   // The worker has exited before anything below looks at its work.
   const exit = await new Promise(res => child.on('close', (code, signal) => res({ code, signal })));

@@ -65,6 +65,19 @@ test('the detected gate is prefilled under Facts, and written to gate.json', () 
   assert.ok(existsSync(join(dir, '.orchestrator', 'gate.json')));
 });
 
+test('the repo map is built at run start and named under Facts; a folder outside git has none', () => {
+  const dir = repo({ 'src/a.mjs': "import './b.mjs';\n", 'src/b.mjs': '// b.\n' });
+  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', 'add', '-A'], { cwd: dir });
+  spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'x'], { cwd: dir });
+  const md = readFileSync(run(dir, 'x').stdout.split('\n')[0].trim(), 'utf8');
+  assert.match(md.slice(md.indexOf('## Facts'), md.indexOf('## Tasks')), /MAP: .*map\.md \(\d+ chars/);
+  assert.match(readFileSync(join(dir, '.orchestrator', 'map', 'map.md'), 'utf8'), /src\/b\.mjs — 1 importers/);
+  const plain = repo({ 'README.md': 'hi\n' }, false);
+  const r = run(plain, 'x');
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(readFileSync(r.stdout.split('\n')[0].trim(), 'utf8'), /^MAP:/m);
+});
+
 test('a repo with no detectable gate still gets a ledger, and says the gate is unknown', () => {
   const dir = repo({ 'README.md': 'hi\n' });
   const r = run(dir, 'x');
