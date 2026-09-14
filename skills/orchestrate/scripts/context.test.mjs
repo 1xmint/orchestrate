@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   readContext, sampleContext, adviseContext, contextNotice, scanSlice, inputSide, thresholds,
-  storedContext, markAnnounced, agentTranscriptPath, formatReading, writeStatusCapacity, statusCapacity,
+  storedContext, markAnnounced, agentTranscriptPath, formatReading, writeStatusCapacity, statusCapacity, checkpointPath,
 } from './lib/context.mjs';
 import { loadPolicy, setPolicyValue } from './lib/policy.mjs';
 import { persistDecision } from './persist-check.mjs';
@@ -109,6 +109,14 @@ test('thresholds: checkpoint at 120k, compact at 150k, or 75% of a known smaller
   assert.throws(() => setPolicyValue({}, 'context.nope', '1'), /unknown policy key/);
 });
 
+test('hard context advice is once per compaction epoch and says not to start work', () => {
+  const reading = { state: 'measured', tokens: 300000, capacity: null, compaction: { uuid: 'epoch-1' }, responsesSinceCompaction: 4 };
+  const advice = adviseContext(reading, policy);
+  assert.equal(advice.action, 'hard');
+  assert.match(contextNotice(reading, advice), /Do not start new work here/);
+  assert.match(checkpointPath('s', reading), /checkpoint-epoch-1\.md$/);
+});
+
 test('still large right after compaction: investigate, do not recommend compacting again', () => {
   const { p } = file([assistant(900000, { min: 1 }), boundary(900000, 160000, 2), summary(2), assistant(171000, { min: 3 })]);
   const r = readContext(p, { now: NOW, policy, capacity: null });
@@ -139,7 +147,8 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   const { p, store } = file([user('start', 0), assistant(100000, { min: 1 })]);
   const s1 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s1.reading.tokens, 100000);
-  assert.equal(s1.notice, '');
+  assert.match(s1.notice, /~100k tokens per step, measured. Nothing to do until ~120k/, 'below the thresholds the lead still hears the measured size');
+  assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store, force: true }).notice, '', 'once per 25k step');
 
   appendFileSync(p, `${user('x'.repeat(5000), 2)}\n${assistant(125000, { min: 3 })}\n`);
   const s2 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
@@ -154,13 +163,15 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   appendFileSync(p, `${user('z'.repeat(5000), 6)}\n${assistant(160000, { min: 7 })}\n`);
   const s4 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s4.advice.action, 'compact');
-  assert.match(s4.notice, /compact if this same task continues; start a fresh conversation if the task changes/);
+  assert.match(s4.notice, /save the checkpoint .*recommend compacting if this same task continues/);
+  assert.equal(s4.reading.compactions, 0);
 
   // Compaction keeps the file; the reading and the announced advice start over.
   appendFileSync(p, `${boundary(160000, 17000, 8)}\n${summary(8)}\n`);
   const s5 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s5.reading.state, 'provisional');
-  assert.equal(s5.notice, '');
+  assert.equal(s5.reading.compactions, 1, 'a new epoch is one more compaction');
+  assert.match(s5.notice, /~17k tokens per step, measured from the compaction summary · compacted 1 time this session/);
   appendFileSync(p, `${user('w'.repeat(5000), 9)}\n${assistant(22000, { min: 10 })}\n`);
   const s6 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s6.reading.tokens, 22000);
@@ -280,4 +291,30 @@ test('replay: long session with two compactions and a large retained transcript'
   const r2 = readContext(p, { now: now + 120000, policy, capacity: null });
   assert.equal(r2.tokens, 41000);
   assert.equal(adviseContext(r2, policy).action, 'none');
+});
+
+test('compact by default; a fresh conversation only after repeated compactions', () => {
+  const at = (tokens, compactions) => {
+    const r = { state: 'measured', tokens, capacity: null, compaction: compactions ? { uuid: `c${compactions}` } : null, responsesSinceCompaction: 10, compactions };
+    const a = adviseContext(r, policy);
+    return { a, notice: contextNotice(r, a) };
+  };
+  assert.equal(policy.context.freshAfterCompactions, 2);
+  const once = at(160000, 1);
+  assert.equal(once.a.fresh, false);
+  assert.match(once.notice, /recommend compacting if this same task continues/);
+  const twice = at(160000, 2);
+  assert.equal(twice.a.fresh, true);
+  assert.match(twice.notice, /recommend a fresh conversation that resumes from the checkpoint: this one has already been compacted 2 times/);
+  assert.match(at(310000, 2).notice, /Do not start new work here.*fresh conversation/);
+  assert.match(at(310000, 0).notice, /Do not start new work here.*recommend compacting/);
+  const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: 160000, compactions: 2 } });
+  assert.match(stop.why, /fresh conversation that resumes from the checkpoint/);
+});
+
+test('the size line can be turned off, and only speaks for a measured size', () => {
+  const { p, store } = file([assistant(60000, { min: 1 })]);
+  assert.equal(sampleContext({ transcriptPath: p, session: 'q', policy: loadPolicy({ policy: { context: { tickEvery: 0 } } }), now: NOW, dir: store }).notice, '');
+  const { p: p2, store: s2 } = file([user('hi', 0)]);
+  assert.equal(sampleContext({ transcriptPath: p2, session: 'u', policy, now: NOW, dir: s2 }).notice, '', 'no usage yet: nothing to say');
 });

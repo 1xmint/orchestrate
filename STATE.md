@@ -2,6 +2,147 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.0 — the lead keeps judgment, workers carry the bulk, 2026-09-14
+
+Asked: does the plugin waste context, should the lead mostly manage workers,
+can the context thresholds be strict, and is Codex used and routed well?
+
+**What one plan step cost.** Session `059154a1` (repo realorrug, "Plan 0001
+step 6c", 19:46–20:40) ended at 472k context, 106 model calls, 0 compactions,
+0 helpers. Fixed overhead ~53k; orchestrate's own hook text ~1.5k. The rest was
+the lead doing bulk work itself: 17 `Write` calls totalling 276k chars (`lib.rs`
+written whole twice, 45k + 44k; `main.rs` twice; `tests.rs` 37k), a 64k `Read`
+of a file it had just written, `cat` of four Cargo.toml (15k), multi-file `sed`
+dumps (10k each). Context went 74k → 159k by response 20 → 470k by response
+106. The "compact now" notice fired at 159k and was ignored for ~250 responses:
+auto-continue kept the turn alive and only the user can compact. Re-read total
+35.0M tokens (34.6M cache reads), 226k output, ≈ $25.57 list at Opus. Same
+shape in `7d9adf10` (304k, 0 helpers) and `39341f01` (344k, 0 helpers). A
+Sonnet or Codex worker capped at 50 steps near 125k re-reads ~6M tokens at a
+fifth to a tenth of the price (≈ $3–4 list); arithmetic, not an A/B.
+
+**Codex before this release:** 7 runs ever, all from the plugin's acceptance
+tests. No reference said what any GPT model is good at.
+
+**Cause.** SKILL.md §3, ladder.md and the card said "Direct is most work,
+including long work. Six files is not a reason to delegate." True for a task
+of a few steps, wrong for "write a new module with tests".
+
+**Decisions (Josh).** Nesting engineered in as one bounded shape (the
+coordinator, depth 2). Context line enforced three ways: host auto-compact at
+200k, auto-continue stops at the line, a Stop past the line refused once until a
+checkpoint exists. Codex is the worker lane until it runs out; Claude workers
+only after that or for what Codex cannot reach; no Codex fallback when Claude
+is near its limit. Astra needs the user's yes each time. Codex tier is asked
+once and stored; `~/.codex/auth.json` is never read.
+
+**Sources (checked 2026-09-14).** code.claude.com/docs/en/model-config,
+/commands, /subagents, /costs; openai.com/index/gpt-6-astra (2026-09-03);
+developers.openai.com/codex/pricing; help.openai.com article 11369540;
+learn.chatgpt.com/docs/non-interactive-mode and config-file/config-reference;
+openai/codex release rust-v0.154.0 (2026-09-09). Unresolved: the gpt-5.4
+retirement date conflicts between sources; the no-flag default model is in
+transition, so the worker always passes `-m`.
+
+**Built** (this section is filled in as each part lands):
+
+- Card and version: the router card carries the delegation rule (1,547 chars);
+  `codex-worker.mjs --model --effort --approved`, Astra refused without approval.
+- Part C, the coordinator: `assets/agents/orch-coordinator.md` (opus, high,
+  maxTurns 40). `guard-agent.mjs workflowDecision` allows a dispatch carrying
+  `agent_id` only when the parent's recorded role is `orch-coordinator`, the
+  child is implementer/researcher/reviewer/Explore with a model named, and depth
+  ≤ 2; anything it cannot attribute is denied. The parent's depth comes from the
+  host's `subagents/*.meta.json` `spawnDepth`, confirmed present in all 88 meta
+  files on this machine (84 at 1, 4 at 2, those 4 also carry `parentAgentId`).
+  `policy.workers.nested` defaults to `coordinator`; the concurrency limit is 3
+  while a coordinator is live. Nested returns carry `parent` in the ledger.
+- Part B, context discipline: `profile.mjs --autocompact 200k [--dry-run]`
+  writes `CLAUDE_CODE_AUTO_COMPACT_WINDOW` through `lib/settings.mjs`;
+  `precompact-check.mjs` asks an unbound session for
+  `~/.claude/orchestrate/context/<session>/checkpoint-<epoch>.md` once per
+  epoch; SessionStart after compaction injects it (1,200 chars); armed
+  auto-continue stops on `compact`/`investigate` advice; the plugin-wide Stop
+  refuses once per epoch at `compactAt` until the checkpoint exists;
+  `policy.context.hardAt` 300k; `ctx` band in the state line.
+  **Replay on `059154a1`** (throwaway HOME, unarmed Stop): the transcript cut
+  at line 92 → silent; cut at line 93, the first response ≥ 150k → "context is
+  ~159k: write the checkpoint …"; full transcript → blocks once at ~473k, the
+  second Stop passes; with the checkpoint file present → silent. PreCompact on
+  an unbound session → one block naming the path, then passes.
+- Part E1: `measure.mjs --growth <transcript>`. On `059154a1` it prints Write
+  276,180 input chars, the 63,858-char `Read` of `lib.rs` as the largest
+  result, 29,000 chars of hook attachments (all plugins), and $25.57 at Opus:
+  the hand measurement, reproduced in one command.
+- Part D, Codex as the worker lane: a finished Codex run now writes
+  `returns/<task>-codex.md` and a `returns.jsonl` line with model and effort, so
+  it is graded like a Claude return; `reports.jsonl` carries both too. A Codex
+  limit message with no reset time lifts after five hours instead of holding for
+  the run. `profile.mjs --set codex.tier=plus|pro5|pro20` stores the plan (set to
+  `plus` here). `profile.mjs` writes a Codex status cache; `--brief` reads it
+  (fresh for one hour) and prints `codex: <model> · <plan> · ok`, `limit until
+  <time>`, `not signed in`, `not installed`, or `not checked in the last hour`.
+  The router state line and its change-detection hash carry `codex: ok|limit|off`.
+  On this machine: `--brief` in 130 ms printing `codex: gpt-6-astra · plus · ok`
+  (the model shown is Codex's own configured default; dispatches name `-m`).
+  The worker returned partial; the lead added `profile.test.mjs` (plan saved,
+  bad plan refused, all five line shapes) and moved the agent count to seven.
+- Docs: SKILL.md §0 (ask the Codex plan once), §3 (context size decides, not
+  file count), §5 (the Codex recipe and "Codex for workers until it runs out;
+  Claude for judgment and for what Codex cannot reach", when to use the
+  coordinator), §6; ladder.md prose; lanes.md; models.md "The Codex side" and the
+  coordinator's cost; routing.md "Codex routing"; hosts.md "Host facts checked
+  2026-09-14" with `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` as a backstop;
+  README opening, setup note, seven agents. No "Direct. This is most work",
+  "Six files is not a reason" or "prefer Codex" remains.
+- Auto-compact at 200k is the plugin default (Josh). A plugin's own
+  settings.json supports only `agent` and `subagentStatusLine`
+  (code.claude.com/docs/en/plugins-reference, checked 2026-09-14), so orchestrate
+  writes `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` into `~/.claude/settings.json`
+  once: the router does it on the first prompt of a plugin install and says so
+  in that prompt's context; `install.mjs` does it too (`--no-autocompact` skips).
+  It never overwrites a value the user set, takes a backup, and leaves
+  `~/.claude/orchestrate/autocompact-default.json` so it never runs again, even
+  if the user removes the key. `policy.context.autocompactDefault: off` opts
+  out; `profile.mjs --autocompact off` removes the key and keeps it removed.
+- Compact or start fresh, from measured size only (Josh). Found when the lead
+  told Josh to start a new conversation from a pre-compaction summary number
+  (~150k) right after compacting. Three changes:
+  - The lead hears the measured size smoothly: one short line per 25k of growth
+    and after each compaction (`policy.context.tickEvery`), and the state line
+    always carries `ctx ~Nk` once measured, not only at 120k and above.
+  - Compact is the default recommendation. The context reader counts
+    compactions per session; from `policy.context.freshAfterCompactions` (2) on,
+    the compact and hard notices, and the Stop hook's, say start fresh from the
+    checkpoint instead. A dead duplicate `compact` branch in `contextNotice`
+    that hid the compact-vs-fresh rule is gone.
+  - The turn-count "marathon" handoff fires only when the size is unknown; a
+    measured size owns that advice, so a just-compacted session is never told to
+    hand off. 351/351.
+  Takes effect from the next session. Applied on this machine by hand first.
+
+**Found while building.** (1) The Codex sandbox refuses child processes, so
+`node --test` fails there with `spawn EPERM`; `--test-isolation=none` runs
+single files, and the lead runs the full suite. Every Codex packet says so now.
+(2) A Claude helper stopped by its turn limit kept its concurrency slot until
+the 10-minute silence rule released it, and a Codex dispatch was refused
+meanwhile. (3) The router read a blocks-on cell of short ids (`0001 0002`) as
+nothing to wait for; the table needs full ids. (4) A Codex start refused for a
+busy slot still wrote a `returns.jsonl` line, so three retries left three
+"blocked" returns to grade; only runs where Codex started are recorded now.
+
+**Verification.** Full suite 344/344 on the branch. Hook replays on `059154a1`
+above. Worker-lane run on a scratch repo with three failing `slugify` tests:
+`codex-worker.mjs run --model gpt-5.6-luna --effort low --run <scratch run>` →
+done in 50 s, 86,521 input tokens (49,408 cached), 1,209 output; 3/3 pass when
+rerun outside the sandbox; one `returns.jsonl` line with model and effort; the
+router's state line in that repo reads `1 return to grade: 9-14-0001`. Astra
+without `--approved` is refused before Codex starts. Live acceptance on a real
+plan step was skipped for this release (Josh).
+
+**How this release was built.** The lead wrote packets and graded returns; the
+code parts ran as Codex workers (terra medium for B, D, E1; sol high for C).
+
 ## v0.14.0 — a repo map helpers read before searching, 2026-09-14
 
 Asked: would a persistent codebase map (Graphify was the example) make the

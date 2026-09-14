@@ -172,3 +172,49 @@ export function setKeys(settings, { model, effortLevel } = {}) {
   if (effortLevel) settings.effortLevel = String(effortLevel);
   return settings;
 }
+
+export function setEnv(settings, values = {}) {
+  settings.env = settings.env && typeof settings.env === 'object' ? settings.env : {};
+  for (const [key, value] of Object.entries(values)) if (value != null) settings.env[key] = String(value);
+  return settings;
+}
+
+// The host does not let a plugin ship environment settings.  This is therefore
+// a one-time, deliberately conservative migration owned by both install paths.
+export function parseAutocompact(value, { allowOff = false } = {}) {
+  if (allowOff && String(value).toLowerCase() === 'off') return 'off';
+  const m = /^(\d+)(k)?$/i.exec(String(value));
+  if (!m || Number(m[1]) <= 0) return null;
+  return Number(m[1]) * (m[2] ? 1000 : 1);
+}
+
+export function autocompactMarkerPath(markerDir) {
+  return join(markerDir, 'autocompact-default.json');
+}
+
+// Returns an application report, never throws.  Check the marker first: this
+// is the normal hook path after the one-time write and avoids reading settings.
+export function applyAutocompactDefault({ settingsPath, markerDir, policy, now = new Date() } = {}) {
+  try {
+    const marker = autocompactMarkerPath(markerDir);
+    if (existsSync(marker)) return { applied: false, reason: 'marker', marker };
+    const value = policy && policy.context && policy.context.autocompactDefault;
+    if (value === 'off') return { applied: false, reason: 'off', marker };
+    const tokens = parseAutocompact(value);
+    if (!tokens) return { applied: false, reason: 'off', marker };
+    const settings = readSettings(settingsPath);
+    if (settings.env && Object.prototype.hasOwnProperty.call(settings.env, 'CLAUDE_CODE_AUTO_COMPACT_WINDOW')) {
+      // The user chose already. Remember that, so later prompts stop at the
+      // marker instead of re-reading settings.json every time.
+      mkdirSync(markerDir, { recursive: true });
+      writeFileSync(marker, JSON.stringify({ at: now.toISOString(), value: 'existing', settingsPath }, null, 2) + '\n');
+      return { applied: false, reason: 'existing', marker };
+    }
+    const backup = backupSettings(settingsPath, markerDir, now);
+    setEnv(settings, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: tokens });
+    writeSettings(settingsPath, settings);
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(marker, JSON.stringify({ at: now.toISOString(), value: tokens, settingsPath, backup }, null, 2) + '\n');
+    return { applied: true, value: tokens, settingsPath, backup, marker };
+  } catch { return { applied: false, reason: 'error' }; }
+}

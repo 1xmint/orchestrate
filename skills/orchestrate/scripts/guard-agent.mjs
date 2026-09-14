@@ -24,7 +24,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, AGENT_NAMES } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { helperFiles, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision } from './lib/workers.mjs';
+import { helperFiles, nativeAgent, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision } from './lib/workers.mjs';
 import { priceTag, estimateDollars, family, normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { readCosts } from './ledger.mjs';
@@ -129,20 +129,31 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
 // reached 683k context, and started helpers of its own. Each rule names what to
 // send instead.
 //
-//   nested       a helper starting a helper — denied; the lead schedules
+//   nested       only a recorded coordinator may start a capped child
 //   plan mode    helpers only read and return findings inline
 //   uncapped     general-purpose/claude while capped role agents are installed
 //   worktree     a Claude helper aimed at a worktree a live Codex worker holds
-//   concurrency  two workers at once across providers; browser work serial
+//   concurrency  two workers normally, three while a coordinator holds a slot
 export const PLAN_READ_ROLES = new Set(['orch-researcher', 'orch-reviewer', 'Explore', 'Plan', 'claude-code-guide']);
 export const UNCAPPED = new Set(['general-purpose', 'claude']);
+export const COORDINATOR_CHILD_ROLES = new Set(['orch-implementer', 'orch-researcher', 'orch-reviewer', 'Explore']);
 
-export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, native = [], external = [] } = {}) {
+const nestedReason = 'this nested dispatch cannot be attributed to a recorded coordinator parent, so it is denied';
+
+export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, native = [], external = [], dispatches = [], files = new Map() } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const prompt = String(ti.prompt || '');
 
   if (input && input.agent_id && policy.workers.nested !== 'allow') {
-    return { prefix: 'workers', reason: 'a helper does not start helpers; the lead does all scheduling. Finish what you can yourself, then return STATUS: PARTIAL naming the remaining work, so the lead can decide who does it.' };
+    if (policy.workers.nested === 'deny') {
+      return { prefix: 'workers', reason: 'nested dispatches are disabled by policy.workers.nested=deny' };
+    }
+    const parent = nativeAgent(dispatches, files, input.agent_id);
+    if (!parent || parent.depth == null) return { prefix: 'workers', reason: nestedReason };
+    if (parent.role !== 'orch-coordinator') return { prefix: 'workers', reason: `only orch-coordinator may dispatch workers; recorded parent ${parent.agentId} is ${parent.role}` };
+    if (!COORDINATOR_CHILD_ROLES.has(role)) return { prefix: 'workers', reason: `orch-coordinator may dispatch only orch-implementer, orch-researcher, orch-reviewer, or Explore; ${role} is not allowed` };
+    if (!String(ti.model || '').trim()) return { prefix: 'workers', reason: 'a coordinator child must name its model' };
+    if (parent.depth + 1 > 2) return { prefix: 'workers', reason: `nested dispatch depth ${parent.depth + 1} exceeds the depth-2 limit` };
   }
 
   if (input && input.permission_mode === 'plan') {
@@ -333,13 +344,19 @@ function main() {
   try {
     const state = loadSession(input.session_id) || {};
     const policy = loadPolicy();
-    const native = repeat ? [] : runningNative(Array.isArray(state.dispatches) ? state.dispatches : [], {
+    const dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
+    const files = helperFiles(input.transcript_path);
+    const native = repeat ? [] : runningNative(dispatches, {
       returned: Array.isArray(state.returned) ? state.returned : [],
-      files: helperFiles(input.transcript_path),
+      files,
       staleMin: policy.workers.staleMin,
     });
-    m = workflowDecision(input, ti, { policy, installed: agentsInstalled().installed, native, external: runningExternal() });
-  } catch { m = null; }
+    m = workflowDecision(input, ti, { policy, installed: agentsInstalled().installed, native, external: runningExternal(), dispatches, files });
+  } catch {
+    let unrestricted = false;
+    try { unrestricted = loadPolicy().workers.nested === 'allow'; } catch {}
+    m = input && input.agent_id && !unrestricted ? { prefix: 'workers', reason: nestedReason } : null;
+  }
   if (m) {
     if (!repeat) recordDenial(input, ti, `${m.prefix}: ${m.reason.split('.')[0]}`);
     emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${m.prefix}: ${m.reason}` } });
@@ -413,6 +430,7 @@ function recordDispatch(input, ti) {
       // found from disk rather than by resuming the stopped agent.
       progress: (/^\s*PROGRESS:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
       run: runFor(input, ti),
+      ...(input.agent_id ? { parent: String(input.agent_id) } : {}),
     });
     state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;
   });

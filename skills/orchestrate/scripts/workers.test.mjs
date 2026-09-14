@@ -1,4 +1,4 @@
-// workers.test.mjs — bounded workers: no nested delegation, capped role agents
+// workers.test.mjs — bounded workers: engineered coordinator nesting, capped role agents
 // over general-purpose, read-only helpers in Plan mode and the approval
 // handoff, two workers across providers with browser work serial, the worktree
 // lock, capped returns treated as partial, and a replay of the 274-call helper.
@@ -24,22 +24,31 @@ const NOW = Date.parse('2026-09-14T12:00:00Z');
 const ago = min => new Date(NOW - min * 60000).toISOString();
 const ti = (subagent_type, prompt = 'TASK: 9-14-0001\nfind it', extra = {}) => ({ subagent_type, model: 'sonnet', prompt, ...extra });
 
-test('a helper starting a helper is denied, whatever it asks for', () => {
-  for (const role of ['orchestrate:orch-implementer', 'general-purpose', 'Explore']) {
-    const d = workflowDecision({ agent_id: 'a123', session_id: 's' }, ti(role), { policy, installed: 6 });
-    assert.equal(d.prefix, 'workers');
-    assert.match(d.reason, /does not start helpers/);
-    assert.match(d.reason, /STATUS: PARTIAL/);
-  }
+test('only a recorded depth-1 coordinator may dispatch a named capped child', () => {
+  const opts = (agent, depth = 1) => ({
+    policy, installed: 7,
+    dispatches: [{ agent, toolUseId: 'toolu_parent', at: ago(1) }],
+    files: new Map([['toolu_parent', { agentId: 'a123', meta: { spawnDepth: depth } }]]),
+  });
+  assert.equal(workflowDecision({ agent_id: 'a123' }, ti('orchestrate:orch-implementer'), opts('orchestrate:orch-coordinator')), null);
+  assert.match(workflowDecision({ agent_id: 'a123' }, ti('orch-implementer'), opts('orch-implementer')).reason, /only orch-coordinator/);
+  assert.match(workflowDecision({ agent_id: 'a123' }, ti('orch-coordinator'), opts('orch-coordinator')).reason, /may dispatch only/);
+  assert.match(workflowDecision({ agent_id: 'a123' }, { subagent_type: 'Explore', prompt: 'find it' }, opts('orch-coordinator')).reason, /must name its model/);
+  assert.match(workflowDecision({ agent_id: 'a123' }, ti('orch-reviewer'), opts('orch-coordinator', 2)).reason, /depth 3 exceeds/);
+  assert.match(workflowDecision({ agent_id: 'unknown' }, ti('orch-reviewer'), opts('orch-coordinator')).reason, /cannot be attributed to a recorded coordinator parent/);
+
+  const deny = loadPolicy({ policy: { workers: { nested: 'deny' } } });
+  assert.match(workflowDecision({ agent_id: 'a123' }, ti('Explore'), { ...opts('orch-coordinator'), policy: deny }).reason, /nested=deny/);
   const allow = loadPolicy({ policy: { workers: { nested: 'allow' } } });
-  assert.equal(workflowDecision({ agent_id: 'a' }, ti('Explore'), { policy: allow, installed: 6 }), null);
+  assert.equal(workflowDecision({ agent_id: 'unknown' }, { subagent_type: 'Explore', prompt: 'x' }, { policy: allow, installed: 7 }), null);
+  assert.equal(workflowDecision({}, ti('orch-coordinator'), { policy, installed: 7 }), null, 'the lead remains free to dispatch a coordinator');
 });
 
 test('general-purpose is replaced by capped role agents while they are installed', () => {
-  const d = workflowDecision({}, ti('general-purpose'), { policy, installed: 6 });
+  const d = workflowDecision({}, ti('general-purpose'), { policy, installed: 7 });
   assert.match(d.reason, /no turn cap/);
   assert.match(d.reason, /orch-implementer/);
-  assert.match(workflowDecision({}, ti('claude'), { policy, installed: 6 }).reason, /no turn cap/);
+  assert.match(workflowDecision({}, ti('claude'), { policy, installed: 7 }).reason, /no turn cap/);
   assert.equal(workflowDecision({}, ti('general-purpose'), { policy, installed: 0 }), null, 'without the role agents it is the only choice');
   assert.equal(workflowDecision({}, ti('general-purpose'), { policy, installed: 3 }), null, 'a partial install still falls back on it');
   assert.equal(workflowDecision({}, ti('orchestrate:orch-implementer'), { policy, installed: 6 }), null);
@@ -88,6 +97,38 @@ test('the tool-boundary hook delivers the approval handoff mid-turn', () => {
   assert.equal(contextCheck({ session_id: 'x', agent_id: 'helper' }), '', 'a helper is never told to compact or plan');
 });
 
+test('context-check tells a coordinator to write PROGRESS and then return PARTIAL', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-coord-context-'));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessions, { recursive: true });
+  writeFileSync(join(sessions, 'coord-context.json'), JSON.stringify({
+    v: 1, session_id: 'coord-context', dispatches: [{
+      at: new Date().toISOString(), agent: 'orch-coordinator', toolUseId: 'toolu_coord',
+    }],
+  }));
+  const lead = join(home, 'lead.jsonl');
+  writeFileSync(lead, '');
+  const sub = join(home, 'lead', 'subagents');
+  mkdirSync(sub, { recursive: true });
+  const transcript = join(sub, 'agent-coord.jsonl');
+  writeFileSync(join(sub, 'agent-coord.meta.json'), JSON.stringify({ agentType: 'orch-coordinator', toolUseId: 'toolu_coord', spawnDepth: 1 }));
+  const response = (id, tokens) => JSON.stringify({
+    type: 'assistant', timestamp: new Date().toISOString(),
+    message: { id, model: 'claude-opus-5', usage: { input_tokens: tokens, output_tokens: 1 } },
+  }) + '\n';
+  writeFileSync(transcript, response('checkpoint', 120000));
+  const payload = { session_id: 'coord-context', agent_id: 'coord', transcript_path: lead, agent_transcript_path: transcript };
+  const first = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
+  assert.equal(first.status, 0, first.stderr);
+  assert.match(JSON.parse(first.stdout).hookSpecificOutput.additionalContext, /write PROGRESS/);
+
+  writeFileSync(transcript, response('checkpoint', 120000) + response('compact', 150000));
+  const second = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
+  assert.equal(second.status, 0, second.stderr);
+  assert.match(JSON.parse(second.stdout).hookSpecificOutput.additionalContext, /return PARTIAL now with the handoff/);
+});
+
 test('two workers across providers; browser work serial', () => {
   const one = [{ provider: 'claude', role: 'orch-implementer', task: '1' }];
   const two = [...one, { provider: 'codex', role: 'implement', task: '2' }];
@@ -97,6 +138,9 @@ test('two workers across providers; browser work serial', () => {
   assert.match(busy, /limit is 2 across Claude and Codex/);
   assert.match(concurrencyDecision('orch-browser', { native: [{ provider: 'claude', role: 'orch-browser', task: 'b' }], policy }), /browser work is serial/);
   assert.equal(concurrencyDecision('x', { native: two, policy: loadPolicy({ policy: { workers: { maxConcurrent: 3 } } }) }), null);
+  const coordinator = [{ provider: 'claude', role: 'orch-coordinator', task: 'wave' }];
+  assert.equal(concurrencyDecision('orch-implementer', { native: [...coordinator, one[0]], policy }), null, 'a live coordinator raises the default slot count to three');
+  assert.match(concurrencyDecision('orch-reviewer', { native: [...coordinator, ...two], policy }), /limit is 3/);
   assert.match(workflowDecision({}, ti('orchestrate:orch-researcher'), { policy, installed: 6, native: two }).reason, /already running/);
 });
 
@@ -169,7 +213,11 @@ test('quota exhaustion is scoped by provider, account and run; unidentified entr
   ] }));
   assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 's' }, legacy, t0 + 60 * 60000));
   assert.equal(exhaustedFor({ provider: 'codex', account: 'a', scope: 's' }, legacy, t0 + 104 * 60000), null);
-  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'held' }, legacy, t0 + 48 * 3600000), 'no stated time holds for the run');
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'held' }, legacy, t0 + 48 * 3600000), 'legacy entries retain their prior behavior');
+  const five = mkdtempSync(join(tmpdir(), 'orch-prov-'));
+  markExhausted({ provider: 'codex', account: 'a', scope: 'five', message: 'usage limit', now: t0 }, five);
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'five' }, five, t0 + 4 * 3600000));
+  assert.equal(exhaustedFor({ provider: 'codex', account: 'a', scope: 'five' }, five, t0 + 5 * 3600000), null);
 });
 
 test('reset times are read from the provider message', async () => {
@@ -253,7 +301,8 @@ test('replay: the 274-call general-purpose helper is measured whole and would be
   assert.equal(sumUsage(join(sub, 'agent-gp1.jsonl')).turns, 274);
 
   // What the guard says now to the same two dispatches.
-  assert.match(workflowDecision({}, { subagent_type: 'general-purpose', model: 'sonnet', prompt: 'do everything' }, { policy, installed: 6 }).reason, /no turn cap/);
-  assert.match(workflowDecision({ agent_id: 'gp1' }, { subagent_type: 'general-purpose', prompt: 'sub-task' }, { policy, installed: 6 }).reason, /does not start helpers/);
+  assert.match(workflowDecision({}, { subagent_type: 'general-purpose', model: 'sonnet', prompt: 'do everything' }, { policy, installed: 7 }).reason, /no turn cap/);
+  const nestedOpts = { policy, installed: 7, dispatches: [{ agent: 'general-purpose', toolUseId: 'toolu_gp' }], files: helperFiles(leadPath) };
+  assert.match(workflowDecision({ agent_id: 'gp1' }, { subagent_type: 'general-purpose', prompt: 'sub-task' }, nestedOpts).reason, /only orch-coordinator/);
   assert.equal(measure(readFileSync(leadPath, 'utf8')).dispatches.length, 1);
 });

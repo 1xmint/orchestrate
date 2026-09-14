@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { measure, report, withoutToolResults } from './measure.mjs';
+import { measure, measureGrowth, growthReport, report, treeReport, withoutToolResults } from './measure.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +32,30 @@ const LINES = [
 ];
 
 const text = LINES.map(o => JSON.stringify(o)).join('\n') + '\n';
+
+test('growth attributes the main session tool payloads, hooks, context and price', () => {
+  const fixture = readFileSync(join(HERE, 'fixtures', 'growth.jsonl'), 'utf8');
+  const r = measureGrowth(fixture);
+  assert.equal(r.toolInputChars.Write, JSON.stringify({ file_path: 'src/a.js', content: 'abcdef' }).length);
+  assert.equal(r.toolResultChars.Read, 'this is the much larger read result'.length);
+  assert.equal(r.largestInputs[0].tool, 'Write');
+  assert.equal(r.largestInputs[0].label, 'src/a.js');
+  assert.equal(r.largestResults[0].tool, 'Read');
+  assert.equal(r.largestResults[0].label, 'src/a.js');
+  assert.equal(r.hookAttachmentChars, 'hook context'.length);
+  assert.deepEqual(r.contexts, [{ response: 10, tokens: 330 }]);
+  assert.deepEqual({ input: r.input, output: r.output, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }, { input: 550, output: 55, cacheRead: 1100, cacheWrite: 165 });
+  assert.equal(r.priceModel, 'opus');
+  assert.equal(r.price, 0.00570625);
+  assert.match(growthReport(r), /context every 10th response: #10 330/);
+});
+
+test('the tree calls out a coordinator and nests its child below it', () => {
+  const agent = (agentId, type, parent = null) => ({ agentId, type, parent, depth: parent ? 2 : 1, calls: 1, models: ['claude-opus-5'], requestedModel: null, maxContext: 1, lastContext: 1, output: 1, retries: 0, nestedDispatches: 0, exploration: {} });
+  const text = treeReport({ session: 's', lead: agent(null, 'lead'), agents: [agent('coord', 'coordinator'), agent('child', 'orch-implementer', 'coord')], codex: [], totals: { agents: 2, nestedAgents: 1, calls: 3, input: 0, cacheRead: 0, cacheWrite: 0, output: 3, retries: 0, codexRuns: 0, fallbacks: 0 } });
+  assert.match(text, /coordinator coord:/);
+  assert.match(text, /\n    orch-implementer child \(depth 2, from coord\):/);
+});
 
 test('tokens, turns, models and the session header', () => {
   const r = measure(text);
@@ -197,7 +221,7 @@ test('a message that merely quotes a block reason is not counted as one', () => 
   assert.equal(r.stopBlocks, 0);
 });
 
-import { callsOf, treeReport } from './measure.mjs';
+import { callsOf } from './measure.mjs';
 
 test('lookups before the first edit are counted apart from later ones, and test output is not a lookup', () => {
   const rec = o => JSON.stringify(o);

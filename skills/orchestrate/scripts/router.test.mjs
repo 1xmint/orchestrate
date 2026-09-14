@@ -4,25 +4,48 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD } from './router.mjs';
+import { cardBody, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash } from './router.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTER = join(HERE, 'router.mjs');
+
+test('state line and hash carry context bands', () => {
+  const base = { self: null, tier: 'pro', agents: 0, limits: [], candidates: [], run: null, quota: null, persist: false };
+  assert.match(stateLine({ ...base, context: { tokens: 151000 } }, '[x]'), /ctx ~151k/);
+  assert.match(stateLine({ ...base, context: { tokens: 52000 } }, '[x]'), /ctx ~52k/, 'the measured size is always shown');
+  assert.notEqual(stateHash({ ...base, context: { tokens: 121000 } }), stateHash({ ...base, context: { tokens: 151000 } }));
+  assert.match(stateLine({ ...base, codex: 'limit', context: null }, '[x]'), /codex: limit/);
+  assert.notEqual(stateHash({ ...base, codex: 'limit', context: null }), stateHash({ ...base, codex: 'ok', context: null }));
+});
 
 function makeHome() {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'max5', tierSource: 'user', setAt: '2026-09-08T00:00:00Z' }));
+  // Most router tests are about ordinary prompts, not this one-time migration.
+  writeFileSync(join(home, '.claude', 'orchestrate', 'autocompact-default.json'), '{}');
   mkdirSync(join(home, '.claude', 'agents'), { recursive: true });
-  for (const n of ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger']) {
+  for (const n of ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger', 'orch-coordinator']) {
     writeFileSync(join(home, '.claude', 'agents', `${n}.md`), `---\nname: ${n}\n---\n`);
   }
   return home;
 }
+
+test('the first router prompt applies auto-compact once and carries its notice', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  const first = prompt(home, repo, 'short prompt');
+  assert.match(first, /set auto-compact to 200k/);
+  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
+  assert.match(first, /backup at/);
+  assert.equal(prompt(home, repo, 'another short prompt'), '', 'the marker makes later prompts cheap and silent');
+});
 
 function makeRepo(withRun, opts = {}) {
   const repo = mkdtempSync(join(tmpdir(), 'orch-repo-'));
@@ -77,7 +100,7 @@ test('the first substantive prompt gets the state line and the card, once', () =
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
   assert.match(first, /\[orchestrate\]/);
   assert.match(first, /tier max5/);
-  assert.match(first, /orch-agents 6\/6/);
+  assert.match(first, /orch-agents 7\/7/);
   assert.match(first, /run: none/);
   assert.match(first, /orchestrate is loaded/);
 
@@ -173,6 +196,23 @@ test('resume and compaction carry the goal, the constraints and the Pickup', () 
   const compacted = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-res2', cwd: repo });
   assert.match(compacted, /\[orchestrate · compacted\]/);
   assert.match(compacted, /Goal: Finish the tidy command/);
+});
+
+test('SessionStart compact with no bound run injects the checkpoint file, capped at 1,200 chars', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessionId = 's-checkpoint1';
+  const dir = join(home, '.claude', 'orchestrate', 'context', sessionId);
+  mkdirSync(dir, { recursive: true });
+  const long = 'checkpoint text '.repeat(200); // well over the 1,200 char cap
+  writeFileSync(join(dir, 'checkpoint-e1.md'), long);
+
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo });
+  const m = /\[orchestrate · compacted\] checkpoint\n([\s\S]*)/.exec(out);
+  assert.ok(m, `expected a checkpoint block: ${out}`);
+  const excerpt = m[1];
+  assert.ok(excerpt.length <= 1200, `${excerpt.length} <= 1200`);
+  assert.match(excerpt, /\.\.\.$/);
+  assert.equal(excerpt, `${long.slice(0, 1197)}...`);
 });
 
 test('the resume excerpt is bounded', () => {

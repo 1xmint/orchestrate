@@ -318,6 +318,7 @@ function main() {
     task: r.task || null,
     agent,
     agentId,
+    ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}),
     model: ranModel,
     status: r.status || null,
     ...(cap.capped ? { capped: true, claimed: cap.claimed } : {}),
@@ -333,7 +334,7 @@ function main() {
     const state = input.session_id && loadSession(input.session_id);
     if (state) {
       state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null, ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}) });
       saveSession(state);
     }
   } catch {}

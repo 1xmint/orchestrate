@@ -23,19 +23,28 @@ export const DEFAULT_POLICY = Object.freeze({
     // here, or at `windowFraction` of a known smaller window, whichever is lower.
     checkpointAt: 120000,
     compactAt: 150000,
+    hardAt: 300000,
     windowFraction: 0.75,
     // A known window size, when the user wants to state one; otherwise it is
     // read from the status line for the session, or left unknown.
     window: null,
     // A measurement older than this is not current.
     staleMs: 12 * 3600 * 1000,
+    // After this many compactions in one session, a full conversation is
+    // advised to start fresh from its checkpoint instead of compacting again.
+    freshAfterCompactions: 2,
+    // Say the measured size once per this much growth (0 turns it off).
+    tickEvery: 25000,
+    // Written once into settings.json by orchestrate; "off" opts out.
+    autocompactDefault: 200000,
   }),
   workers: Object.freeze({
     // Across providers: native helpers and external Codex workers together.
     maxConcurrent: 2,
     browserConcurrent: 1,
-    // A helper starting its own helpers: denied unless set to "allow".
-    nested: 'deny',
+    // Only the capped coordinator may start a helper. "deny" closes nesting
+    // entirely; "allow" preserves the host's unrestricted legacy behaviour.
+    nested: 'coordinator',
     // Built-in general-purpose/claude helpers have no turn cap: denied while the
     // capped role agents are installed, unless set to "allow".
     generalPurpose: 'deny',
@@ -59,6 +68,11 @@ function readProfile(path) {
 }
 
 const posNum = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
+const autocompact = (v, d) => {
+  if (v === 'off') return 'off';
+  const m = /^(\d+)(k)?$/i.exec(String(v));
+  return m && Number(m[1]) > 0 ? Number(m[1]) * (m[2] ? 1000 : 1) : d;
+};
 
 // The defaults with whatever valid values the profile overrides. An invalid
 // value falls back to the default rather than breaking a hook.
@@ -72,14 +86,18 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
     context: {
       checkpointAt: posNum(c.checkpointAt, D.context.checkpointAt),
       compactAt: posNum(c.compactAt, D.context.compactAt),
+      hardAt: posNum(c.hardAt, D.context.hardAt),
       windowFraction: frac > 0 && frac <= 1 ? frac : D.context.windowFraction,
       window: c.window == null ? null : posNum(c.window, null),
       staleMs: posNum(c.staleMs, D.context.staleMs),
+      freshAfterCompactions: Math.floor(posNum(c.freshAfterCompactions, D.context.freshAfterCompactions)),
+      tickEvery: c.tickEvery === 0 ? 0 : posNum(c.tickEvery, D.context.tickEvery),
+      autocompactDefault: autocompact(c.autocompactDefault, D.context.autocompactDefault),
     },
     workers: {
       maxConcurrent: Math.floor(posNum(w.maxConcurrent, D.workers.maxConcurrent)),
       browserConcurrent: Math.floor(posNum(w.browserConcurrent, D.workers.browserConcurrent)),
-      nested: w.nested === 'allow' ? 'allow' : 'deny',
+      nested: ['deny', 'allow', 'coordinator'].includes(w.nested) ? w.nested : D.workers.nested,
       generalPurpose: w.generalPurpose === 'allow' ? 'allow' : 'deny',
       staleMin: posNum(w.staleMin, D.workers.staleMin),
     },

@@ -13,7 +13,7 @@
       "id": 2,
       "name": "clear-bug-across-six-files",
       "prompt": "Sessions are being dropped on refresh. The token is read in session.ts, client.ts, router.ts, api.ts, db.ts and web.ts. Find where it is lost and fix it.",
-      "expected_output": "The lead reads the six files and fixes the bug itself, with a test or a command proving the session survives. Six files is not a reason to delegate: the file count says nothing about whether the answer is small. Delegation here would be justified only by isolation or parallel progress, and neither applies.",
+      "expected_output": "What decides it is how much enters the lead's context, not the file count. If the six files are short and the fix is one small edit, the lead reads them and fixes it itself, with a test or a command proving the session survives. If the reads would bring in long files, a cheap worker (Codex luna, or Explore on haiku) returns where the token is lost as file:line, and the lead makes the edit. No ledger, no review.",
       "files": []
     },
     {
@@ -112,6 +112,13 @@
       "name": "the-work-is-finished",
       "prompt": "That was the last item on the list.",
       "expected_output": "A report that the done-when evidence exists, with the evidence, and then a stop. No new improvement loop, no unrequested refactor, no list of things that could also be done. Finishing is not a cue to start.",
+      "files": []
+    },
+    {
+      "id": 17,
+      "name": "plan-step-writes-a-new-module",
+      "prompt": "Read docs/plan.md and execute step 3: add the payout module with its tests.",
+      "expected_output": "The lead reads the step, writes one packet for it (OWNS, DONE WHEN with the test command), and dispatches a worker: Codex terra at medium effort while Codex has allowance, a Claude implementer on sonnet otherwise. The lead does not Write the module or its tests itself, does not Read back files the worker wrote, and grades the return from the test output and the diff stat. Pass: at least one worker was dispatched and the lead's context stayed under 150k (measure.mjs --growth on the transcript). The failure this guards against is a lead that writes 17 files itself and ends at 472k.",
       "files": []
     }
   ]

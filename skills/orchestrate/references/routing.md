@@ -36,6 +36,39 @@ No API exposes remaining usage to a session. `/usage` shows it to the human.
 missing signal is `unknown`, never a guess: guessing a paid tier on a Pro account
 spends the user's money. An API-key session is `api`.
 
+## Codex routing
+
+Codex is the worker lane until its shared allowance runs out. Ask for the Codex
+tier once, when the first Codex dispatch is considered and the profile has none,
+then store it with `profile.mjs --set codex.tier=plus|pro5|pro20`.
+
+| Task | Codex model / effort | Claude after Codex is out |
+|---|---|---|
+| mechanical edits, renames, extraction, run a suite and report, sweeps | `gpt-5.6-luna` low–medium | `Explore` haiku / implementer sonnet |
+| bounded implementation with an oracle (tests, types) | `gpt-5.6-terra` medium; high on retry | implementer sonnet |
+| hard bounded coding, a failure that resisted one attempt | `gpt-5.6-sol` high–xhigh | debugger opus |
+| cross-vendor review of a Claude-authored risky change | `gpt-5.6-sol` high | reviewer opus; never the author's vendor |
+| hard to check and expensive to get wrong | `gpt-6-astra` high–xhigh; user's approval each time | planner or reviewer fable, with the same approval rule |
+| planner, browser, anything needing this session's MCP tools or permissions | Claude, as today | — |
+
+Always pass the model and effort on the worker command. Codex effort is a real
+per-dispatch lever. When a check justifies escalation, start a fresh run one
+model step up: Luna → Terra → Sol → Astra. Carry only a three-line note saying
+what failed. Astra still needs the user's approval for that dispatch.
+
+The models share one five-hour and weekly allowance, but draw on it at different
+rates. These are the messages-per-five-hours ranges recorded 2026-09-14:
+
+| Codex tier | Astra | Sol | Terra | Luna |
+|---|---:|---:|---:|---:|
+| Plus | 5–45 | 10–100 | 25–200 | 250–2,000 |
+| Pro 5x | 25–225 | 50–500 | 125–1,000 | 1,250–10,000 |
+| Pro 20x | 100–900 | 200–2,000 | 500–4,000 | 5,000–40,000 |
+
+There is no scriptable remaining-allowance read. Learn exhaustion from the
+worker error and its reset time. The default model is in transition, so always
+pass `-m` through `codex-worker.mjs --model <id>`.
+
 ## Who chooses the model
 
 You do, every time. No hook decides it or rewrites it. There used to be a daily
@@ -100,11 +133,12 @@ cap; an uncapped expensive one is not. The guard enforces the executor rows.
 | `orch-browser` | sonnet | sonnet | sonnet |
 | `orch-reviewer` | opus | opus | opus; fable for security, release, public, money |
 | `orch-debugger` | opus | opus | opus; fable after Opus is stuck |
+| `orch-coordinator` | opus | opus | opus |
 | any Fable dispatch | **the user's call each time** | judge each on its merits | judge each on its merits |
 
 Pass it on the `Agent` call (`model: sonnet | opus | haiku | fable`).
 
-**Effort is not a per-call lever; the role files set it, at or below `high`**
+**Claude effort is not a per-call lever; the role files set it, at or below `high`**
 (`models.md`). The old pins went the wrong way — planner and debugger at
 `xhigh` — and were removed; the current ones exist to spend less than a session
 at `xhigh` would. The model is the per-call lever, and it overrides the file.
@@ -158,25 +192,22 @@ user, not a more expensive retry.
 De-escalate below the table only by naming the oracle that makes it safe: a
 strong deterministic test, a type-checked interface, an exact spec.
 
-## External CLIs (optional lane)
+## Other external CLIs
 
-Codex, opencode, gemini and aider are separate quota pools and, for review,
-another vendor's blind spots. Use one only when `profile.mjs` shows it installed
-**and** authenticated. Run `scripts/smoke.mjs <provider>` once before a planned
-dispatch. On any quota or auth error, drop that provider for the rest of the run.
-Never write a key or token anywhere.
+Codex is the supported worker lane described above. It uses a separate allowance
+and, for review, another vendor's blind spots. Use it only when `profile.mjs`
+shows it installed and authenticated. On an allowance or auth error, stop using
+it until the recorded reset. Never write a key or token anywhere.
 
-- Codex has a supported adapter: `scripts/codex-worker.mjs` (SKILL.md §5,
-  `lanes.md`). It handles the worktree, the timeout, the structured report,
-  usage-limit detection and the Claude fallback packet; do not hand-roll
+- `scripts/codex-worker.mjs` handles the worktree, timeout, structured report,
+  usage-limit detection and Claude fallback packet. Do not hand-roll
   `codex exec` for a worker task.
 - `opencode run "<prompt>"` with `-m <provider/model>`; `opencode models`.
 - `claude -p "<prompt>" --model <alias> --output-format json` needs the CLI
   itself logged in; the desktop app's login does not carry over.
 
-Good for a cross-vendor review of risky work, a tiebreak, or overflow when a
-family limit is hit. No good for anything needing this session's permissions,
-MCP tools or worktrees.
+The other CLIs are optional for a tiebreak. They cannot use this session's
+permissions or MCP tools.
 
 ## Sources
 

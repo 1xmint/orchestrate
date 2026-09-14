@@ -14,6 +14,7 @@
 //   node profile.mjs --set paidServices=never|ask|free
 //   node profile.mjs --set allowPaid=<plugin> | denyPaid=<plugin>   a paid plugin allowed by name
 //   node profile.mjs --clear          remove the override
+//   node profile.mjs --autocompact <tokens|Nk|off> [--dry-run]
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -25,7 +26,7 @@ const HOME = homedir();
 const IS_WIN = process.platform === 'win32';
 const OVERRIDE_PATH = join(HOME, '.claude', 'orchestrate', 'profile.json');
 const TIERS = new Set(['pro', 'max5', 'max20', 'team', 'api', 'unknown']);
-const AGENT_NAMES = ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger'];
+const CODEX_TIERS = new Set(['plus', 'pro5', 'pro20']);
 
 const args = process.argv.slice(2);
 const wantJson = args.includes('--json');
@@ -79,6 +80,28 @@ if (defIdx >= 0) {
   const said = [kvd.model ? `model ${kvd.model}` : null, kvd.effort ? `effort ${kvd.effort}` : null].filter(Boolean).join(', ');
   console.log(`saved as the default for new sessions: ${said} (${settingsPath}${backup ? `; backup ${backup}` : ''})`);
   console.log('this conversation changes only with the picker.');
+  process.exit(0);
+}
+
+const autoIdx = args.findIndex(a => a === '--autocompact');
+if (autoIdx >= 0) {
+  const raw = String(args[autoIdx + 1] || '');
+  const { setEnv, readSettings, backupSettings, writeSettings, parseAutocompact, autocompactMarkerPath } = await import('./lib/settings.mjs');
+  const tokens = parseAutocompact(raw, { allowOff: true });
+  if (tokens == null) { console.error('usage: --autocompact <tokens|Nk|off> [--dry-run]'); process.exit(2); }
+  const settingsPath = join(HOME, '.claude', 'settings.json');
+  const markerDir = join(HOME, '.claude', 'orchestrate');
+  const edit = tokens === 'off' ? 'remove settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW' : `settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=${tokens}`;
+  if (args.includes('--dry-run')) { console.log(tokens === 'off' ? `would ${edit}` : `would write ${edit}`); process.exit(0); }
+  const s = readSettings(settingsPath);
+  const backup = backupSettings(settingsPath, markerDir);
+  if (tokens === 'off') {
+    if (s.env && typeof s.env === 'object') delete s.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(autocompactMarkerPath(markerDir), JSON.stringify({ at: new Date().toISOString(), value: 'off', settingsPath, backup }, null, 2) + '\n');
+  } else setEnv(s, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: tokens });
+  writeSettings(settingsPath, s);
+  console.log(`saved ${edit} (${settingsPath}${backup ? `; backup ${backup}` : ''})`);
   process.exit(0);
 }
 
@@ -163,6 +186,17 @@ if (setIdx >= 0) {
     if (byName[1] === 'allowPaid') list.add(byName[2]); else list.delete(byName[2]);
     saveProfile({ paidAllowed: [...list].sort() });
     console.log(`paid plugins allowed by name: ${list.size ? [...list].sort().join(', ') : 'none'}`);
+    process.exit(0);
+  }
+
+  const codexTier = /^codex\.tier=(\w+)$/.exec(kv);
+  if (codexTier) {
+    if (!CODEX_TIERS.has(codexTier[1])) {
+      console.error(`usage: --set codex.tier=<${[...CODEX_TIERS].join('|')}>`);
+      process.exit(2);
+    }
+    saveProfile({ codex: { ...(loadProfile().codex || {}), tier: codexTier[1], setAt: new Date().toISOString() } });
+    console.log(`Codex tier saved: ${codexTier[1]} (${OVERRIDE_PATH})`);
     process.exit(0);
   }
 
@@ -287,7 +321,22 @@ function detectProviders() {
 // Probing five CLIs costs up to 40 s of wall clock, so the answer is cached for
 // a day. `--brief` only ever reads the cache; it must never block the skill.
 const PROVIDER_CACHE = join(HOME, '.claude', 'orchestrate', 'providers.json');
+const CODEX_STATUS_CACHE = join(HOME, '.claude', 'orchestrate', 'workers', 'codex-status.json');
 const CACHE_MS = 24 * 60 * 60 * 1000;
+const CODEX_STATUS_MS = 60 * 60 * 1000;
+
+function cachedCodexStatus() {
+  const c = readJson(CODEX_STATUS_CACHE);
+  return c && c.at && Date.now() - Date.parse(c.at) < CODEX_STATUS_MS ? c : null;
+}
+function codexBriefLine(c) {
+  if (!c) return 'codex: not checked in the last hour (run profile.mjs)';
+  if (c.status === 'not-installed') return 'codex: not installed';
+  if (c.status === 'not-signed-in') return 'codex: not signed in';
+  if (c.status === 'limit') return `codex: limit until ${c.until || 'unknown'}`;
+  const tier = ((loadProfile().codex || {}).tier) || 'tier unknown';
+  return `codex: ${c.model || 'model unknown'} · ${tier} · ok`;
+}
 
 function cachedProviders() {
   const c = readJson(PROVIDER_CACHE);
@@ -414,6 +463,9 @@ if (brief) {
     // from, and measure.mjs reports what a finished run cost.
     const included = { max5: 'Opus, Sonnet, Haiku and Fable', max20: 'Opus, Sonnet, Haiku and Fable', pro: 'Opus, Sonnet and Haiku; Fable costs credits, so ask first', team: 'Opus, Sonnet and Haiku; Fable costs credits, so ask first', api: 'all, billed per token; ask before Fable' }[tier.tier] || 'unknown, ask the user once';
     console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')})` : ''}`);
+    console.log(codexBriefLine(cachedCodexStatus()));
+    const auto = (readJson(join(HOME, '.claude', 'settings.json')) || {}).env || {};
+    if (!auto.CLAUDE_CODE_AUTO_COMPACT_WINDOW) console.log('auto-compact is at the window limit; run `profile.mjs --autocompact 200k`');
     console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''}`);
     console.log(`this plan includes: ${included}`);
     const paidMode = loadProfile().paidServices || 'ask';
@@ -442,6 +494,17 @@ if (brief) {
 
 const providers = detectProviders();
 cacheProviders(providers);
+try {
+  const { status } = await import('./codex-worker.mjs');
+  const s = status();
+  const active = s.exhausted.find(e => e.provider === 'codex' && e.active);
+  const value = !s.bin ? { status: 'not-installed' }
+    : !s.login.ok ? { status: 'not-signed-in' }
+      : active ? { status: 'limit', until: active.resetsAt ? new Date(active.resetsAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'unknown' }
+        : { status: 'ok', model: s.model || 'model unknown' };
+  mkdirSync(dirname(CODEX_STATUS_CACHE), { recursive: true });
+  writeFileSync(CODEX_STATUS_CACHE, JSON.stringify({ at: new Date().toISOString(), ...value }, null, 2) + '\n');
+} catch {}
 
 const result = { host, tier: tier.tier, tierSource: tier.source, providers, agents, repo, runs, skills, skillDir, node: process.version, platform: process.platform };
 

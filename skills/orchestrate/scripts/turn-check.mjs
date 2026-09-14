@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession } from './lib/tier.mjs';
+import { storedContext } from './lib/context.mjs';
 
 export function pickupSection(runMdText) {
   const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
@@ -80,7 +81,7 @@ export const IDLE_READY_MIN = 2;
 // Pickup check. Pure but for advancing the turn counter it carries in `rec`, so
 // it can be tested without files. Priority is deliberate: hand off a marathon
 // before doing more work, and start unblocked work before nagging about Pickup.
-export function heartbeatDecision({ run, rec }) {
+export function heartbeatDecision({ run, rec, context = null }) {
   const prev = rec || {};
   const turns = (Number(prev.turns) || 0) + 1;
   const out = { ...prev, turns };
@@ -88,8 +89,13 @@ export function heartbeatDecision({ run, rec }) {
   // A long conversation re-reads its whole self every turn — 84% of the cost of
   // the run that prompted this design. The vendor's own remedy for a long
   // session is to hand off and resume from disk, which the ledger makes cheap.
+  // The cost is the size re-read, not the turn count. When the size is
+  // measured, the context notices own the advice (compact by default, fresh
+  // after repeated compactions), so a conversation a compaction just shrank is
+  // never told to hand off. The turn count is only the fallback for an unknown size.
   const marathonNext = Number(prev.marathonNext) || MARATHON_FIRST;
-  if (turns >= marathonNext) {
+  const measured = Boolean(context) && Number.isFinite(context.tokens);
+  if (turns >= marathonNext && !measured) {
     out.marathonNext = turns + MARATHON_EVERY;
     return { rec: out, kind: 'marathon', why: `this session has run about ${turns} turns. A long conversation re-reads its entire self on every turn, and that re-read was the single largest cost of the run this design came from. This is a good stopping point: write the Pickup line, then hand off to a fresh session — it resumes from the ledger and starts with a small, cheap context.` };
   }
@@ -120,7 +126,9 @@ function checkHeartbeat(input) {
   const rec = store[key] || {};
 
   // Marathon and idle first, advancing the turn counter either way.
-  const hb = heartbeatDecision({ run, rec });
+  let context = null;
+  try { context = storedContext(input.session_id || null); } catch { context = null; }
+  const hb = heartbeatDecision({ run, rec, context });
   let updated = { ...hb.rec, checkedAt: new Date().toISOString() };
   if (hb.kind) {
     store[key] = updated;

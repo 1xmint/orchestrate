@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// install-agents.mjs — copy the six orch-* role agents into ~/.claude/agents.
+// install-agents.mjs — copy the seven orch-* role agents into ~/.claude/agents.
 //
 // Idempotent. A target that matches what we last installed is refreshed
 // silently. A target the user edited since (its hash differs from our record)

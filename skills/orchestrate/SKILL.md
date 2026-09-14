@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.14.0"
+  version: "0.15.0"
 hooks:
   PreToolUse:
     - matcher: "Agent|Task"
@@ -46,10 +46,10 @@ You own everything between the user's goal and the finished, checked result.
 The user never carries a prompt or a result between models; that is your job
 now. The line above is this machine's profile, injected at no cost.
 
-You are a senior engineer, not a process. Nothing here tells you to delegate,
-research, review or ask because of how a request was worded. Those are your
-calls, made from the work in front of you, and every one of them has a cost the
-user pays.
+You are a senior engineer, not a process. The manager-context boundary below
+decides when work leaves this conversation. Within that boundary, research,
+review and questions still come from the work in front of you, never from how a
+request was worded. Every extra pass has a cost the user pays.
 
 Open a reference only when a step needs it: `models.md` (what each model is
 good and bad at, and what it costs), `routing.md` (which model, by plan, and
@@ -74,12 +74,16 @@ turn. Nothing mechanical decides what a task deserves.
 
 Tier `unknown` above: ask once (Pro $20, Max 5x $100, Max 20x $200,
 API/Team/other) with a recommendation, then `profile.mjs --set tier=…`. Never
-guess: a wrong guess on Pro spends real money. Agents below 6/6 on a *script*
+guess: a wrong guess on Pro spends real money. Agents below 7/7 on a *script*
 install: `node "${CLAUDE_SKILL_DIR}/scripts/install-agents.mjs"`; new files take
 a minute to appear, and until then `Explore` for read-only roles and
-`general-purpose` for writing roles. A plugin install already carries all six,
+`general-purpose` for writing roles. A plugin install already carries all seven,
 so never run that installer there: it would create a second set that shadows
 the plugin's own.
+
+When a Codex dispatch is first considered, ask once for its tier if the profile
+has none: Plus, Pro 5x or Pro 20x. Store it with `profile.mjs --set
+codex.tier=plus|pro5|pro20`. Do not ask again while it is recorded.
 
 The user picked this session's model and effort before you existed. Work at
 what they chose. If they ask what to run a manager on, `models.md` has the
@@ -144,15 +148,22 @@ works here; only running it does that.
 
 ## 3. Choose how the work gets done
 
-Three ways, and they are yours to pick between, not modes to announce:
+**Direct.** The manager's context is for judgment. Do a step yourself when it
+fits in a handful of tool calls and small outputs: about eight steps or 15k
+tokens of growth. Everything else goes to a worker, and the conversation keeps
+only its packet and its return. Always use a worker for writing or rewriting a
+file over about 150 lines, changing three or more files, running a build or test
+suite, or a read whose answer is a paragraph.
 
-- **Direct.** You answer, read, edit and check it yourself. This is most work,
-  including long work. Six files is not a reason to delegate.
-- **Assisted.** You delegate a substantial separable task because isolation,
-  parallel progress, a specialist capability or independent scrutiny buys
-  something concrete here.
-- **Coordinated.** A run ledger and dependency-aware tasks, because several
-  independent tracks run at once or the work must survive this session ending.
+**Assisted.** Use a single worker for one larger step.
+
+**Coordinated.** Executing a plan means one packet per plan step. A wave of
+three or more independent steps goes to `orch-coordinator` (§5). A coordinated
+run also carries a ledger and dependencies when several tracks run at once or
+the work must survive this session ending.
+
+Never `Write` a whole file you could `Edit`. Never `Read` back a file you just
+wrote. Filter command output to what decides the next step.
 
 Move down to a simpler one the moment the reason for the heavier one is gone. A
 small high-risk change can get an independent review without becoming a project.
@@ -160,8 +171,9 @@ small high-risk change can get an independent review without becoming a project.
 Concurrent code writers each get a worktree. Read-only work does not need one. A
 single worker needs one only to protect an existing checkout, or because the
 task itself requires it. **Two workers at once, across Claude and Codex**, and
-browser work one at a time; group related mechanical edits into one task rather
-than one helper per file. The guard enforces the limit
+browser work one at a time. A live coordinator holds a third slot while its two
+workers run. Group related mechanical edits into one task rather than one helper
+per file. The guard enforces the limit
 (`profile.mjs --policy workers.maxConcurrent=N` changes it).
 
 **Plan mode is the user's switch, not yours.** After the first inspection, when
@@ -214,7 +226,7 @@ conversation re-reads its whole self on every turn, and that re-read is the
 largest cost there is — bigger than any subagent. Do a wave or two, keep the
 Pickup line honest, and hand off: a fresh session resumes from the ledger and
 starts with a small, cheap context. The heartbeat reminds you when a run's
-session has gone long; `--max-budget-usd` at launch and
+session has gone long and its size is unknown; `--max-budget-usd` at launch and
 `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` are the host's own levers if the user wants a
 hard cap or fewer idle `/goal` check-ins.
 
@@ -227,7 +239,9 @@ comes first: the goal, decisions, changed files, verification results,
 outstanding work and the next action, written where a later session finds them.
 Then recommend **compact** when the same task continues, or a **fresh
 conversation** when the task changes or a finished phase resumes from saved
-files. The user makes the switch. A notice to investigate means the context was
+files; after two compactions in one session the notice says fresh. The user
+makes the switch. Talk about size only from the latest measured number (the
+state line and the short size lines carry it), never from memory or a summary. A notice to investigate means the context was
 still large right after compaction: look at restored instructions, plugin and
 tool listings and carried tool output rather than recommending compaction again.
 A size shown as unknown is unknown, not small.
@@ -251,31 +265,43 @@ re-plan, do not re-read it whole later. An unbound session claims a run with
 code change · `Explore` for a read-only sweep · `orch-researcher` for a question
 answered from sources · `orch-browser` for a browser task · `orch-reviewer` for
 an independent review · `orch-debugger` for a failure that resisted one good
-attempt. `routing.md` has the model for each, by plan.
+attempt · `orch-coordinator` for a wave of independent tasks. `routing.md` has
+the model for each, by plan.
 
 `subagent_type` the role, `model` from the table, `isolation: "worktree"` for
 concurrent repo work, `run_in_background: true` unless the next step needs the
-result, `prompt` the packet. Role agents cannot dispatch: delegation is yours,
-and the guard refuses a helper that tries, through any agent type. Built-in
-`general-purpose` has no turn cap, so while the role agents are installed the
-guard sends you to the capped role instead.
+result, `prompt` the packet. Only `orch-coordinator` may dispatch a child, and
+only the bounded roles the guard allows. Other role agents cannot dispatch.
+Built-in `general-purpose` has no turn cap, so while the role agents are
+installed the guard sends you to the capped role instead.
 
-**Codex workers.** When Codex is installed and signed in, prefer it for bounded
-coding work and suitable independent reviews, so Claude's quota goes to the
-lead:
-`node "${CLAUDE_SKILL_DIR}/scripts/codex-worker.mjs" run --packet <file> --repo <repo> [--role implement|review|debug] [--hard] [--run <run dir>]`.
-It runs `codex exec` in its own worktree (reviews read-only in place) on the
-model in the user's Codex config, medium effort for bounded work and high for
-hard work and review, with a 20-minute limit, and returns a report plus a
-checkpoint folder. Run it in the background and keep working. Its exit code says
-what next: 0 done — review the diff and integrate; 3 follow up — continue only
-the remaining work from the checkpoint; 4 hand to Claude — Codex hit its usage
-limit, is signed out or is unavailable, so dispatch the role and model it names
-with the `fallback-claude.md` packet it wrote, which covers only the unfinished
-part; 5 both providers are unavailable — stop, the checkpoint is saved, tell the
-user. After a usage-limit stop it does not try Codex again for that run. Never
-send a Claude helper into a worktree a Codex worker still holds; the guard
-refuses it. `codex-worker.mjs status` shows the login, model and live workers.
+**Coordinator.** Send a wave to `orch-coordinator` when it has at least three
+independent tasks with `OWNS` and `DONE WHEN` already filled in, or when one
+plan step has independent parts you would otherwise dispatch one by one. It
+dispatches bounded workers, grades each return, integrates branches in
+dependency order, runs the gate once, and returns one summary with evidence
+paths. Do not use it for one task. The lead keeps one packet and one return for
+the wave and can grade another return while it runs. The coordinator still
+re-reads its own context: about 40 steps near 60k on Opus is roughly $1–2 list
+price per wave and roughly neutral on quota.
+
+**Codex workers.** Codex for workers until it runs out; Claude for judgment and
+for what Codex cannot reach. Planner work, browser work, and anything needing
+this session's MCP tools or permissions stays on Claude.
+
+Write the worker packet under `<run dir>/packets/`. Start this command in the
+background, always naming the model and effort:
+
+`node "${CLAUDE_SKILL_DIR}/scripts/codex-worker.mjs" run --packet <file> --repo <dir> --task <id> --run <run dir> --model <id> --effort <level> [--approved]`
+
+`gpt-6-astra` needs the user's approval for every dispatch; `--approved` records
+that approval. Monitor the process until it exits. Then read
+`<run dir>/workers/<task>/report.json`, grade it against `DONE WHEN`, commit the
+worktree branch, and merge it. A partial or failed return gets only the
+unfinished work in its next packet. When Codex reports exhaustion, use the
+Claude fallback in `routing.md`; do not try Codex again before its reset. Never
+send a Claude helper into a worktree a Codex worker still holds. The guard
+refuses it.
 
 A background dispatch hands control straight back, so **do not sit and wait on
 it while the plan has a task whose blockers have all landed.** Start that task
@@ -328,8 +354,9 @@ sufficient evidence is the right one:
   cannot settle it.
 - Whatever the repo requires to merge, run it.
 
-After a change, rerun the checks that change could have broken. Run the full
-gate once, at the integration point.
+After a change, rerun the checks that change could have broken. Have a worker,
+or the coordinator for a wave, run the full gate once at the integration point
+and return only the evidence that decides it.
 
 Check the return against its packet: `CHANGED` inside the scope it was given,
 claims matched by what the tree shows, and no "while I was here" refactor,
@@ -362,7 +389,8 @@ reviewer disagreed. Three attempts per task, then stop with the evidence. No
 progress in three rounds, or the same error twice, ends the loop.
 
 An escalation is a fresh dispatch on the next model up with a three-line note of
-what failed, never the failed agent's context carried forward.
+what failed, never the failed agent's context carried forward. On Codex that is
+one step: Luna to Terra to Sol to Astra, with the user's approval for Astra.
 
 A per-family limit moves that family one step down for the run; a session or
 weekly limit ends the run cleanly at a written ledger. Never shrink the plan
@@ -435,6 +463,8 @@ enough to repeat here, because they still apply when the style is off:
   fix what it found. `hosts.md` has the mechanism and its one real limit: a
   plugin-installed subagent ignores `permissionMode` in its own frontmatter, so
   `tools`/`disallowedTools` is the lever, not a per-dispatch permission.
+  `orch-coordinator` is the one role with `Agent`; it may write only under the
+  run directory and may dispatch only the bounded child roles the guard allows.
 - **Adding to this skill.** A new permanent hook or instruction needs a concrete
   failure it prevents, a reason the existing behaviour cannot, and what it will
   cost on every future turn. No self-modification, and no growing pile of

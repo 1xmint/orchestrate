@@ -9,6 +9,7 @@
 // (assets/worker-report.schema.json).
 //
 //   node codex-worker.mjs run --packet <file|-> --repo <dir> [--role implement|review|debug]
+//        [--model <id>] [--effort minimal|low|medium|high|xhigh] [--approved]
 //        [--hard] [--task <id>] [--run <run dir>] [--worktree <dir>] [--base <ref>]
 //        [--timeout-min 20] [--session <id>] [--json]
 //   node codex-worker.mjs status [--json]     binary, login, model, live workers, exhausted accounts
@@ -46,6 +47,8 @@ import { readQuota, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.
 const SELF = fileURLToPath(import.meta.url);
 export const SCHEMA_PATH = resolve(dirname(SELF), '..', 'assets', 'worker-report.schema.json');
 export const EXIT = { done: 0, followUp: 3, fallback: 4, blocked: 5, usage: 2 };
+export const ASTRA = 'gpt-6-astra';
+export const CODEX_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'];
 
 // ---- finding Codex ------------------------------------------------------------
 
@@ -369,10 +372,28 @@ export async function runWorker(opts, deps = {}) {
     // One line per finished run, for the meter's agent tree (measure.mjs --tree).
     try {
       mkdirSync(workersDir, { recursive: true });
-      appendFileSync(join(workersDir, 'reports.jsonl'), JSON.stringify({ at: report.endedAt, session, taskId: report.taskId, role, status: report.status, checkpoint, fallback: Boolean(report.fallback), model: report.model || null, usage: (report.evidence && report.evidence.usage) || null }) + '\n');
+      appendFileSync(join(workersDir, 'reports.jsonl'), JSON.stringify({ at: report.endedAt, session, taskId: report.taskId, role, status: report.status, checkpoint, fallback: Boolean(report.fallback), runtime: 'codex', model: report.model || null, effort: report.effort || null, usage: (report.evidence && report.evidence.usage) || null }) + '\n');
+      // Only a run where Codex started is a return to grade; a refused start
+      // (a busy slot, a missing approval) is retried and would stack duplicates.
+      if (opts.run && report.evidence && report.evidence.exitCode !== undefined) {
+        const returns = join(resolve(opts.run), 'returns');
+        mkdirSync(returns, { recursive: true });
+        const file = join(returns, `${String(report.taskId).replace(/[^A-Za-z0-9_-]/g, '_')}-codex.md`);
+        const final = report.evidence && report.evidence.final;
+        const body = final ? JSON.stringify(final, null, 2) : `${report.status}: ${report.why || ''}`;
+        writeFileSync(file, `<!-- ${report.endedAt} · codex · ${report.model || 'model unknown'} · ${report.effort || 'effort unknown'} -->\n\n${body}\n`);
+        appendFileSync(join(returns, 'returns.jsonl'), JSON.stringify({ at: report.endedAt, session, run: packet.run || null, task: report.taskId, agent: 'codex', agentId: `codex-${report.taskId}`, runtime: 'codex', model: report.model || null, effort: report.effort || null, status: report.status, evidence: report.evidence || null, file, dollars: null }) + '\n');
+      }
     } catch {}
     return { report, code };
   };
+
+  // Model and effort are per run; the policy only fills in what the dispatch left out.
+  if (opts.effort && !CODEX_EFFORTS.includes(opts.effort)) return finish({ status: 'blocked', why: `--effort must be one of ${CODEX_EFFORTS.join(', ')}`, evidence: { edited: false } }, EXIT.usage);
+  const model = opts.model || policy.codex.model || null;
+  if (model === ASTRA && !opts.approved && !/^\s*APPROVED BY USER:\s*astra\b/im.test(packetText)) {
+    return finish({ status: 'blocked', why: `${ASTRA} needs the user's yes for this task: pass --approved or put "APPROVED BY USER: astra" in the packet`, evidence: { edited: false } }, EXIT.usage);
+  }
 
   if (!policy.codex.enabled) return finish({ status: 'unavailable', why: 'Codex workers are turned off (policy codex.enabled=false)', evidence: { edited: false } }, EXIT.fallback);
   const bin = deps.bin !== undefined ? deps.bin : findCodex(env);
@@ -407,21 +428,21 @@ export async function runWorker(opts, deps = {}) {
   if (holder) return finish({ status: 'blocked', why: `another worker (${holder.task}, pid ${holder.pid}) is running in ${wt.path}`, evidence: { edited: false } }, EXIT.followUp);
 
   const progressPath = role === 'review' ? null : join(checkpoint, 'progress.md');
-  const effort = hard || role === 'review' ? policy.codex.effortHard : policy.codex.effortImplement;
+  const effort = opts.effort || (hard || role === 'review' ? policy.codex.effortHard : policy.codex.effortImplement);
   const lastMessagePath = join(checkpoint, 'last-message.json');
   const args = [
     'exec', '--json',
     '--disable', 'multi_agent', '--disable', 'multi_agent_v2',
     '-s', role === 'review' ? 'read-only' : 'workspace-write',
     '-C', wt.path,
-    ...(policy.codex.model ? ['-m', policy.codex.model] : []),
+    ...(model ? ['-m', model] : []),
     '-c', `model_reasoning_effort="${effort}"`,
     '--output-schema', deps.schemaPath || SCHEMA_PATH,
     '-o', lastMessagePath,
     ...(progressPath ? ['--add-dir', checkpoint] : []),
     '-',
   ];
-  report.model = policy.codex.model || configuredModel(env);
+  report.model = model || configuredModel(env);
   report.effort = effort;
 
   const eventsPath = join(checkpoint, 'events.jsonl');
@@ -489,7 +510,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (!a.startsWith('--')) { o._.push(a); continue; }
     const k = a.slice(2);
-    if (['json', 'hard'].includes(k)) o[k] = true;
+    if (['json', 'hard', 'approved'].includes(k)) o[k] = true;
     else { o[k] = argv[i + 1]; i++; }
   }
   return o;
@@ -521,7 +542,7 @@ async function main() {
     return 0;
   }
   if (cmd !== 'run' || !o.packet || !o.repo) {
-    console.error('usage: codex-worker.mjs run --packet <file|-> --repo <dir> [--role implement|review|debug] [--hard] [--task <id>] [--run <run dir>] [--worktree <dir>] [--base <ref>] [--timeout-min N] [--session <id>] [--json]\n       codex-worker.mjs status [--json]');
+    console.error('usage: codex-worker.mjs run --packet <file|-> --repo <dir> [--role implement|review|debug] [--model <id>] [--effort <level>] [--approved] [--hard] [--task <id>] [--run <run dir>] [--worktree <dir>] [--base <ref>] [--timeout-min N] [--session <id>] [--json]\n       codex-worker.mjs status [--json]');
     return EXIT.usage;
   }
   const packetText = o.packet === '-' ? readFileSync(0, 'utf8') : readFileSync(o.packet, 'utf8');

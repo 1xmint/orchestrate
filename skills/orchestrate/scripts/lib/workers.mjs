@@ -56,6 +56,29 @@ export function helperFiles(leadTranscript) {
   return out;
 }
 
+// The recorded dispatch that owns a native helper id. The host's metadata is
+// the bridge: its filename gives the helper id and `toolUseId` points at the
+// guard's dispatch row. If either half is absent, there is no attributable
+// parent and nesting must fail closed.
+export function nativeAgent(dispatches, files, agentId) {
+  const id = String(agentId || '');
+  if (!id) return null;
+  for (const [toolUseId, file] of files || []) {
+    if (!file || file.agentId !== id) continue;
+    const dispatch = [...(dispatches || [])].reverse().find(d => d && d.toolUseId === toolUseId);
+    if (!dispatch) return null;
+    const depth = Number(file.meta && file.meta.spawnDepth);
+    return {
+      agentId: id,
+      role: roleOf(dispatch.agent),
+      depth: Number.isInteger(depth) && depth > 0 ? depth : null,
+      dispatch,
+      meta: file.meta,
+    };
+  }
+  return null;
+}
+
 // Pure: which dispatch records still count as running.
 export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin } = {}) {
   const back = new Set((returned || []).map(r => r && r.agentId).filter(Boolean));
@@ -150,13 +173,18 @@ export function lockHolder(worktree, external) {
 export function concurrencyDecision(role, { native = [], external = [], policy = loadPolicy() } = {}) {
   const all = [...native, ...external];
   const r = roleOf(role);
+  // A coordinator occupies one ordinary slot while scheduling its two capped
+  // children. The extra slot exists only while that coordinator is live.
+  const maxConcurrent = all.some(w => roleOf(w.role) === 'orch-coordinator')
+    ? Math.max(policy.workers.maxConcurrent, 3)
+    : policy.workers.maxConcurrent;
   const list = xs => xs.map(w => `${w.provider === 'claude' ? w.role : `${w.provider} ${w.role || 'worker'}`}${w.task ? ` ${w.task}` : ''}`).join(', ');
   if (r === 'orch-browser') {
     const b = all.filter(w => roleOf(w.role) === 'orch-browser');
     if (b.length >= policy.workers.browserConcurrent) return `browser work is serial and ${list(b)} is still using the browser. Wait for it to return, then send this one.`;
   }
-  if (all.length >= policy.workers.maxConcurrent) {
-    return `${all.length} worker${all.length === 1 ? ' is' : 's are'} already running (${list(all)}), and the limit is ${policy.workers.maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for 10 minutes stops counting.`;
+  if (all.length >= maxConcurrent) {
+    return `${all.length} worker${all.length === 1 ? ' is' : 's are'} already running (${list(all)}), and the limit is ${maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for 10 minutes stops counting.`;
   }
   return null;
 }
@@ -202,7 +230,10 @@ export function markExhausted({ provider, account, scope, message = '', now = Da
   const s = readJson(p) || { v: WORKERS_V, exhausted: [] };
   s.v = WORKERS_V;
   s.exhausted = (Array.isArray(s.exhausted) ? s.exhausted : []).filter(e => !(e.provider === provider && e.account === account && e.scope === scope)).slice(-50);
-  const resets = parseResetTime(message, now);
+  // Codex sometimes says only that its allowance is exhausted.  That is a
+  // five-hour window, not a hold for the rest of the run; the next dispatch is
+  // deliberately the probe once this conservative expiry has passed.
+  const resets = parseResetTime(message, now) || (provider === 'codex' ? now + 5 * 3600000 : null);
   s.exhausted.push({ provider, account, scope, at: new Date(now).toISOString(), resetsAt: resets ? new Date(resets).toISOString() : null, message: String(message).slice(0, 300) });
   writeJsonAtomic(p, s);
   return true;

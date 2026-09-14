@@ -12,7 +12,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseReturn, sumUsage, describeDispatch, returnFilename, costLine, appendCost, readCosts, latestPerAgent, COSTS_MAX } from './ledger.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
-import { decide as precompactDecide } from './precompact-check.mjs';
+import { decide as precompactDecide, unboundDecision } from './precompact-check.mjs';
 import { decide, eventId, markSeen } from './guard-agent.mjs';
 import { trimLog, runSpend } from './lib/tier.mjs';
 
@@ -24,6 +24,14 @@ function sandbox() {
   mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
   return home;
 }
+
+test('precompact unbound blocks once per epoch then proceeds', () => {
+  const reading = { compaction: { uuid: 'e1' } };
+  const one = unboundDecision({ session: 's', reading, prev: {}, checkpoint: false });
+  assert.equal(one.block, true);
+  assert.match(one.reason, /checkpoint/);
+  assert.equal(unboundDecision({ session: 's', reading, prev: { blockedFor: 'e1' }, checkpoint: false }).block, false);
+});
 
 function run(name, payload, home, extraEnv = {}) {
   const r = spawnSync(process.execPath, [script(name)], {
@@ -221,6 +229,35 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
   assert.equal(out.status, 0);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's2.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'sonnet');
+});
+
+test('guard: an attributable coordinator child is recorded with its parent', () => {
+  const home = sandbox();
+  const sessionDir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(join(sessionDir, 'nested.json'), JSON.stringify({
+    v: 1, session_id: 'nested', dispatches: [{
+      at: new Date().toISOString(), agent: 'orchestrate:orch-coordinator',
+      model: 'opus', task: 'wave', toolUseId: 'toolu_coord',
+    }],
+  }));
+  const lead = join(home, 'lead.jsonl');
+  writeFileSync(lead, '');
+  const sub = join(home, 'lead', 'subagents');
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, 'agent-coord.meta.json'), JSON.stringify({ agentType: 'orch-coordinator', toolUseId: 'toolu_coord', spawnDepth: 1 }));
+
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'nested', cwd: home,
+    agent_id: 'coord', transcript_path: lead, tool_use_id: 'toolu_child',
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: child\ndo it' },
+  }, home);
+
+  assert.equal(out.status, 0);
+  assert.doesNotMatch(out.stdout, /permissionDecision.*deny/);
+  const state = JSON.parse(readFileSync(join(sessionDir, 'nested.json'), 'utf8'));
+  assert.equal(state.dispatches.at(-1).parent, 'coord');
+  assert.equal(state.dispatches.at(-1).task, 'child');
 });
 
 test('guard: a dispatch that names no model is recorded as inherited and not priced', () => {
@@ -478,6 +515,30 @@ test('ledger: the return is written under the bound run and indexed', () => {
   assert.equal(index[0].run, repo.runId);
   assert.equal(index[0].status, 'DONE');
   assert.equal(out.status, 0);
+});
+
+test('ledger: a nested SubagentStop is filed and indexed with its parent', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'nested-stop', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'nested-stop.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{
+    at: new Date().toISOString(), agent: 'orch-implementer', model: 'sonnet',
+    task: '9-9-0001', run: repo.runId, parent: 'coord-parent', toolUseId: 'toolu_child',
+  }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'nested-stop', cwd: repo.dir,
+    agent_id: 'child-id', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+
+  assert.equal(out.status, 0);
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index[0].parent, 'coord-parent');
+  assert.ok(existsSync(index[0].file), 'the nested return is filed under the run');
+  assert.equal(JSON.parse(readFileSync(sessionPath, 'utf8')).returned[0].parent, 'coord-parent');
 });
 
 test('ledger: the task rows are left exactly as they were', () => {
@@ -749,11 +810,18 @@ test('precompact: a written Pickup, or no dispatch yet, never blocks', () => {
   assert.equal(run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc3', cwd: quiet.dir }, home).stdout.trim(), '');
 });
 
-test('precompact: a session with no bound run says nothing at all', () => {
+// v0.15.0: an unbound session used to compact with nothing saved, and the 472k
+// session in STATE.md lost its thread that way. It now gets one block per
+// compaction epoch naming where to write the checkpoint, then compaction proceeds.
+test('precompact: a session with no bound run is asked for a checkpoint once, then proceeds', () => {
   const home = sandbox();
   const repo = fixtureRepo();
-  const out = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc4', cwd: repo.dir }, home);
-  assert.equal(out.stdout.trim(), '');
+  const input = { hook_event_name: 'PreCompact', session_id: 'spc4', cwd: repo.dir };
+  const first = run('precompact-check.mjs', input, home);
+  const block = JSON.parse(first.stdout);
+  assert.equal(block.decision, 'block');
+  assert.match(block.reason, /context[\\/]spc4[\\/]checkpoint-/);
+  assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '');
 });
 
 test('turn check: nothing in it can ask for more research, testing or improvement', () => {

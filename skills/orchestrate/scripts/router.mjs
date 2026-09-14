@@ -21,7 +21,7 @@
 //   node router.mjs --cost <transcript.jsonl>     what the router cost that session
 //   node router.mjs --prune                       delete session state older than 7 days
 
-import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -30,14 +30,28 @@ import {
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, staleRunsUnder,
 } from './lib/tier.mjs';
-import { sampleContext } from './lib/context.mjs';
+import { sampleContext, storedContext, CONTEXT_DIR } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
+import { applyAutocompactDefault } from './lib/settings.mjs';
+import { loadPolicy } from './lib/policy.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const CODEX_STATUS_CACHE = join(DIR, 'workers', 'codex-status.json');
+
+export function codexState(now = Date.now()) {
+  const c = readJson(CODEX_STATUS_CACHE);
+  // A newly learned quota stop wins over an older successful probe.  This is
+  // read-only and never starts Codex from a hook.
+  const provider = readJson(join(DIR, 'workers', 'provider-state.json')) || {};
+  const exhausted = Array.isArray(provider.exhausted) && provider.exhausted.some(e => e && e.provider === 'codex' && e.resetsAt && Date.parse(e.resetsAt) > now);
+  if (exhausted) return 'limit';
+  if (!c || !c.at || now - Date.parse(c.at) > 3600000) return 'off';
+  return c.status === 'limit' ? 'limit' : c.status === 'ok' ? 'ok' : 'off';
+}
 
 // ---- the card (from references/ladder.md, so the text has one home) ---------
 // Five short paragraphs: how the work is shaped, how a question is answered,
@@ -49,10 +63,10 @@ const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // the file cannot be read; it used to be a shorter, separately-maintained
 // summary that silently fell two paragraphs behind the real card.
 export const FALLBACK_CARD = [
-  'orchestrate is loaded. Do ordinary bounded work yourself, including long work and work across several files. Delegate one substantial separable task when isolation, parallel progress, a specialist, or independent scrutiny buys something concrete. Open a run ledger only when several tracks run at once or the work outlives this session.',
-  'Answer a settled question from the record and say where. Answer a question about the world from the world: search it, open the source that settles it, stop when nothing further could change the answer. One authoritative source can be enough. Answer a judgment question with a recommendation and what would change it. An installed skill that does what a built-in tool cannot (a blocked page, platform data, a design review) beats rebuilding it; name it in the packet of any helper that needs it. A plain page fetch already comes back summarised.',
-  'Before adding a dependency, an abstraction, another research wave or another worker, name the unresolved problem it solves now. A future possibility is not one.',
-  'Evidence decides done: reuse a check that already passed, add a test for a real uncovered behaviour, drive a user flow when reading it cannot settle it. Independent review is for money, auth, destructive data, a contract others consume, or real architectural doubt.',
+  'orchestrate is loaded. Your context is for judgment. Do a step yourself when it fits in about 8 tool calls with small outputs. Everything else goes to a worker, and you keep only its return: writing a file over ~150 lines, changing three or more files, a build or test suite, a read whose answer is a paragraph. Workers run on Codex (codex-worker.mjs --model --effort) until it runs out; Claude workers for what Codex cannot reach. A plan: one packet per step; three or more independent steps go to orch-coordinator. Never Write a file you could Edit, never Read back what you wrote; filter output. Open a run ledger when several tracks run at once or the work outlives this session.',
+  'Answer a settled question from the record and say where. Answer a question about the world from the source that settles it. Answer a judgment question with a recommendation and what would change it. An installed skill that does what a built-in tool cannot beats rebuilding it; name it in any packet that needs it.',
+  'Before adding a dependency, an abstraction or another worker, name the problem it solves now.',
+  'Evidence decides done: reuse a check that passed, test a real uncovered behaviour, drive a user flow when reading cannot settle it. Independent review is for money, auth, destructive data, a contract others consume, or real architectural doubt.',
   'Stop and ask, recommendation first, only for money, a public surface, credentials, or a destructive or irreversible action. Authorisation already given is not asked for twice. Mute this card: type "router off".',
 ].join('\n');
 
@@ -72,9 +86,23 @@ export function stateLine(ctx, prefix) {
   const you = ctx.self && ctx.self.model
     ? `you: ${ctx.self.model}${ctx.self.effort ? ` @ ${ctx.self.effort} effort` : ''}`
     : 'you: model not known here';
-  const agents = `orch-agents ${ctx.agents}/6`;
-  const limits = ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none';
-  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
+  const agents = `orch-agents ${ctx.agents}/7`;
+  const limits = (ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none') + contextPhrase(ctx.context);
+  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · codex: ${ctx.codex || codexState()} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
+}
+
+export function contextBand(reading) {
+  const n = reading && reading.tokens;
+  if (!Number.isFinite(n)) return 'none';
+  if (n >= 300000) return 'hard';
+  if (n >= 150000) return 'compact';
+  if (n >= 120000) return 'checkpoint';
+  return 'none';
+}
+
+export function contextPhrase(reading) {
+  // Always the measured number when there is one, so the lead never guesses it.
+  return reading && Number.isFinite(reading.tokens) ? ` · ctx ~${Math.round(reading.tokens / 1000)}k` : '';
 }
 
 // Live plan usage, when the status line has reported it. Past the caution line
@@ -180,7 +208,7 @@ export function stateHash(ctx) {
     focus && focus.edgesMissing ? 'edges?' : '',
     ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : '',
     // The band, not the number: a line every percent would be noise.
-    quotaBand(ctx.quota),
+    quotaBand(ctx.quota), contextBand(ctx.context), ctx.codex || codexState(),
   ].join('|');
 }
 
@@ -205,6 +233,17 @@ export function resumeExcerpt(runMd, cap = RESUME_CAP) {
   let out = parts.join('\n');
   if (out.length > cap) out = `${out.slice(0, cap - 3)}...`;
   return out;
+}
+
+export function checkpointExcerpt(session, cap = RESUME_CAP) {
+  try {
+    const dir = join(CONTEXT_DIR, String(session || 'nosession').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120));
+    const paths = readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)).map(n => join(dir, n));
+    const path = paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+    if (!path) return '';
+    const text = readFileSync(path, 'utf8').trim();
+    return text.length > cap ? `${text.slice(0, cap - 3)}...` : text;
+  } catch { return ''; }
 }
 
 // ---- local context ----------------------------------------------------------
@@ -294,6 +333,8 @@ function gatherContext(input, state) {
     self: self || state.self || null,
     persist: Boolean(state.persist && state.persist.armed),
     quota: readQuota(),
+    context: storedContext(input.session_id || null),
+    codex: codexState(),
   };
 }
 
@@ -385,6 +426,12 @@ function handlePrompt(input) {
   const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed) && trimmed.split(/\s+/).length >= 4;
   const ctx = gatherContext(input, state);
   const out = [];
+  // Plugin settings cannot carry env vars.  Do this once, before the normal
+  // card logic; after the marker exists this only stats one tiny file.
+  const compact = applyAutocompactDefault({
+    settingsPath: join(dirname(DIR), 'settings.json'), markerDir: DIR, policy: loadPolicy(),
+  });
+  if (compact.applied) out.push(`orchestrate set auto-compact to ${compact.value % 1000 ? compact.value : `${compact.value / 1000}k`} in ~/.claude/settings.json (it applies from the next session; backup at ${compact.backup || 'none'}). To undo: \`profile.mjs --autocompact off\`.`);
   // The mode the host reports, on every prompt: a switch into or out of Plan
   // mode is said once, whatever the prompt looks like.
   const mode = modeNote(state, input);
@@ -543,6 +590,9 @@ function handleSessionStart(input) {
   if (ctx.run) {
     const ex = resumeExcerpt(ctx.run.runMd);
     out.push(`[orchestrate · ${word}] run ${ctx.run.runMd}${ex ? `\n${ex}` : ' — nothing written under Goal or Pickup yet'}`);
+  } else if (source === 'compact') {
+    const ex = checkpointExcerpt(input.session_id);
+    if (ex) out.push(`[orchestrate · compacted] checkpoint\n${ex}`);
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
   }

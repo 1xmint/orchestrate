@@ -32,6 +32,13 @@ test('arms on an explicit ask to keep going, never on a question or a one-off', 
   }
 });
 
+test('context compact advice stops an armed loop before its did-work check', () => {
+  const d = persistDecision({ scan: { progressed: true, denied: false, errors: [], asked: false, goalMet: false }, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: { session: 's', tokens: 151000, compaction: null } });
+  assert.equal(d.kind, 'stop');
+  assert.match(d.why, /context is ~151k/);
+  assert.match(d.why, /checkpoint/);
+});
+
 test('the armed line carries the goal verbatim and the ways out', () => {
   const line = persistLine({ armed: true, goal: 'keep coding until the website is done' });
   assert.match(line, /"keep coding until the website is done"/);
@@ -189,4 +196,41 @@ test('router: after compaction the pinned goal comes back verbatim', () => {
   run('router.mjs', { hook_event_name: 'UserPromptSubmit', session_id: 'p3', cwd: dir, prompt: 'execute the plan in docs/plan.md' }, home);
   const out = run('router.mjs', { hook_event_name: 'SessionStart', source: 'compact', session_id: 'p3', cwd: dir }, home);
   assert.match(out.json.hookSpecificOutput.additionalContext, /\[orchestrate · compacted\] auto-continue is on toward: "execute the plan in docs\/plan.md"/);
+});
+
+// ---- plugin-wide Stop, not armed: the context-size block ---------------------
+test('plugin-wide Stop (not armed) blocks once per epoch at or above compactAt, then passes', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
+  const transcript = join(dir, 't.jsonl');
+  writeFileSync(transcript, JSON.stringify({"type":"assistant","timestamp":new Date().toISOString(),"message":{"id":"m1","model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"x"}],"usage":{"input_tokens":2,"cache_read_input_tokens":158000,"cache_creation_input_tokens":1000,"output_tokens":50}}}) + '\n');
+
+  const stop = { hook_event_name: 'Stop', session_id: 'p5', cwd: dir, transcript_path: transcript };
+  const first = run('persist-check.mjs', stop, home);
+  assert.equal(first.json.decision, 'block', 'a session that never armed is still blocked once at high context');
+  assert.match(first.json.reason, /checkpoint/);
+
+  // Never twice for the same compaction epoch: it blocks once, not in a loop.
+  assert.equal(run('persist-check.mjs', stop, home).stdout.trim(), '');
+});
+
+test('plugin-wide Stop: silent below compactAt, once a checkpoint exists, and when stop_hook_active', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
+
+  // Below compactAt: silent outright.
+  const smallTranscript = join(dir, 'small.jsonl');
+  writeFileSync(smallTranscript, JSON.stringify({"type":"assistant","timestamp":new Date().toISOString(),"message":{"id":"m2","model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"x"}],"usage":{"input_tokens":2,"cache_read_input_tokens":40000,"cache_creation_input_tokens":1000,"output_tokens":50}}}) + '\n');
+  assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'p6', cwd: dir, transcript_path: smallTranscript }, home).stdout.trim(), '');
+
+  // At or above compactAt, but a checkpoint was already written for this epoch: silent.
+  const bigTranscript = join(dir, 'big.jsonl');
+  writeFileSync(bigTranscript, JSON.stringify({"type":"assistant","timestamp":new Date().toISOString(),"message":{"id":"m3","model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"x"}],"usage":{"input_tokens":2,"cache_read_input_tokens":158000,"cache_creation_input_tokens":1000,"output_tokens":50}}}) + '\n');
+  const checkpointDir = join(home, '.claude', 'orchestrate', 'context', 'p7');
+  mkdirSync(checkpointDir, { recursive: true });
+  writeFileSync(join(checkpointDir, 'checkpoint-none.md'), 'already written');
+  assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'p7', cwd: dir, transcript_path: bigTranscript }, home).stdout.trim(), '');
+
+  // At or above compactAt, but this Stop is itself already re-entered: never block itself again.
+  assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'p8', cwd: dir, transcript_path: bigTranscript, stop_hook_active: true }, home).stdout.trim(), '');
 });
