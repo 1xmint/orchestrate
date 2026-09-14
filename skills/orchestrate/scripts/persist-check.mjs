@@ -28,15 +28,17 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
 import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
+import { sampleContext, markAnnounced } from './lib/context.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
 // not a model judging a model (deleted once as "certain cost, zero benefit",
-// STATE.md v0.8.0). The size flag is a warning before an expensive re-read,
-// never a running counter.
+// STATE.md v0.8.0). Context size is not judged here: transcript bytes survive
+// compaction, so a byte threshold kept warning about a conversation that had
+// already been compacted. The shared reader (lib/context.mjs) decides, and its
+// notice rides along only when its advice changes.
 export const PERSIST_STEP_CAP = 25;
 export const PERSIST_CHECKIN_EVERY = 6;
-export const PERSIST_COST_FLAG_BYTES = 1_500_000;
 export const PERSIST_SCAN_CAP = 262144;
 
 const WORK_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell', 'Agent', 'Task']);
@@ -89,7 +91,7 @@ export function scanTurn(tail) {
 
 // Continue or stop, from the scan and the loop's own record. Pure: returns the
 // next record rather than writing it.
-export function persistDecision({ rec = {}, scan, transcriptSize = 0, goal = '', quota = null }) {
+export function persistDecision({ rec = {}, scan, contextNotice = '', goal = '', quota = null }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -107,7 +109,7 @@ export function persistDecision({ rec = {}, scan, transcriptSize = 0, goal = '',
 
   let why = `orchestrate: still working toward "${g}". The last step did real work and nothing says it is finished or blocked, so do the next step now instead of ending the turn. Name the step as you start it. If you are waiting on CI, a build or a background agent, watch it with Monitor and do other independent work meanwhile; the result wakes you, so there is nothing to sit and wait for. If the goal is met, say so plainly; if you need a decision from the user, ask it — either one ends this loop.`;
   if (steps % PERSIST_CHECKIN_EVERY === 0) why += ` Check-in (step ${steps} of at most ${PERSIST_STEP_CAP}): in one line, tell the user what the last few steps did, so they can catch drift from the goal. They can say "persist off" to stop this.`;
-  if (transcriptSize >= PERSIST_COST_FLAG_BYTES) why += ` Cost: this conversation is long, so every further step re-reads a lot of it. If the rest can be resumed from files, say so and suggest a fresh session.`;
+  if (contextNotice) why += ` ${contextNotice}`;
   return { rec: out, kind: 'continue', why };
 }
 
@@ -135,7 +137,12 @@ export function check(input) {
   // Exactly the bytes since the last check: any floor here re-reads the previous
   // step's work and counts it again, which is a loop that never sees "no work".
   const tail = input.transcript_path && size > from ? readTail(input.transcript_path, Math.min(size - from, PERSIST_SCAN_CAP)) : '';
-  const dec = persistDecision({ rec, scan: scanTurn(tail), transcriptSize: size, goal: p.goal, quota: readQuota() });
+  // Sampled without announcing: the notice is only delivered if this Stop is
+  // refused, and the store is marked as announced only then.
+  let ctx = null;
+  try { ctx = input.transcript_path ? sampleContext({ transcriptPath: input.transcript_path, session: input.session_id || null, announce: false }) : null; } catch { ctx = null; }
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', goal: p.goal, quota: readQuota() });
+  if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };
   try { writeJsonAtomic(path, store); } catch {}

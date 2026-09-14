@@ -102,7 +102,7 @@ function build(spec) {
   for (const file of walk(SRC).sort()) {
     const rel = relative(SRC, file).split('\\').join('/');
     // The test files are the proof, not the product; they never ship.
-    if (/\.test\.mjs$/.test(rel)) continue;
+    if (/\.test\.mjs$/.test(rel) || /(^|\/)fixtures\//.test(rel)) continue;
     let data = readFileSync(file);
     if (spec && /\.md$/.test(rel)) data = Buffer.from(toSpec(data.toString('utf8')), 'utf8');
     entries.push([`orchestrate/${rel}`, data]);

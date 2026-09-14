@@ -22,7 +22,9 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, AGENT_NAMES } from './lib/tier.mjs';
+import { loadPolicy } from './lib/policy.mjs';
+import { helperFiles, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision } from './lib/workers.mjs';
 import { priceTag, estimateDollars, family, normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { readCosts } from './ledger.mjs';
@@ -118,6 +120,48 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
     const tried = dispatches.some(d => d && normalizeRole(d.agent) === role && d.key === key && rank(d.model === 'inherit' ? 'sonnet' : d.model) >= rank('sonnet'));
     if (!tried) return { prefix: 'model', reason: `${role} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead.` };
   }
+  return null;
+}
+
+// ---- the workflow rules ------------------------------------------------------
+// Scheduling belongs to the lead. The record that set these: one Sonnet helper
+// dispatched as built-in general-purpose (no turn cap) made 274 model calls,
+// reached 683k context, and started helpers of its own. Each rule names what to
+// send instead.
+//
+//   nested       a helper starting a helper — denied; the lead schedules
+//   plan mode    helpers only read and return findings inline
+//   uncapped     general-purpose/claude while capped role agents are installed
+//   worktree     a Claude helper aimed at a worktree a live Codex worker holds
+//   concurrency  two workers at once across providers; browser work serial
+export const PLAN_READ_ROLES = new Set(['orch-researcher', 'orch-reviewer', 'Explore', 'Plan', 'claude-code-guide']);
+export const UNCAPPED = new Set(['general-purpose', 'claude']);
+
+export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, native = [], external = [] } = {}) {
+  const role = normalizeRole(ti.subagent_type || 'general-purpose');
+  const prompt = String(ti.prompt || '');
+
+  if (input && input.agent_id && policy.workers.nested !== 'allow') {
+    return { prefix: 'workers', reason: 'a helper does not start helpers; the lead does all scheduling. Finish what you can yourself, then return STATUS: PARTIAL naming the remaining work, so the lead can decide who does it.' };
+  }
+
+  if (input && input.permission_mode === 'plan') {
+    if (!PLAN_READ_ROLES.has(role)) return { prefix: 'plan', reason: `the host is in Plan mode, where helpers only read. ${role} can change files. Send orch-researcher, orch-reviewer or Explore (with a model named) and ask for findings returned inline, or do the inspection yourself.` };
+    if (ti.isolation === 'worktree' || /^\s*WHERE:.*worktree:\s*yes/mi.test(prompt) || /^\s*worktree:\s*yes/mi.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: no worktrees. Remove the worktree and ask for read-only findings returned inline.' };
+    if (/^\s*PROGRESS:/m.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: helpers write no progress files. Remove the PROGRESS line and ask for findings returned inline; only the lead maintains the plan.' };
+  }
+
+  // Only once all six role agents are present: a partial script install still
+  // falls back on general-purpose for a writing role (SKILL.md §0).
+  if (UNCAPPED.has(role) && installed >= AGENT_NAMES.length && policy.workers.generalPurpose !== 'allow') {
+    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orchestrate:orch-implementer (model "sonnet") to change code, orchestrate:orch-researcher or Explore (model "haiku") to find things, orchestrate:orch-reviewer to review. Or do a small task yourself.` };
+  }
+
+  const locked = lockedWorktreeIn(prompt, external);
+  if (locked) return { prefix: 'workers', reason: `a Codex worker (${locked.task || 'task'}, pid ${locked.pid}) is still running in ${locked.worktree}. Two providers never work in one worktree at once: wait for it to exit, then send only the unfinished part.` };
+
+  const busy = concurrencyDecision(role, { native, external, policy });
+  if (busy) return { prefix: 'workers', reason: busy };
   return null;
 }
 
@@ -282,9 +326,25 @@ function main() {
     return;
   }
 
-  // The model rule, on every invocation for the same reason: a retry of a denied
-  // dispatch must be denied again unless it changed.
+  // The workflow rules, then the model rule, on every invocation for the same
+  // reason: a retry of a denied dispatch must be denied again unless it changed.
+  // A repeat of this same tool call is not a second worker.
   let m = null;
+  try {
+    const state = loadSession(input.session_id) || {};
+    const policy = loadPolicy();
+    const native = repeat ? [] : runningNative(Array.isArray(state.dispatches) ? state.dispatches : [], {
+      returned: Array.isArray(state.returned) ? state.returned : [],
+      files: helperFiles(input.transcript_path),
+      staleMin: policy.workers.staleMin,
+    });
+    m = workflowDecision(input, ti, { policy, installed: agentsInstalled().installed, native, external: runningExternal() });
+  } catch { m = null; }
+  if (m) {
+    if (!repeat) recordDenial(input, ti, `${m.prefix}: ${m.reason.split('.')[0]}`);
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${m.prefix}: ${m.reason}` } });
+    return;
+  }
   try {
     const state = loadSession(input.session_id) || {};
     m = modelDecision(ti, {
@@ -346,6 +406,9 @@ function recordDispatch(input, ti) {
       model: String(ti.model || 'inherit'),
       task: (/^\s*TASK:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
       key: taskKey(ti.prompt),
+      // Links this record to the helper's own transcript (subagents/*.meta.json
+      // carries the same id), which is how "still running" is judged.
+      toolUseId: input.tool_use_id ? String(input.tool_use_id) : null,
       // Where the agent keeps its progress, so work stopped by a usage limit is
       // found from disk rather than by resuming the stopped agent.
       progress: (/^\s*PROGRESS:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,

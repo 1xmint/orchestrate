@@ -185,8 +185,9 @@ install. You should not need to type them.
 | Hook | When | What it holds |
 |---|---|---|
 | `router.mjs` | every prompt, and on resume or compact | once a session, the local state the model cannot see: plan tier, your own model, the run this session is bound to, agents installed, a family limit hit today, plus a short card on how work gets shaped. While a run is open it also names the returns still waiting to be graded and the tasks whose blockers have all landed, so a session stops waiting on one agent when there is work it could start. On resume it brings back the run's goal, constraints and next step. After that, silence unless one of those facts changes. Turn it off for a session by typing `router off` |
-| `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It refuses, with the exact retry: a coding, research or browser helper above Sonnet before a cheaper attempt at the same task; a search helper with no cheap model named; a copy of a conversation already past ~100k tokens; Fable on a plan where it costs credits; and any new helper once the 5-hour window is at 80% or the week at 90% |
-| `persist-check.mjs` | when a turn ends | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refusal, the same error twice, 25 steps, or 90% of the 5-hour window |
+| `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It refuses, with the exact retry: a helper starting its own helpers; built-in `general-purpose` (no turn cap) while the capped role agents are installed; a third worker while two are running across Claude and Codex, or a second browser task; in Plan mode, any helper that could write, a worktree or a progress file; a Claude helper aimed at a worktree a live Codex worker holds; a coding, research or browser helper above Sonnet before a cheaper attempt at the same task; a search helper with no cheap model named; a copy of a conversation already past ~100k measured tokens; Fable on a plan where it costs credits; and any new helper once the 5-hour window is at 80% or the week at 90% |
+| `context-check.mjs` | after each tool call | reads only what the conversation added since last time and says something only when the advice changes: prepare a checkpoint, recommend compacting or a fresh conversation at the next safe point, or look for what stayed large after a compaction. It also notices when the app enters or leaves Plan mode, and when a helper stopped at its turn cap. Inside a helper it records that helper's size and says nothing |
+| `persist-check.mjs` | when a turn ends | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refusal, the same error twice, 25 steps, or 90% of the 5-hour window. It no longer warns about transcript size; the context reader's advice rides along when it changes |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run this session is bound to, prices it, and records which run and task it belongs to in `returns/returns.jsonl`. It does not touch the task rows: two returns landing together each rewrote the whole file, and the second erased the first |
 | `turn-check.mjs` | when a turn ends | one rule, and only for a run this session is bound to: it asks once for the Pickup line when that line has not moved since the last dispatch, so a session that dies is still resumable |
 | `precompact-check.mjs` | just before the conversation is compacted | the same Pickup rule as `turn-check.mjs`, fired one moment earlier: a long session can auto-compact mid-turn, and a stale Pickup line does not just age, it is gone. Asks once per unwritten line, then lets compaction proceed either way so it can never block the very thing that frees up context |
@@ -267,6 +268,53 @@ line was installed and working when run by hand, yet the desktop app never ran
 it once in hours of use. So in the desktop app the usage stops above never fire.
 Orchestrate still stops when an actual limit message arrives, and helpers on
 Sonnet with step caps keep usage low either way.
+
+A usage reading counts only when it names the provider and the account it came
+from. One from another account, or an old file that cannot say whose it is, is
+ignored rather than allowed to stop your work.
+
+### How big the conversation is, and when to compact
+
+Every step re-reads the whole conversation, so its size is the biggest cost there
+is. Orchestrate measures it from the last model response after the last
+compaction: fresh input plus cache reads plus cache writes. Transcript file size
+is not used, because compaction keeps the file.
+
+- At **120k tokens** it asks the model to write a checkpoint: the goal,
+  decisions, changed files, test results, what is left, and the next step.
+- At **150k**, or 75% of a smaller window when the window is known, it
+  recommends a change at the next safe point: **compact** if the same task
+  continues, a **fresh conversation** if the task changes or a finished phase
+  will resume from saved files. You make the switch.
+- Right after a compaction it says nothing until a response measures the new
+  size. If that size is still large, it says to look for what is being restored
+  every step (instruction files, plugin and tool listings, big tool output)
+  instead of compacting again.
+- No measurement, or one older than 12 hours, shows as **unknown**, never 0%.
+
+See it for any session, including helpers it recorded:
+
+```bash
+node skills/orchestrate/scripts/context.mjs --latest
+node skills/orchestrate/scripts/context.mjs --session <session id> --json
+```
+
+### Change the numbers
+
+```bash
+node skills/orchestrate/scripts/profile.mjs --policy
+node skills/orchestrate/scripts/profile.mjs --policy context.compactAt=180000 workers.maxConcurrent=3
+```
+
+Keys: `context.checkpointAt`, `context.compactAt`, `context.windowFraction`,
+`context.window`, `context.staleMs`, `workers.maxConcurrent`,
+`workers.browserConcurrent`, `workers.nested` (`deny`/`allow`),
+`workers.generalPurpose` (`deny`/`allow`), `workers.staleMin`, `codex.enabled`,
+`codex.model`, `codex.effortImplement`, `codex.effortHard`, `codex.timeoutMin`.
+They are stored under `policy` in `~/.claude/orchestrate/profile.json`; an older
+version ignores that key. `profile.mjs --host` shows which Claude Code engine the
+running app has, read from its own transcript rather than the terminal CLI,
+which can be a different version.
 
 ## Plugins that make it better, and ones that cost you
 
@@ -518,8 +566,8 @@ rm -rf ~/.claude/skills/orchestrate ~/.agents/skills/orchestrate ~/.claude/agent
 ```
 
 Then open `~/.claude/settings.json` and delete the hook entries naming
-`router.mjs`, `guard-agent.mjs`, `ledger.mjs`, `turn-check.mjs` or
-`precompact-check.mjs`. Your own
+`router.mjs`, `guard-agent.mjs`, `ledger.mjs`, `turn-check.mjs`,
+`precompact-check.mjs`, `persist-check.mjs` or `context-check.mjs`. Your own
 hooks sit in the same arrays, so read before you cut; a backup from before the
 first install is in `~/.claude/orchestrate/`.
 
@@ -531,6 +579,35 @@ want them gone.
 Per repo, `node scripts/install.mjs --project <repo>` also wrote
 `.orchestrator/`, a line in `.git/info/exclude` and
 `.claude/rules/orchestrate.md`. Those are local to that repo and safe to delete.
+
+### Try a new version, and roll it back
+
+The marketplace entry auto-updates from `main`, so a merged release installs
+itself at the next session. To try a branch first, without touching the
+installed copy (terminal only; the app cannot pass the flag):
+
+```bash
+git -C /path/to/orchestrate checkout release/v0.13.0
+```
+
+```bash
+claude --plugin-dir /path/to/orchestrate
+```
+
+Once it is merged, `claude plugin marketplace update orchestrate` followed by
+`claude plugin update orchestrate@orchestrate` fetches it without waiting, and
+takes effect in a new session. To roll back:
+
+1. Right away, on this machine: `claude plugin disable orchestrate@orchestrate`.
+2. For everyone: revert the release's merge on `main` and push; auto-update
+   installs the previous version again. Earlier versions stay in
+   `~/.claude/plugins/cache/orchestrate/orchestrate/`.
+3. Data: v0.13.0 only adds files — `~/.claude/orchestrate/context/`,
+   `~/.claude/orchestrate/workers/`, and a `policy` key in `profile.json`.
+   Older versions ignore all three, and deleting them is safe.
+4. A script install: rerun the old version's `scripts/install.mjs`; it replaces
+   this plugin's hook entries by script name instead of stacking them, but it
+   does not know `context-check.mjs`, so delete that one entry by hand.
 
 ## Drop it into one repo
 
@@ -580,9 +657,34 @@ Reads the transcript Claude Code already wrote and prints what the turns cost
 which models, how long the packets and returns were, how often the Pickup check
 sent a turn back, and what the router's own injections cost once and
 cumulatively. Add `--dollars` for the list-price figure. No quota, no network.
+
+`--tree` covers the whole session: the lead, every helper, helpers started by
+helpers, the models that actually ran, how large each request's context was,
+retries, and Codex worker runs and hand-offs. Each model call is counted once
+even when the host wrote it several times. On one real session it showed a
+built-in helper that made 274 calls, reached 683k context and started six helpers
+of its own. List-price dollars are not what a subscription bills, and no script
+here turns them into a percentage of your plan.
 The efficiency claims in this repo
 stay estimates until you run this on a real orchestration; the script exists so
 that costs nothing.
+
+## Report a problem
+
+```bash
+node ~/.claude/skills/orchestrate/scripts/diagnose.mjs
+```
+
+One snapshot of how orchestrate sees this machine and this session: the
+version in this copy and the installed one, the host and engine version it
+detected, the policy in force, which hooks your settings file registers, the
+context report, the agent-tree meter, Codex's login state and live workers, and
+whether a fresh Claude usage snapshot exists. It reads only; it changes no
+settings and no stored readings. Your home folder is written as `~`, and it
+holds no credentials, emails, prompts or file contents, so the output can be
+pasted into an issue as it is. `--session <id>` or a transcript path picks
+another session, `--no-codex` skips asking Codex, and `--json` gives the same
+as JSON for a before/after comparison.
 
 ## Install from the .skill file (no git)
 
@@ -606,12 +708,37 @@ wrong: every rule the hooks hold is also stated in the body.
   repo the skill still runs, without isolation.
 
 That is the whole list. **It needs no other agent CLI and no API key of its
-own.** `scripts/smoke.mjs` can check whether Codex, opencode or a signed-in
-`claude` CLI answers, and `references/routing.md` sketches using one as a
-separate quota pool, but nothing in the skill depends on any of them and that
-lane has not been exercised. Treat it as a note, not a feature.
+own.** Codex is optional (below).
 
-## Codex and the ChatGPT desktop app
+## Codex workers (optional)
+
+If Codex is installed and signed in with ChatGPT, the lead can send bounded
+coding work and independent reviews to it, so Claude's usage goes to leading:
+
+```bash
+node skills/orchestrate/scripts/codex-worker.mjs status
+node skills/orchestrate/scripts/codex-worker.mjs run --packet task.md --repo . --role implement
+```
+
+- It runs `codex exec` with your saved login — no API key — on the model in
+  your Codex config, at medium effort for bounded work and high for hard work
+  and reviews.
+- Code changes happen in their own git worktree next to the repo; reviews are
+  read-only. Codex's own multi-agent features are turned off, and its normal
+  sandbox, approvals and repository instructions stay on.
+- It stops a worker after 20 minutes and keeps whatever it did.
+- It never reads your Codex credentials; it asks `codex login status`.
+- If Codex says its usage limit is reached, it stops using Codex for that run,
+  keeps the diff, and writes a packet for Claude covering only the unfinished
+  part. Sign-in failures, throttling, permission errors, timeouts, bad output
+  and failing tests are each reported as what they are. If Claude is also near
+  its limit, it saves the checkpoint and says both are unavailable.
+- Two workers at once across Claude and Codex, and never both in one worktree.
+
+The CLI is found on `PATH`, or inside the Codex desktop app on Windows, or at
+`ORCH_CODEX_BIN`. Turn the lane off with `profile.mjs --policy codex.enabled=false`.
+
+## Codex and the ChatGPT desktop app as a host
 
 The same folder loads from `~/.agents/skills/orchestrate/` and is invoked as
 `$orchestrate` or `@orchestrate`. The instructions apply and the plain-speech
@@ -623,13 +750,17 @@ supported path. See `skills/orchestrate/references/hosts.md`.
 
 ```
 skills/orchestrate/
-  SKILL.md              the skill (317 body lines; stays in context)
+  SKILL.md              the skill (400 body lines; stays in context)
   references/           ladder, routing, evaluation, lanes, hosts, models
-  scripts/              router, guard, ledger, turn-check, precompact-check, gate,
-                        profile, run-init, measure, install-agents, install-project, batch
-  assets/               RUN.md template, packet template, six role agents, the Plain output style
+  scripts/              router, guard, ledger, turn-check, precompact-check, persist-check,
+                        context-check, context, codex-worker, gate, profile, run-init,
+                        measure, diagnose, install-agents, install-project, batch
+  scripts/lib/          context (the one context reader), policy, workers, modes, host,
+                        quota, tier, settings, prices, listing, template
+  assets/               RUN.md template, packet template, worker report schema, six role
+                        agents, the Plain output style
 .claude-plugin/          plugin manifest, so /plugin install works
-hooks/hooks.json         the three global hooks, for the plugin path
+hooks/hooks.json         the global hooks, for the plugin path
 evals/                  test prompts for the skill-creator loop
 scripts/install.mjs     installs the skill, agents and hooks
 scripts/package.mjs     builds the two .skill zips
@@ -648,8 +779,14 @@ by a repeat, the ledger's parsing and its attribution of a return to the right
 run, the Pickup check, which tasks are ready and which returns are still owed a
 grade, gate detection on three fixture repo layouts, the project kit, the
 installer's merge against a copy of a real `settings.json`, both package builds,
-and the eval file's shape. The run prints the count; anything red is a
-regression.
+and the eval file's shape. Since v0.13.0 they also cover the context reader on
+fixture transcripts (compaction, retained history, null usage, restored context,
+duplicate and half-written records, concurrent sessions, a long-session replay),
+the worker rules (nested helpers, Plan mode, concurrency, worktree locks, capped
+returns, a replay of the 274-call helper), and the Codex adapter against a fake
+Codex CLI (success, usage limit before and after edits, bad output, sign-in
+errors, throttling, timeout and the hand-off to Claude). The run prints the
+count; anything red is a regression.
 
 ## Provenance
 

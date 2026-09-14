@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 // batch.mjs — WS5's in-model fan-out lane. Turns one mechanical change spec
-// and a file list into N per-file packets and N `RUN.md` task rows, so a
-// mass-edit ("rename this field everywhere", "add this header to every
-// route") can go out as N parallel `orch-implementer` dispatches, each in its
-// own worktree owning exactly one file, capped at a concurrency the lead
-// controls.
+// and a file list into a few packets and `RUN.md` task rows, so a mass-edit
+// ("rename this field everywhere", "add this header to every route") goes out
+// as a small number of `orch-implementer` dispatches, each in its own worktree
+// owning a group of files, two at a time by default.
 //
 // This exists because the model cannot reliably start Claude Code's own
 // `/batch` (a user-typed slash command, per lanes.md) or the Workflow tool
@@ -13,7 +12,7 @@
 // uses is worth building. If a future host exposes either to the model
 // directly, prefer that; this stays the one that works everywhere.
 //
-// Every task here owns exactly one file — never split a file across two
+// Every file belongs to exactly one task — never split a file across two
 // tasks, and never batch a file whose change needs to see another file (a
 // shared rename across a type and its usages is not this lane; that needs
 // one task that owns the whole set). The spec is the one mechanical
@@ -22,7 +21,7 @@
 //
 //   node batch.mjs <RUN.md> --spec "<the mechanical instruction>" \
 //     --files "a.ts,b.ts,c.ts" [--done-when "<command>"] \
-//     [--concurrency 20] [--role orch-implementer] [--model sonnet] \
+//     [--concurrency 2] [--per-task N] [--role orch-implementer] [--model sonnet] \
 //     [--dry-run]
 //
 // Prints the task rows (paste into RUN.md's table) and, for each file, the
@@ -50,19 +49,31 @@ export function idPrefixFromRunMd(runMdText) {
 
 const pad4 = n => String(n).padStart(4, '0');
 
-// One task per file: a row for the table, and the full packet text. `owns`
-// is the single file, which is what makes N of these safe to run at once —
-// an agent cannot see the other worktrees, so two tasks owning the same file
-// is a merge conflict after both finish, not a warning here.
-export function buildBatch({ idPrefix, startAt = 1, spec, objective, doneWhen, files, role = 'orch-implementer', model = 'sonnet', concurrency = 20, runId }) {
+// The default is two workers at once (the concurrency limit the dispatch guard
+// enforces across Claude and Codex), and related files are grouped so a batch
+// is a few helpers each owning a set, never one helper per file: every helper
+// re-reads its own growing context on every step, so twenty one-file helpers
+// cost far more than two helpers doing ten files each.
+export const BATCH_CONCURRENCY = 2;
+export const MAX_FILES_PER_TASK = 15;
+
+// A row for the table and the full packet text per task. `OWNS` is the task's
+// file set, which is what makes the tasks safe to run at once — an agent cannot
+// see the other worktrees, so two tasks owning the same file is a merge
+// conflict after both finish, not a warning here.
+export function buildBatch({ idPrefix, startAt = 1, spec, objective, doneWhen, files, role = 'orch-implementer', model = 'sonnet', concurrency = BATCH_CONCURRENCY, perTask = null, runId }) {
   const list = (files || []).filter(Boolean);
   if (!idPrefix) throw new Error('idPrefix is required (e.g. "9-10", from the run\'s own task ids)');
   if (!spec) throw new Error('--spec is required: the one mechanical instruction applied to every file');
   if (!list.length) throw new Error('--files is required: a non-empty list');
+  const size = perTask && perTask > 0 ? Math.floor(perTask) : Math.min(MAX_FILES_PER_TASK, Math.max(1, Math.ceil(list.length / concurrency)));
+  const groups = [];
+  for (let i = 0; i < list.length; i += size) groups.push(list.slice(i, i + size));
 
-  const tasks = list.map((file, i) => {
+  const tasks = groups.map((set, i) => {
     const id = `${idPrefix}-${pad4(startAt + i)}`;
-    const done = doneWhen || 'the gate the run already detected, run against this file alone where that is possible';
+    const file = set.join(', ');
+    const done = doneWhen || `the gate the run already detected, run against ${set.length === 1 ? 'this file' : 'these files'} alone where that is possible`;
     const row = `| ${id} | 📋 planned | — | ${file} | ${role} · ${model} | ${spec} | ${done} | 0 | — |`;
     const packet = [
       `TASK: ${id}  ROLE: ${role.replace(/^orch-/, '')}`,
@@ -72,7 +83,8 @@ export function buildBatch({ idPrefix, startAt = 1, spec, objective, doneWhen, f
       objective || spec,
       '',
       'CONTEXT',
-      `- this is one task in a batch of ${list.length} applying the same mechanical change across files; every other file is a separate task owning its own file, not yours to touch`,
+      `- this is one task in a batch of ${groups.length} applying the same mechanical change across ${list.length} files; every other file belongs to a separate task and is not yours to touch`,
+      ...(set.length > 1 ? ['- apply the change to every file in scope, then run the check once for the set'] : []),
       '',
       'SCOPE',
       `in: ${file}`,
@@ -84,7 +96,7 @@ export function buildBatch({ idPrefix, startAt = 1, spec, objective, doneWhen, f
       'DONE WHEN (evidence)',
       `- ${done}`,
     ].join('\n');
-    return { id, file, row, packet };
+    return { id, file, files: set, row, packet };
   });
 
   const waves = [];
@@ -111,7 +123,7 @@ function main() {
   const { positional, opts } = parseArgs(process.argv.slice(2));
   const runMd = positional[0] ? resolvePath(positional[0]) : null;
   if (!runMd || !existsSync(runMd)) {
-    console.error('usage: batch.mjs <RUN.md> --spec "…" --files "a,b,c" [--done-when "…"] [--concurrency 20] [--role orch-implementer] [--model sonnet] [--dry-run]');
+    console.error(`usage: batch.mjs <RUN.md> --spec "…" --files "a,b,c" [--done-when "…"] [--concurrency ${BATCH_CONCURRENCY}] [--per-task N] [--role orch-implementer] [--model sonnet] [--dry-run]`);
     process.exit(2);
   }
   const runText = readFileSync(runMd, 'utf8');
@@ -121,13 +133,14 @@ function main() {
   const runId = (/^#\s*Run\s+(\S+)/m.exec(runText) || [])[1] || null;
 
   const files = (opts.files || '').split(',').map(s => s.trim()).filter(Boolean);
-  const concurrency = opts.concurrency ? Number(opts.concurrency) : 20;
+  const concurrency = opts.concurrency ? Number(opts.concurrency) : BATCH_CONCURRENCY;
+  const perTask = opts['per-task'] ? Number(opts['per-task']) : null;
 
   let result;
   try {
     result = buildBatch({
       idPrefix, startAt, spec: opts.spec, objective: opts.objective, doneWhen: opts['done-when'],
-      files, role: opts.role || 'orch-implementer', model: opts.model || 'sonnet', concurrency, runId,
+      files, role: opts.role || 'orch-implementer', model: opts.model || 'sonnet', concurrency, perTask, runId,
     });
   } catch (e) { console.error(String(e && e.message || e)); process.exit(2); }
 

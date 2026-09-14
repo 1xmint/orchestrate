@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { limitsFromTail, contextNote, leadNote, CONTEXT_LINES, unreturned, unreturnedNote } from './router.mjs';
+import { limitsFromTail, contextLine, leadNote, unreturned, unreturnedNote } from './router.mjs';
 
 test('helpers that never returned are found from dispatch and return records', () => {
   const state = {
@@ -42,14 +42,9 @@ test('only the host\'s own limit message counts as a limit', () => {
   assert.deepEqual([...limitsFromTail(synthetic("You've hit your session limit"))], ['session']);
 });
 
-test('the per-step size is said at each line once', () => {
-  assert.equal(contextNote(120000, 0), null);
-  const first = contextNote(160000, 0);
-  assert.equal(first.upTo, CONTEXT_LINES[0]);
-  assert.match(first.text, /~160k tokens on every step/);
-  assert.equal(contextNote(200000, first.upTo), null, 'not again below the next line');
-  assert.equal(contextNote(310000, first.upTo).upTo, CONTEXT_LINES[1]);
-  assert.equal(contextNote(900000, CONTEXT_LINES[1]), null);
+test('the router reads context through the shared reader, never transcript bytes', () => {
+  assert.equal(contextLine({}), '', 'no transcript, nothing to say');
+  assert.equal(contextLine(null), '');
 });
 
 test('a lead above quota-first effort is told once a week per setting', () => {

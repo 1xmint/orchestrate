@@ -7,6 +7,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
+import { lastMeasuredTokens } from './context.mjs';
 
 export const HOME = homedir();
 export const DIR = join(HOME, '.claude', 'orchestrate');
@@ -630,24 +631,12 @@ export function selfModel(transcriptPath) {
   return null;
 }
 
-// How many tokens the conversation re-reads on each step right now: the input
-// side of the last real API call in the transcript. Every later step pays at
-// least this much again, which is the number a fork copies and a long session
-// keeps paying. Null when there is no call yet.
-export function lastContextTokens(transcriptPath, bytes = 262144) {
-  const tail = readTail(transcriptPath, bytes);
-  if (!tail) return null;
-  const lines = tail.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i].trim();
-    if (!l || l[0] !== '{') continue;
-    let o; try { o = JSON.parse(l); } catch { continue; }
-    const m = o && o.type === 'assistant' && o.message;
-    if (!m || !m.usage || m.model === '<synthetic>') continue;
-    const u = m.usage;
-    return (Number(u.input_tokens) || 0) + (Number(u.cache_read_input_tokens) || 0) + (Number(u.cache_creation_input_tokens) || 0);
-  }
-  return null;
+// How many tokens the conversation re-reads on each step right now. One reader
+// owns this (lib/context.mjs): the input side of the last real response after
+// the last compaction, or null when that is not currently known. It used to
+// walk past compaction boundaries and report a pre-compaction size.
+export function lastContextTokens(transcriptPath) {
+  return lastMeasuredTokens(transcriptPath);
 }
 
 // `claude-opus-5` and `claude-sonnet-5-20260101` are both "opus"/"sonnet" here;

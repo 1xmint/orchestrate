@@ -33,12 +33,31 @@ rewrite). Needs a git repository with a remote. User-typed command; hand the use
 For real parallel mass-edit — the same mechanical change across many files —
 without depending on `/batch` or the Workflow tool, neither of which the model
 can start here (above). `scripts/batch.mjs <RUN.md> --spec "…" --files
-"a,b,c" [--done-when "…"] [--concurrency 20]` reads the run's own task id
-sequence and writes one packet and one task row per file, each `OWNS` exactly
-that file so N `orch-implementer` worktrees can run at once with no merge
+"a,b,c" [--done-when "…"] [--concurrency 2] [--per-task N]` reads the run's own
+task id sequence and groups the files into a few tasks, each `OWNS` its own
+file set so the `orch-implementer` worktrees can run at once with no merge
 conflict — the same rule SKILL.md §4 already states for parallel tasks, just
-generated rather than typed by hand N times. Default concurrency 20, matching
-the host's own default concurrent-subagent limit (`hosts.md`).
+generated rather than typed by hand. Default concurrency 2, the plugin's own
+worker limit across Claude and Codex; by default the files are split evenly
+across that many tasks, at most 15 files each. It used to be concurrency 20 with
+one helper per file: every helper re-reads its own growing context on every
+step, so twenty one-file helpers cost far more than two helpers doing ten each.
+The host still allows up to 20 concurrent subagents (`hosts.md`); the guard
+holds this plugin to 2 unless `profile.mjs --policy workers.maxConcurrent=N`.
+
+## `codex` (an external worker, `scripts/codex-worker.mjs`)
+
+Bounded coding work or an independent review on the user's Codex subscription,
+through `codex exec` and the ChatGPT login already saved on the machine — no API
+key. Writers get their own worktree next to the repo (`<repo>-worktrees/<task>`),
+reviewers run read-only in place; Codex's own multi-agent features are disabled
+so the lead keeps all scheduling. The packet goes in on stdin and a structured
+report comes back (`assets/worker-report.schema.json`), with events, stderr, the
+diff and a progress note saved in a checkpoint folder. A usage-limit error stops
+Codex for the run and writes a Claude packet for only the unfinished part;
+login, throttling, permission, timeout, malformed output and failing checks are
+each reported as themselves. SKILL.md §5 has when to use it and what each exit
+code means.
 
 Use it for one mechanical instruction applied identically across files: a
 rename, a header, an import rewrite, a dependency bump repeated per package.

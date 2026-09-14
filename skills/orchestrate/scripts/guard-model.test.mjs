@@ -91,10 +91,28 @@ test('a stale or empty quota snapshot reads as absent', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-quota-'));
   const p = join(dir, 'quota.json');
   const now = Date.now();
-  writeFileSync(p, JSON.stringify(snapshotFrom({ rate_limits: { five_hour: { used_percentage: 50 } } }, now - 11 * 60 * 1000)));
-  assert.equal(readQuota(now, p), null);
-  writeFileSync(p, JSON.stringify(snapshotFrom({ rate_limits: { five_hour: { used_percentage: 50 } } }, now)));
-  assert.equal(readQuota(now, p).fiveHour.pct, 50);
-  writeFileSync(p, JSON.stringify(snapshotFrom({}, now)));
-  assert.equal(readQuota(now, p), null, 'an API-key session has no windows');
+  writeFileSync(p, JSON.stringify(snapshotFrom({ rate_limits: { five_hour: { used_percentage: 50 } } }, now - 11 * 60 * 1000, 'org-a')));
+  assert.equal(readQuota(now, p, 'org-a'), null);
+  writeFileSync(p, JSON.stringify(snapshotFrom({ rate_limits: { five_hour: { used_percentage: 50 } } }, now, 'org-a')));
+  assert.equal(readQuota(now, p, 'org-a').fiveHour.pct, 50);
+  writeFileSync(p, JSON.stringify(snapshotFrom({}, now, 'org-a')));
+  assert.equal(readQuota(now, p, 'org-a'), null, 'an API-key session has no windows');
+});
+
+test('a quota snapshot is enforced only for the provider and account it names', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-quota-'));
+  const p = join(dir, 'quota.json');
+  const now = Date.now();
+  const busy = { rate_limits: { five_hour: { used_percentage: 95 } }, session_id: 's1' };
+  writeFileSync(p, JSON.stringify(snapshotFrom(busy, now, 'org-a')));
+  assert.equal(readQuota(now, p, 'org-b'), null, 'another account\'s usage never stops this one');
+  assert.equal(readQuota(now, p, null).fiveHour.pct, 95, 'an unknown current account still honours an identified snapshot');
+  const snap = snapshotFrom(busy, now, 'org-a');
+  assert.equal(snap.provider, 'claude');
+  assert.equal(snap.session, 's1');
+  // Unidentified: an old v1 file, or one written with no account.
+  writeFileSync(p, JSON.stringify({ at: now, fiveHour: { pct: 95 } }));
+  assert.equal(readQuota(now, p, 'org-a'), null, 'an unidentified snapshot is not enforced');
+  writeFileSync(p, JSON.stringify(snapshotFrom(busy, now, null)));
+  assert.equal(readQuota(now, p, 'org-a'), null);
 });

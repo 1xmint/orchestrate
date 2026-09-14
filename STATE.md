@@ -2,6 +2,90 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.13.0 — accurate context, bounded workers, Codex with Claude fallback, 2026-09-14
+
+Quality per unit of quota. Claude Desktop stays the lead. 313 tests pass (up from
+265 at v0.12.1), on Windows / Node 24 locally; CI runs Node 18/20/22.
+
+**What was wrong, from the records.**
+1. `persist-check.mjs` warned whenever the transcript passed 1.5 MB. Compaction
+   keeps the file, so the warning never cleared after a compaction.
+2. `lastContextTokens` walked back past compaction boundaries: it could report a
+   311k reading after a 17k compaction summary, and treated absent usage as 0.
+3. Built-in `general-purpose` bypassed the role agents' caps. Replayed from disk
+   with the new meter (`measure.mjs --tree`, session 41eecddd): one Sonnet helper
+   made 274 calls, reached 683k context and started six helpers of its own
+   (four transcripts at depth 2).
+
+**Changes.**
+- `lib/context.mjs` is the one reader (router, continuation hook, guard, report,
+  tool-boundary sampler). Measurement = input + cache read + cache write of the
+  last real response after the last `compact_boundary`; provisional from the
+  boundary's `postTokens` until a response reports usage; unknown when missing,
+  null or older than 12 h. Per session and per agent under
+  `~/.claude/orchestrate/context/`, read incrementally from a byte offset.
+  Advice: checkpoint 120k, compact 150k or 75% of a known window, investigate
+  when still large within 3 responses of a compaction; said once per change,
+  keyed to the compaction epoch. A 13 MB, twice-compacted transcript reads in
+  ~0.1 s.
+- `context-check.mjs` (PostToolUse) samples at tool boundaries, notices Plan-mode
+  entry and exit (`lib/modes.mjs`), and surfaces capped returns.
+- Guard (`workflowDecision`): no dispatch when `agent_id` is present (nested); no
+  `general-purpose`/`claude` once all six role agents are installed; two workers
+  across Claude and Codex, browser serial (`lib/workers.mjs`, alive = dispatched
+  <5 min ago or helper transcript written <10 min ago, not returned); Plan mode
+  allows only read roles, no worktree, no PROGRESS; no Claude helper into a live
+  Codex worktree.
+- Ledger marks a return at its role's `maxTurns` as PARTIAL; the router or the
+  sampler says once to continue only the remainder in a fresh packet.
+- `codex-worker.mjs`: `codex exec --json --disable multi_agent --disable
+  multi_agent_v2 -s workspace-write|read-only -C <worktree> -c
+  model_reasoning_effort=… --output-schema … -o … -`, packet on stdin, 20-minute
+  timeout with tree kill, diff saved after exit, status classified from error
+  events and stderr only (quota, auth, throttled, permission, timeout,
+  malformed, checks-failed), quota marked per provider+account+run, Claude
+  fallback packet for the unfinished part, exit 5 when Claude is also near its
+  limit. Sign-in checked with `codex login status`; credentials never read.
+- Quota snapshots carry provider, account and session; unidentified or other
+  accounts are not enforced. `batch.mjs` defaults to concurrency 2 with grouped
+  files (≤15 per task). `profile.mjs --policy` and `--host`. `measure.mjs --tree`
+  (per-request context for every agent).
+- Codex usage-limit blocks lift at the reset time the message states ("try again
+  at 2:31 PM", "in 3 days 4 hours"); with no stated time they hold for the run.
+- `diagnose.mjs`: versions, host, policy, settings-file hooks, context report,
+  agent tree, Codex state and quota freshness in one read-only snapshot, home
+  folder written as ~. Runs in 0.26 s on this session.
+
+**Acceptance on this machine (Desktop engine 2.1.270, Codex CLI 0.154.0-alpha.6.2).**
+A scratch repo with three failing `slugify` tests, sent through the adapter.
+- Run 1: gpt-6-astra at medium, 55 s, 99,741 input tokens (77,824 cached), 883
+  output. The change was correct — 3/3 pass when run outside Codex's sandbox.
+  The adapter reported `checks-failed` because the sandbox blocked `node --test`
+  with spawn EPERM. Fixed: a check the sandbox would not run is now "not
+  verified, rerun it yourself", and the worker prompt says to report it not-run.
+- Run 2 hit Codex's real usage limit ("You've hit your usage limit … try again
+  at 2:31 PM"). Classified quota-exhausted in 13 s, no edits, marked for the
+  session, Claude packet written, exit 4.
+- The lead's own measured context grew 379,987 → 386,939 across both runs,
+  including reading the reports. This is not an A/B against a Claude helper
+  (none was run, to spend no Claude quota on it), so no savings percentage is
+  claimed.
+- Reference only, not a comparison: `costs.jsonl` holds 69 Claude implementer
+  returns from other, larger tasks; the smallest read 21M input tokens over its
+  life. Different tasks and tokenizers, so nothing is derived from it.
+
+**Hook replay on live data.** This session's real 3.9 MB transcript and
+Desktop-shaped payloads, fed to the new scripts with a throwaway home folder:
+context-check measured 116,336 (below 120k, silent); the Plan-mode note on a
+`plan` payload, then the approval note when the mode became `acceptEdits`; the
+guard refused an implementer in Plan mode and a dispatch carrying `agent_id`;
+router and persist-check stayed silent below the thresholds. Nothing was written
+outside the throwaway folder.
+
+**Not verified.** The hooks have not run as the installed plugin inside Desktop:
+the installed plugin is still 0.12.1 until this merges and auto-updates. Codex quota cannot be probed
+before a run by design, so a limit is only learned from a real attempt.
+
 ## v0.12.0 — quota first, 2026-09-13
 
 Josh: quota always wins; speed only when it costs little or no extra quota.

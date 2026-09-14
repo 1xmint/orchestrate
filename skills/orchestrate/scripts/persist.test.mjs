@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } f
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanTurn, persistDecision, errorKey, PERSIST_STEP_CAP, PERSIST_CHECKIN_EVERY, PERSIST_COST_FLAG_BYTES } from './persist-check.mjs';
+import { scanTurn, persistDecision, errorKey, PERSIST_STEP_CAP, PERSIST_CHECKIN_EVERY } from './persist-check.mjs';
 import { persistIntent, persistLine } from './router.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -101,11 +101,13 @@ test('the loop stops near the 5-hour limit, and only there', () => {
   assert.equal(persistDecision({ scan: base, quota: null }).kind, 'continue', 'no status line means no usage stop');
 });
 
-test('the check-in comes at its cadence, the cost flag only on a large session', () => {
+test('the check-in comes at its cadence; context advice rides along only when given', () => {
   assert.match(persistDecision({ rec: { steps: PERSIST_CHECKIN_EVERY - 1 }, scan: base }).why, /Check-in/);
   assert.doesNotMatch(persistDecision({ rec: { steps: PERSIST_CHECKIN_EVERY }, scan: base }).why, /Check-in/);
-  assert.match(persistDecision({ scan: base, transcriptSize: PERSIST_COST_FLAG_BYTES }).why, /Cost:/);
-  assert.doesNotMatch(persistDecision({ scan: base, transcriptSize: PERSIST_COST_FLAG_BYTES - 1 }).why, /Cost:|\d+ (tokens|\$)/, 'never a running counter');
+  assert.match(persistDecision({ scan: base, contextNotice: '[orchestrate · context] ~152k tokens per step.' }).why, /~152k tokens per step/);
+  assert.doesNotMatch(persistDecision({ scan: base }).why, /context\]|\d+k tokens/, 'no size talk without a current measurement');
+  // Transcript bytes are no longer an input at all: a huge file says nothing.
+  assert.doesNotMatch(persistDecision({ scan: base, transcriptSize: 50_000_000 }).why, /Cost:|context\]/);
 });
 
 // ---- the hooks, end to end ----------------------------------------------------

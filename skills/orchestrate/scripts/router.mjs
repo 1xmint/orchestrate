@@ -28,8 +28,11 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
-  DIR, readJson, writeJsonAtomic, lastContextTokens, staleRunsUnder,
+  DIR, readJson, writeJsonAtomic, staleRunsUnder,
 } from './lib/tier.mjs';
+import { sampleContext } from './lib/context.mjs';
+import { modeNote } from './lib/modes.mjs';
+import { cappedNote } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
@@ -236,16 +239,14 @@ function scanLimits(transcriptPath, state) {
   } catch { return state.limits || []; }
 }
 
-// The lead's own cost per step, said when it crosses a line, once per line.
-export const CONTEXT_LINES = [150000, 300000];
-
-export function contextNote(tokensNow, warnedUpTo = 0) {
-  const line = [...CONTEXT_LINES].reverse().find(t => tokensNow >= t && t > warnedUpTo);
-  if (!line) return null;
-  return {
-    upTo: line,
-    text: `[orchestrate · context] this conversation now re-reads ~${Math.round(tokensNow / 1000)}k tokens on every step. If the rest of the work can resume from files (the plan, the commits, a Pickup line), tell the user once that a fresh session would cost less per step, and write down where to resume.`,
-  };
+// The lead's own cost per step comes from the shared reader (lib/context.mjs),
+// said only when its advice changes. A compaction starts a new epoch there, so
+// advice given before it is never repeated against the compacted conversation.
+export function contextLine(input, { force = false } = {}) {
+  try {
+    if (!input || !input.transcript_path) return '';
+    return sampleContext({ transcriptPath: input.transcript_path, session: input.session_id || null, force }).notice || '';
+  } catch { return ''; }
 }
 
 // Once a week per plan, model and effort: the lead running above what
@@ -384,6 +385,10 @@ function handlePrompt(input) {
   const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed) && trimmed.split(/\s+/).length >= 4;
   const ctx = gatherContext(input, state);
   const out = [];
+  // The mode the host reports, on every prompt: a switch into or out of Plan
+  // mode is said once, whatever the prompt looks like.
+  const mode = modeNote(state, input);
+  if (mode) out.push(mode);
 
   if (!state.cardSent && substantive) {
     out.push(stateLine(ctx, '[orchestrate]'));
@@ -415,13 +420,14 @@ function handlePrompt(input) {
   if (substantive) {
     const line = pluginFitReport(input.transcript_path);
     if (line) out.push(`[orchestrate · plugins] ${line}`);
-    const size = lastContextTokens(input.transcript_path);
-    const note = size != null ? contextNote(size, Number(state.contextWarnedUpTo) || 0) : null;
-    if (note) { out.push(note.text); state.contextWarnedUpTo = note.upTo; }
+    const note = contextLine(input);
+    if (note) out.push(note);
     const lead = leadNote(ctx.self, ctx.tier);
     if (lead) out.push(lead);
     const hidden = staleNote(ctx.repoRoot);
     if (hidden) out.push(hidden);
+    const capped = cappedNote(state);
+    if (capped) out.push(capped);
     // A usage limit just landed: the moment helpers may have died mid-task.
     const limitKey = ctx.limits.join(',');
     if (limitKey && state.recoverShownFor !== limitKey) {
@@ -466,6 +472,9 @@ export function unreturnedNote(state, max = 5) {
   const shown = list.slice(-max).map(u => `${u.role}${u.task ? ` ${u.task}` : ''}${u.progress ? ` — progress ${u.progress}` : ' — no PROGRESS file named'}`).join('; ');
   return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session never returned: ${shown}. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
 }
+
+// Helpers that stopped at their turn cap (lib/workers.mjs), said once each.
+export { cappedNote };
 
 // Plans set aside as stale, said once per plan on this machine, so a user who
 // wanted one back knows the one command, and nobody is told twice.
@@ -543,6 +552,13 @@ function handleSessionStart(input) {
   if (state.persist && state.persist.armed) out.push(`[orchestrate · ${word}] ${persistLine(state.persist)}`);
   const lost = unreturnedNote(state);
   if (lost) out.push(lost);
+  // After a compaction the reading starts over from the boundary. Usually that
+  // says nothing until a response measures it; a summary that is itself huge
+  // says so now.
+  const size = contextLine(input, { force: true });
+  if (size) out.push(size);
+  const mode = modeNote(state, input);
+  if (mode) out.push(mode);
 
   state.cardSent = true;
   state.lastStateHash = stateHash(ctx);
