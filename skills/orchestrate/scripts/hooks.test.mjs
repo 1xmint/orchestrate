@@ -12,7 +12,7 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseReturn, sumUsage, describeDispatch, returnFilename, costLine, appendCost, readCosts, latestPerAgent, COSTS_MAX } from './ledger.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
-import { decide as precompactDecide } from './precompact-check.mjs';
+import { decide as precompactDecide, unboundDecision } from './precompact-check.mjs';
 import { decide, eventId, markSeen } from './guard-agent.mjs';
 import { trimLog, runSpend } from './lib/tier.mjs';
 
@@ -24,6 +24,14 @@ function sandbox() {
   mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
   return home;
 }
+
+test('precompact unbound blocks once per epoch then proceeds', () => {
+  const reading = { compaction: { uuid: 'e1' } };
+  const one = unboundDecision({ session: 's', reading, prev: {}, checkpoint: false });
+  assert.equal(one.block, true);
+  assert.match(one.reason, /checkpoint/);
+  assert.equal(unboundDecision({ session: 's', reading, prev: { blockedFor: 'e1' }, checkpoint: false }).block, false);
+});
 
 function run(name, payload, home, extraEnv = {}) {
   const r = spawnSync(process.execPath, [script(name)], {
@@ -802,11 +810,18 @@ test('precompact: a written Pickup, or no dispatch yet, never blocks', () => {
   assert.equal(run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc3', cwd: quiet.dir }, home).stdout.trim(), '');
 });
 
-test('precompact: a session with no bound run says nothing at all', () => {
+// v0.15.0: an unbound session used to compact with nothing saved, and the 472k
+// session in STATE.md lost its thread that way. It now gets one block per
+// compaction epoch naming where to write the checkpoint, then compaction proceeds.
+test('precompact: a session with no bound run is asked for a checkpoint once, then proceeds', () => {
   const home = sandbox();
   const repo = fixtureRepo();
-  const out = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc4', cwd: repo.dir }, home);
-  assert.equal(out.stdout.trim(), '');
+  const input = { hook_event_name: 'PreCompact', session_id: 'spc4', cwd: repo.dir };
+  const first = run('precompact-check.mjs', input, home);
+  const block = JSON.parse(first.stdout);
+  assert.equal(block.decision, 'block');
+  assert.match(block.reason, /context[\\/]spc4[\\/]checkpoint-/);
+  assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '');
 });
 
 test('turn check: nothing in it can ask for more research, testing or improvement', () => {

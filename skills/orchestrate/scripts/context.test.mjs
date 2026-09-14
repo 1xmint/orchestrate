@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   readContext, sampleContext, adviseContext, contextNotice, scanSlice, inputSide, thresholds,
-  storedContext, markAnnounced, agentTranscriptPath, formatReading, writeStatusCapacity, statusCapacity,
+  storedContext, markAnnounced, agentTranscriptPath, formatReading, writeStatusCapacity, statusCapacity, checkpointPath,
 } from './lib/context.mjs';
 import { loadPolicy, setPolicyValue } from './lib/policy.mjs';
 import { persistDecision } from './persist-check.mjs';
@@ -109,6 +109,14 @@ test('thresholds: checkpoint at 120k, compact at 150k, or 75% of a known smaller
   assert.throws(() => setPolicyValue({}, 'context.nope', '1'), /unknown policy key/);
 });
 
+test('hard context advice is once per compaction epoch and says not to start work', () => {
+  const reading = { state: 'measured', tokens: 300000, capacity: null, compaction: { uuid: 'epoch-1' }, responsesSinceCompaction: 4 };
+  const advice = adviseContext(reading, policy);
+  assert.equal(advice.action, 'hard');
+  assert.match(contextNotice(reading, advice), /Do not start new work here/);
+  assert.match(checkpointPath('s', reading), /checkpoint-epoch-1\.md$/);
+});
+
 test('still large right after compaction: investigate, do not recommend compacting again', () => {
   const { p } = file([assistant(900000, { min: 1 }), boundary(900000, 160000, 2), summary(2), assistant(171000, { min: 3 })]);
   const r = readContext(p, { now: NOW, policy, capacity: null });
@@ -154,7 +162,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   appendFileSync(p, `${user('z'.repeat(5000), 6)}\n${assistant(160000, { min: 7 })}\n`);
   const s4 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s4.advice.action, 'compact');
-  assert.match(s4.notice, /compact if this same task continues; start a fresh conversation if the task changes/);
+  assert.match(s4.notice, /Finish this step only, write the checkpoint/);
 
   // Compaction keeps the file; the reading and the announced advice start over.
   appendFileSync(p, `${boundary(160000, 17000, 8)}\n${summary(8)}\n`);

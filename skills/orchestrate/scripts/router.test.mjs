@@ -8,10 +8,16 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD } from './router.mjs';
+import { cardBody, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash } from './router.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTER = join(HERE, 'router.mjs');
+
+test('state line and hash carry context bands', () => {
+  const base = { self: null, tier: 'pro', agents: 0, limits: [], candidates: [], run: null, quota: null, persist: false };
+  assert.match(stateLine({ ...base, context: { tokens: 151000 } }, '[x]'), /ctx ~151k/);
+  assert.notEqual(stateHash({ ...base, context: { tokens: 121000 } }), stateHash({ ...base, context: { tokens: 151000 } }));
+});
 
 function makeHome() {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
@@ -173,6 +179,23 @@ test('resume and compaction carry the goal, the constraints and the Pickup', () 
   const compacted = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-res2', cwd: repo });
   assert.match(compacted, /\[orchestrate · compacted\]/);
   assert.match(compacted, /Goal: Finish the tidy command/);
+});
+
+test('SessionStart compact with no bound run injects the checkpoint file, capped at 1,200 chars', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessionId = 's-checkpoint1';
+  const dir = join(home, '.claude', 'orchestrate', 'context', sessionId);
+  mkdirSync(dir, { recursive: true });
+  const long = 'checkpoint text '.repeat(200); // well over the 1,200 char cap
+  writeFileSync(join(dir, 'checkpoint-e1.md'), long);
+
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo });
+  const m = /\[orchestrate · compacted\] checkpoint\n([\s\S]*)/.exec(out);
+  assert.ok(m, `expected a checkpoint block: ${out}`);
+  const excerpt = m[1];
+  assert.ok(excerpt.length <= 1200, `${excerpt.length} <= 1200`);
+  assert.match(excerpt, /\.\.\.$/);
+  assert.equal(excerpt, `${long.slice(0, 1197)}...`);
 });
 
 test('the resume excerpt is bounded', () => {

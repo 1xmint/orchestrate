@@ -172,3 +172,9 @@ export function setKeys(settings, { model, effortLevel } = {}) {
   if (effortLevel) settings.effortLevel = String(effortLevel);
   return settings;
 }
+
+export function setEnv(settings, values = {}) {
+  settings.env = settings.env && typeof settings.env === 'object' ? settings.env : {};
+  for (const [key, value] of Object.entries(values)) if (value != null) settings.env[key] = String(value);
+  return settings;
+}
