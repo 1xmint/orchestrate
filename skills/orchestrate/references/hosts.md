@@ -7,6 +7,21 @@ same folder but its dispatch path is documented, not exercised.
 
 ## Claude Code (desktop app or CLI)
 
+### Host facts checked 2026-09-14
+
+- **Compaction.** Set `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` in the settings
+  `env`, use `/autocompact 200k`, or launch with `claude --autocompact 200k`.
+  `profile.mjs --autocompact 200k` writes the setting and accepts `--dry-run`.
+  `/compact [instructions]` accepts focus text. A hook cannot run that command.
+- **Tool results.** Interactive sessions have no automatic clearing of old tool
+  results. Compact or continue from a checkpoint instead.
+- **Worker model.** A `model` on an `Agent` call beats both the agent file and
+  `CLAUDE_CODE_SUBAGENT_MODEL`. Name it on every dispatch.
+- **Nesting.** The host allows three subagent layers and 20 concurrent
+  subagents by default. Set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` as a host
+  backstop. Whether it counts the lead's own level is unverified, so the
+  coordinator guard remains the real rail.
+
 **Dispatch** is the `Agent` tool: `subagent_type` (a role agent, or `Explore` /
 `general-purpose`), `model` (`sonnet | opus | haiku | fable`; overrides the agent file), `prompt`
 (the packet), `isolation: "worktree"`, `run_in_background` (default true), `description` (3–5
@@ -34,17 +49,15 @@ than the session's own working directory. Two other stops in the same session ar
 before it treats a stop as a return; without that check the lead's own messages were being
 filed under `returns/`.
 
-**Nesting** is allowed to three layers below the main conversation
-(`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`); `Agent` is removed only at the depth limit. This skill's
-rule that only the lead dispatches is enforced in the role files themselves
-(`disallowedTools: Agent`, or a tool allowlist without it), because a nested dispatch hides both
-its cost and its return from the ledger. Up to 20 concurrent subagents by default.
-Built-in `general-purpose` has no such rule and no turn cap: one Sonnet helper on
-this machine made 274 model calls, reached 683k context and started six helpers
-of its own. So the guard also refuses any dispatch whose hook payload carries
-`agent_id` (present only when the hook fires inside a subagent), refuses
-`general-purpose` while the role agents are installed, and holds the plugin to
-two concurrent workers across Claude and Codex.
+**Nesting** is allowed only through `orch-coordinator`. The guard finds the
+parent from its dispatch record, allows only `orch-implementer`,
+`orch-researcher`, `orch-reviewer` or `Explore` with a named model, refuses a
+second coordinator, and caps depth at two. Every nested dispatch records its
+parent and counts against the same budget and worker slots. The policy is
+`policy.workers.nested=coordinator|deny|allow`, with `coordinator` as the
+default. A live coordinator raises the default concurrent slot count to three,
+so it can hold one slot while two workers run. Built-in `general-purpose` has no
+turn cap; the guard refuses it while the bounded roles are installed.
 
 **Which host.** The desktop app runs its own embedded engine: on one machine its
 transcripts said 2.1.270 while the terminal `claude --version` said 2.1.209.
@@ -68,7 +81,7 @@ start small. A `fork` inherits the whole conversation instead.
 repo, wins). Fields used here: `name`, `description`, `model`, `tools`,
 `disallowedTools`, `maxTurns`, `isolation`, `color`, `memory` (`user` → `~/.claude/agent-memory/
 <name>/`, `project`, `local`), `hooks` (`Stop` in an agent file becomes `SubagentStop` for that
-agent). `install-agents.mjs` installs the six and substitutes the skill's absolute path into
+agent). `install-agents.mjs` installs the seven and substitutes the skill's absolute path into
 their paths. New agent files appear in a running session after a minute or two; a new
 
 The full field list also has `model: inherit` (run on whatever the session is on, rather than a
@@ -77,7 +90,7 @@ unlisted one through the Skill tool), `mcpServers` (per-subagent, including inli
 definitions), `background` (stay backgrounded even if Claude asks to run it in the foreground),
 `effort` (overrides the session's effort for that subagent only — every role here sets it, see
 `models.md`; it is honoured on a plugin install), `initialPrompt`, and `experimental.cacheTtl`
-(`5m` or `1h`, the file-level form of `subagentPromptCacheTtl`). **The six role agents use only
+(`5m` or `1h`, the file-level form of `subagentPromptCacheTtl`). **The seven role agents use only
 `effort` among these**, and one omission is worth naming why: **a plugin-installed subagent ignores
 `hooks`, `mcpServers` and `permissionMode` in its own frontmatter entirely** (documented
 2026-09-10). Since the plugin path is this skill's primary distribution channel, per-role
@@ -184,10 +197,10 @@ was of a check that spends real money to enforce formatting — but the write re
 not. From plan mode, dispatch only read-only tasks whose packet says "return the findings
 inline, write nothing", or name the plan file's own sibling as the output path.
 
-**`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`** is the host's mechanical form of "only the
-the lead dispatches", alongside `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`. Whether the count
-includes the manager's own level is unverified, so nothing here sets it; one dispatch under a
-known value settles it.
+**`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2`** is the recommended host backstop
+for coordinator nesting. Its counting of the lead's own level is unverified, so
+the plugin guard still enforces the actual depth-two rule and records the
+parent. `policy.workers.nested` chooses `coordinator`, `deny` or `allow`.
 
 **One browser pane** per session; browser tasks run one at a time.
 

@@ -6,18 +6,20 @@ file.
 
 There used to be a ten-rung ladder here, and a hook that read each message with
 regular expressions and named the rung. It is gone. A pattern in the wording is
-not evidence about the work: "six files" is not a reason to delegate, "should
-we" is not a reason to research, and the word "deploy" in a sentence is not a
-reason to ask permission for an edit. What is left is the actual question and
-what it costs to get it wrong.
+not evidence about the work: "should we" is not a reason to research, and the
+word "deploy" in a sentence is not a reason to ask permission for an edit. What
+is left is the actual work, how much manager context it would consume, and what
+it costs to get it wrong.
 
 ## The choice
 
-**Direct** — you answer, read, edit and check it yourself.
+**Direct** — you answer, read, edit and check it yourself when the step fits in
+about eight tool calls with small outputs, or about 15k tokens of growth.
 
-Most work, including long work and work across several files. Your own context
-is the thing you are spending: a task is worth delegating when its *output* is
-large and its *answer* is small, not when the task is tedious.
+The manager's context is for judgment. Everything larger goes to a worker, and
+the conversation keeps only its packet and return. Always use a worker to write
+or rewrite a file over about 150 lines, change three or more files, run a build
+or test suite, or make a large read whose answer is a paragraph.
 
 **Assisted** — one substantial separable task goes to a role agent with a packet.
 
@@ -31,16 +33,20 @@ Worth it when delegation buys something concrete:
 | independent scrutiny | someone who did not write it decides whether it is right |
 | context | a large read whose result is a paragraph; the reading dies with the agent |
 
-Worth it for none of these: a task you could do in the time the packet takes to
-write.
+Worth it for none of these: a step that stays within the direct-work boundary.
 
 **Coordinated** — a run ledger, ids, dependencies, and returns filed on disk.
 
 Worth it when several independent tracks run at once, or the work must survive
-this session ending. Not worth it for one task, however large.
+this session ending. A plan gets one packet per step. A wave of three or more
+independent steps goes to `orch-coordinator`; one larger task goes to one
+worker.
 
 Move to the simpler choice as soon as the reason for the heavier one is gone. A
 small high-risk change can take an independent review without becoming a run.
+
+Never `Write` a file you could `Edit`. Never `Read` back a file you just wrote.
+Filter command output to what decides the next step.
 
 ## Cheaper moves that are not delegation
 

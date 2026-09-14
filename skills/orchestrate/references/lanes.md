@@ -43,36 +43,29 @@ across that many tasks, at most 15 files each. It used to be concurrency 20 with
 one helper per file: every helper re-reads its own growing context on every
 step, so twenty one-file helpers cost far more than two helpers doing ten each.
 The host still allows up to 20 concurrent subagents (`hosts.md`); the guard
-holds this plugin to 2 unless `profile.mjs --policy workers.maxConcurrent=N`.
+holds this plugin to two workers, plus the coordinator's own slot while it is
+live, unless `profile.mjs --policy workers.maxConcurrent=N` changes it.
 
 ## `codex` (an external worker, `scripts/codex-worker.mjs`)
 
-Bounded coding work or an independent review on the user's Codex subscription,
-through `codex exec` and the ChatGPT login already saved on the machine — no API
-key. Writers get their own worktree next to the repo (`<repo>-worktrees/<task>`),
-reviewers run read-only in place; Codex's own multi-agent features are disabled
-so the lead keeps all scheduling. The packet goes in on stdin and a structured
-report comes back (`assets/worker-report.schema.json`), with events, stderr, the
-diff and a progress note saved in a checkpoint folder. A usage-limit error stops
-Codex for the run and writes a Claude packet for only the unfinished part;
-login, throttling, permission, timeout, malformed output and failing checks are
-each reported as themselves. SKILL.md §5 has when to use it and what each exit
-code means.
+Codex is the worker lane until its shared allowance runs out. Use it for bounded
+coding, mechanical work, test runs and suitable cross-vendor review. Planner
+work, browser work and anything needing this session's MCP tools or permissions
+stays on Claude. `routing.md` chooses one of the four models and an effort for
+each dispatch.
 
-Use it for one mechanical instruction applied identically across files: a
-rename, a header, an import rewrite, a dependency bump repeated per package.
-Not for a change where two files need to see each other — a shared rename
-across a type and its call sites is one task owning the whole set, not a
-batch. Paste the printed rows into `RUN.md`'s table, then dispatch each
-file's packet as its own `orch-implementer` call, in waves of the printed
-size; the full gate runs once at the join, same as any other coordinated run
-(`SKILL.md §6`).
+The adapter uses the ChatGPT login already saved on the machine, not an API key.
+Writers get their own worktree. Codex's own multi-agent features are disabled,
+so the lead or `orch-coordinator` keeps scheduling. Put the packet under the
+run's `packets/` directory and always pass the model and effort:
 
-Portable, not a fast path: it costs a real dispatch per file, same as typing
-each packet by hand would. If a future host exposes `/batch` or the Workflow
-tool to the model directly, that beats this for the cases `/batch` already
-covers (5–30 files, one worktree per file, opens a PR) — check `hosts.md`'s
-dated finding before assuming either is still unavailable.
+`codex-worker.mjs run --packet <file> --repo <dir> --task <id> --run <run dir> --model <id> --effort <level> [--approved]`
+
+The report lands at `<run dir>/workers/<task>/report.json`. A usage-limit error
+stops Codex until the reset and writes a Claude packet for only the unfinished
+part. Login, throttling, permission, timeout, malformed output and failing
+checks are each reported as themselves. SKILL.md §5 has the full start,
+monitor, grade, commit and merge recipe.
 
 ## `fork`
 
