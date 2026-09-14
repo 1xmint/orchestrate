@@ -38,6 +38,18 @@ import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const CODEX_STATUS_CACHE = join(DIR, 'workers', 'codex-status.json');
+
+export function codexState(now = Date.now()) {
+  const c = readJson(CODEX_STATUS_CACHE);
+  // A newly learned quota stop wins over an older successful probe.  This is
+  // read-only and never starts Codex from a hook.
+  const provider = readJson(join(DIR, 'workers', 'provider-state.json')) || {};
+  const exhausted = Array.isArray(provider.exhausted) && provider.exhausted.some(e => e && e.provider === 'codex' && e.resetsAt && Date.parse(e.resetsAt) > now);
+  if (exhausted) return 'limit';
+  if (!c || !c.at || now - Date.parse(c.at) > 3600000) return 'off';
+  return c.status === 'limit' ? 'limit' : c.status === 'ok' ? 'ok' : 'off';
+}
 
 // ---- the card (from references/ladder.md, so the text has one home) ---------
 // Five short paragraphs: how the work is shaped, how a question is answered,
@@ -72,9 +84,9 @@ export function stateLine(ctx, prefix) {
   const you = ctx.self && ctx.self.model
     ? `you: ${ctx.self.model}${ctx.self.effort ? ` @ ${ctx.self.effort} effort` : ''}`
     : 'you: model not known here';
-  const agents = `orch-agents ${ctx.agents}/6`;
+  const agents = `orch-agents ${ctx.agents}/7`;
   const limits = (ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none') + contextPhrase(ctx.context);
-  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
+  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · codex: ${ctx.codex || codexState()} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
 }
 
 export function contextBand(reading) {
@@ -193,7 +205,7 @@ export function stateHash(ctx) {
     focus && focus.edgesMissing ? 'edges?' : '',
     ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : '',
     // The band, not the number: a line every percent would be noise.
-    quotaBand(ctx.quota), contextBand(ctx.context),
+    quotaBand(ctx.quota), contextBand(ctx.context), ctx.codex || codexState(),
   ].join('|');
 }
 
@@ -319,6 +331,7 @@ function gatherContext(input, state) {
     persist: Boolean(state.persist && state.persist.armed),
     quota: readQuota(),
     context: storedContext(input.session_id || null),
+    codex: codexState(),
   };
 }
 

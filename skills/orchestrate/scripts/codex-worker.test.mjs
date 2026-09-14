@@ -86,6 +86,13 @@ test('success: an isolated worktree, explicit arguments, the packet on stdin, a 
   assert.ok(!exec.argv.some(a => /dangerously|ignore-rules|ignore-user-config/.test(a)), 'normal permissions and repo instructions stay on');
   const saved = JSON.parse(readFileSync(join(report.checkpoint, 'report.json'), 'utf8'));
   assert.equal(saved.status, 'done');
+  const returned = JSON.parse(readFileSync(join(deps.workersDir, '..', 'run-20260914-x', 'returns', 'returns.jsonl'), 'utf8'));
+  assert.equal(returned.runtime, 'codex');
+  assert.equal(returned.model, report.model);
+  assert.equal(returned.effort, report.effort);
+  assert.ok(existsSync(join(deps.workersDir, '..', 'run-20260914-x', 'returns', '9-14-0001-codex.md')));
+  const reportLine = JSON.parse(readFileSync(join(deps.workersDir, 'reports.jsonl'), 'utf8'));
+  assert.equal(reportLine.effort, report.effort);
   assert.equal(runningExternal(deps.workersDir).length, 0, 'the worker is unregistered after it exits');
 });
 

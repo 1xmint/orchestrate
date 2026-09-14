@@ -213,7 +213,11 @@ test('quota exhaustion is scoped by provider, account and run; unidentified entr
   ] }));
   assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 's' }, legacy, t0 + 60 * 60000));
   assert.equal(exhaustedFor({ provider: 'codex', account: 'a', scope: 's' }, legacy, t0 + 104 * 60000), null);
-  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'held' }, legacy, t0 + 48 * 3600000), 'no stated time holds for the run');
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'held' }, legacy, t0 + 48 * 3600000), 'legacy entries retain their prior behavior');
+  const five = mkdtempSync(join(tmpdir(), 'orch-prov-'));
+  markExhausted({ provider: 'codex', account: 'a', scope: 'five', message: 'usage limit', now: t0 }, five);
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'five' }, five, t0 + 4 * 3600000));
+  assert.equal(exhaustedFor({ provider: 'codex', account: 'a', scope: 'five' }, five, t0 + 5 * 3600000), null);
 });
 
 test('reset times are read from the provider message', async () => {
