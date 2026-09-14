@@ -2,6 +2,14 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.1 — helper size budgets, capped helpers free their slot, 2026-09-14
+
+A version bump so installed copies pick up PR #9: the plugin cache refreshes
+only on a new version, and `claude plugin update` reported 0.15.0 "already at
+the latest" with the old code still installed. PR #9 carried the README made
+current, the capped-helper slot fix, helper size budgets with raised turn caps
+(all listed under v0.15.0 below), and the size line naming its next step.
+
 ## v0.15.0 — the lead keeps judgment, workers carry the bulk, 2026-09-14
 
 Asked: does the plugin waste context, should the lead mostly manage workers,
