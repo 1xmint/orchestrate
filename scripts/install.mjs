@@ -9,6 +9,7 @@
 //                                                   interpreter's absolute path pinned in
 //   node scripts/install.mjs --no-codex           skip ~/.agents
 //   node scripts/install.mjs --no-agents          skip the role agents
+//   node scripts/install.mjs --no-autocompact     do not set the one-time 200k auto-compact default
 //   node scripts/install.mjs --project <repo>     drop the project kit into one repo (see below)
 //   node scripts/install.mjs --dry-run            say what would happen, change nothing
 //
@@ -22,8 +23,9 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  registrations, applyRegistrations, readSettings, writeSettings, backupSettings, nodeMajor, toPosix,
+  registrations, applyRegistrations, readSettings, writeSettings, backupSettings, nodeMajor, toPosix, applyAutocompactDefault,
 } from '../skills/orchestrate/scripts/lib/settings.mjs';
+import { loadPolicy } from '../skills/orchestrate/scripts/lib/policy.mjs';
 import { templateTree } from '../skills/orchestrate/scripts/lib/template.mjs';
 
 // The interpreter, quoted and forward-slashed, for the templated hook commands
@@ -102,6 +104,16 @@ if (wantRouter || wantGuard) {
   if (dryRun && before === JSON.stringify(settings)) say('no change needed');
 }
 
+if (!has('--no-autocompact')) {
+  const settingsPath = join(HOME, '.claude', 'settings.json');
+  if (dryRun) say(`would set auto-compact to 200k in ${toPosix(settingsPath)} once unless already configured or opted out`);
+  else {
+    const compact = applyAutocompactDefault({ settingsPath, markerDir: join(HOME, '.claude', 'orchestrate'), policy: loadPolicy() });
+    if (compact.applied) say(`auto-compact set to 200k in ${toPosix(settingsPath)} (backup ${toPosix(compact.backup || '')})`);
+    else say(`auto-compact unchanged (${compact.reason})`);
+  }
+}
+
 // ---- role agents ------------------------------------------------------------
 if (!has('--no-agents')) {
   const args = [join(SRC, 'scripts', 'install-agents.mjs'), ...(dryRun ? ['--dry-run'] : [])];
@@ -124,4 +136,3 @@ if (existsSync(STYLE_SRC)) {
   console.log('Installed as a plugin instead, the Plain voice is on in every session without');
   console.log('anybody selecting it, and disabling the plugin is the way off.');
 }
-

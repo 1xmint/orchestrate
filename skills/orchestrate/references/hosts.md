@@ -11,7 +11,11 @@ same folder but its dispatch path is documented, not exercised.
 
 - **Compaction.** Set `CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000` in the settings
   `env`, use `/autocompact 200k`, or launch with `claude --autocompact 200k`.
-  `profile.mjs --autocompact 200k` writes the setting and accepts `--dry-run`.
+  A plugin cannot ship this env setting: its `settings.json` supports only
+  `agent` and `subagentStatusLine`. Orchestrate therefore writes its 200k
+  default once to the user's settings unless configured or opted out.
+  `profile.mjs --autocompact 200k` writes it; `--autocompact off` removes it
+  and records the opt-out; both accept `--dry-run`.
   `/compact [instructions]` accepts focus text. A hook cannot run that command.
 - **Tool results.** Interactive sessions have no automatic clearing of old tool
   results. Compact or continue from a checkpoint instead.

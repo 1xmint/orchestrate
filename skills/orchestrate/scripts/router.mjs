@@ -36,6 +36,8 @@ import { cappedNote } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
+import { applyAutocompactDefault } from './lib/settings.mjs';
+import { loadPolicy } from './lib/policy.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CODEX_STATUS_CACHE = join(DIR, 'workers', 'codex-status.json');
@@ -423,6 +425,12 @@ function handlePrompt(input) {
   const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed) && trimmed.split(/\s+/).length >= 4;
   const ctx = gatherContext(input, state);
   const out = [];
+  // Plugin settings cannot carry env vars.  Do this once, before the normal
+  // card logic; after the marker exists this only stats one tiny file.
+  const compact = applyAutocompactDefault({
+    settingsPath: join(dirname(DIR), 'settings.json'), markerDir: DIR, policy: loadPolicy(),
+  });
+  if (compact.applied) out.push(`orchestrate set auto-compact to ${compact.value % 1000 ? compact.value : `${compact.value / 1000}k`} in ~/.claude/settings.json (it applies from the next session; backup at ${compact.backup || 'none'}). To undo: \`profile.mjs --autocompact off\`.`);
   // The mode the host reports, on every prompt: a switch into or out of Plan
   // mode is said once, whatever the prompt looks like.
   const mode = modeNote(state, input);
