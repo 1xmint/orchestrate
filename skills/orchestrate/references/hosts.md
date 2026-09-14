@@ -25,6 +25,12 @@ same folder but its dispatch path is documented, not exercised.
   subagents by default. Set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` as a host
   backstop. Whether it counts the lead's own level is unverified, so the
   coordinator guard remains the real rail.
+- **Helper compaction.** A helper compacts on its own when its window fills,
+  "using the same logic as the main conversation" (sub-agents.md, 2026-09-14);
+  seen once here, 167k to 63k. Nothing lets a helper ask for it on purpose, and
+  a turn cap usually ends a helper first. A helper at `maxTurns` returns marked
+  partial with an id `SendMessage` can resume; docs do not say whether a message
+  to a running helper lands mid-run.
 
 **Dispatch** is the `Agent` tool: `subagent_type` (a role agent, or `Explore` /
 `general-purpose`), `model` (`sonnet | opus | haiku | fable`; overrides the agent file), `prompt`

@@ -2,6 +2,13 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.2 — helpers do compact, 2026-09-14
+
+Step S6 of the rules-versus-judgment plan (run `20260914-rules-vs-judgment`,
+PLAN.md in its run dir). The v0.15.1 entry below said helpers do not compact;
+the docs and one transcript here say they do. Corrected there and added to
+references/hosts.md with what a capped helper returns.
+
 ## v0.15.1 — helper size budgets, capped helpers free their slot, 2026-09-14
 
 A version bump so installed copies pick up PR #9: the plugin cache refreshes
@@ -138,9 +145,13 @@ transition, so the worker always passes `-m`.
   set per role with `profile.mjs --policy workers.size.<role>.returnAt=160000`,
   and a pair whose warnAt is not below returnAt keeps the role's defaults. Turn
   caps are raised to a backstop: implementer 100, debugger 120, coordinator
-  150, researcher, planner and browser 80, reviewer 60. Helpers do not compact:
-  undocumented for subagents, and 0 of 89 helper transcripts on this machine
-  ever did; the progress file carries the work instead. 357/357.
+  150, researcher, planner and browser 80, reviewer 60 (the implementer cap was
+  50 on the 2026-09-14 lead-delegates run). The progress file carries the work
+  when a helper stops. 357/357. *Corrected 2026-09-14:* this entry first said
+  helpers do not compact. They do: sub-agents.md says "Subagents support
+  automatic compaction using the same logic as the main conversation", and one
+  helper here did (`agent-ac3ff549f4812ba36.jsonl`, one compact_boundary, 167k
+  peak to 63k). The earlier 0 of 89 was only turn caps ending helpers first.
 
 **Found while building.** (1) The Codex sandbox refuses child processes, so
 `node --test` fails there with `spawn EPERM`; `--test-isolation=none` runs
