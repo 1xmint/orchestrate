@@ -124,6 +124,21 @@ test('the CLI builds and answers from any folder inside the repo', () => {
   assert.equal(cli('who-uses').status, 2);
 });
 
+test('where git cannot start (a sandbox), queries answer from the saved map named by --repo', () => {
+  const { root } = fixture();
+  build(root);
+  const noGit = { ...process.env, PATH: '', Path: '' };
+  const cli = (...a) => spawnSync(process.execPath, [join(HERE, 'map.mjs'), ...a], { cwd: tmpdir(), env: noGit, encoding: 'utf8' });
+  const t = cli('tests-for', 'app.mjs', '--repo', root);
+  assert.equal(t.status, 0, t.stderr);
+  assert.match(t.stdout, /^\(saved map from \w{7}; git could not start here/);
+  assert.match(t.stdout, /test\/app\.test\.mjs {2}\(imports it at line 1\)/);
+  assert.equal(cli('build', '--repo', root).status, 2, 'building needs git');
+  const none = cli('tests-for', 'app.mjs');
+  assert.equal(none.status, 2);
+  assert.match(none.stderr, /git could not start here \(ENOENT\); pass --repo/);
+});
+
 test('building the map never shows up as a change in git', () => {
   const { root } = fixture();
   build(root);

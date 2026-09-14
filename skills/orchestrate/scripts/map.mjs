@@ -423,9 +423,24 @@ function main() {
   const repoArg = i >= 0 ? args.splice(i, 2)[1] : null;
   const json = args.includes('--json');
   const [cmd, ...rest] = args.filter(a => a !== '--json');
-  const top = git(resolvePath(repoArg || process.cwd()), ['rev-parse', '--show-toplevel']);
-  if (top.status !== 0) { console.error('map.mjs: not inside a git repository'); process.exit(2); }
-  const root = resolvePath(top.stdout.trim());
+  const start = resolvePath(repoArg || process.cwd());
+  const top = git(start, ['rev-parse', '--show-toplevel']);
+  // Codex's sandbox stops Node starting other programs (spawn EPERM), so git
+  // cannot run there even inside a repo; seen on the v0.14.0 acceptance run.
+  // The map already saved in --repo still answers, marked as not re-checked.
+  const saved = top.error ? readJsonFile(join(mapDir(start), 'map.json')) : null;
+  if (top.status !== 0 && !(saved && saved.v === MAP_V)) {
+    console.error(top.error ? `map.mjs: git could not start here (${top.error.code}); pass --repo <repo root> where the map was built` : 'map.mjs: not inside a git repository');
+    process.exit(2);
+  }
+  const root = top.status === 0 ? resolvePath(top.stdout.trim()) : start;
+  if (top.status !== 0) {
+    const queries = { 'who-uses': () => whoUses(saved, rest[0], root), deps: () => deps(saved, rest[0]), 'tests-for': () => testsFor(saved, rest) };
+    if (!queries[cmd] || !rest[0]) { console.error('map.mjs: git could not start here, so only who-uses, deps and tests-for work, from the saved map'); process.exit(2); }
+    const lines = queries[cmd]();
+    console.log(json ? JSON.stringify(lines) : [`(saved map from ${String(saved.head).slice(0, 7)}; git could not start here, so it was not checked against HEAD)`, ...lines].join('\n'));
+    return;
+  }
   if (cmd === 'build') {
     const { map, md, ms } = build(root);
     const c = map.counts;

@@ -255,9 +255,9 @@ test('findCodex prefers the override, then PATH, then the app bundle', () => {
 
 test('the worker is pointed at the repo map only when one exists, and a stale one is rebuilt first', async () => {
   const { mapNote } = await import('./codex-worker.mjs');
-  const p = workerPrompt(PACKET, { role: 'implement', worktree: '/w', progress: null, map: { mdPath: '/r/.orchestrator/map/map.md', script: '/s/map.mjs' } });
+  const p = workerPrompt(PACKET, { role: 'implement', worktree: '/w', progress: null, map: { mdPath: '/r/.orchestrator/map/map.md', script: '/s/map.mjs', repo: '/r' } });
   assert.match(p, /Before searching, read \/r\/\.orchestrator\/map\/map\.md/);
-  assert.match(p, /node "\/s\/map\.mjs" who-uses <file>/);
+  assert.match(p, /node "\/s\/map\.mjs" who-uses <file> --repo "\/r"/);
   assert.doesNotMatch(workerPrompt(PACKET, { role: 'implement', worktree: '/w' }), /Before searching/);
 
   let built = 0;

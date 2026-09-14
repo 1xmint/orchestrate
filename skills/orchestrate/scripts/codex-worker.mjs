@@ -240,7 +240,9 @@ export function mapNote(repo, { build: doBuild = buildMap, status: doStatus = ma
     if (s.state === 'missing') return null;
     if (s.state !== 'fresh') { doBuild(repo); s = doStatus(repo); }
     if (s.state !== 'fresh' || !s.mdPath) return null;
-    return { mdPath: s.mdPath, script: fileURLToPath(new URL('./map.mjs', import.meta.url)) };
+    // --repo lets the queries answer from the saved map inside Codex's sandbox,
+    // where the script cannot start git to find the repo itself.
+    return { mdPath: s.mdPath, repo: resolve(repo), script: fileURLToPath(new URL('./map.mjs', import.meta.url)) };
   } catch { return null; }
 }
 
@@ -253,7 +255,7 @@ export function workerPrompt(packetText, { role, worktree, progress, map = null 
     role === 'review'
       ? '- Read only: do not modify any file. Review against the objective and acceptance checks above and report findings with file:line.'
       : '- Make the change, run the acceptance checks you can run locally, and leave the changes uncommitted in the worktree; the lead reviews and commits.',
-    ...(map ? [`- Before searching, read ${map.mdPath}: folders, most-imported files, entry points and checks. For who imports a file or which tests cover it, run \`node "${map.script}" who-uses <file>\` or \`tests-for <file>\`; grep for text. The map is found in the text, so confirm by reading before you rely on it.`] : []),
+    ...(map ? [`- Before searching, read ${map.mdPath}: folders, most-imported files, entry points and checks. For who imports a file or which tests cover it, run \`node "${map.script}" who-uses <file> --repo "${map.repo}"\` or \`tests-for <file> --repo "${map.repo}"\`; grep for text. The map is found in the text, so confirm by reading before you rely on it.`] : []),
     ...(progress ? [`- Keep a short progress note at ${progress} as you go (done so far, what is left), so an interruption loses nothing.`] : []),
     '- Do not wait on CI or other remote jobs.',
     '- If the sandbox stops a check from running at all (for example spawn EPERM), report that check as not-run with the error as its evidence; it is not a failure of your change.',
