@@ -139,26 +139,69 @@ function strings(v, out = []) {
 
 const inputOf = u => num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens);
 
+// Finding the way: tool results that only read or search, split at the agent's
+// first edit. Characters, not tokens; ÷4 is an estimate. A Bash call counts only
+// when its command starts with a read-only lookup, so a test run's output is not
+// mistaken for exploration.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const LOOK_TOOLS = new Set(['Read', 'Grep', 'Glob', 'LSP']);
+const LOOK_CMD = /^(?:grep|rg|find|ls|cat|head|tail|sed\s+-n|wc|tree|git\s+(?:log|show|diff|grep|ls-files|blame))\b/;
+
+function isLookup(b) {
+  if (LOOK_TOOLS.has(b.name)) return true;
+  if (b.name !== 'Bash') return false;
+  // `cd "<dir>" && cat x` is a read; so is `echo "== x ==" ; cat x`.
+  let cmd = String((b.input || {}).command || '').trim().replace(/^cd\s+("[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, '');
+  if (/^echo\b/.test(cmd)) cmd = cmd.replace(/^echo\s+("[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, '');
+  return LOOK_CMD.test(cmd);
+}
+
+function resultChars(content) {
+  if (typeof content === 'string') return content.length;
+  if (!Array.isArray(content)) return 0;
+  return content.reduce((n, c) => n + (c && c.type === 'text' ? String(c.text || '').length : 0), 0);
+}
+
 export function callsOf(text, { lead = false, seen = new Set() } = {}) {
   const r = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, maxContext: 0, lastContext: null, contexts: [], models: [], retries: 0, nestedDispatches: 0, compactions: 0 };
   const byId = new Map();
   const models = new Set();
   const toolUses = new Set();
+  const lookups = new Map();
+  const ex = { lookups: 0, chars: 0, beforeEditLookups: 0, beforeEditChars: 0, edited: false, contextAtFirstEdit: null };
+  const hits = [];
+  const compacts = [];
   let anon = 0;
   for (const line of String(text).split('\n')) {
     if (!line.trim()) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
-    if (o.type === 'system' && o.subtype === 'compact_boundary') { r.compactions++; continue; }
+    if (o.type === 'system' && o.subtype === 'compact_boundary') { r.compactions++; compacts.push(byId.size); continue; }
+    if (o.type === 'user' && !(lead && o.isSidechain === true)) {
+      for (const b of Array.isArray((o.message || {}).content) ? o.message.content : []) {
+        if (!b || b.type !== 'tool_result' || !lookups.has(b.tool_use_id)) continue;
+        const before = lookups.get(b.tool_use_id);
+        lookups.delete(b.tool_use_id);
+        const n = resultChars(b.content);
+        ex.lookups++; ex.chars += n;
+        if (before) { ex.beforeEditLookups++; ex.beforeEditChars += n; }
+        hits.push({ n, before, at: byId.size });
+      }
+      continue;
+    }
     if (o.type !== 'assistant') continue;
     if (lead && o.isSidechain === true) continue;
     const msg = o.message || {};
     if (o.isApiErrorMessage || (msg.model === '<synthetic>' && /API Error|retry/i.test(JSON.stringify(msg.content || '')))) { r.retries++; continue; }
     if (msg.model === '<synthetic>') continue;
     for (const b of Array.isArray(msg.content) ? msg.content : []) {
-      if (!b || b.type !== 'tool_use' || (b.name !== 'Agent' && b.name !== 'Task')) continue;
+      if (!b || b.type !== 'tool_use') continue;
       if (b.id && toolUses.has(b.id)) continue;
       if (b.id) toolUses.add(b.id);
-      r.nestedDispatches++;
+      if (EDIT_TOOLS.has(b.name) && !ex.edited) {
+        ex.edited = true;
+        if (msg.usage) ex.contextAtFirstEdit = inputOf(msg.usage);
+      } else if (b.id && isLookup(b)) lookups.set(b.id, !ex.edited);
+      if (b.name === 'Agent' || b.name === 'Task') r.nestedDispatches++;
     }
     if (!msg.usage) continue;
     const id = msg.id || `anon-${anon++}-${Math.random()}`;
@@ -179,6 +222,24 @@ export function callsOf(text, { lead = false, seen = new Set() } = {}) {
     r.contexts.push(c);
   }
   r.models = [...models];
+  // Growth is first request to peak. The share is how much of it the lookups
+  // before the first edit could explain; capped at 1 because ÷4 is rough.
+  const growth = r.contexts.length ? r.maxContext - r.contexts[0] : 0;
+  ex.growth = growth;
+  ex.beforeEditShare = growth > 0 ? Math.min(1, ex.beforeEditChars / 4 / growth) : null;
+  ex.share = growth > 0 ? Math.min(1, ex.chars / 4 / growth) : null;
+  // What the lookups cost: each result is re-read by every later call. Against
+  // the context added above the first request, summed over calls.
+  const above = r.contexts.reduce((t, c) => t + Math.max(0, c - (r.contexts[0] || 0)), 0);
+  // A compaction drops earlier results, so re-reads stop there.
+  const until = at => compacts.find(c => c > at) ?? r.calls;
+  const reread = xs => xs.reduce((t, h) => t + (h.n / 4) * Math.max(0, until(h.at) - h.at), 0);
+  ex.rereadAbove = above;
+  ex.reread = Math.round(reread(hits));
+  ex.beforeEditReread = Math.round(reread(hits.filter(h => h.before)));
+  ex.rereadShare = above > 0 ? Math.min(1, ex.reread / above) : null;
+  ex.beforeEditRereadShare = above > 0 ? Math.min(1, ex.beforeEditReread / above) : null;
+  r.exploration = ex;
   return r;
 }
 
@@ -237,7 +298,13 @@ export function measureTree(leadTranscript, { reportsPath = WORKER_REPORTS_PATH 
 export function treeReport(t) {
   const L = [];
   const k = n => `${Math.round((n || 0) / 1000)}k`;
-  const row = a => `${a.type}${a.agentId ? ` ${a.agentId.slice(0, 8)}` : ''}${a.depth > 1 ? ` (depth ${a.depth}, from ${String(a.parent).slice(0, 8)})` : ''}: ${a.calls} calls on ${a.models.join(', ') || 'no model'}${a.requestedModel ? ` (asked ${a.requestedModel})` : ''} · context up to ${k(a.maxContext)}${a.lastContext != null ? `, last ${k(a.lastContext)}` : ''} · ${k(a.output)} out${a.retries ? ` · ${a.retries} retries` : ''}${a.nestedDispatches ? ` · started ${a.nestedDispatches} helper(s)` : ''}`;
+  const row = a => `${a.type}${a.agentId ? ` ${a.agentId.slice(0, 8)}` : ''}${a.depth > 1 ? ` (depth ${a.depth}, from ${String(a.parent).slice(0, 8)})` : ''}: ${a.calls} calls on ${a.models.join(', ') || 'no model'}${a.requestedModel ? ` (asked ${a.requestedModel})` : ''} · context up to ${k(a.maxContext)}${a.lastContext != null ? `, last ${k(a.lastContext)}` : ''} · ${k(a.output)} out${a.retries ? ` · ${a.retries} retries` : ''}${a.nestedDispatches ? ` · started ${a.nestedDispatches} helper(s)` : ''}${explored(a.exploration)}`;
+  const explored = e => {
+    if (!e || !e.lookups) return '';
+    const pct = s => (s == null ? '' : `, ≈${Math.round(s * 100)}% of context growth`);
+    if (!e.edited) return ` · ${e.lookups} lookups, ≈${k(e.chars / 4)} read, no edit${pct(e.share)}`;
+    return ` · ${e.beforeEditLookups} lookups before first edit, ≈${k(e.beforeEditChars / 4)} read${pct(e.beforeEditShare)}${e.contextAtFirstEdit != null ? `, context ${k(e.contextAtFirstEdit)} at that edit` : ''}${e.beforeEditReread ? `, re-read ≈${k(e.beforeEditReread)} by later calls` : ''}`;
+  };
   L.push(`agent tree for ${t.session}`);
   L.push(`  ${row(t.lead)}${t.lead.compactions ? ` · ${t.lead.compactions} compaction(s)` : ''}`);
   // Each helper under the one that started it.

@@ -196,3 +196,32 @@ test('a message that merely quotes a block reason is not counted as one', () => 
   ].join('\n'));
   assert.equal(r.stopBlocks, 0);
 });
+
+import { callsOf, treeReport } from './measure.mjs';
+
+test('lookups before the first edit are counted apart from later ones, and test output is not a lookup', () => {
+  const rec = o => JSON.stringify(o);
+  const use = (id, name, input, usage, mid) => rec({ type: 'assistant', message: { id: mid, model: 'claude-sonnet-5', usage, content: [{ type: 'tool_use', id, name, input }] } });
+  const res = (id, text) => rec({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: [{ type: 'text', text }] }] } });
+  const u = n => ({ input_tokens: 0, cache_read_input_tokens: n, cache_creation_input_tokens: 0, output_tokens: 10 });
+  const lines = [
+    use('t1', 'Grep', { pattern: 'x' }, u(10000), 'm1'), res('t1', 'a'.repeat(4000)),
+    use('t2', 'Read', { file_path: 'f' }, u(11000), 'm2'), res('t2', 'b'.repeat(8000)),
+    use('t3', 'Bash', { command: 'node --test' }, u(14000), 'm3'), res('t3', 'c'.repeat(40000)),
+    use('t4', 'Edit', { file_path: 'f' }, u(15000), 'm4'), res('t4', 'ok'),
+    use('t5', 'Bash', { command: 'git diff HEAD' }, u(20000), 'm5'), res('t5', 'd'.repeat(400)),
+  ];
+  const r = callsOf(lines.join('\n'));
+  assert.equal(r.exploration.beforeEditLookups, 2);
+  assert.equal(r.exploration.beforeEditChars, 12000);
+  assert.equal(r.exploration.lookups, 3);
+  assert.equal(r.exploration.contextAtFirstEdit, 15000);
+  assert.equal(r.exploration.growth, 10000);
+  assert.equal(r.exploration.beforeEditShare, 0.3);
+  // 1k tokens re-read by 4 later calls, 2k by 3; the post-edit diff by none.
+  assert.equal(r.exploration.beforeEditReread, 10000);
+  assert.equal(r.exploration.rereadAbove, 20000);
+  assert.equal(r.exploration.rereadShare, 0.5);
+  const text = treeReport({ session: 's', lead: { type: 'lead', depth: 0, agentId: null, ...r }, agents: [], codex: [], totals: { agents: 0, nestedAgents: 0, calls: 5, input: 0, cacheRead: 0, cacheWrite: 0, output: 50, retries: 0 } });
+  assert.match(text, /2 lookups before first edit, ≈3k read, ≈30% of context growth, context 15k at that edit, re-read ≈10k by later calls/);
+});
