@@ -669,6 +669,38 @@ The efficiency claims in this repo
 stay estimates until you run this on a real orchestration; the script exists so
 that costs nothing.
 
+Each agent's row also says how much it read and searched before its first edit,
+and how many tokens later steps spent re-reading that. Across 81 helpers on one
+machine, that finding-the-way came to about a fifth of everything they read:
+16% for implementers, 35% for read-only helpers.
+
+## Give helpers a map of the repo
+
+```bash
+node ~/.claude/skills/orchestrate/scripts/map.mjs build
+```
+
+A helper starts knowing nothing about the repo, so it searches, and everything
+it reads stays in its memory for the rest of its work. The map is a short page
+it reads first instead: the folders and what each is for, the most-used files,
+the entry points, the check commands, and which tests cover which file. It is
+written to `.orchestrator/map/`, which git is told to ignore. Starting a run
+builds it, and any question to it rebuilds it after a new commit, rescanning only
+changed files. On this repo that takes a fraction of a second.
+
+It answers three questions in a line each: `who-uses <file or function>`,
+`deps <file>` and `tests-for <files>`. Briefs for helpers and Codex workers point
+at it. It finds imports by reading the text, for JavaScript, TypeScript, Python,
+Rust and Go, so it misses imports built at run time and macros. It is a starting
+point, and helpers still read the code before relying on it. A language-server
+plugin (see "Plugins that make it better") gives exact answers where one is
+installed.
+
+Graphify and similar code-graph tools are not needed and not installed. Their
+own hooks and instructions get re-read on every step. The one independent
+measurement found showed a graph agent answering slightly worse than plain
+searching, while using about a tenth of the tokens.
+
 ## Report a problem
 
 ```bash
@@ -678,8 +710,10 @@ node ~/.claude/skills/orchestrate/scripts/diagnose.mjs
 One snapshot of how orchestrate sees this machine and this session: the
 version in this copy and the installed one, the host and engine version it
 detected, the policy in force, which hooks your settings file registers, the
-context report, the agent-tree meter, Codex's login state and live workers, and
-whether a fresh Claude usage snapshot exists. It reads only; it changes no
+context report, the agent-tree meter, Codex's login state and live workers,
+whether a fresh Claude usage snapshot exists, and the code tools: whether the repo
+map is fresh, which language servers are ready, and which of the repo's
+languages have none. It reads only; it changes no
 settings and no stored readings. Your home folder is written as `~`, and it
 holds no credentials, emails, prompts or file contents, so the output can be
 pasted into an issue as it is. `--session <id>` or a transcript path picks
@@ -750,11 +784,11 @@ supported path. See `skills/orchestrate/references/hosts.md`.
 
 ```
 skills/orchestrate/
-  SKILL.md              the skill (400 body lines; stays in context)
+  SKILL.md              the skill (403 body lines; stays in context)
   references/           ladder, routing, evaluation, lanes, hosts, models
   scripts/              router, guard, ledger, turn-check, precompact-check, persist-check,
                         context-check, context, codex-worker, gate, profile, run-init,
-                        measure, diagnose, install-agents, install-project, batch
+                        measure, diagnose, map, install-agents, install-project, batch
   scripts/lib/          context (the one context reader), policy, workers, modes, host,
                         quota, tier, settings, prices, listing, template
   assets/               RUN.md template, packet template, worker report schema, six role

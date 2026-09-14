@@ -2,6 +2,57 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.14.0 — a repo map helpers read before searching, 2026-09-14
+
+Asked: would a persistent codebase map (Graphify was the example) make the
+plugin more effective and efficient? 325 tests pass.
+
+**Research (checked 2026-09-14).** Graphify (github.com/safishamsi/graphify,
+Python, tree-sitter) publishes memory benchmarks (LOCOMO, LongMemEval), not
+coding ones; `graphify claude install` adds a PreToolUse hook and CLAUDE.md text.
+The one independent coding measurement (arXiv 2603.27277, Codebase-Memory, Opus
+4.6, 31 repos × 12 questions): graph agent 0.83 answer quality vs 0.92 for
+grep-and-read, ~1,000 vs ~10,000 tokens and 2.3 vs 4.8 tool calls per question;
+loses on macros, dynamic dispatch and text lookups. Claude Code dropped a vector
+index early because agentic search worked better (Boris Cherny). TDAD (arXiv
+2603.17973, SWE-bench Verified, small Qwen models): a source→test map cut
+regressions 6.08% → 1.82%, while "do TDD" instructions alone made it worse
+(9.94%). The LSP tool needs only an enabled language-server plugin with its
+binary on PATH (plugins reference: `lspServers` / `.lsp.json`).
+
+**Measured first.** `measure --tree` now splits each agent's read/search results
+at its first edit and counts what later calls re-read. On the 81 helpers under
+`~/.claude/projects/C--Users-Josh-Desktop-GitHub` (≥5 calls each): lookups
+before the first edit were **9% of context growth** — under the plan's 15% stop
+line — but **21% of all input read** once re-reads are counted (implementers 16%
+of 465.8M, read-only helpers 35% of 144.2M, general-purpose 22% of 234.3M); all
+lookups 25%. The plan named growth; the decision was taken on re-read cost,
+because that is what quota pays for. Implementer context at first edit: median
+125k, from a 52k start. Characters ÷ 4 is an estimate.
+
+**Built.**
+1. `scripts/map.mjs` — from the git index, no dependencies: files with a
+   one-line purpose, import edges with lines (JS/TS, Python, Rust, Go, found in
+   text), symbols, entry points, tests per file (imports it / name pairs /
+   through one file). Cached per blob; any query rebuilds when HEAD moves.
+   `map.md` ≤ 4,000 chars. On this repo: 60 files, 119 edges, 0.3 s cold, 0.1 s
+   cached; `who-uses lib/workers.mjs` matched grep exactly (6 importers).
+   `.orchestrator/` goes into git's local exclude so the map never reads as a
+   change.
+2. `run-init` builds the map and names it under Facts.
+3. `packet.md`: MAP, TESTS FOR SCOPE, reviewer CALLERS (PROGRESS and the CI note
+   tightened to stay under the 6,500-byte cap). SKILL.md §2 and §5.
+4. `codex-worker`: when the repo already has a map, the prompt tells Codex to read
+   it first; stale is rebuilt, missing is left alone.
+5. `diagnose`: map state, language servers ready / disabled / binary missing,
+   repo languages with none (e.g. `heyvera-current`: 180 `.rs` files, no Rust
+   server), Graphify, code-graph MCP servers by name.
+
+**Not built, and why.** Graphify or an MCP code graph by default (Python install,
+another per-step hook and CLAUDE.md, no coding evidence of its own); embeddings
+(measured worse for code search by the Claude Code team); tree-sitter (a native
+or wasm dependency for a regex scanner's gaps).
+
 ## v0.13.1 — usage-limit entries expire, and the sandbox retry, 2026-09-14
 
 - Older usage-limit entries saved before v0.13.0 now expire from the reset time
