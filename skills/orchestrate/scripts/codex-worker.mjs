@@ -30,7 +30,7 @@
 // permission) · 5 both providers unavailable · 2 usage.
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, basename, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -312,7 +312,9 @@ export async function runWorker(opts, deps = {}) {
   mkdirSync(checkpoint, { recursive: true });
   writeFileSync(join(checkpoint, 'packet.md'), packetText);
   const report = newReport(packet, { runtime: 'codex', role, checkpoint, startedAt: now() });
-  const scope = packet.run ? `run:${packet.run}` : (opts.session || env.CLAUDE_CODE_SESSION_ID) ? `session:${opts.session || env.CLAUDE_CODE_SESSION_ID}` : `day:${now().slice(0, 10)}`;
+  const session = opts.session || env.CLAUDE_CODE_SESSION_ID || null;
+  report.session = session;
+  const scope = packet.run ? `run:${packet.run}` : session ? `session:${session}` : `day:${now().slice(0, 10)}`;
   const finish = (fields, code) => {
     Object.assign(report, fields, { endedAt: now() });
     if (HAND_TO_CLAUDE.has(report.status) || (FOLLOW_UP.has(report.status) && report.evidence && report.evidence.edited === false && report.status !== 'blocked')) {
@@ -335,6 +337,11 @@ export async function runWorker(opts, deps = {}) {
         : `Continue only the remaining work from ${checkpoint} (report.json, diff.patch${report.fallback ? `, ${basename(report.fallback.path)}` : ''}); do not rerun the whole task.`;
     }
     writeFileSync(join(checkpoint, 'report.json'), JSON.stringify(report, null, 2) + '\n');
+    // One line per finished run, for the meter's agent tree (measure.mjs --tree).
+    try {
+      mkdirSync(workersDir, { recursive: true });
+      appendFileSync(join(workersDir, 'reports.jsonl'), JSON.stringify({ at: report.endedAt, session, taskId: report.taskId, role, status: report.status, checkpoint, fallback: Boolean(report.fallback), model: report.model || null, usage: (report.evidence && report.evidence.usage) || null }) + '\n');
+    } catch {}
     return { report, code };
   };
 
@@ -351,10 +358,9 @@ export async function runWorker(opts, deps = {}) {
   // Two at once, across providers.
   const external = runningExternal(workersDir);
   let native = [];
-  const session = opts.session || env.CLAUDE_CODE_SESSION_ID || null;
   if (session && !deps.skipNative) {
     try {
-      const { findSessionTranscript } = await import('./context.mjs');
+      const { findSessionTranscript } = await import('./lib/context.mjs');
       const state = loadSession(session) || {};
       native = runningNative(state.dispatches || [], { returned: state.returned || [], files: helperFiles(findSessionTranscript(session)), staleMin: policy.workers.staleMin });
     } catch { native = []; }

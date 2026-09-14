@@ -11,6 +11,8 @@
 //   node measure.mjs <transcript.jsonl> --json     the same as JSON
 //   node measure.mjs --latest [--project <dir>]    the newest transcript for a project
 //   node measure.mjs <t> --dollars               the same, priced at list price
+//   node measure.mjs <t> --tree [--json]         the lead, every helper and nested
+//                                                helper, and Codex worker runs
 //
 // Transcripts live under ~/.claude/projects/<slugged cwd>/<session id>.jsonl.
 // Fields read: message.usage.{input_tokens, cache_creation_input_tokens,
@@ -126,6 +128,133 @@ function strings(v, out = []) {
   return out;
 }
 
+// ---- the whole agent tree ------------------------------------------------------
+// A session's cost is the lead plus every helper, and helpers of helpers. Each
+// helper writes its own transcript under <session>/subagents/agent-<id>.jsonl,
+// with a .meta.json naming its type, the tool call that started it, its spawn
+// depth and its parent. One model call is counted once across the whole tree,
+// by message id, so streaming copies and a resumed helper's repeated records
+// never count twice. Context is per request (the input side of each call);
+// totals are consumption, and the two are never mixed.
+
+const inputOf = u => num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens);
+
+export function callsOf(text, { lead = false, seen = new Set() } = {}) {
+  const r = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, maxContext: 0, lastContext: null, models: [], retries: 0, nestedDispatches: 0, compactions: 0 };
+  const byId = new Map();
+  const models = new Set();
+  const toolUses = new Set();
+  let anon = 0;
+  for (const line of String(text).split('\n')) {
+    if (!line.trim()) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (o.type === 'system' && o.subtype === 'compact_boundary') { r.compactions++; continue; }
+    if (o.type !== 'assistant') continue;
+    if (lead && o.isSidechain === true) continue;
+    const msg = o.message || {};
+    if (o.isApiErrorMessage || (msg.model === '<synthetic>' && /API Error|retry/i.test(JSON.stringify(msg.content || '')))) { r.retries++; continue; }
+    if (msg.model === '<synthetic>') continue;
+    for (const b of Array.isArray(msg.content) ? msg.content : []) {
+      if (!b || b.type !== 'tool_use' || (b.name !== 'Agent' && b.name !== 'Task')) continue;
+      if (b.id && toolUses.has(b.id)) continue;
+      if (b.id) toolUses.add(b.id);
+      r.nestedDispatches++;
+    }
+    if (!msg.usage) continue;
+    const id = msg.id || `anon-${anon++}-${Math.random()}`;
+    if (seen.has(id) && !byId.has(id)) continue;
+    seen.add(id);
+    byId.set(id, msg.usage);
+    if (typeof msg.model === 'string') models.add(msg.model);
+  }
+  for (const u of byId.values()) {
+    r.calls++;
+    r.input += num(u.input_tokens);
+    r.cacheRead += num(u.cache_read_input_tokens);
+    r.cacheWrite += num(u.cache_creation_input_tokens);
+    r.output += num(u.output_tokens);
+    const c = inputOf(u);
+    r.maxContext = Math.max(r.maxContext, c);
+    r.lastContext = c;
+  }
+  r.models = [...models];
+  return r;
+}
+
+export const WORKER_REPORTS_PATH = join(homedir(), '.claude', 'orchestrate', 'workers', 'reports.jsonl');
+
+// Codex worker reports for a session, one per task and checkpoint (a rerun
+// that rewrote the same report counts once, as its latest state).
+export function workerReports(session, path = WORKER_REPORTS_PATH) {
+  const latest = new Map();
+  let text = '';
+  try { text = readFileSync(path, 'utf8'); } catch { return []; }
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (!o || (session && o.session !== session)) continue;
+    latest.set(`${o.taskId}|${o.checkpoint}`, o);
+  }
+  return [...latest.values()];
+}
+
+export function measureTree(leadTranscript, { reportsPath = WORKER_REPORTS_PATH } = {}) {
+  const seen = new Set();
+  const session = leadTranscript.replace(/\\/g, '/').split('/').pop().replace(/\.jsonl$/, '');
+  const lead = { agentId: null, type: 'lead', depth: 0, parent: null, ...callsOf(readFileSync(leadTranscript, 'utf8'), { lead: true, seen }) };
+  const dir = join(leadTranscript.replace(/\.jsonl$/, ''), 'subagents');
+  const agents = [];
+  for (const f of safeList(dir).filter(n => /^agent-.+\.jsonl$/.test(n)).sort()) {
+    const agentId = f.slice(6, -6);
+    let meta = {};
+    try { meta = JSON.parse(readFileSync(join(dir, `agent-${agentId}.meta.json`), 'utf8')) || {}; } catch {}
+    let text = '';
+    try { text = readFileSync(join(dir, f), 'utf8'); } catch { continue; }
+    agents.push({
+      agentId, type: meta.agentType || 'unknown', depth: Number(meta.spawnDepth) || 1, parent: meta.parentAgentId || null,
+      requestedModel: meta.model || null, toolUseId: meta.toolUseId || null,
+      ...callsOf(text, { seen }),
+    });
+  }
+  const codex = workerReports(session, reportsPath);
+  const all = [lead, ...agents];
+  const sum = k => all.reduce((s, a) => s + (a[k] || 0), 0);
+  return {
+    session, lead, agents, codex,
+    totals: {
+      agents: agents.length,
+      nestedAgents: agents.filter(a => a.depth > 1).length,
+      calls: sum('calls'), input: sum('input'), cacheRead: sum('cacheRead'), cacheWrite: sum('cacheWrite'), output: sum('output'),
+      retries: sum('retries'), nestedDispatches: agents.reduce((s, a) => s + a.nestedDispatches, 0),
+      maxHelperContext: agents.reduce((m, a) => Math.max(m, a.maxContext), 0),
+      codexRuns: codex.length,
+      fallbacks: codex.filter(c => c.fallback).length,
+    },
+  };
+}
+
+export function treeReport(t) {
+  const L = [];
+  const k = n => `${Math.round((n || 0) / 1000)}k`;
+  const row = a => `${a.type}${a.agentId ? ` ${a.agentId.slice(0, 8)}` : ''}${a.depth > 1 ? ` (depth ${a.depth}, from ${String(a.parent).slice(0, 8)})` : ''}: ${a.calls} calls on ${a.models.join(', ') || 'no model'}${a.requestedModel ? ` (asked ${a.requestedModel})` : ''} · context up to ${k(a.maxContext)}${a.lastContext != null ? `, last ${k(a.lastContext)}` : ''} · ${k(a.output)} out${a.retries ? ` · ${a.retries} retries` : ''}${a.nestedDispatches ? ` · started ${a.nestedDispatches} helper(s)` : ''}`;
+  L.push(`agent tree for ${t.session}`);
+  L.push(`  ${row(t.lead)}${t.lead.compactions ? ` · ${t.lead.compactions} compaction(s)` : ''}`);
+  // Each helper under the one that started it.
+  const ids = new Set(t.agents.map(a => a.agentId));
+  const walk = (parent, depth) => {
+    for (const a of t.agents.filter(x => (x.parent && ids.has(x.parent) ? x.parent : null) === parent)) {
+      L.push(`  ${'  '.repeat(depth)}${row(a)}`);
+      walk(a.agentId, depth + 1);
+    }
+  };
+  walk(null, 0);
+  for (const c of t.codex) L.push(`  codex ${c.taskId}: ${c.status}${c.usage ? ` · ${k(c.usage.input)} in / ${k(c.usage.output)} out` : ''}${c.fallback ? ' · handed to Claude' : ''}`);
+  const x = t.totals;
+  L.push(`total: ${x.calls} Claude calls across the lead and ${x.agents} helper(s)${x.nestedAgents ? ` (${x.nestedAgents} started by other helpers)` : ''} · ${k(x.input + x.cacheRead + x.cacheWrite)} input read · ${k(x.output)} out${x.retries ? ` · ${x.retries} retries` : ''}${x.codexRuns ? ` · ${x.codexRuns} Codex run(s), ${x.fallbacks} fallback(s)` : ''}`);
+  L.push('consumption totals are summed over calls; context is per request and is never summed');
+  return L.join('\n');
+}
+
 const tok = n => `${Math.round(n / 1000)}k`;
 
 export function report(r) {
@@ -220,6 +349,11 @@ function main() {
     console.error(`# ${path}`);
   }
   if (!path) { console.error('usage: measure.mjs <transcript.jsonl> | --latest [--project <dir>]'); process.exit(2); }
+  if (args.includes('--tree')) {
+    const t = measureTree(path);
+    console.log(args.includes('--json') ? JSON.stringify(t, null, 2) : treeReport(t));
+    return;
+  }
   const r = measure(readFileSync(path, 'utf8'));
   if (args.includes('--json')) { console.log(JSON.stringify(r, null, 2)); return; }
   console.log(report(r));

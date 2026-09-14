@@ -22,6 +22,7 @@ import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sampleContext, agentTranscriptPath } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
+import { cappedNote } from './lib/workers.mjs';
 import { loadSession, saveSession, routerSettings } from './lib/tier.mjs';
 
 export function check(input) {
@@ -44,7 +45,9 @@ export function check(input) {
     const before = state.mode || null;
     const note = modeNote(state, input);
     if (note) out.push(note);
-    if ((state.mode || null) !== before) { try { saveSession(state); } catch {} }
+    const capped = cappedNote(state);
+    if (capped) out.push(capped);
+    if ((state.mode || null) !== before || capped) { try { saveSession(state); } catch {} }
   }
   return out.join('\n');
 }

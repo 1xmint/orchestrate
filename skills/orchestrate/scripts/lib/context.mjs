@@ -23,7 +23,7 @@
 // ~/.claude/orchestrate/context/, sampled incrementally from the bytes added
 // since the last sample. No network, no child processes, never throws.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, openSync, readSync, closeSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { loadPolicy } from './policy.mjs';
@@ -38,8 +38,6 @@ export const SCAN_ENOUGH = 2 * 1024 * 1024;
 export const SCAN_MAX = 16 * 1024 * 1024;
 // Responses after a compaction that still count as "immediately after".
 export const JUST_COMPACTED_RESPONSES = 3;
-// A sample skips the read when the transcript grew by less than this.
-export const SAMPLE_MIN_GROWTH = 4096;
 
 const fin = v => v != null && v !== '' && Number.isFinite(Number(v));
 const idPart = s => String(s || 'unknown').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
@@ -286,6 +284,18 @@ function writeStore(p, obj) {
   } catch {}
 }
 
+// A session's transcript, found by id under ~/.claude/projects/<project>/.
+export function findSessionTranscript(sessionId, base = join(homedir(), '.claude', 'projects')) {
+  if (!sessionId || !/^[\w-]{4,120}$/.test(sessionId)) return null;
+  let dirs = [];
+  try { dirs = readdirSync(base); } catch { return null; }
+  for (const d of dirs) {
+    const p = join(base, d, `${sessionId}.jsonl`);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
 // Where a helper's own transcript lives, when the host does not hand it over:
 // <project>/<session>/subagents/agent-<id>.jsonl next to the lead's file.
 export function agentTranscriptPath(leadTranscript, agentId) {
@@ -308,8 +318,9 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
 
   let reading;
   const sameFile = prev && prev.reading && prev.transcript === (transcriptPath || null);
-  if (!force && sameFile && size >= prev.offset && size - prev.size < SAMPLE_MIN_GROWTH) {
-    // Too little new to read; the reading stands, with its age recomputed.
+  if (!force && sameFile && size === prev.size) {
+    // Nothing new; the reading stands, with its age recomputed. Any growth at
+    // all is read: a compaction record can be a few hundred bytes.
     const nothing = { compaction: null, usage: null, responses: 0, sawBoundary: false, host: null };
     reading = { ...toReading(nothing, { ...opts, prev: prev.reading, continued: true }), offset: prev.offset, size };
   } else if (!force && sameFile && size >= prev.offset && size - prev.offset <= SCAN_MAX) {

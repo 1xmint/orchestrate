@@ -22,7 +22,7 @@
 // It never blocks and never fails a stop.
 
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
-import { join, resolve as resolvePath } from 'node:path';
+import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
@@ -144,6 +144,25 @@ export function readCosts(path = COSTS_PATH) {
   try {
     return latestPerAgent(readFileSync(path, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean));
   } catch { return []; }
+}
+
+// A role's turn cap, from its own agent file (assets/agents/<role>.md), so the
+// number has one home. Null for a role with no file or no cap.
+const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'agents');
+export function roleMaxTurns(role, dir = AGENTS_DIR) {
+  try {
+    const fm = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(dir, `${normalizeRole(role)}.md`), 'utf8').replace(/\r\n/g, '\n'));
+    const m = fm && /^maxTurns:\s*(\d+)/m.exec(fm[1]);
+    return m ? Number(m[1]) : null;
+  } catch { return null; }
+}
+
+// A helper that used every turn it was allowed stopped because of the cap, not
+// because it finished, whatever its last message claims. Its return is partial:
+// the lead continues only what is left, from its evidence and progress file.
+export function cappedReturn(turns, cap, parsedStatus) {
+  const capped = cap != null && Number(turns) >= cap;
+  return { capped, status: capped ? 'PARTIAL' : (parsedStatus || null), claimed: parsedStatus || null };
 }
 
 export function formatUsage(u) {
@@ -272,6 +291,8 @@ function main() {
 
   const r = parseReturn(text);
   const usage = sumUsage(input.agent_transcript_path);
+  const cap = cappedReturn(usage.turns, roleMaxTurns(agentType), r.status);
+  r.status = cap.status;
   const dispatch = dispatchFor(input.session_id, r.task);
   const asked = dispatch && dispatch.model !== 'inherit' ? dispatch.model : '';
   const ranModel = usage.model || asked || 'inherit';
@@ -285,7 +306,8 @@ function main() {
 
   try {
     mkdirSync(dir, { recursive: true });
-    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced} -->\n\n`;
+    const capNote = cap.capped ? ` · stopped at its ${usage.turns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote} -->\n\n`;
     writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
@@ -298,6 +320,7 @@ function main() {
     agentId,
     model: ranModel,
     status: r.status || null,
+    ...(cap.capped ? { capped: true, claimed: cap.claimed } : {}),
     verdict: r.verdict || null,
     evidence: r.evidence,
     file,
@@ -310,7 +333,7 @@ function main() {
     const state = input.session_id && loadSession(input.session_id);
     if (state) {
       state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null, ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}) });
       saveSession(state);
     }
   } catch {}

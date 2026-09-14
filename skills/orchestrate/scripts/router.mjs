@@ -32,6 +32,7 @@ import {
 } from './lib/tier.mjs';
 import { sampleContext } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
+import { cappedNote } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
@@ -425,6 +426,8 @@ function handlePrompt(input) {
     if (lead) out.push(lead);
     const hidden = staleNote(ctx.repoRoot);
     if (hidden) out.push(hidden);
+    const capped = cappedNote(state);
+    if (capped) out.push(capped);
     // A usage limit just landed: the moment helpers may have died mid-task.
     const limitKey = ctx.limits.join(',');
     if (limitKey && state.recoverShownFor !== limitKey) {
@@ -469,6 +472,9 @@ export function unreturnedNote(state, max = 5) {
   const shown = list.slice(-max).map(u => `${u.role}${u.task ? ` ${u.task}` : ''}${u.progress ? ` — progress ${u.progress}` : ' — no PROGRESS file named'}`).join('; ');
   return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session never returned: ${shown}. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
 }
+
+// Helpers that stopped at their turn cap (lib/workers.mjs), said once each.
+export { cappedNote };
 
 // Plans set aside as stale, said once per plan on this machine, so a user who
 // wanted one back knows the one command, and nobody is told twice.

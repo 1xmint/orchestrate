@@ -9,6 +9,8 @@
 //   node profile.mjs                  human-readable, ~8 lines
 //   node profile.mjs --json           machine-readable
 //   node profile.mjs --set tier=max5  persist an override (pro|max5|max20|team|api|unknown)
+//   node profile.mjs --policy [context.compactAt=150000 workers.maxConcurrent=2 ...]
+//   node profile.mjs --host [--json]  the running host's version and capabilities
 //   node profile.mjs --set paidServices=never|ask|free
 //   node profile.mjs --set allowPaid=<plugin> | denyPaid=<plugin>   a paid plugin allowed by name
 //   node profile.mjs --clear          remove the override
@@ -77,6 +79,33 @@ if (defIdx >= 0) {
   const said = [kvd.model ? `model ${kvd.model}` : null, kvd.effort ? `effort ${kvd.effort}` : null].filter(Boolean).join(', ');
   console.log(`saved as the default for new sessions: ${said} (${settingsPath}${backup ? `; backup ${backup}` : ''})`);
   console.log('this conversation changes only with the picker.');
+  process.exit(0);
+}
+
+// --policy [key=value ...]: the efficiency thresholds (lib/policy.mjs). With no
+// pair it prints the policy in effect; each pair is validated against the
+// defaults' keys, and only `policy` in profile.json is written.
+const polIdx = args.findIndex(a => a === '--policy');
+if (polIdx >= 0) {
+  const { loadPolicy, setPolicyValue } = await import('./lib/policy.mjs');
+  const pairs = args.slice(polIdx + 1).filter(a => /^[\w]+\.[\w]+=/.test(a));
+  if (pairs.length) {
+    let p = loadProfile();
+    try { for (const kv of pairs) { const i = kv.indexOf('='); p = setPolicyValue(p, kv.slice(0, i), kv.slice(i + 1)); } } catch (e) { console.error(String(e.message)); process.exit(2); }
+    saveProfile({ policy: p.policy });
+    console.log(`policy saved (${OVERRIDE_PATH}): ${pairs.join(', ')}`);
+  }
+  console.log(JSON.stringify(loadPolicy(loadProfile()), null, 2));
+  process.exit(0);
+}
+
+// --host: what the running host can do, read from the host itself — its
+// environment and its own transcript records — never from `claude --version`,
+// which describes whatever terminal CLI is on PATH, not the app running this.
+if (args.includes('--host')) {
+  const { hostCapabilities } = await import('./lib/host.mjs');
+  const h = hostCapabilities();
+  console.log(wantJson ? JSON.stringify(h, null, 2) : Object.entries(h).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n'));
   process.exit(0);
 }
 

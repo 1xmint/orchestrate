@@ -11,23 +11,13 @@
 //   node context.mjs ... --json                  the same as JSON
 
 import { readdirSync, existsSync, statSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join, basename, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readContext, adviseContext, formatReading, agentTranscriptPath, storedContext, CONTEXT_DIR } from './lib/context.mjs';
+import { readContext, adviseContext, formatReading, agentTranscriptPath, storedContext, findSessionTranscript, CONTEXT_DIR } from './lib/context.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { latestTranscript } from './measure.mjs';
 
-export function findSessionTranscript(sessionId, base = join(homedir(), '.claude', 'projects')) {
-  if (!sessionId || !/^[\w-]{4,120}$/.test(sessionId)) return null;
-  let dirs = [];
-  try { dirs = readdirSync(base); } catch { return null; }
-  for (const d of dirs) {
-    const p = join(base, d, `${sessionId}.jsonl`);
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
+export { findSessionTranscript };
 
 // Helpers whose context a hook has recorded for this session.
 export function recordedAgents(sessionId, dir = CONTEXT_DIR) {
