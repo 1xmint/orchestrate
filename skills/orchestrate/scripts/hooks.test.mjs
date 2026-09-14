@@ -223,6 +223,35 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
   assert.equal(state.dispatches[0].model, 'sonnet');
 });
 
+test('guard: an attributable coordinator child is recorded with its parent', () => {
+  const home = sandbox();
+  const sessionDir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(join(sessionDir, 'nested.json'), JSON.stringify({
+    v: 1, session_id: 'nested', dispatches: [{
+      at: new Date().toISOString(), agent: 'orchestrate:orch-coordinator',
+      model: 'opus', task: 'wave', toolUseId: 'toolu_coord',
+    }],
+  }));
+  const lead = join(home, 'lead.jsonl');
+  writeFileSync(lead, '');
+  const sub = join(home, 'lead', 'subagents');
+  mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, 'agent-coord.meta.json'), JSON.stringify({ agentType: 'orch-coordinator', toolUseId: 'toolu_coord', spawnDepth: 1 }));
+
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'nested', cwd: home,
+    agent_id: 'coord', transcript_path: lead, tool_use_id: 'toolu_child',
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: child\ndo it' },
+  }, home);
+
+  assert.equal(out.status, 0);
+  assert.doesNotMatch(out.stdout, /permissionDecision.*deny/);
+  const state = JSON.parse(readFileSync(join(sessionDir, 'nested.json'), 'utf8'));
+  assert.equal(state.dispatches.at(-1).parent, 'coord');
+  assert.equal(state.dispatches.at(-1).task, 'child');
+});
+
 test('guard: a dispatch that names no model is recorded as inherited and not priced', () => {
   const home = sandbox();
   const out = run('guard-agent.mjs', {
@@ -478,6 +507,30 @@ test('ledger: the return is written under the bound run and indexed', () => {
   assert.equal(index[0].run, repo.runId);
   assert.equal(index[0].status, 'DONE');
   assert.equal(out.status, 0);
+});
+
+test('ledger: a nested SubagentStop is filed and indexed with its parent', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'nested-stop', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'nested-stop.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{
+    at: new Date().toISOString(), agent: 'orch-implementer', model: 'sonnet',
+    task: '9-9-0001', run: repo.runId, parent: 'coord-parent', toolUseId: 'toolu_child',
+  }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'nested-stop', cwd: repo.dir,
+    agent_id: 'child-id', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+
+  assert.equal(out.status, 0);
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index[0].parent, 'coord-parent');
+  assert.ok(existsSync(index[0].file), 'the nested return is filed under the run');
+  assert.equal(JSON.parse(readFileSync(sessionPath, 'utf8')).returned[0].parent, 'coord-parent');
 });
 
 test('ledger: the task rows are left exactly as they were', () => {

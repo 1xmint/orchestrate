@@ -34,8 +34,9 @@ export const DEFAULT_POLICY = Object.freeze({
     // Across providers: native helpers and external Codex workers together.
     maxConcurrent: 2,
     browserConcurrent: 1,
-    // A helper starting its own helpers: denied unless set to "allow".
-    nested: 'deny',
+    // Only the capped coordinator may start a helper. "deny" closes nesting
+    // entirely; "allow" preserves the host's unrestricted legacy behaviour.
+    nested: 'coordinator',
     // Built-in general-purpose/claude helpers have no turn cap: denied while the
     // capped role agents are installed, unless set to "allow".
     generalPurpose: 'deny',
@@ -79,7 +80,7 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
     workers: {
       maxConcurrent: Math.floor(posNum(w.maxConcurrent, D.workers.maxConcurrent)),
       browserConcurrent: Math.floor(posNum(w.browserConcurrent, D.workers.browserConcurrent)),
-      nested: w.nested === 'allow' ? 'allow' : 'deny',
+      nested: ['deny', 'allow', 'coordinator'].includes(w.nested) ? w.nested : D.workers.nested,
       generalPurpose: w.generalPurpose === 'allow' ? 'allow' : 'deny',
       staleMin: posNum(w.staleMin, D.workers.staleMin),
     },

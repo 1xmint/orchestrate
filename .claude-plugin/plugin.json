@@ -23,7 +23,8 @@
     "./skills/orchestrate/assets/agents/orch-researcher.md",
     "./skills/orchestrate/assets/agents/orch-browser.md",
     "./skills/orchestrate/assets/agents/orch-reviewer.md",
-    "./skills/orchestrate/assets/agents/orch-debugger.md"
+    "./skills/orchestrate/assets/agents/orch-debugger.md",
+    "./skills/orchestrate/assets/agents/orch-coordinator.md"
   ],
   "outputStyles": "./skills/orchestrate/assets/output-styles/"
 }

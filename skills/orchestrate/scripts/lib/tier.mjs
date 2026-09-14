@@ -14,7 +14,7 @@ export const DIR = join(HOME, '.claude', 'orchestrate');
 export const SESSIONS_DIR = join(DIR, 'sessions');
 export const PROFILE_PATH = join(DIR, 'profile.json');
 export const TIERS = ['pro', 'max5', 'max20', 'team', 'api', 'unknown'];
-export const AGENT_NAMES = ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger'];
+export const AGENT_NAMES = ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger', 'orch-coordinator'];
 export const OPEN_GLYPHS = /📋|🔨|🔍|◐|⛔/;
 
 export function readJson(path) {

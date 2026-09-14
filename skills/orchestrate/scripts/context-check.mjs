@@ -11,8 +11,8 @@
 // lead mid-turn.
 //
 // Inside a helper (`agent_id` present) it records that helper's own context
-// under its own key and says nothing: a helper cannot compact, and its size is
-// for the lead's report.
+// under its own key. Ordinary helpers hear nothing; the coordinator is told to
+// checkpoint its wave or return a partial handoff at the two thresholds.
 //
 // Most calls read one small file, see too little growth, and exit. Never
 // blocks, never exits non-zero, never fails the tool call.
@@ -20,10 +20,22 @@
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sampleContext, agentTranscriptPath } from './lib/context.mjs';
+import { sampleContext, agentTranscriptPath, markAnnounced } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
-import { cappedNote } from './lib/workers.mjs';
+import { cappedNote, helperFiles, nativeAgent } from './lib/workers.mjs';
 import { loadSession, saveSession, routerSettings } from './lib/tier.mjs';
+
+export function coordinatorNotice(sample) {
+  if (!sample || !sample.changed || !sample.reading || !sample.advice) return '';
+  const size = `~${Math.round(sample.reading.tokens / 1000)}k`;
+  if (sample.advice.action === 'checkpoint') {
+    return `[orchestrate · coordinator] context is ${size}: write PROGRESS now so every task grade, branch, and evidence path survives.`;
+  }
+  if (sample.advice.action === 'compact' || sample.advice.action === 'investigate') {
+    return `[orchestrate · coordinator] context is ${size}: return PARTIAL now with the handoff; do not dispatch or integrate more work.`;
+  }
+  return '';
+}
 
 export function check(input) {
   if (!input || typeof input !== 'object' || !input.session_id) return '';
@@ -31,7 +43,14 @@ export function check(input) {
   const agent = input.agent_id ? String(input.agent_id) : null;
   if (agent) {
     const t = input.agent_transcript_path || agentTranscriptPath(input.transcript_path, agent);
-    if (t) sampleContext({ transcriptPath: t, session, agent, announce: false });
+    if (t) {
+      const sample = sampleContext({ transcriptPath: t, session, agent, announce: false });
+      const state = loadSession(session) || {};
+      const owner = nativeAgent(Array.isArray(state.dispatches) ? state.dispatches : [], helperFiles(input.transcript_path), agent);
+      const notice = owner && owner.role === 'orch-coordinator' ? coordinatorNotice(sample) : '';
+      if (notice) markAnnounced(session, agent, sample.advice.key);
+      return notice;
+    }
     return '';
   }
   if (!routerSettings().enabled) return '';
