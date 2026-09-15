@@ -102,13 +102,13 @@ test('helperSizeNotice: one fact line, no orders, said once per threshold, retur
   assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 79000, budget, announced: null }), null);
   const warn = helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: null, turn: 38, maxTurns: 50, callsSinceEdit: 31, progress: { path: '/r/progress/1.md', minutesAgo: 12 } });
   assert.equal(warn.key, 'size-warn');
-  assert.equal(warn.text, '[orchestrate · size] ~81k of ~80k budget · turn 38 of 50 · 31 tool calls since your last edit · progress file: /r/progress/1.md, written 12 min ago');
+  assert.equal(warn.text, '[orchestrate · size] ~81k of ~120k budget · turn 38 of 50 · 31 tool calls since your last edit · progress file: /r/progress/1.md, written 12 min ago');
   assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: 'size-warn' }), null, 'said once');
   const ret = helperSizeNotice({ role: 'orch-implementer', tokens: 125000, budget, announced: 'size-warn', progress: null });
   assert.equal(ret.key, 'size-return');
   // At returnAt the same shape fires again; the budget number is just the
   // smaller one now crossed, and no order is given either time.
-  assert.equal(ret.text, '[orchestrate · size] ~125k of ~120k budget · none given');
+  assert.equal(ret.text, '[orchestrate · size] ~125k of ~120k budget · progress file: none given');
   assert.doesNotMatch(ret.text, /return|start no new work|PARTIAL/i);
   // A jump straight past returnAt hears only the return notice.
   const jump = helperSizeNotice({ role: 'orch-implementer', tokens: 205000, budget, announced: null });
@@ -169,7 +169,7 @@ test('context-check gives a coordinator one fact line at warnAt and again at ret
   const firstText = JSON.parse(first.stdout).hookSpecificOutput.additionalContext;
   // No orders, ever: this is a fact line, not "write PROGRESS" or "return PARTIAL".
   assert.doesNotMatch(firstText, /write|return PARTIAL|do not/i);
-  assert.match(firstText, /^\[orchestrate · size\] ~150k of ~150k budget · turn 1 of \d+ · 1 tool call since your last edit · /);
+  assert.match(firstText, /^\[orchestrate · size\] ~150k of ~200k budget · turn 1 of \d+ · 1 tool call since your last edit · /);
   assert.match(firstText, new RegExp(`progress file: ${progressPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, not written yet$`));
 
   // The helper writes its progress file; the counter keeps counting reads and

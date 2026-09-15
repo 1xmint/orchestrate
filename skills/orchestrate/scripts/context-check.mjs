@@ -12,9 +12,9 @@
 //
 // Inside a helper (`agent_id` present) it records that helper's own context
 // under its own key and measures it against that role's size budget
-// (lib/policy.mjs): a plain-words notice at warnAt to write progress and keep
-// going, and at returnAt to start no new work and return PARTIAL. The
-// coordinator hears the same two thresholds in its own words.
+// (lib/policy.mjs): once at warnAt and once at returnAt it hears one line of
+// facts (size, turn of cap, tool calls since its last edit, its progress
+// file), with no instruction attached. The helper decides what to do.
 //
 // Most calls read one small file, see too little growth, and exit. Never
 // blocks, never exits non-zero, never fails the tool call.
@@ -34,7 +34,7 @@ import { loadPolicy, sizeBudget } from './lib/policy.mjs';
 // by the caller, since only it knows what "now" and "the file's mtime" mean
 // for this run.
 function progressFact(progress) {
-  if (!progress || !progress.path) return 'none given';
+  if (!progress || !progress.path) return 'progress file: none given';
   if (progress.minutesAgo == null) return `progress file: ${progress.path}, not written yet`;
   const m = Math.max(0, Math.round(progress.minutesAgo));
   return `progress file: ${progress.path}, written ${m < 1 ? 'just now' : `${m} min ago`}`;
@@ -55,11 +55,10 @@ export function helperSizeNotice({ role, tokens, budget, announced = null, turn 
   if (!budget || tokens == null || !Number.isFinite(tokens)) return null;
   const n = Math.round(tokens / 1000);
   let key = null;
-  let at = null;
-  if (tokens >= budget.returnAt) { key = 'size-return'; at = budget.returnAt; }
-  else if (tokens >= budget.warnAt) { key = 'size-warn'; at = budget.warnAt; }
+  if (tokens >= budget.returnAt) { key = 'size-return'; }
+  else if (tokens >= budget.warnAt) { key = 'size-warn'; }
   if (!key || key === announced) return null;
-  const parts = [`~${n}k of ~${Math.round(at / 1000)}k budget`];
+  const parts = [`~${n}k of ~${Math.round(budget.returnAt / 1000)}k budget`];
   if (Number.isFinite(turn) && Number.isFinite(maxTurns)) parts.push(`turn ${turn} of ${maxTurns}`);
   if (Number.isFinite(callsSinceEdit)) parts.push(`${callsSinceEdit} tool call${callsSinceEdit === 1 ? '' : 's'} since your last edit`);
   parts.push(progressFact(progress));
@@ -81,6 +80,9 @@ export function check(input) {
       const tokens = reading && (reading.state === 'measured' || reading.state === 'provisional') ? reading.tokens : null;
       const budget = sizeBudget(role, loadPolicy());
       const announced = storedAdvisedKey(session, agent);
+      // The turn count reads the whole transcript, so it is paid only on the
+      // call that is past warnAt, not on every tool call a helper makes.
+      if (!budget || tokens == null || tokens < budget.warnAt) return '';
       const maxTurns = roleMaxTurns(owner ? owner.dispatch.agent : role);
       const turn = transcriptTurns(t);
       const progressPath = owner && owner.dispatch ? owner.dispatch.progress : null;
