@@ -300,8 +300,7 @@ is not used, because compaction keeps the file.
   per 25k of growth and after each compaction (`policy.context.tickEvery`, `0`
   turns it off), and the state line always carries it. The model talks about
   size from that number, never from memory or an older summary.
-- At **300k** (`policy.context.hardAt`) it says not to start new work in that
-  conversation. A checkpoint for an unbound session lives at
+- A checkpoint for an unbound session lives at
   `~/.claude/orchestrate/context/<session>/checkpoint-<epoch>.md`.
 - Right after a compaction it says nothing until a response measures the new
   size. If that size is still large, it says to look for what is being restored
@@ -323,7 +322,7 @@ node skills/orchestrate/scripts/profile.mjs --policy
 node skills/orchestrate/scripts/profile.mjs --policy context.compactAt=180000 workers.maxConcurrent=3
 ```
 
-Keys: `context.checkpointAt`, `context.compactAt`, `context.hardAt`, `context.windowFraction`,
+Keys: `context.checkpointAt`, `context.compactAt`, `context.windowFraction`,
 `context.window`, `context.staleMs`, `context.freshAfterCompactions`, `context.tickEvery`, `context.autocompactDefault` (a positive token count or `off`), `workers.maxConcurrent`,
 `workers.browserConcurrent`, `workers.nested` (`coordinator`/`deny`/`allow`),
 `workers.generalPurpose` (`deny`/`allow`), `workers.staleMin`,

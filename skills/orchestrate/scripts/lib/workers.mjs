@@ -30,7 +30,6 @@ import { normalizeRole } from './prices.mjs';
 export const WORKERS_V = 1;
 export const WORKERS_DIR = join(homedir(), '.claude', 'orchestrate', 'workers');
 export const JUST_DISPATCHED_MS = 5 * 60 * 1000;
-export const SILENT_MS = 10 * 60 * 1000;
 
 const readJson = p => { try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; } };
 function writeJsonAtomic(p, obj) {
@@ -120,14 +119,16 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
   for (const d of dispatches || []) {
     if (!d || !d.at) continue;
     const age = now - Date.parse(d.at);
-    if (!Number.isFinite(age) || age > staleMin * 60000) continue;
+    if (!Number.isFinite(age)) continue;
     const f = d.toolUseId ? files.get(d.toolUseId) : null;
     if (f && back.has(f.agentId)) continue;
     // A return with no agent id, matched in order by role and task.
     const role = roleOf(d.agent);
     const hit = loose.find(r => !r.used && roleOf(r.agent) === role && (!d.task || !r.task || r.task === d.task) && Date.parse(r.at || 0) >= Date.parse(d.at));
     if (hit) { hit.used = true; continue; }
-    const alive = age < JUST_DISPATCHED_MS || (f && f.mtimeMs != null && now - f.mtimeMs < SILENT_MS);
+    // "Silent" means no transcript activity within staleMin, the one policy
+    // number for how long silence still counts as running.
+    const alive = age < JUST_DISPATCHED_MS || (f && f.mtimeMs != null && now - f.mtimeMs < staleMin * 60000);
     if (!alive) continue;
     const cap = f && f.path ? capOf(d.agent) : null;
     if (cap && turnsOf(f.path) >= cap) continue;
@@ -220,7 +221,7 @@ export function concurrencyDecision(role, { native = [], external = [], policy =
     if (b.length >= policy.workers.browserConcurrent) return `browser work is serial and ${list(b)} is still using the browser. Wait for it to return, then send this one.`;
   }
   if (all.length >= maxConcurrent) {
-    return `${all.length} worker${all.length === 1 ? ' is' : 's are'} already running (${list(all)}), and the limit is ${maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for 10 minutes stops counting.`;
+    return `${all.length} worker${all.length === 1 ? ' is' : 's are'} already running (${list(all)}), and the limit is ${maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for ${policy.workers.staleMin} minutes stops counting.`;
   }
   return null;
 }
