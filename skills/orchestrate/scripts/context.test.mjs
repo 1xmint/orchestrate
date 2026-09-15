@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, appendFileSync, readFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, appendFileSync, readFileSync, mkdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -24,6 +24,9 @@ const T0 = Date.parse('2026-09-14T10:00:00Z');
 const iso = min => new Date(T0 + min * 60000).toISOString();
 const NOW = T0 + 120 * 60000;
 const policy = loadPolicy({});
+const kk = v => `~${Math.round(v / 1000)}k`;
+// Words that give orders. The size line states facts only.
+const ORDERS = /prepare|save the|recommend|do not|nothing to do|before this turn/i;
 
 let n = 0;
 const assistant = (tokens, { min = 0, id = `msg_${++n}`, model = 'claude-opus-5', sidechain = false, usage, tools = [] } = {}) => JSON.stringify({
@@ -120,11 +123,14 @@ test('thresholds: checkpoint and compact from policy, or 75% of a known smaller 
 });
 
 test('there is no escalated "hard" tier past compactAt: a conversation far past it still gets the ordinary compact advice', () => {
-  const reading = { state: 'measured', tokens: 300000, capacity: null, compaction: { uuid: 'epoch-1' }, responsesSinceCompaction: 4 };
+  const far = Math.max(thresholds(null, policy).compactAt, policy.context.autocompactDefault) + 100000;
+  const reading = { state: 'measured', tokens: far, capacity: null, compaction: { uuid: 'epoch-1' }, responsesSinceCompaction: 4 };
   const advice = adviseContext(reading, policy);
   assert.equal(advice.action, 'compact');
-  assert.match(contextNotice(reading, advice), /At the next safe boundary/);
-  assert.doesNotMatch(contextNotice(reading, advice), /Do not start new work here/);
+  const text = contextNotice(reading, advice, { policy, dir: mkdtempSync(join(tmpdir(), 'ctx-far-')) });
+  assert.match(text, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · newest checkpoint: none$`));
+  assert.doesNotMatch(text, /next:/, 'both size events are already behind it');
+  assert.doesNotMatch(text, ORDERS);
   assert.match(checkpointPath('s', reading), /checkpoint-epoch-1\.md$/);
 });
 
@@ -190,34 +196,39 @@ test('sampleContext: the tool-calls-since-last-edit count survives across increm
 
 test('incremental sampling reads only new bytes, resets advice on compaction, and speaks only on change', () => {
   const { checkpointAt: cp, compactAt: ca } = thresholds(null, policy);
+  const auto = policy.context.autocompactDefault;
+  const past = ca + Math.floor((auto - ca) / 2);
+  assert.ok(ca < past && past < auto, 'the compact line comes before autocompact');
   const { p, store } = file([user('start', 0), assistant(cp - 20000, { min: 1 })]);
   const s1 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s1.reading.tokens, cp - 20000);
-  assert.match(s1.notice, new RegExp(`~${(cp - 20000) / 1000}k tokens per step, measured. Nothing to do until ~${cp / 1000}k`),'below the thresholds the lead still hears the measured size');
+  assert.match(s1.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp - 20000)} of ~\\d+k · next: compact ${kk(ca)} · newest checkpoint: none · 0 tool calls since your last edit$`), 'below the thresholds the lead still hears the measured size');
   assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store, force: true }).notice, '', 'once per 25k step');
 
   appendFileSync(p, `${user('x'.repeat(5000), 2)}\n${assistant(cp + 5000, { min: 3 })}\n`);
   const s2 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s2.advice.action, 'checkpoint');
-  assert.match(s2.notice, /Prepare a checkpoint/);
+  assert.match(s2.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 5000)} of ~\\d+k · next: compact ${kk(ca)} · newest checkpoint: none`));
+  assert.doesNotMatch(s2.notice, ORDERS);
 
   appendFileSync(p, `${user('y'.repeat(5000), 4)}\n${assistant(cp + 8000, { min: 5 })}\n`);
   const s3 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s3.reading.tokens, cp + 8000);
   assert.equal(s3.notice, '', 'the same advice is not repeated');
 
-  appendFileSync(p, `${user('z'.repeat(5000), 6)}\n${assistant(ca + 10000, { min: 7 })}\n`);
+  appendFileSync(p, `${user('z'.repeat(5000), 6)}\n${assistant(past, { min: 7 })}\n`);
   const s4 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s4.advice.action, 'compact');
-  assert.match(s4.notice, /save the checkpoint .*recommend compacting if this same task continues/);
+  assert.match(s4.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(past)} of ~\\d+k · next: autocompact ${kk(auto)} · newest checkpoint: none`));
+  assert.doesNotMatch(s4.notice, ORDERS);
   assert.equal(s4.reading.compactions, 0);
 
   // Compaction keeps the file; the reading and the announced advice start over.
-  appendFileSync(p, `${boundary(ca + 10000, 17000, 8)}\n${summary(8)}\n`);
+  appendFileSync(p, `${boundary(past, 17000, 8)}\n${summary(8)}\n`);
   const s5 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s5.reading.state, 'provisional');
   assert.equal(s5.reading.compactions, 1, 'a new epoch is one more compaction');
-  assert.match(s5.notice, /~17k tokens per step, measured from the compaction summary · compacted 1 time this session/);
+  assert.match(s5.notice, new RegExp(`^\\[orchestrate · context\\] ~17k of ~\\d+k · compacted 1× · next: compact ${kk(ca)}`));
   appendFileSync(p, `${user('w'.repeat(5000), 9)}\n${assistant(22000, { min: 10 })}\n`);
   const s6 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s6.reading.tokens, 22000);
@@ -227,7 +238,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   appendFileSync(p, `${user('v'.repeat(5000), 11)}\n${assistant(40000, { min: 12 })}\n${assistant(60000, { min: 13 })}\n${assistant(80000, { min: 14 })}\n${assistant(cp + 10000, { min: 15 })}\n`);
   const s7 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s7.advice.action, 'checkpoint');
-  assert.match(s7.notice, /Prepare a checkpoint/);
+  assert.match(s7.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 10000)} of ~\\d+k · compacted 1× · next: compact ${kk(ca)}`));
 
   // No growth: nothing is read, and the reading stands. A half-written line
   // is not consumed and does not disturb it.
@@ -343,20 +354,24 @@ test('compact by default; a fresh conversation only after repeated compactions',
   const at = (tokens, compactions) => {
     const r = { state: 'measured', tokens, capacity: null, compaction: compactions ? { uuid: `c${compactions}` } : null, responsesSinceCompaction: 10, compactions };
     const a = adviseContext(r, policy);
-    return { a, notice: contextNotice(r, a) };
+    return { a, notice: contextNotice(r, a, { policy, dir: mkdtempSync(join(tmpdir(), 'ctx-fresh-')) }) };
   };
+  const { compactAt } = thresholds(null, policy);
+  const big = compactAt + 10000;
   assert.equal(policy.context.freshAfterCompactions, 2);
-  const once = at(160000, 1);
+  const once = at(big, 1);
   assert.equal(once.a.fresh, false);
-  assert.match(once.notice, /recommend compacting if this same task continues/);
-  const twice = at(160000, 2);
+  assert.match(once.notice, / · compacted 1× · /);
+  const twice = at(big, 2);
   assert.equal(twice.a.fresh, true);
-  assert.match(twice.notice, /recommend a fresh conversation that resumes from the checkpoint: this one has already been compacted 2 times/);
-  // No escalated "hard" tier: a conversation far past compactAt still gets the
-  // ordinary compact advice, fresh or not.
-  assert.match(at(310000, 2).notice, /At the next safe boundary.*fresh conversation/);
-  assert.match(at(310000, 0).notice, /At the next safe boundary.*recommend compacting/);
-  const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: 160000, compactions: 2 } });
+  // The line states how many times it was compacted; the choice is the reader's.
+  assert.match(twice.notice, / · compacted 2× · /);
+  assert.doesNotMatch(twice.notice, ORDERS);
+  // No escalated "hard" tier: far past compactAt the line has the same shape.
+  const far = Math.max(compactAt, policy.context.autocompactDefault) + 100000;
+  assert.match(at(far, 2).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · compacted 2× · newest checkpoint: none$`));
+  assert.match(at(far, 0).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · newest checkpoint: none$`));
+  const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: big, compactions: 2 } });
   assert.match(stop.why, /fresh conversation that resumes from the checkpoint/);
 });
 
@@ -367,12 +382,28 @@ test('the size line can be turned off, and only speaks for a measured size', () 
   assert.equal(sampleContext({ transcriptPath: p2, session: 'u', policy, now: NOW, dir: s2 }).notice, '', 'no usage yet: nothing to say');
 });
 
-test('the size line names the next step for where the size actually is', () => {
+test('the size line names the next size event that has not passed yet', () => {
   const { checkpointAt, compactAt } = thresholds(null, policy);
-  const ck = Math.round(checkpointAt / 1000), cp = Math.round(compactAt / 1000);
-  const line = tokens => contextTick({ state: 'measured', tokens, capacity: null, compaction: null, compactions: 0 }, policy).text;
-  assert.match(line(60000), new RegExp(`Nothing to do until ~${ck}k`));
-  assert.match(line(compactAt - 5000), new RegExp(`Past the checkpoint line; the switch recommendation comes at ~${cp}k`));
-  assert.doesNotMatch(line(compactAt - 5000), /Nothing to do/);
-  assert.match(line(compactAt + 25000), /Past the switch line/);
+  const auto = policy.context.autocompactDefault;
+  assert.ok(compactAt < auto, 'the compact line comes before autocompact');
+  const dir = mkdtempSync(join(tmpdir(), 'ctx-next-'));
+  const line = tokens => contextTick({ state: 'measured', tokens, capacity: null, compaction: null, compactions: 0 }, policy, { policy, dir }).text;
+  assert.match(line(checkpointAt - 10000), new RegExp(` · next: compact ${kk(compactAt)} · `));
+  assert.match(line(compactAt - 5000), new RegExp(` · next: compact ${kk(compactAt)} · `));
+  assert.match(line(Math.round((compactAt + auto) / 2)), new RegExp(` · next: autocompact ${kk(auto)} · `));
+  assert.doesNotMatch(line(auto + 25000), /next:/);
+  for (const t of [checkpointAt - 10000, compactAt - 5000, auto + 25000]) assert.doesNotMatch(line(t), ORDERS);
+});
+
+test('the size line names the newest checkpoint, its age, and the tool calls since the last edit', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ctx-newest-'));
+  const reading = { state: 'measured', tokens: 90000, capacity: 200000, compaction: { uuid: 'e1' }, compactions: 1 };
+  const bare = contextTick(reading, policy, { policy, session: 'nc', dir, editCounter: 8, now: NOW }).text;
+  assert.match(bare, /^\[orchestrate · context\] ~90k of ~200k · compacted 1× · next: .* · newest checkpoint: none · 8 tool calls since your last edit$/);
+  const cp = checkpointPath('nc', reading, dir);
+  mkdirSync(join(cp, '..'), { recursive: true });
+  writeFileSync(cp, '# checkpoint\n');
+  utimesSync(cp, new Date(NOW - 3 * 60000), new Date(NOW - 3 * 60000));
+  const withCp = contextTick(reading, policy, { policy, session: 'nc', dir, editCounter: 1, now: NOW }).text;
+  assert.ok(withCp.includes(` · newest checkpoint: ${cp}, 3 min ago · 1 tool call since your last edit`), withCp);
 });

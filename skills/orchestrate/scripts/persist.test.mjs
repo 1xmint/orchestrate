@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, ut
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanTurn, persistDecision, errorKey, PERSIST_STEP_CAP, PERSIST_CHECKIN_EVERY } from './persist-check.mjs';
+import { scanTurn, persistDecision, errorKey, PERSIST_STEP_CAP, runGoalLine } from './persist-check.mjs';
 import { persistIntent, persistLine } from './router.mjs';
 import { PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
@@ -77,13 +77,31 @@ test('scan: a guard denial and error keys', () => {
 // ---- decision -----------------------------------------------------------------
 const base = { progressed: true, denied: false, errors: [], asked: false, goalMet: false };
 
-test('continues on visible work, and names what to do instead of a bare nudge', () => {
-  const d = persistDecision({ rec: {}, scan: base, goal: 'ship the site' });
+test('continues on visible work with one line of facts: goal, step, last change', () => {
+  const d = persistDecision({ rec: {}, scan: { ...base, lastChange: 'src/site.css' }, goal: 'ship the site' });
   assert.equal(d.kind, 'continue');
-  assert.match(d.why, /"ship the site"/);
-  assert.match(d.why, /Monitor/);
-  assert.doesNotMatch(d.why, /Check-in|Cost:/, 'no check-in or cost flag on an ordinary step');
+  assert.equal(d.why, `orchestrate: "ship the site" · step 1 of ${PERSIST_STEP_CAP} · last edited src/site.css`);
   assert.equal(d.rec.steps, 1);
+  // Parts nobody knows are left out, not guessed.
+  assert.equal(persistDecision({ rec: { steps: 4 }, scan: base }).why, `orchestrate: step 5 of ${PERSIST_STEP_CAP}`);
+  assert.doesNotMatch(d.why, /\n/);
+});
+
+test('scan: the last file an edit tool named is the last change', () => {
+  const edit = file => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: file } }] } });
+  assert.equal(scanTurn(tail(edit('a.js'), result('ok'), used('Bash'), edit('b.js'))).lastChange, 'b.js');
+  assert.equal(scanTurn(tail(used('Bash'), result('ok'))).lastChange, null, 'a command names no file');
+});
+
+test('runGoalLine: the first line under the RUN.md Goal heading, else nothing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'goal-'));
+  const md = join(dir, 'RUN.md');
+  writeFileSync(md, '# Run x\n\nintro\n\n## Goal\n\nShip the site\n\nWhy it matters: users\n\n## Done when\n\n- it ships\n');
+  assert.equal(runGoalLine(md), 'Ship the site');
+  writeFileSync(md, '# Run x\n\n## Goal\n\n<goal>\n\n## Done when\n');
+  assert.equal(runGoalLine(md), null, 'a template placeholder is not a goal');
+  assert.equal(runGoalLine(join(dir, 'missing.md')), null);
+  assert.equal(runGoalLine(null), null);
 });
 
 test('every hardstop fires', () => {
@@ -115,9 +133,7 @@ test('the loop stops near the 5-hour limit, and only there', () => {
   assert.equal(persistDecision({ scan: base, quota: null }).kind, 'continue', 'no status line means no usage stop');
 });
 
-test('the check-in comes at its cadence; context advice rides along only when given', () => {
-  assert.match(persistDecision({ rec: { steps: PERSIST_CHECKIN_EVERY - 1 }, scan: base }).why, /Check-in/);
-  assert.doesNotMatch(persistDecision({ rec: { steps: PERSIST_CHECKIN_EVERY }, scan: base }).why, /Check-in/);
+test('context advice rides along only when given', () => {
   assert.match(persistDecision({ scan: base, contextNotice: '[orchestrate · context] ~152k tokens per step.' }).why, /~152k tokens per step/);
   assert.doesNotMatch(persistDecision({ scan: base }).why, /context\]|\d+k tokens/, 'no size talk without a current measurement');
   // Transcript bytes are no longer an input at all: a huge file says nothing.
@@ -161,7 +177,7 @@ test('replay: the stall — no ledger, a step with work, then a step that only t
   const blocked = run('persist-check.mjs', { ...stop, stop_hook_active: false }, home);
   assert.equal(blocked.json.decision, 'block', 'the stall is refused');
   assert.match(blocked.json.reason, /keep coding until the website is done/);
-  assert.match(blocked.json.reason, /Monitor/);
+  assert.match(blocked.json.reason, new RegExp(`step 1 of ${PERSIST_STEP_CAP}`));
 
   // Re-entered after its own block (stop_hook_active), another working step still continues.
   appendFileSync(transcript, tail(used('Edit'), result('ok'), said('Added the footer.')));

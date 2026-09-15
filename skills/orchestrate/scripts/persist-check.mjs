@@ -39,12 +39,26 @@ import { modeOf } from './lib/modes.mjs';
 // already been compacted. The shared reader (lib/context.mjs) decides, and its
 // notice rides along only when its advice changes.
 export const PERSIST_STEP_CAP = 25;
-export const PERSIST_CHECKIN_EVERY = 6;
 export const PERSIST_SCAN_CAP = 262144;
 
 const WORK_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell', 'Agent', 'Task']);
+// The subset of WORK_TOOLS whose file is named in the tool call itself, so
+// "what the last step changed" can be said without opening anything.
+const FILE_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
 export const shortGoal = g => { const s = String(g || '').replace(/\s+/g, ' ').trim(); return s.length > 80 ? `${s.slice(0, 77)}...` : s; };
+
+// The first line under a bound run's RUN.md Goal heading, or null when there
+// is none to read. Read fresh each time: RUN.md is the source of truth, not a
+// copy pinned at arm time.
+export function runGoalLine(runMd) {
+  if (!runMd) return null;
+  let text;
+  try { text = readFileSync(runMd, 'utf8'); } catch { return null; }
+  const m = /## Goal\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
+  const first = m ? m[1].split('\n').map(l => l.trim()).find(l => l && !/^<.*>$/.test(l)) : null;
+  return first || null;
+}
 
 const textOf = c => typeof c === 'string' ? c
   : Array.isArray(c) ? c.map(b => (b && typeof b.text === 'string') ? b.text : (b && typeof b.content !== 'undefined') ? textOf(b.content) : '').join('\n')
@@ -63,6 +77,7 @@ export function scanTurn(tail) {
   const errors = [];
   let denied = false;
   let lastText = '';
+  let lastChange = null;
   for (const line of String(tail || '').split('\n')) {
     if (!line.trim()) continue;
     let rec;
@@ -71,7 +86,10 @@ export function scanTurn(tail) {
     const content = msg && Array.isArray(msg.content) ? msg.content : null;
     if (rec.type === 'assistant' && content) {
       for (const b of content) {
-        if (b && b.type === 'tool_use' && b.name) tools.push(b.name);
+        if (b && b.type === 'tool_use' && b.name) {
+          tools.push(b.name);
+          if (FILE_TOOLS.has(b.name) && b.input && typeof b.input.file_path === 'string') lastChange = b.input.file_path;
+        }
         if (b && b.type === 'text' && b.text && b.text.trim()) lastText = b.text;
       }
     } else if (rec.type === 'user' && content) {
@@ -87,11 +105,13 @@ export function scanTurn(tail) {
   const tailText = lastText.trim().replace(/[\s*_`)\]]+$/, '');
   const asked = /\?$/.test(tailText);
   const goalMet = /\b(goal (is )?(met|complete|completed|achieved|reached)|all (the )?(steps|tasks|todos|items) (are )?(done|complete|finished)|nothing (left|more) to do|everything (is|in the plan is) (done|complete|finished))\b/i.test(lastText);
-  return { progressed, denied, errors, asked, goalMet, tools: tools.length };
+  return { progressed, denied, errors, asked, goalMet, tools: tools.length, lastChange };
 }
 
 // Continue or stop, from the scan and the loop's own record. Pure: returns the
-// next record rather than writing it.
+// next record rather than writing it. `goal` is already-resolved text (the
+// bound run's Goal line, or '' when there is none) — this function does not
+// read files.
 export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', quota = null }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
@@ -113,8 +133,11 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   if (steps > PERSIST_STEP_CAP) return stop(`${PERSIST_STEP_CAP} auto-continued steps`);
   if (!scan.progressed) return stop('the last step did no visible work (no edit, command or dispatch)');
 
-  let why = `orchestrate: still working toward "${g}". The last step did real work and nothing says it is finished or blocked, so do the next step now instead of ending the turn. Name the step as you start it. If you are waiting on CI, a build or a background agent, watch it with Monitor and do other independent work meanwhile; the result wakes you, so there is nothing to sit and wait for. If the goal is met, say so plainly; if you need a decision from the user, ask it — either one ends this loop.`;
-  if (steps % PERSIST_CHECKIN_EVERY === 0) why += ` Check-in (step ${steps} of at most ${PERSIST_STEP_CAP}): in one line, tell the user what the last few steps did, so they can catch drift from the goal. They can say "persist off" to stop this.`;
+  const parts = [];
+  if (g) parts.push(`"${g}"`);
+  parts.push(`step ${steps} of ${PERSIST_STEP_CAP}`);
+  if (scan.lastChange) parts.push(`last edited ${scan.lastChange}`);
+  let why = `orchestrate: ${parts.join(' · ')}`;
   if (contextNotice) why += ` ${contextNotice}`;
   return { rec: out, kind: 'continue', why };
 }
@@ -132,8 +155,9 @@ export function check(input) {
   const path = STORE();
   const store = readJson(path) || {};
   const key = sanitizeId(input.session_id || 'nosession');
+  const bound = (state && state.run && state.run.runMd) || null;
   let ctx = null;
-  try { ctx = input.transcript_path ? sampleContext({ transcriptPath: input.transcript_path, session: input.session_id || null, announce: false }) : null; } catch { ctx = null; }
+  try { ctx = input.transcript_path ? sampleContext({ transcriptPath: input.transcript_path, session: input.session_id || null, announce: false, runMd: bound, permissionMode: modeOf(input) }) : null; } catch { ctx = null; }
   // This is deliberately outside auto-continue: reaching the compaction line
   // is unsafe even for an ordinary Stop. A block is once per epoch, and an
   // active Stop hook must not block itself again.
@@ -141,7 +165,6 @@ export function check(input) {
     const epoch = contextEpoch(ctx.reading);
     const rec = store[key] || {};
     const at = thresholds(ctx.reading).compactAt;
-    const bound = (state && state.run && state.run.runMd) || null;
     const checkpoint = hasCheckpoint(input.session_id || null, ctx.reading, { runMd: bound, permissionMode: modeOf(input) });
     if (ctx.reading.tokens >= at && !checkpoint && rec.contextBlockedFor !== epoch) {
       store[key] = { ...rec, contextBlockedFor: epoch, checkedAt: new Date().toISOString() };
@@ -163,7 +186,7 @@ export function check(input) {
   const tail = input.transcript_path && size > from ? readTail(input.transcript_path, Math.min(size - from, PERSIST_SCAN_CAP)) : '';
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: p.goal, quota: readQuota() });
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: runGoalLine(bound) || p.goal || '', quota: readQuota() });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };

@@ -294,10 +294,16 @@ export const PLANS_DIR = join(homedir(), '.claude', 'plans');
 //   - in plan mode only, the newest `*.md` under `plansDir` (the host's own
 //     plan file), because the plan is the checkpoint while a plan is what the
 //     user asked for and helpers may be forbidden to write anything else.
-export function hasCheckpoint(session, reading, { dir = CONTEXT_DIR, runMd = null, permissionMode = null, plansDir = PLANS_DIR } = {}) {
-  try { if (existsSync(checkpointPath(session, reading, dir))) return true; } catch { /* fall through */ }
+// The newest of the same candidates `hasCheckpoint` accepts, as a fact a
+// notice can print: `{ path, mtimeMs }`, or null when none qualifies. Does not
+// change what counts as a checkpoint — only reports which one is newest.
+export function newestCheckpoint(session, reading, { dir = CONTEXT_DIR, runMd = null, permissionMode = null, plansDir = PLANS_DIR } = {}) {
+  let best = null;
+  const consider = (path, mtimeMs) => { if (path && Number.isFinite(mtimeMs) && (!best || mtimeMs > best.mtimeMs)) best = { path, mtimeMs }; };
+  const p = checkpointPath(session, reading, dir);
+  try { if (existsSync(p)) consider(p, statSync(p).mtimeMs); } catch { /* fall through */ }
   const epochStart = contextEpochStart(reading);
-  if (epochStart == null) return false;
+  if (epochStart == null) return best;
   if (runMd) {
     try {
       const st = statSync(runMd);
@@ -306,7 +312,7 @@ export function hasCheckpoint(session, reading, { dir = CONTEXT_DIR, runMd = nul
         const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
         const prompt = /Pickup prompt:\s*(.*)/.exec(m ? m[1] : '');
         const v = prompt ? prompt[1].trim() : '';
-        if (v && !/^<.*>$/.test(v)) return true;
+        if (v && !/^<.*>$/.test(v)) consider(runMd, st.mtimeMs);
       }
     } catch { /* no RUN.md, or it moved: not a checkpoint */ }
   }
@@ -314,12 +320,17 @@ export function hasCheckpoint(session, reading, { dir = CONTEXT_DIR, runMd = nul
     try {
       for (const f of readdirSync(plansDir)) {
         if (!f.endsWith('.md')) continue;
-        const st = statSync(join(plansDir, f));
-        if (st.mtimeMs > epochStart) return true;
+        const fp = join(plansDir, f);
+        const st = statSync(fp);
+        if (st.mtimeMs > epochStart) consider(fp, st.mtimeMs);
       }
     } catch { /* no plans directory on this machine */ }
   }
-  return false;
+  return best;
+}
+
+export function hasCheckpoint(session, reading, opts = {}) {
+  return newestCheckpoint(session, reading, opts) != null;
 }
 
 // What to do about the current size. The key changes only when the advice
@@ -358,22 +369,72 @@ export function switchAdvice(reading, advice) {
   return 'recommend compacting if this same task continues; a fresh conversation only if the task changes or a finished phase will resume from saved files';
 }
 
+const k1 = n => `~${Math.round(n / 1000)}k`;
+
+// A written-N-min-ago-or-just-now age, the same style as a helper's own
+// progress-file fact (context-check.mjs's `progressFact`).
+function ageStr(mtimeMs, now) {
+  const m = Math.round((now - mtimeMs) / 60000);
+  if (!Number.isFinite(m)) return 'time unknown';
+  return m < 1 ? 'just now' : m < 120 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
+}
+
+// The window this line reports against: the known capacity, or the
+// autocompact point the plugin already knows about (`policy.context.
+// autocompactDefault`), whichever is available. Null when neither is known.
+function reportedWindow(reading, policy) {
+  if (reading && reading.capacity) return reading.capacity;
+  const auto = policy.context.autocompactDefault;
+  return auto === 'off' ? null : auto;
+}
+
+// The next thing that will happen at a size: the compact line (`thresholds()`)
+// or autocompact (`policy.context.autocompactDefault`), whichever is lower and
+// not yet passed. Null once both are behind the current size.
+function nextEvent(reading, policy) {
+  const { compactAt } = thresholds(reading, policy);
+  const auto = policy.context.autocompactDefault;
+  const candidates = [{ label: 'compact', at: compactAt }];
+  if (auto !== 'off') candidates.push({ label: 'autocompact', at: auto });
+  const ahead = candidates.filter(c => reading.tokens < c.at).sort((a, b) => a.at - b.at);
+  return ahead[0] || null;
+}
+
+// One line of facts about the conversation's size: this is the single shape
+// behind the checkpoint notice, the compact notice, and the periodic tick —
+// they differ only in when they fire, never in what they say. No instruction
+// words: what a reader does with the numbers is theirs to decide.
+function factLine(reading, policy, ctx = {}) {
+  const { session = null, editCounter = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null, now = Date.now() } = ctx;
+  const parts = [];
+  const window = reportedWindow(reading, policy);
+  parts.push(`${k1(reading.tokens)}${window ? ` of ${k1(window)}` : ''}`);
+  const n = Number(reading.compactions) || 0;
+  if (n) parts.push(`compacted ${n}×`);
+  const next = nextEvent(reading, policy);
+  if (next) parts.push(`next: ${next.label} ${k1(next.at)}`);
+  const cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
+  parts.push(cp ? `newest checkpoint: ${cp.path}, ${ageStr(cp.mtimeMs, now)}` : 'newest checkpoint: none');
+  if (Number.isFinite(editCounter)) parts.push(`${editCounter} tool call${editCounter === 1 ? '' : 's'} since your last edit`);
+  return `[orchestrate · context] ${parts.join(' · ')}`;
+}
+
 // The short notice for an advice change; empty when there is nothing to say.
 // Never recommend a switch from memory or an old number: only this notice,
-// measured from the last response, says the conversation is full.
-export function contextNotice(reading, advice) {
+// measured from the last response, says the conversation is full. `ctx` carries
+// what `factLine` needs (policy, session, editCounter, runMd, permissionMode);
+// see `sampleContext`.
+export function contextNotice(reading, advice, ctx = {}) {
   if (!reading || !advice) return '';
-  const k = n => `~${Math.round(n / 1000)}k`;
-  const cap = reading.capacity ? ` of a ${Math.round(reading.capacity / 1000)}k window` : '';
+  const policy = ctx.policy || loadPolicy();
   switch (advice.action) {
     case 'checkpoint':
-      return `[orchestrate · context] this conversation re-reads ${k(reading.tokens)} tokens${cap} on every step (measured from the last response). Prepare a checkpoint now: write down ${CHECKPOINT_WHAT}, where a later session can find it.`;
     case 'compact':
-      return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. At the next safe boundary (no edit half-done, no helper running), save the checkpoint (${CHECKPOINT_WHAT}), then ${switchAdvice(reading, advice)}. The user makes the switch.`;
+      return factLine(reading, policy, ctx);
     case 'investigate': {
       const c = reading.compaction || {};
-      const was = c.preTokens != null && c.postTokens != null ? ` (compaction took it from ${k(c.preTokens)} to ${k(c.postTokens)})` : '';
-      return `[orchestrate · context] still ${k(reading.tokens)} tokens right after compaction${was}. Compacting again will not help: something restored on every step is large. Check CLAUDE.md and memory files, plugin, skill and MCP tool listings, and any large tool output being carried, before recommending anything else.`;
+      const was = c.preTokens != null && c.postTokens != null ? ` (compaction took it from ${k1(c.preTokens)} to ${k1(c.postTokens)})` : '';
+      return `[orchestrate · context] still ${k1(reading.tokens)} tokens right after compaction${was}. Compacting again will not help: something restored on every step is large. Check CLAUDE.md and memory files, plugin, skill and MCP tool listings, and any large tool output being carried, before recommending anything else.`;
     }
     default:
       return '';
@@ -382,21 +443,14 @@ export function contextNotice(reading, advice) {
 
 // The measured size as a short line, keyed by compaction epoch and a step of
 // `tickEvery` tokens, so it is said once per step and again after a compaction.
-export function contextTick(reading, policy = loadPolicy()) {
+// Same shape as `contextNotice`'s checkpoint/compact text — see `factLine`.
+export function contextTick(reading, policy = loadPolicy(), ctx = {}) {
   const every = policy.context.tickEvery;
   if (!every || !reading || reading.tokens == null || !Number.isFinite(reading.tokens)) return { key: null, text: '' };
   if (reading.state !== 'measured' && reading.state !== 'provisional') return { key: null, text: '' };
-  const n = Number(reading.compactions) || 0;
-  const cap = reading.capacity ? ` of a ${Math.round(reading.capacity / 1000)}k window` : '';
-  const since = n ? ` · compacted ${n} time${n === 1 ? '' : 's'} this session` : '';
-  const { checkpointAt, compactAt } = thresholds(reading, policy);
-  const k = v => `~${Math.round(v / 1000)}k`;
-  const next = reading.tokens < checkpointAt ? `Nothing to do until ${k(checkpointAt)}`
-    : reading.tokens < compactAt ? `Past the checkpoint line; the switch recommendation comes at ${k(compactAt)}`
-    : 'Past the switch line; the compact-or-fresh advice already given stands';
   return {
     key: `${contextEpoch(reading)}|${Math.floor(reading.tokens / every)}`,
-    text: `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step, measured${reading.state === 'provisional' ? ' from the compaction summary' : ''}${since}. ${next}; use this number, not an older one, when talking about size.`,
+    text: factLine(reading, policy, ctx),
   };
 }
 
@@ -443,7 +497,7 @@ export function agentTranscriptPath(leadTranscript, agentId) {
 // Returns { reading, advice, changed, notice } where `notice` is non-empty only
 // when the advice differs from the last advice this store announced, and
 // `announce` records it as announced.
-export function sampleContext({ transcriptPath, session = null, agent = null, policy = loadPolicy(), now = Date.now(), force = false, dir = CONTEXT_DIR, announce = true } = {}) {
+export function sampleContext({ transcriptPath, session = null, agent = null, policy = loadPolicy(), now = Date.now(), force = false, dir = CONTEXT_DIR, announce = true, runMd = null, permissionMode = null } = {}) {
   const p = storePath(session, agent, dir);
   const prev = readStore(p);
   let size = 0;
@@ -484,15 +538,16 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
   const isNew = epoch !== 'none' && (!before || contextEpoch(before) !== epoch);
   reading.compactions = (before ? Number(before.compactions) || 0 : 0) + (isNew ? 1 : 0);
 
+  const noticeCtx = { policy, session, editCounter, dir, now, runMd, permissionMode };
   const advice = adviseContext(reading, policy);
   const lastKey = prev ? prev.advisedKey || null : null;
   const changed = advice.key !== lastKey;
-  let notice = changed ? contextNotice(reading, advice) : '';
+  let notice = changed ? contextNotice(reading, advice, noticeCtx) : '';
   // Between thresholds the lead still hears the measured size, one short line
   // each `tickEvery` of growth and after each compaction, so it never has to
   // guess the size from memory or an old summary.
   const lastTick = prev ? prev.tickKey || null : null;
-  const tick = contextTick(reading, policy);
+  const tick = contextTick(reading, policy, noticeCtx);
   const ticked = Boolean(tick.key) && tick.key !== lastTick;
   if (!notice && ticked) notice = tick.text;
   const { offset, size: sz, toolUses, ...clean } = reading;
