@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession } from './lib/tier.mjs';
 import { pickupSection, pickupHash, shouldBlock } from './turn-check.mjs';
 import { readContext, checkpointPath, contextEpoch, hasCheckpoint } from './lib/context.mjs';
+import { modeOf } from './lib/modes.mjs';
 
 const STORE = () => join(DIR, 'precompact-checks.json');
 
@@ -82,7 +83,9 @@ function main() {
     if (run) d = decide({ run, lastDispatchAt: state.lastDispatchAt || null, prev: rec });
     else {
       const reading = readContext(input.transcript_path, { session: input.session_id || null });
-      d = unboundDecision({ session: input.session_id || null, reading, prev: rec, checkpoint: hasCheckpoint(input.session_id || null, reading) });
+      const bound = (state && state.run && state.run.runMd) || null;
+      const checkpoint = hasCheckpoint(input.session_id || null, reading, { runMd: bound, permissionMode: modeOf(input) });
+      d = unboundDecision({ session: input.session_id || null, reading, prev: rec, checkpoint });
     }
   } catch { return; }
   if (!d) return;

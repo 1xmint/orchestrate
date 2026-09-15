@@ -15,13 +15,41 @@
 // rather than against whichever run on the machine is newest. Without it the
 // run is still created, and an unbound session can claim it later with --bind.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, utimesSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, utimesSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, block } from './gate.mjs';
 import { build as buildMap } from './map.mjs';
-import { rememberActiveRun, bindSessionRun, readRun } from './lib/tier.mjs';
+import { rememberActiveRun, bindSessionRun, readRun, loadSession } from './lib/tier.mjs';
+
+// The newest `~/.claude/plans/*.md` touched after `sinceMs`, or null. Without
+// a session-start time there is nothing to compare against, so this returns
+// null rather than guess at how old is too old.
+function freshPlanFile(sinceMs) {
+  if (sinceMs == null) return null;
+  try {
+    let best = null;
+    for (const f of readdirSync(join(homedir(), '.claude', 'plans'))) {
+      if (!f.endsWith('.md')) continue;
+      const p = join(homedir(), '.claude', 'plans', f);
+      const st = statSync(p);
+      if (st.mtimeMs > sinceMs && (!best || st.mtimeMs > best.mtimeMs)) best = { path: p, mtimeMs: st.mtimeMs };
+    }
+    return best ? best.path : null;
+  } catch { return null; }
+}
+
+// The session's own start time, when `--session-id` names one this process
+// can see. No id, no recorded start: null, and the Plan line is left off
+// rather than compared against an arbitrary window.
+function sessionStartMs(sessionId) {
+  if (!sessionId) return null;
+  const state = loadSession(sessionId);
+  const t = state && state.started ? Date.parse(state.started) : NaN;
+  return Number.isFinite(t) ? t : null;
+}
 
 const args = process.argv.slice(2);
 const positional = [];
@@ -103,6 +131,13 @@ const body = template
   .replaceAll('{{BUDGET}}', opts.budget ? `$${String(opts.budget).replace(/^\$/, '')} at list price` : '<list-price dollars — set this with the user before the first dispatch>')
   .replaceAll('{{ID_PREFIX}}', idPrefix);
 
+// The host's own plan file, when the user was in Plan mode this session and
+// wrote one: a `Plan:` line so the run and the plan point at each other, and
+// the checkpoint check (lib/context.mjs) can treat a fresh plan as a real
+// checkpoint. No fresh plan file, no line.
+const plan = freshPlanFile(sessionStartMs(opts['session-id']));
+const withPlan = plan ? body.replace('\n## Done when', `\nPlan: ${plan}\n\n## Done when`) : body;
+
 // The gate is the same four commands on every run of this repo, so it is
 // detected once and pasted under Facts, ready for the first packet.
 let gateBlock = '';
@@ -123,8 +158,8 @@ try {
 
 const facts = [gateBlock, mapLine].filter(Boolean).join('\n');
 const withGate = facts
-  ? body.replace('## Facts learned while grounding\n', `## Facts learned while grounding\n\n\`\`\`\n${facts}\n\`\`\`\n`)
-  : body;
+  ? withPlan.replace('## Facts learned while grounding\n', `## Facts learned while grounding\n\n\`\`\`\n${facts}\n\`\`\`\n`)
+  : withPlan;
 
 mkdirSync(dir, { recursive: true });
 writeFileSync(target, withGate);

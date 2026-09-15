@@ -251,12 +251,75 @@ export function contextEpoch(reading) {
   return reading && reading.compaction ? (reading.compaction.uuid || reading.compaction.at || 'c') : 'none';
 }
 
+// When the current epoch began, best-effort. A compaction starts a fresh one
+// at the moment it happened; before any compaction, the epoch is the whole
+// session, so its start is the transcript's own first line. Null means
+// neither fact is available (no transcript, or one this process cannot read),
+// and callers treat that as "cannot tell", not as "just started".
+export function contextEpochStart(reading) {
+  const at = reading && reading.compaction && reading.compaction.at;
+  if (at) { const t = Date.parse(at); if (Number.isFinite(t)) return t; }
+  const path = reading && reading.transcript;
+  if (!path) return null;
+  try {
+    const size = statSync(path).size;
+    if (!size) return null;
+    const text = readRange(path, 0, Math.min(size, 65536));
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let rec;
+      try { rec = JSON.parse(line); } catch { continue; }
+      if (rec && rec.timestamp) { const t = Date.parse(rec.timestamp); if (Number.isFinite(t)) return t; }
+    }
+  } catch { /* fall through */ }
+  return null;
+}
+
 export function checkpointPath(session, reading, dir = CONTEXT_DIR) {
   return join(dir, idPart(session || 'nosession'), `checkpoint-${idPart(contextEpoch(reading))}.md`);
 }
 
-export function hasCheckpoint(session, reading, dir = CONTEXT_DIR) {
-  try { return existsSync(checkpointPath(session, reading, dir)); } catch { return false; }
+export const PLANS_DIR = join(homedir(), '.claude', 'plans');
+
+// A real checkpoint for the current epoch, honestly: not only the plugin's own
+// file, but anything a resuming session would actually be able to read back.
+//   - the plugin checkpoint at `checkpointPath` (today's behaviour)
+//   - `runMd` (the session's bound run, if any) when its Pickup section carries
+//     real text and the file was touched after the epoch began. Checked by
+//     content, not by mtime alone: `run-init.mjs --reopen` touches RUN.md's
+//     mtime with no text change (a deliberate, rare CLI action, not something
+//     a hook does mid-session), so a written-but-unchanged Pickup can still
+//     read as fresh in that one case. Accepted as the smallest honest check
+//     available without a second store recording Pickup's text across epochs.
+//   - in plan mode only, the newest `*.md` under `plansDir` (the host's own
+//     plan file), because the plan is the checkpoint while a plan is what the
+//     user asked for and helpers may be forbidden to write anything else.
+export function hasCheckpoint(session, reading, { dir = CONTEXT_DIR, runMd = null, permissionMode = null, plansDir = PLANS_DIR } = {}) {
+  try { if (existsSync(checkpointPath(session, reading, dir))) return true; } catch { /* fall through */ }
+  const epochStart = contextEpochStart(reading);
+  if (epochStart == null) return false;
+  if (runMd) {
+    try {
+      const st = statSync(runMd);
+      if (st.mtimeMs > epochStart) {
+        const text = readFileSync(runMd, 'utf8');
+        const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
+        const prompt = /Pickup prompt:\s*(.*)/.exec(m ? m[1] : '');
+        const v = prompt ? prompt[1].trim() : '';
+        if (v && !/^<.*>$/.test(v)) return true;
+      }
+    } catch { /* no RUN.md, or it moved: not a checkpoint */ }
+  }
+  if (permissionMode === 'plan') {
+    try {
+      for (const f of readdirSync(plansDir)) {
+        if (!f.endsWith('.md')) continue;
+        const st = statSync(join(plansDir, f));
+        if (st.mtimeMs > epochStart) return true;
+      }
+    } catch { /* no plans directory on this machine */ }
+  }
+  return false;
 }
 
 // What to do about the current size. The key changes only when the advice

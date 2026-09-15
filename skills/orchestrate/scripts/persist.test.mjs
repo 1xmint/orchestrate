@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -233,4 +233,61 @@ test('plugin-wide Stop: silent below compactAt, once a checkpoint exists, and wh
 
   // At or above compactAt, but this Stop is itself already re-entered: never block itself again.
   assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'p8', cwd: dir, transcript_path: bigTranscript, stop_hook_active: true }, home).stdout.trim(), '');
+});
+
+// 9-14-0002: the checkpoint check accepts a real checkpoint that is not the
+// plugin's own file — the host's plan file in Plan mode, or the bound run's
+// written Pickup — because a session already holding one of those does not
+// need a second file nobody asked it to write.
+function bigTranscript(dir, name, startedAgoMs = 3600000) {
+  const p = join(dir, name);
+  const started = new Date(Date.now() - startedAgoMs).toISOString();
+  writeFileSync(p, JSON.stringify({ type: 'user', timestamp: started, message: { role: 'user', content: 'go' } }) + '\n'
+    + JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { id: 'm', model: 'claude-opus-5', role: 'assistant', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 2, cache_read_input_tokens: 158000, cache_creation_input_tokens: 1000, output_tokens: 50 } } }) + '\n');
+  return p;
+}
+
+test('plan mode: a plan file touched this epoch is a real checkpoint', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
+  const plansDir = join(home, '.claude', 'plans');
+  mkdirSync(plansDir, { recursive: true });
+
+  // The plan file was touched after the session (and so the epoch) started.
+  const t1 = bigTranscript(dir, 'plan-fresh.jsonl');
+  writeFileSync(join(plansDir, 'fresh.md'), '# plan\n');
+  assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'pm1', cwd: dir, transcript_path: t1, permission_mode: 'plan' }, home).stdout.trim(), '', 'a fresh plan file stands in for the checkpoint');
+});
+
+test('plan mode: a plan file older than the epoch does not stand in for a checkpoint', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
+  const plansDir = join(home, '.claude', 'plans');
+  mkdirSync(plansDir, { recursive: true });
+  const t = bigTranscript(dir, 'plan-stale.jsonl', 3600000);
+  writeFileSync(join(plansDir, 'old.md'), '# old plan\n');
+  const oldTime = new Date(Date.now() - 7200000); // touched before the session started
+  utimesSync(join(plansDir, 'old.md'), oldTime, oldTime);
+  const blocked = run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'pm2', cwd: dir, transcript_path: t, permission_mode: 'plan' }, home);
+  assert.equal(blocked.json.decision, 'block', 'no plan file from this epoch, and no checkpoint: blocks as before');
+});
+
+test('a bound run whose Pickup was written this epoch is a real checkpoint', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
+  const runMd = join(dir, 'RUN.md');
+  writeFileSync(runMd, '## Goal\n\nship it\n\n## Pickup\n\nPickup prompt: <one sentence that continues from here>\nPickup confidence: high\nResume risk: none\n');
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessions, { recursive: true });
+  writeFileSync(join(sessions, 'pm3.json'), JSON.stringify({ session_id: 'pm3', run: { root: dir, runId: 'r', runMd } }));
+
+  const t = bigTranscript(dir, 'run-fresh.jsonl');
+  // Pickup is still the template placeholder: blocks, same as no checkpoint at all.
+  const first = run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'pm3', cwd: dir, transcript_path: t }, home);
+  assert.equal(first.json.decision, 'block', 'an unwritten Pickup is not a checkpoint');
+
+  // Now write the Pickup for real, after the epoch started: it stands in for the checkpoint.
+  writeFileSync(runMd, '## Goal\n\nship it\n\n## Pickup\n\nPickup prompt: resume from the reviewer step\nPickup confidence: high\nResume risk: none\n');
+  const t2 = bigTranscript(dir, 'run-fresh2.jsonl');
+  assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'pm3', cwd: dir, transcript_path: t2 }, home).stdout.trim(), '', 'a written Pickup this epoch is a real checkpoint');
 });
