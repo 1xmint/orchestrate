@@ -343,7 +343,6 @@ export function adviseContext(reading, policy = loadPolicy()) {
   // session has been compacted `freshAfterCompactions` times the next full
   // conversation is better served by a fresh one resuming from the checkpoint.
   const fresh = (Number(reading.compactions) || 0) >= policy.context.freshAfterCompactions;
-  if (reading.tokens >= policy.context.hardAt) return { action: 'hard', fresh, key: key('hard'), why: `${k(reading.tokens)} is at or above ${k(policy.context.hardAt)}` };
   if (reading.tokens >= compactAt) return { action: 'compact', fresh, key: key('compact'), why: `${k(reading.tokens)} is at or above ${k(compactAt)}` };
   if (reading.tokens >= checkpointAt) return { action: 'checkpoint', key: key('checkpoint'), why: `${k(reading.tokens)} is at or above ${k(checkpointAt)}` };
   return { action: 'none', key: key('none'), why: `${k(reading.tokens)} is below ${k(checkpointAt)}` };
@@ -371,8 +370,6 @@ export function contextNotice(reading, advice) {
       return `[orchestrate · context] this conversation re-reads ${k(reading.tokens)} tokens${cap} on every step (measured from the last response). Prepare a checkpoint now: write down ${CHECKPOINT_WHAT}, where a later session can find it.`;
     case 'compact':
       return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. At the next safe boundary (no edit half-done, no helper running), save the checkpoint (${CHECKPOINT_WHAT}), then ${switchAdvice(reading, advice)}. The user makes the switch.`;
-    case 'hard':
-      return `[orchestrate · context] ${k(reading.tokens)} tokens${cap} per step. Do not start new work here: write the checkpoint (${CHECKPOINT_WHAT}), then ${switchAdvice(reading, advice)}. The user makes the switch.`;
     case 'investigate': {
       const c = reading.compaction || {};
       const was = c.preTokens != null && c.postTokens != null ? ` (compaction took it from ${k(c.preTokens)} to ${k(c.postTokens)})` : '';

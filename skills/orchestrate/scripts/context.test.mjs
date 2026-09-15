@@ -114,11 +114,12 @@ test('thresholds: checkpoint at 120k, compact at 150k, or 75% of a known smaller
   assert.throws(() => setPolicyValue({}, 'context.nope', '1'), /unknown policy key/);
 });
 
-test('hard context advice is once per compaction epoch and says not to start work', () => {
+test('there is no escalated "hard" tier past compactAt: a conversation far past it still gets the ordinary compact advice', () => {
   const reading = { state: 'measured', tokens: 300000, capacity: null, compaction: { uuid: 'epoch-1' }, responsesSinceCompaction: 4 };
   const advice = adviseContext(reading, policy);
-  assert.equal(advice.action, 'hard');
-  assert.match(contextNotice(reading, advice), /Do not start new work here/);
+  assert.equal(advice.action, 'compact');
+  assert.match(contextNotice(reading, advice), /At the next safe boundary/);
+  assert.doesNotMatch(contextNotice(reading, advice), /Do not start new work here/);
   assert.match(checkpointPath('s', reading), /checkpoint-epoch-1\.md$/);
 });
 
@@ -345,8 +346,10 @@ test('compact by default; a fresh conversation only after repeated compactions',
   const twice = at(160000, 2);
   assert.equal(twice.a.fresh, true);
   assert.match(twice.notice, /recommend a fresh conversation that resumes from the checkpoint: this one has already been compacted 2 times/);
-  assert.match(at(310000, 2).notice, /Do not start new work here.*fresh conversation/);
-  assert.match(at(310000, 0).notice, /Do not start new work here.*recommend compacting/);
+  // No escalated "hard" tier: a conversation far past compactAt still gets the
+  // ordinary compact advice, fresh or not.
+  assert.match(at(310000, 2).notice, /At the next safe boundary.*fresh conversation/);
+  assert.match(at(310000, 0).notice, /At the next safe boundary.*recommend compacting/);
   const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: 160000, compactions: 2 } });
   assert.match(stop.why, /fresh conversation that resumes from the checkpoint/);
 });

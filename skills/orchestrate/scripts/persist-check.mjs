@@ -100,7 +100,7 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   const g = shortGoal(goal);
   const stop = why => ({ rec: out, kind: 'stop', why });
 
-  if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate' || contextAdvice.action === 'hard')) {
+  if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate')) {
     const path = checkpointPath(contextReading && contextReading.session, contextReading);
     const n = contextReading && contextReading.tokens != null ? `~${Math.round(contextReading.tokens / 1000)}k` : 'high';
     return stop(`context is ${n}: write the checkpoint at ${path}, then ${switchAdvice(contextReading, contextAdvice)}`);

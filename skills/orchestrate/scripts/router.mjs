@@ -30,7 +30,7 @@ import {
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, staleRunsUnder,
 } from './lib/tier.mjs';
-import { sampleContext, storedContext, CONTEXT_DIR } from './lib/context.mjs';
+import { sampleContext, storedContext, CONTEXT_DIR, thresholds } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
@@ -91,12 +91,15 @@ export function stateLine(ctx, prefix) {
   return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · codex: ${ctx.codex || codexState()} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
 }
 
-export function contextBand(reading) {
+// One policy number decides each cut, read from lib/context.mjs's own
+// thresholds() rather than a private copy: checkpointAt and compactAt (or a
+// known smaller window's share of it) are the only two bands there are.
+export function contextBand(reading, policy = loadPolicy()) {
   const n = reading && reading.tokens;
   if (!Number.isFinite(n)) return 'none';
-  if (n >= 300000) return 'hard';
-  if (n >= 150000) return 'compact';
-  if (n >= 120000) return 'checkpoint';
+  const { checkpointAt, compactAt } = thresholds(reading, policy);
+  if (n >= compactAt) return 'compact';
+  if (n >= checkpointAt) return 'checkpoint';
   return 'none';
 }
 
