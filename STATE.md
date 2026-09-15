@@ -2,6 +2,20 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.4 — the checkpoint check accepts a real checkpoint, 2026-09-14
+
+Step S3 of the rules-versus-judgment plan. The Stop and PreCompact blocks
+used to accept only the plugin's own checkpoint file, so a session with a
+written RUN.md Pickup, or a plan file in Plan mode, was still told to write a
+checkpoint. hasCheckpoint (lib/context.mjs) now accepts: the plugin file; the
+bound run's RUN.md when its Pickup prompt holds real text and the file changed
+after the current context began; or, in Plan mode only, a `~/.claude/plans`
+file written after that point. run-init.mjs writes a `Plan:` line when a fresh
+plan file exists (create path only, not `--bind`). Known gap: `run-init.mjs
+--reopen` touches RUN.md without changing it, so an old real Pickup reads as
+fresh after it. Replay of the real 161k Plan-mode stop: old check blocked, new
+check does not (replay/s3-output.txt in the run dir).
+
 ## v0.15.3 — helpers hear facts, not orders, 2026-09-14
 
 Step S1 of the rules-versus-judgment plan. A helper past its size budget now
