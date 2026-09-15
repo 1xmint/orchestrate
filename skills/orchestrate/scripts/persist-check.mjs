@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
 import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 import { sampleContext, markAnnounced, markTicked, checkpointPath, contextEpoch, hasCheckpoint, thresholds, switchAdvice } from './lib/context.mjs';
+import { modeOf } from './lib/modes.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -140,7 +141,9 @@ export function check(input) {
     const epoch = contextEpoch(ctx.reading);
     const rec = store[key] || {};
     const at = thresholds(ctx.reading).compactAt;
-    if (ctx.reading.tokens >= at && !hasCheckpoint(input.session_id || null, ctx.reading) && rec.contextBlockedFor !== epoch) {
+    const bound = (state && state.run && state.run.runMd) || null;
+    const checkpoint = hasCheckpoint(input.session_id || null, ctx.reading, { runMd: bound, permissionMode: modeOf(input) });
+    if (ctx.reading.tokens >= at && !checkpoint && rec.contextBlockedFor !== epoch) {
       store[key] = { ...rec, contextBlockedFor: epoch, checkedAt: new Date().toISOString() };
       try { writeJsonAtomic(path, store); } catch {}
       return { rec: store[key], kind: 'continue', why: `orchestrate: context is ~${Math.round(ctx.reading.tokens / 1000)}k: write the checkpoint at ${checkpointPath(input.session_id || null, ctx.reading)}, then ${switchAdvice(ctx.reading, ctx.advice)}` };

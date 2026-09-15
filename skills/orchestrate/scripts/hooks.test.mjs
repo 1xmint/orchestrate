@@ -875,6 +875,21 @@ test('precompact: a session with no bound run is asked for a checkpoint once, th
   assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '');
 });
 
+// 9-14-0002: the same honesty fix as persist-check.mjs's Stop block — a plan
+// file the host wrote this epoch, in Plan mode, is a real checkpoint too.
+test('precompact: no bound run, but a plan file touched this epoch, is a real checkpoint', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  const plansDir = join(home, '.claude', 'plans');
+  mkdirSync(plansDir, { recursive: true });
+  const transcript = join(repo.dir, 't.jsonl');
+  const started = new Date(Date.now() - 3600000).toISOString();
+  writeFileSync(transcript, JSON.stringify({ type: 'user', timestamp: started, message: { role: 'user', content: 'go' } }) + '\n');
+  writeFileSync(join(plansDir, 'fresh.md'), '# plan\n');
+  const input = { hook_event_name: 'PreCompact', session_id: 'spc5', cwd: repo.dir, transcript_path: transcript, permission_mode: 'plan' };
+  assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '', 'a fresh plan file stands in for the checkpoint');
+});
+
 test('turn check: nothing in it can ask for more research, testing or improvement', () => {
   // The check that used to live here counted the source-reading tool calls in a
   // turn and blocked a recommendation answered from fewer than two. Two failed
