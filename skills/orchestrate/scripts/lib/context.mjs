@@ -76,12 +76,14 @@ export function scanSlice(text, { partialHead = false, lead = true } = {}) {
   const out = {
     consumed: Buffer.byteLength(complete, 'utf8'),
     compaction: null, usage: null, responses: 0, sawBoundary: false,
-    host: null, skipped: 0,
+    host: null, skipped: 0, toolUses: [],
   };
   const lines = complete.split('\n');
   if (partialHead) lines.shift();
   const ids = new Set();
+  const seenTools = new Set();
   let anon = 0;
+  let anonTool = 0;
   for (const line of lines) {
     if (!line.trim()) continue;
     let rec; try { rec = JSON.parse(line); } catch { out.skipped++; continue; }
@@ -105,6 +107,15 @@ export function scanSlice(text, { partialHead = false, lead = true } = {}) {
     if (rec.type !== 'assistant') continue;
     const msg = rec.message;
     if (!msg || msg.model === '<synthetic>') continue;
+    // Tool calls this response made, in the order it made them, each counted
+    // once even if the record is duplicated by streaming.
+    for (const b of Array.isArray(msg.content) ? msg.content : []) {
+      if (!b || b.type !== 'tool_use' || !b.name) continue;
+      const toolId = b.id || `tool-anon-${anonTool++}`;
+      if (seenTools.has(toolId)) continue;
+      seenTools.add(toolId);
+      out.toolUses.push(b.name);
+    }
     const tokens = inputSide(msg.usage);
     if (tokens == null) continue;
     // Streaming writes one response as several records under one id; each
@@ -114,6 +125,20 @@ export function scanSlice(text, { partialHead = false, lead = true } = {}) {
     out.usage = { tokens, responseId: msg.id || null, model: typeof msg.model === 'string' ? msg.model : null, at: rec.timestamp || null };
   }
   return out;
+}
+
+// Tool names that count as an edit for the "tool calls since your last edit"
+// counter: anything that changes a file. Reading, searching and dispatching
+// helpers do not reset it.
+export const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+// Step a running "tool calls since the last edit" count over one slice's tool
+// uses, in order: an edit tool resets it to 0, anything else adds one. Pure,
+// so an incremental read and a full read use it the same way.
+export function stepEditCounter(count, toolUses) {
+  let c = Number.isFinite(count) ? count : 0;
+  for (const name of toolUses || []) c = EDIT_TOOLS.has(name) ? 0 : c + 1;
+  return c;
 }
 
 // The window size the host reported for this session through the status line,
@@ -206,7 +231,7 @@ export function readContext(transcriptPath, { session = null, agent = null, capa
     if (scan.sawBoundary || all || (scan.usage && window >= SCAN_ENOUGH) || window >= SCAN_MAX) {
       const unseen = !scan.sawBoundary && !all;
       const reading = toReading(scan, { ...base, compactionUnseen: unseen });
-      return { ...reading, offset: start + scan.consumed, size };
+      return { ...reading, offset: start + scan.consumed, size, toolUses: scan.toolUses };
     }
     window = Math.min(size, window * 4);
   }
@@ -367,21 +392,29 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
   const opts = { session, agent, transcript: transcriptPath || null, capacity, now, staleMs: policy.context.staleMs };
 
   let reading;
+  let editCounter;
+  const prevEditCounter = prev && Number.isFinite(prev.editCounter) ? prev.editCounter : 0;
   const sameFile = prev && prev.reading && prev.transcript === (transcriptPath || null);
   if (!force && sameFile && size === prev.size) {
     // Nothing new; the reading stands, with its age recomputed. Any growth at
     // all is read: a compaction record can be a few hundred bytes.
     const nothing = { compaction: null, usage: null, responses: 0, sawBoundary: false, host: null };
     reading = { ...toReading(nothing, { ...opts, prev: prev.reading, continued: true }), offset: prev.offset, size };
+    editCounter = prevEditCounter;
   } else if (!force && sameFile && size >= prev.offset && size - prev.offset <= SCAN_MAX) {
     let text = '';
     try { text = readRange(transcriptPath, prev.offset, size); } catch { text = ''; }
     const scan = scanSlice(text, { partialHead: false, lead: !agent });
     reading = { ...toReading(scan, { ...opts, prev: prev.reading, continued: true }), offset: prev.offset + scan.consumed, size };
+    // Incremental: only the new bytes' tool calls are added to the running
+    // count, so a call already counted on an earlier read is never counted twice.
+    editCounter = stepEditCounter(prevEditCounter, scan.toolUses);
   } else {
     // First sample, a rewritten or truncated file, or a jump too large to read
-    // incrementally.
+    // incrementally: nothing earlier is known, so the count starts fresh from
+    // whatever this wider read can see.
     reading = readContext(transcriptPath, { session, agent, capacity, now, policy });
+    editCounter = stepEditCounter(0, reading.toolUses);
   }
 
   // Count compactions this store has seen: a new epoch is one more. A first
@@ -402,15 +435,15 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
   const tick = contextTick(reading, policy);
   const ticked = Boolean(tick.key) && tick.key !== lastTick;
   if (!notice && ticked) notice = tick.text;
-  const { offset, size: sz, ...clean } = reading;
+  const { offset, size: sz, toolUses, ...clean } = reading;
   writeStore(p, {
     v: CONTEXT_V, session, agent, transcript: transcriptPath || null,
-    offset: offset || 0, size: sz || 0, reading: clean,
+    offset: offset || 0, size: sz || 0, reading: clean, editCounter,
     advisedKey: announce && changed ? advice.key : lastKey,
     tickKey: announce && ticked ? tick.key : lastTick,
     sampledAt: new Date(now).toISOString(),
   });
-  return { reading: clean, advice, changed, notice, tick: ticked ? tick.key : null };
+  return { reading: clean, advice, changed, notice, tick: ticked ? tick.key : null, editCounter };
 }
 
 // The stored reading, without sampling. For callers that must not read the

@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import {
   readContext, sampleContext, adviseContext, contextNotice, scanSlice, inputSide, thresholds,
   storedContext, markAnnounced, agentTranscriptPath, contextTick, formatReading, writeStatusCapacity, statusCapacity, checkpointPath,
+  stepEditCounter,
 } from './lib/context.mjs';
 import { loadPolicy, setPolicyValue } from './lib/policy.mjs';
 import { persistDecision } from './persist-check.mjs';
@@ -25,9 +26,13 @@ const NOW = T0 + 120 * 60000;
 const policy = loadPolicy({});
 
 let n = 0;
-const assistant = (tokens, { min = 0, id = `msg_${++n}`, model = 'claude-opus-5', sidechain = false, usage } = {}) => JSON.stringify({
+const assistant = (tokens, { min = 0, id = `msg_${++n}`, model = 'claude-opus-5', sidechain = false, usage, tools = [] } = {}) => JSON.stringify({
   type: 'assistant', timestamp: iso(min), isSidechain: sidechain, version: '2.1.270', entrypoint: 'claude-desktop',
-  message: { id, model, role: 'assistant', content: [{ type: 'text', text: 'x' }], usage: usage !== undefined ? usage : { input_tokens: 2, cache_read_input_tokens: tokens - 1002, cache_creation_input_tokens: 1000, output_tokens: 50 } },
+  message: {
+    id, model, role: 'assistant',
+    content: [...tools.map((name, i) => ({ type: 'tool_use', id: `${id}_tool${i}`, name, input: {} })), { type: 'text', text: 'x' }],
+    usage: usage !== undefined ? usage : { input_tokens: 2, cache_read_input_tokens: tokens - 1002, cache_creation_input_tokens: 1000, output_tokens: 50 },
+  },
 });
 const user = (text, min = 0) => JSON.stringify({ type: 'user', timestamp: iso(min), message: { role: 'user', content: text } });
 const boundary = (pre, post, min = 0, uuid = `b${++n}`) => JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid, timestamp: iso(min), content: 'Conversation compacted', compactMetadata: { trigger: 'auto', preTokens: pre, postTokens: post } });
@@ -141,6 +146,40 @@ test('streaming duplicates count as one response; a half-written last line is le
   assert.equal(s.usage.tokens, 50000);
   const whole = Buffer.byteLength([boundary(100, 10, 0), rec, rec, rec].join('\n') + '\n');
   assert.equal(s.consumed, whole, 'the partial line is not consumed');
+});
+
+test('stepEditCounter: an edit tool resets the count, anything else adds one', () => {
+  assert.equal(stepEditCounter(0, []), 0);
+  assert.equal(stepEditCounter(0, ['Read', 'Grep', 'Bash']), 3);
+  assert.equal(stepEditCounter(3, ['Read', 'Edit', 'Read', 'Read']), 2, 'the edit resets it, then two more reads');
+  assert.equal(stepEditCounter(5, ['Write']), 0);
+  assert.equal(stepEditCounter(5, ['MultiEdit', 'NotebookEdit', 'Read']), 1);
+  assert.equal(stepEditCounter(NaN, ['Read']), 1, 'a missing count starts at 0');
+});
+
+test('sampleContext: the tool-calls-since-last-edit count survives across incremental hook calls without double-counting', () => {
+  const { p, store } = file([assistant(50000, { min: 0, tools: ['Read', 'Grep'] })]);
+  const s1 = sampleContext({ transcriptPath: p, session: 'edit-1', policy, now: NOW, dir: store });
+  assert.equal(s1.editCounter, 2);
+
+  // Only the newly appended bytes are read; the running count adds to what
+  // was already stored, it does not recount the first response.
+  appendFileSync(p, `${assistant(55000, { min: 1, tools: ['Bash'] })}\n`);
+  const s2 = sampleContext({ transcriptPath: p, session: 'edit-1', policy, now: NOW, dir: store });
+  assert.equal(s2.editCounter, 3, '2 already stored plus 1 more read, not 1 counted twice');
+
+  // No growth at all: the stored count stands, unchanged.
+  const s3 = sampleContext({ transcriptPath: p, session: 'edit-1', policy, now: NOW, dir: store });
+  assert.equal(s3.editCounter, 3);
+
+  // An edit resets it to 0, then further reads count from there.
+  appendFileSync(p, `${assistant(60000, { min: 2, tools: ['Edit'] })}\n`);
+  const s4 = sampleContext({ transcriptPath: p, session: 'edit-1', policy, now: NOW, dir: store });
+  assert.equal(s4.editCounter, 0);
+
+  appendFileSync(p, `${assistant(65000, { min: 3, tools: ['Read', 'Read'] })}\n`);
+  const s5 = sampleContext({ transcriptPath: p, session: 'edit-1', policy, now: NOW, dir: store });
+  assert.equal(s5.editCounter, 2);
 });
 
 test('incremental sampling reads only new bytes, resets advice on compaction, and speaks only on change', () => {

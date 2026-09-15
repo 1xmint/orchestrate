@@ -97,25 +97,30 @@ test('the tool-boundary hook delivers the approval handoff mid-turn', () => {
   assert.equal(contextCheck({ session_id: 'x', agent_id: 'helper' }), '', 'a helper is never told to compact or plan');
 });
 
-test('helperSizeNotice: a size budget said once per helper, return outranking warn', () => {
+test('helperSizeNotice: one fact line, no orders, said once per threshold, return outranking warn', () => {
   const budget = { warnAt: 80000, returnAt: 120000 };
   assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 79000, budget, announced: null }), null);
-  const warn = helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: null });
+  const warn = helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: null, turn: 38, maxTurns: 50, callsSinceEdit: 31, progress: { path: '/r/progress/1.md', minutesAgo: 12 } });
   assert.equal(warn.key, 'size-warn');
-  assert.match(warn.text, /\[orchestrate · size\] your context is ~81k of a ~80k budget/);
-  assert.match(warn.text, /write your progress file now/);
+  assert.equal(warn.text, '[orchestrate · size] ~81k of ~80k budget · turn 38 of 50 · 31 tool calls since your last edit · progress file: /r/progress/1.md, written 12 min ago');
   assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: 'size-warn' }), null, 'said once');
-  const ret = helperSizeNotice({ role: 'orch-implementer', tokens: 125000, budget, announced: 'size-warn' });
+  const ret = helperSizeNotice({ role: 'orch-implementer', tokens: 125000, budget, announced: 'size-warn', progress: null });
   assert.equal(ret.key, 'size-return');
-  assert.match(ret.text, /past your ~120k budget/);
-  assert.match(ret.text, /return STATUS: PARTIAL/);
+  // At returnAt the same shape fires again; the budget number is just the
+  // smaller one now crossed, and no order is given either time.
+  assert.equal(ret.text, '[orchestrate · size] ~125k of ~120k budget · none given');
+  assert.doesNotMatch(ret.text, /return|start no new work|PARTIAL/i);
   // A jump straight past returnAt hears only the return notice.
   const jump = helperSizeNotice({ role: 'orch-implementer', tokens: 205000, budget, announced: null });
   assert.equal(jump.key, 'size-return');
-  const cbudget = { warnAt: 150000, returnAt: 200000 };
-  assert.equal(helperSizeNotice({ role: 'orch-coordinator', tokens: 125000, budget: cbudget, announced: null }), null);
-  const cret = helperSizeNotice({ role: 'orch-coordinator', tokens: 205000, budget: cbudget, announced: null });
-  assert.match(cret.text, /return PARTIAL now with the handoff/);
+  // Turn number and cap drop together when either is unknown, rather than guessing.
+  const noTurns = helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: null, turn: 5, maxTurns: null });
+  assert.doesNotMatch(noTurns.text, /turn/);
+  const noCalls = helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: null, callsSinceEdit: null });
+  assert.doesNotMatch(noCalls.text, /tool call/);
+  // A path named but never written: "not written yet", distinct from "none given".
+  const notWritten = helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: null, progress: { path: '/r/progress/1.md', minutesAgo: null } });
+  assert.match(notWritten.text, /progress file: \/r\/progress\/1\.md, not written yet/);
   assert.equal(helperSizeNotice({ role: 'x', tokens: null, budget, announced: null }), null, 'unknown size says nothing');
   assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 130000, budget, announced: 'size-return' }), null, 'no warn after return');
 });
@@ -134,14 +139,16 @@ test('size budgets: defaults per role, a user override per field, a bad pair fal
   assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.warnAt', '0'), /positive token count/);
 });
 
-test('context-check tells a coordinator to write PROGRESS and then return PARTIAL', () => {
+test('context-check gives a coordinator one fact line at warnAt and again at returnAt, with turn, calls-since-edit and progress facts', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-coord-context-'));
   const env = { ...process.env, HOME: home, USERPROFILE: home };
   const sessions = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(sessions, { recursive: true });
+  const progressPath = join(home, 'progress-9-14.md');
   writeFileSync(join(sessions, 'coord-context.json'), JSON.stringify({
     v: 1, session_id: 'coord-context', dispatches: [{
       at: new Date().toISOString(), agent: 'orch-coordinator', toolUseId: 'toolu_coord',
+      progress: progressPath,
     }],
   }));
   const lead = join(home, 'lead.jsonl');
@@ -150,20 +157,37 @@ test('context-check tells a coordinator to write PROGRESS and then return PARTIA
   mkdirSync(sub, { recursive: true });
   const transcript = join(sub, 'agent-coord.jsonl');
   writeFileSync(join(sub, 'agent-coord.meta.json'), JSON.stringify({ agentType: 'orch-coordinator', toolUseId: 'toolu_coord', spawnDepth: 1 }));
-  const response = (id, tokens) => JSON.stringify({
+  const response = (id, tokens, content) => JSON.stringify({
     type: 'assistant', timestamp: new Date().toISOString(),
-    message: { id, model: 'claude-opus-5', usage: { input_tokens: tokens, output_tokens: 1 } },
+    message: { id, model: 'claude-opus-5', usage: { input_tokens: tokens, output_tokens: 1 }, content: content || [{ type: 'text', text: 'x' }] },
   }) + '\n';
-  writeFileSync(transcript, response('checkpoint', 150000));
+  const readTool = (id, name = 'Read') => ({ type: 'tool_use', id, name, input: {} });
+  writeFileSync(transcript, response('checkpoint', 150000, [readTool('t1')]));
   const payload = { session_id: 'coord-context', agent_id: 'coord', transcript_path: lead, agent_transcript_path: transcript };
   const first = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
   assert.equal(first.status, 0, first.stderr);
-  assert.match(JSON.parse(first.stdout).hookSpecificOutput.additionalContext, /write PROGRESS/);
+  const firstText = JSON.parse(first.stdout).hookSpecificOutput.additionalContext;
+  // No orders, ever: this is a fact line, not "write PROGRESS" or "return PARTIAL".
+  assert.doesNotMatch(firstText, /write|return PARTIAL|do not/i);
+  assert.match(firstText, /^\[orchestrate · size\] ~150k of ~150k budget · turn 1 of \d+ · 1 tool call since your last edit · /);
+  assert.match(firstText, new RegExp(`progress file: ${progressPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, not written yet$`));
 
-  writeFileSync(transcript, response('checkpoint', 150000) + response('compact', 205000));
+  // The helper writes its progress file; the counter keeps counting reads and
+  // resets on the edit tool call in the next response.
+  writeFileSync(progressPath, 'still going');
+  writeFileSync(transcript, response('checkpoint', 150000, [readTool('t1')]) + response('edit', 205000, [readTool('t2'), { type: 'tool_use', id: 't3', name: 'Edit', input: {} }, readTool('t4')]));
   const second = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
   assert.equal(second.status, 0, second.stderr);
-  assert.match(JSON.parse(second.stdout).hookSpecificOutput.additionalContext, /return PARTIAL now with the handoff/);
+  const secondText = JSON.parse(second.stdout).hookSpecificOutput.additionalContext;
+  assert.doesNotMatch(secondText, /write|return PARTIAL|do not/i);
+  // ~205k has crossed both warnAt and returnAt; only the return key is said.
+  assert.match(secondText, /^\[orchestrate · size\] ~205k of ~200k budget · turn 2 of \d+ · 1 tool call since your last edit · /);
+  assert.match(secondText, new RegExp(`progress file: ${progressPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, written (just now|0 min ago)$`));
+
+  // Said once: a third call with no growth repeats nothing.
+  const third = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
+  assert.equal(third.status, 0, third.stderr);
+  assert.equal(third.stdout, '');
 });
 
 test('two workers across providers; browser work serial', () => {
