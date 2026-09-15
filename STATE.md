@@ -2,6 +2,24 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.5 — one number per idea, 2026-09-14
+
+Step S4 of the rules-versus-judgment plan. Removed what could not fire or
+existed twice:
+- `context.hardAt` (300k): autocompact at 200k always came first. A saved
+  profile that still sets it loads fine and ignores it; `--policy
+  context.hardAt=1` answers "unknown policy key". A user with autocompact off
+  still hears the ordinary compact line past compactAt, repeated on growth.
+- router.mjs `contextBand` now reads `thresholds()` instead of its own copy
+  of 300000/150000/120000.
+- turn-check.mjs marathon nudge: it fired only on unmeasured size, which never
+  lasts past one response. The idle nudge stays.
+- `SILENT_MS` (10 min) folded into `workers.staleMin`, now 10 (was 45). A
+  dispatch counts as running while its transcript changed within staleMin,
+  however long ago it started; the 45-minute age cutoff is gone, so a long,
+  busy worker keeps its slot. The 5-minute just-dispatched grace and the
+  turn-cap release stay.
+
 ## v0.15.4 — the checkpoint check accepts a real checkpoint, 2026-09-14
 
 Step S3 of the rules-versus-judgment plan. The Stop and PreCompact blocks
