@@ -189,30 +189,31 @@ test('sampleContext: the tool-calls-since-last-edit count survives across increm
 });
 
 test('incremental sampling reads only new bytes, resets advice on compaction, and speaks only on change', () => {
-  const { p, store } = file([user('start', 0), assistant(100000, { min: 1 })]);
+  const { checkpointAt: cp, compactAt: ca } = thresholds(null, policy);
+  const { p, store } = file([user('start', 0), assistant(cp - 20000, { min: 1 })]);
   const s1 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
-  assert.equal(s1.reading.tokens, 100000);
-  assert.match(s1.notice, /~100k tokens per step, measured. Nothing to do until ~120k/, 'below the thresholds the lead still hears the measured size');
+  assert.equal(s1.reading.tokens, cp - 20000);
+  assert.match(s1.notice, new RegExp(`~${(cp - 20000) / 1000}k tokens per step, measured. Nothing to do until ~${cp / 1000}k`),'below the thresholds the lead still hears the measured size');
   assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store, force: true }).notice, '', 'once per 25k step');
 
-  appendFileSync(p, `${user('x'.repeat(5000), 2)}\n${assistant(125000, { min: 3 })}\n`);
+  appendFileSync(p, `${user('x'.repeat(5000), 2)}\n${assistant(cp + 5000, { min: 3 })}\n`);
   const s2 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s2.advice.action, 'checkpoint');
   assert.match(s2.notice, /Prepare a checkpoint/);
 
-  appendFileSync(p, `${user('y'.repeat(5000), 4)}\n${assistant(128000, { min: 5 })}\n`);
+  appendFileSync(p, `${user('y'.repeat(5000), 4)}\n${assistant(cp + 8000, { min: 5 })}\n`);
   const s3 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
-  assert.equal(s3.reading.tokens, 128000);
+  assert.equal(s3.reading.tokens, cp + 8000);
   assert.equal(s3.notice, '', 'the same advice is not repeated');
 
-  appendFileSync(p, `${user('z'.repeat(5000), 6)}\n${assistant(160000, { min: 7 })}\n`);
+  appendFileSync(p, `${user('z'.repeat(5000), 6)}\n${assistant(ca + 10000, { min: 7 })}\n`);
   const s4 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s4.advice.action, 'compact');
   assert.match(s4.notice, /save the checkpoint .*recommend compacting if this same task continues/);
   assert.equal(s4.reading.compactions, 0);
 
   // Compaction keeps the file; the reading and the announced advice start over.
-  appendFileSync(p, `${boundary(160000, 17000, 8)}\n${summary(8)}\n`);
+  appendFileSync(p, `${boundary(ca + 10000, 17000, 8)}\n${summary(8)}\n`);
   const s5 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s5.reading.state, 'provisional');
   assert.equal(s5.reading.compactions, 1, 'a new epoch is one more compaction');
@@ -223,7 +224,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   assert.equal(s6.advice.action, 'none');
 
   // Growing again after compaction: checkpoint advice is said again, in the new epoch.
-  appendFileSync(p, `${user('v'.repeat(5000), 11)}\n${assistant(40000, { min: 12 })}\n${assistant(60000, { min: 13 })}\n${assistant(80000, { min: 14 })}\n${assistant(130000, { min: 15 })}\n`);
+  appendFileSync(p, `${user('v'.repeat(5000), 11)}\n${assistant(40000, { min: 12 })}\n${assistant(60000, { min: 13 })}\n${assistant(80000, { min: 14 })}\n${assistant(cp + 10000, { min: 15 })}\n`);
   const s7 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s7.advice.action, 'checkpoint');
   assert.match(s7.notice, /Prepare a checkpoint/);
@@ -231,13 +232,13 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   // No growth: nothing is read, and the reading stands. A half-written line
   // is not consumed and does not disturb it.
   const s8 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
-  assert.equal(s8.reading.tokens, 130000);
-  appendFileSync(p, assistant(135000, { min: 16 }).slice(0, 60));
-  assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store }).reading.tokens, 130000);
-  appendFileSync(p, assistant(135000, { min: 16 }).slice(60) + '\n');
+  assert.equal(s8.reading.tokens, cp + 10000);
+  appendFileSync(p, assistant(cp + 15000, { min: 16 }).slice(0, 60));
+  assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store }).reading.tokens, cp + 10000);
+  appendFileSync(p, assistant(cp + 15000, { min: 16 }).slice(60) + '\n');
   // The completed line is read whole from where the last complete line ended.
   const s9 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
-  assert.equal(s9.reading.tokens, 135000);
+  assert.equal(s9.reading.tokens, cp + 15000);
 });
 
 test('an unannounced sample is said later; markAnnounced records delivery', () => {

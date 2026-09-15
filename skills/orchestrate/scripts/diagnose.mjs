@@ -25,7 +25,7 @@ import { loadPolicy } from './lib/policy.mjs';
 import { hostCapabilities } from './lib/host.mjs';
 import { OUR_SCRIPTS } from './lib/settings.mjs';
 import { readQuota } from './lib/quota.mjs';
-import { findSessionTranscript } from './lib/context.mjs';
+import { findSessionTranscript, thresholds } from './lib/context.mjs';
 import { buildReport } from './context.mjs';
 import { measureTree, treeReport, latestTranscript } from './measure.mjs';
 import { status as codexStatus } from './codex-worker.mjs';
@@ -183,7 +183,7 @@ export function humanDiagnosis(d) {
   if (d.context) {
     const r = d.context.reading;
     L.push(`context: ${r.tokens == null ? 'unknown' : `${Math.round(r.tokens / 1000)}k`} (${r.state}${r.stale ? ', stale' : ''}) · advice ${d.context.advice.action}${d.context.advice.why ? ` — ${d.context.advice.why}` : ''}`);
-    if (r.tokens != null && r.tokens >= d.policy.context.checkpointAt && d.transcript) L.push(`  inspect growth: node measure.mjs --growth ${d.transcript}`);
+    if (r.tokens != null && r.tokens >= thresholds(r, d.policy).checkpointAt && d.transcript) L.push(`  inspect growth: node measure.mjs --growth ${d.transcript}`);
   }
   if (d.tree) L.push(d.tree.text);
   if (d.codex === 'skipped') L.push('codex: skipped');
