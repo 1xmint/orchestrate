@@ -2,6 +2,16 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.3 — helpers hear facts, not orders, 2026-09-14
+
+Step S1 of the rules-versus-judgment plan. A helper past its size budget now
+hears one line: size against the return budget, turn of its cap, tool calls
+since its last edit, and its progress file (path and when it was last
+written, or "none given"). No instruction is attached. The whole-transcript
+turn count is paid only past warnAt. The Agent guard notes a packet with no
+PROGRESS line for a role that authors work. Replay of the 2026-09-14
+lead-delegates implementers: replay/s1-helper-line.txt in the run dir.
+
 ## v0.15.2 — helpers do compact, 2026-09-14
 
 Step S6 of the rules-versus-judgment plan (run `20260914-rules-vs-judgment`,

@@ -231,6 +231,33 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
   assert.equal(state.dispatches[0].model, 'sonnet');
 });
 
+test('guard: the packet notice names a missing PROGRESS line on an author-role dispatch, plainly, and not in Plan mode', () => {
+  const home = sandbox();
+  const noProgress = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's3', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0002\ndo it' },
+  }, home);
+  assert.match(noProgress.stdout, /no PROGRESS line: a capped return will have nothing to resume from/);
+
+  const withProgress = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's4', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0003\nPROGRESS: /r/progress/1.md\ndo it' },
+  }, home);
+  assert.doesNotMatch(withProgress.stdout, /no PROGRESS line/);
+
+  const reviewer = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's5', cwd: home,
+    tool_input: { subagent_type: 'orch-reviewer', model: 'sonnet', prompt: 'TASK: 9-9-0004\nreview it' },
+  }, home);
+  assert.doesNotMatch(reviewer.stdout, /no PROGRESS line/, 'a reviewer returns a verdict, not partial work');
+
+  const planMode = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's6', cwd: home, permission_mode: 'plan',
+    tool_input: { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-9-0005\nfind it' },
+  }, home);
+  assert.doesNotMatch(planMode.stdout, /no PROGRESS line/, 'Plan mode already forbids the line');
+});
+
 test('guard: an attributable coordinator child is recorded with its parent', () => {
   const home = sandbox();
   const sessionDir = join(home, '.claude', 'orchestrate', 'sessions');
@@ -264,9 +291,9 @@ test('guard: a dispatch that names no model is recorded as inherited and not pri
   const home = sandbox();
   const out = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's9', cwd: home,
-    tool_input: { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0001\ndo it' },
+    tool_input: { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0001\nPROGRESS: /r/progress/1.md\ndo it' },
   }, home);
-  assert.equal(out.stdout.trim(), '', 'no model named means no figure to give');
+  assert.equal(out.stdout.trim(), '', 'no model named means no figure to give, and the packet already names its progress file');
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit');
 });

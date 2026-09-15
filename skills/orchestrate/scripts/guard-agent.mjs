@@ -251,6 +251,24 @@ export function tagFor(ti) {
   } catch { return ''; }
 }
 
+// Roles that write their own findings to disk mid-task and can be cut off by
+// a turn cap or a usage limit before they return: a capped return with no
+// PROGRESS line has nothing on disk for a fresh dispatch to resume from. Not
+// orch-reviewer (returns a verdict, not partial work) and not orch-coordinator
+// (its own packet is the lead's business, not a worker's).
+export const AUTHOR_ROLES = new Set(['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-debugger']);
+
+// A fact, not a denial: Plan mode already forbids a PROGRESS line (its own
+// rule above), so this says nothing there. Elsewhere, an author-role packet
+// with no PROGRESS line is named as what it is before the dispatch happens,
+// since M4's two worst-shaped helpers had none and nothing told the lead.
+export function progressFact(role, prompt, planMode) {
+  if (planMode) return '';
+  if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
+  if (/^\s*PROGRESS:\s*\S+/m.test(String(prompt || ''))) return '';
+  return 'no PROGRESS line: a capped return will have nothing to resume from';
+}
+
 // The run this packet belongs to: the `RUN:` line a coordinated packet carries,
 // or the run this session is bound to. The ledger resolves a return from this,
 // rather than from whichever run on the machine happens to be newest.
@@ -395,6 +413,8 @@ function main() {
   let tag = tagFor(ti);
   const size = String(ti.prompt || '').length;
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
+  const pf = progressFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
+  if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
 
