@@ -2,6 +2,26 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.7 — the lead hears facts, not orders, 2026-09-14
+
+Step S2 of the rules-versus-judgment plan. The checkpoint notice, the compact
+notice and the size tick are now one line of facts, said at the same moments
+as before: `[orchestrate · context] ~165k of ~200k · compacted 1× · next:
+autocompact ~200k · newest checkpoint: <path>, 3 min ago · 8 tool calls since
+your last edit`. "of" is the known window, else `context.autocompactDefault`;
+"next" is the compact line or autocompact, whichever is lower and not yet
+passed. `newestCheckpoint()` returns the newest of the candidates
+`hasCheckpoint` accepts, and `hasCheckpoint` is now "it is not null", with
+the same rules. The "still large after compaction" notice is unchanged.
+The auto-continue reason is one line: `orchestrate: "<goal>" · step n of 25 ·
+last edited <file>`. The goal is the first line under the bound RUN.md Goal
+heading, else the goal given when the loop was switched on. The every-6-steps
+check-in paragraph is gone (`PERSIST_CHECKIN_EVERY` removed). Stop and
+PreCompact block reasons and when they fire are unchanged.
+Replay (run dir replay/s2-lead-line.txt): sessions 059154a1 and e681c7ce,
+17 and 35 lines said, zero moments where only one version spoke; context-line
+characters 3,383 → 1,838 and 8,152 → 4,711.
+
 ## v0.15.6 — tests pin behaviour, not numbers, 2026-09-14
 
 Step S5 of the rules-versus-judgment plan. Threshold, size-budget and quota

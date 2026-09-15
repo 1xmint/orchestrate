@@ -21,7 +21,7 @@ export const DEFAULT_POLICY = Object.freeze({
   context: Object.freeze({
     // The size line is said again when the size crosses checkpointAt, and again
     // at compactAt (or `windowFraction` of a known smaller window, whichever is
-    // lower), where the Stop and PreCompact checkpoint blocks also start.
+    // lower), where the Stop hook's checkpoint block also starts.
     checkpointAt: 120000,
     compactAt: 150000,
     windowFraction: 0.75,
