@@ -101,11 +101,16 @@ test('a stale measurement is not current', () => {
   assert.equal(adviseContext(r, policy).action, 'unknown');
 });
 
-test('thresholds: checkpoint at 120k, compact at 150k, or 75% of a known smaller window', () => {
+test('the defaults are checkpoint 120k, compact 150k, on purpose', () => {
+  assert.deepEqual(thresholds(null, policy), { checkpointAt: 120000, compactAt: 150000 });
+});
+
+test('thresholds: checkpoint and compact from policy, or 75% of a known smaller window', () => {
+  const { checkpointAt, compactAt } = thresholds(null, policy);
   const at = (tokens, capacity = null) => adviseContext({ state: 'measured', tokens, capacity, compaction: null, responsesSinceCompaction: null }, policy).action;
-  assert.equal(at(119000), 'none');
-  assert.equal(at(120000), 'checkpoint');
-  assert.equal(at(150000), 'compact');
+  assert.equal(at(checkpointAt - 1000), 'none');
+  assert.equal(at(checkpointAt), 'checkpoint');
+  assert.equal(at(compactAt), 'compact');
   assert.deepEqual(thresholds({ capacity: 160000 }, policy), { checkpointAt: 96000, compactAt: 120000 });
   assert.equal(at(121000, 160000), 'compact', 'a small known window moves compaction earlier');
   assert.equal(at(121000, 1000000), 'checkpoint', 'a large window does not move it later');

@@ -11,6 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanTurn, persistDecision, errorKey, PERSIST_STEP_CAP, PERSIST_CHECKIN_EVERY } from './persist-check.mjs';
 import { persistIntent, persistLine } from './router.mjs';
+import { PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -100,11 +101,17 @@ test('every hardstop fires', () => {
   assert.equal(persistDecision({ rec: first.rec, scan: { ...base, errors: ['Error: y'] } }).kind, 'continue');
 });
 
+test('the loop\'s 5-hour stop default is 90, on purpose', () => {
+  assert.equal(PERSIST_STOP_FIVE_HOUR, 90);
+});
+
 test('the loop stops near the 5-hour limit, and only there', () => {
   const at = pct => ({ fiveHour: { pct, resetsAt: null }, week: null });
-  assert.equal(persistDecision({ scan: base, quota: at(91) }).kind, 'stop');
-  assert.match(persistDecision({ scan: base, quota: at(91) }).why, /91%/);
-  assert.equal(persistDecision({ scan: base, quota: at(70) }).kind, 'continue');
+  const above = PERSIST_STOP_FIVE_HOUR + 1;
+  const below = PERSIST_STOP_FIVE_HOUR - 20;
+  assert.equal(persistDecision({ scan: base, quota: at(above) }).kind, 'stop');
+  assert.match(persistDecision({ scan: base, quota: at(above) }).why, new RegExp(`${above}%`));
+  assert.equal(persistDecision({ scan: base, quota: at(below) }).kind, 'continue');
   assert.equal(persistDecision({ scan: base, quota: null }).kind, 'continue', 'no status line means no usage stop');
 });
 
