@@ -23,7 +23,6 @@ export const DEFAULT_POLICY = Object.freeze({
     // here, or at `windowFraction` of a known smaller window, whichever is lower.
     checkpointAt: 120000,
     compactAt: 150000,
-    hardAt: 300000,
     windowFraction: 0.75,
     // A known window size, when the user wants to state one; otherwise it is
     // read from the status line for the session, or left unknown.
@@ -48,8 +47,9 @@ export const DEFAULT_POLICY = Object.freeze({
     // Built-in general-purpose/claude helpers have no turn cap: denied while the
     // capped role agents are installed, unless set to "allow".
     generalPurpose: 'deny',
-    // A dispatch with no return after this long no longer counts as running.
-    staleMin: 45,
+    // A dispatch with no transcript activity for this long no longer counts
+    // as running, however long ago it was dispatched.
+    staleMin: 10,
     // Each helper's own size budget in tokens: at warnAt, the hook tells it to
     // write its progress file and keep going; at returnAt, to start no new
     // work and return PARTIAL. Keyed by normalized role name; "default" is the
@@ -102,7 +102,6 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
     context: {
       checkpointAt: posNum(c.checkpointAt, D.context.checkpointAt),
       compactAt: posNum(c.compactAt, D.context.compactAt),
-      hardAt: posNum(c.hardAt, D.context.hardAt),
       windowFraction: frac > 0 && frac <= 1 ? frac : D.context.windowFraction,
       window: c.window == null ? null : posNum(c.window, null),
       staleMs: posNum(c.staleMs, D.context.staleMs),

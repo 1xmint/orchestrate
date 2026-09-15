@@ -219,10 +219,27 @@ test('running helpers: dispatched and not returned and still alive', () => {
     { agent: 'orchestrate:orch-researcher', task: '5', at: ago(90) },
   ];
   const returned = [{ agent: 'orch-reviewer', agentId: 'ccc', at: ago(1) }];
-  const live = runningNative(dispatches, { returned, files, now: NOW, staleMin: 45 });
+  const live = runningNative(dispatches, { returned, files, now: NOW, staleMin: 10 });
   assert.deepEqual(live.map(w => w.task || w.role), ['1', 'Explore'], 'writing recently or just dispatched; the silent, returned and stale ones do not count');
   // A return recorded without an agent id still matches by role and task.
   assert.deepEqual(runningNative([{ agent: 'orch-researcher', task: '7', at: ago(1) }], { returned: [{ agent: 'orch-researcher', task: '7', at: ago(0) }], now: NOW }), []);
+});
+
+test('running helpers: liveness is one number — just-dispatched counts, a fresh transcript counts however old the dispatch, silent past staleMin does not', () => {
+  const files = new Map([
+    // Dispatched long ago, but its transcript is still being written: alive.
+    ['tu_old_fresh', { agentId: 'of', mtimeMs: NOW - 60000 }],
+    // Dispatched long ago, transcript silent past staleMin: not alive.
+    ['tu_old_silent', { agentId: 'os', mtimeMs: NOW - 20 * 60000 }],
+  ]);
+  const dispatches = [
+    { agent: 'orch-implementer', task: 'old-fresh', at: ago(120), toolUseId: 'tu_old_fresh' },
+    { agent: 'orch-implementer', task: 'old-silent', at: ago(120), toolUseId: 'tu_old_silent' },
+    // No transcript yet, but dispatched moments ago: alive on the grace alone.
+    { agent: 'orch-implementer', task: 'just-dispatched', at: ago(1) },
+  ];
+  const live = runningNative(dispatches, { files, now: NOW, staleMin: 10 });
+  assert.deepEqual(live.map(w => w.task), ['old-fresh', 'just-dispatched']);
 });
 
 test('running helpers: one that used every turn its role allows has stopped, even with no return recorded', () => {
@@ -235,7 +252,7 @@ test('running helpers: one that used every turn its role allows has stopped, eve
     { agent: 'orchestrate:orch-implementer', task: '2', at: ago(3), toolUseId: 'tu_mid' },
   ];
   const turnsOf = p => (p === 'cap.jsonl' ? 100 : 12);
-  const live = runningNative(dispatches, { files, now: NOW, staleMin: 45, turnsOf });
+  const live = runningNative(dispatches, { files, now: NOW, staleMin: 10, turnsOf });
   assert.deepEqual(live.map(w => w.task), ['2'], 'the capped helper frees its slot at once; the one mid-work still counts');
   assert.equal(roleMaxTurns('orchestrate:orch-implementer'), 100);
   assert.match(concurrencyDecision('orch-implementer', { native: live, policy: loadPolicy() }) || 'free', /free/);
