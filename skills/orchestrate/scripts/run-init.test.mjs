@@ -123,6 +123,41 @@ test('a slug is required, and a messy one is normalised', () => {
   assert.match(r.stdout.split('\n')[0], /\d{8}-tidy-finish-v2/);
 });
 
+// 9-14-0002: the run and the host's plan file point at each other, so the
+// checkpoint check can treat a fresh plan as a real checkpoint.
+test('a plan file touched after the session started gets a Plan line; an older one does not', () => {
+  const dir = repo({ 'package.json': '{}' });
+  const plansDir = join(FAKE_HOME, '.claude', 'plans');
+  mkdirSync(plansDir, { recursive: true });
+  const sessionsDir = join(FAKE_HOME, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessionsDir, { recursive: true });
+  const started = new Date(Date.now() - 60000).toISOString();
+  writeFileSync(join(sessionsDir, 'sess-fresh.json'), JSON.stringify({ session_id: 'sess-fresh', started }));
+  const planPath = join(plansDir, 'the-plan.md');
+  writeFileSync(planPath, '# plan\n');
+
+  const r = run(dir, 'x', '--session-id', 'sess-fresh');
+  assert.equal(r.status, 0, r.stderr);
+  const md = readFileSync(r.stdout.split('\n')[0].trim(), 'utf8');
+  assert.match(md, new RegExp(`^Plan: .*the-plan\\.md$`, 'm'));
+
+  // An older session: its plan predates the session, so it is not this run's plan.
+  const oldStarted = new Date(Date.now() + 3600000).toISOString(); // "started" after the plan file's mtime
+  writeFileSync(join(sessionsDir, 'sess-stale.json'), JSON.stringify({ session_id: 'sess-stale', started: oldStarted }));
+  const r2 = run(dir, 'y', '--session-id', 'sess-stale');
+  assert.equal(r2.status, 0, r2.stderr);
+  const md2 = readFileSync(r2.stdout.split('\n')[0].trim(), 'utf8');
+  assert.doesNotMatch(md2, /^Plan:/m);
+});
+
+test('no session-id and no plan file both leave the Plan line off', () => {
+  const dir = repo({ 'package.json': '{}' });
+  const r = run(dir, 'z');
+  assert.equal(r.status, 0, r.stderr);
+  const md = readFileSync(r.stdout.split('\n')[0].trim(), 'utf8');
+  assert.doesNotMatch(md, /^Plan:/m);
+});
+
 test('the new ledger reads back as an open run with an unwritten Pickup', () => {
   const dir = repo({ 'package.json': '{}' });
   run(dir, 'x', '--goal', 'do the thing');
