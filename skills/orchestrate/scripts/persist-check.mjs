@@ -48,16 +48,16 @@ const FILE_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
 
 export const shortGoal = g => { const s = String(g || '').replace(/\s+/g, ' ').trim(); return s.length > 80 ? `${s.slice(0, 77)}...` : s; };
 
-// The Goal line of a bound run's RUN.md, one line, or null when there is none
-// to read. Read fresh each time: RUN.md is the source of truth, not a copy
-// pinned at arm time.
+// The first line under a bound run's RUN.md Goal heading, or null when there
+// is none to read. Read fresh each time: RUN.md is the source of truth, not a
+// copy pinned at arm time.
 export function runGoalLine(runMd) {
   if (!runMd) return null;
   let text;
   try { text = readFileSync(runMd, 'utf8'); } catch { return null; }
   const m = /## Goal\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(text);
-  const body = m ? m[1].split('\n').map(l => l.trim()).filter(l => l && !/^<.*>$/.test(l)).join(' ') : '';
-  return body || null;
+  const first = m ? m[1].split('\n').map(l => l.trim()).find(l => l && !/^<.*>$/.test(l)) : null;
+  return first || null;
 }
 
 const textOf = c => typeof c === 'string' ? c
@@ -186,7 +186,7 @@ export function check(input) {
   const tail = input.transcript_path && size > from ? readTail(input.transcript_path, Math.min(size - from, PERSIST_SCAN_CAP)) : '';
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: runGoalLine(bound) || '', quota: readQuota() });
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: runGoalLine(bound) || p.goal || '', quota: readQuota() });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };

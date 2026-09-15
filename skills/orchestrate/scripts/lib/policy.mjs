@@ -19,8 +19,9 @@ export const POLICY_PROFILE_PATH = join(homedir(), '.claude', 'orchestrate', 'pr
 export const DEFAULT_POLICY = Object.freeze({
   v: POLICY_V,
   context: Object.freeze({
-    // Prepare a checkpoint here, recommend compaction at the next safe boundary
-    // here, or at `windowFraction` of a known smaller window, whichever is lower.
+    // The size line is said again when the size crosses checkpointAt, and again
+    // at compactAt (or `windowFraction` of a known smaller window, whichever is
+    // lower), where the Stop and PreCompact checkpoint blocks also start.
     checkpointAt: 120000,
     compactAt: 150000,
     windowFraction: 0.75,
