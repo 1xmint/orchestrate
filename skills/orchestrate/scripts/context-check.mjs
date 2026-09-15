@@ -23,7 +23,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sampleContext, agentTranscriptPath, markAnnounced, storedAdvisedKey } from './lib/context.mjs';
-import { modeNote } from './lib/modes.mjs';
+import { modeNote, modeOf } from './lib/modes.mjs';
 import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, transcriptTurns } from './lib/workers.mjs';
 import { loadSession, saveSession, routerSettings } from './lib/tier.mjs';
 import { loadPolicy, sizeBudget } from './lib/policy.mjs';
@@ -99,11 +99,12 @@ export function check(input) {
   }
   if (!routerSettings().enabled) return '';
   const out = [];
+  const state = loadSession(session);
   if (input.transcript_path) {
-    const r = sampleContext({ transcriptPath: input.transcript_path, session });
+    const bound = (state && state.run && state.run.runMd) || null;
+    const r = sampleContext({ transcriptPath: input.transcript_path, session, runMd: bound, permissionMode: modeOf(input) });
     if (r.notice) out.push(r.notice);
   }
-  const state = loadSession(session);
   if (state) {
     const before = state.mode || null;
     const note = modeNote(state, input);
