@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelDecision, taskKey, FORK_MAX_CONTEXT } from './guard-agent.mjs';
+import { modelDecision, taskKey, FORK_MAX_CONTEXT, progressFact, AUTHOR_ROLES } from './guard-agent.mjs';
 import { normalizeRole, estimateDollars } from './lib/prices.mjs';
 import { snapshotFrom, readQuota } from './lib/quota.mjs';
 import { quotaPhrase, quotaBand } from './router.mjs';
@@ -13,6 +13,19 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const pro = { tier: 'pro' };
+
+test('progressFact: a plain fact for an author-role packet with no PROGRESS line, absent for reviewer and in plan mode', () => {
+  const reason = 'no PROGRESS line: a capped return will have nothing to resume from';
+  for (const role of AUTHOR_ROLES) {
+    assert.equal(progressFact(role, 'TASK: 1\nfind it', false), reason, `${role} names the missing line`);
+    assert.equal(progressFact(`orchestrate:${role}`, 'TASK: 1\nfind it', false), reason, 'a plugin-namespaced role is still recognised');
+    assert.equal(progressFact(role, 'TASK: 1\nPROGRESS: /r/p.md\nfind it', false), '', 'said nothing once the line is there');
+    assert.equal(progressFact(role, 'TASK: 1\nfind it', true), '', 'plan mode already forbids the line, so this adds nothing');
+  }
+  assert.equal(progressFact('orch-reviewer', 'TASK: 1\nfind it', false), '', 'a reviewer returns a verdict, not partial work');
+  assert.equal(progressFact('orch-coordinator', 'TASK: 1\nfind it', false), '', 'the coordinator packet is the lead\'s business');
+  assert.equal(progressFact('Explore', 'x', false), '', 'a built-in sweeper is not an author role');
+});
 
 test('role names are one name whatever the install path calls them', () => {
   assert.equal(normalizeRole('orchestrate:orch-planner'), 'orch-planner');
