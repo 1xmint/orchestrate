@@ -2,6 +2,19 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.6 — tests pin behaviour, not numbers, 2026-09-14
+
+Step S5 of the rules-versus-judgment plan. Threshold, size-budget and quota
+tests now derive their inputs from `thresholds()`, `DEFAULT_POLICY` and the
+lib/quota.mjs constants; each default has one test that names it on purpose.
+New lib/quota.test.mjs covers the 80% five-hour and 90% weekly helper stops,
+the 60% caution band, and the 10-minute snapshot freshness. diagnose.mjs now
+uses the capped checkpoint line from `thresholds()` instead of the raw policy
+value. Drift proof: with `context.checkpointAt` set to 110000 the full suite
+fails only "the defaults are checkpoint 120k, compact 150k, on purpose".
+Note: raising checkpointAt above 80% of compactAt has no effect, because
+`thresholds()` caps it there.
+
 ## v0.15.5 — one number per idea, 2026-09-14
 
 Step S4 of the rules-versus-judgment plan. Removed what could not fire or

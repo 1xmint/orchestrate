@@ -14,7 +14,7 @@ import { workflowDecision, PLAN_READ_ROLES } from './guard-agent.mjs';
 import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal } from './lib/workers.mjs';
 import { modeTransition, modeNote, PLAN_NOTE, APPROVED_NOTE } from './lib/modes.mjs';
 import { cappedReturn, roleMaxTurns, sumUsage } from './ledger.mjs';
-import { loadPolicy, setPolicyValue, sizeBudget } from './lib/policy.mjs';
+import { loadPolicy, setPolicyValue, sizeBudget, DEFAULT_POLICY } from './lib/policy.mjs';
 import { measure, measureTree } from './measure.mjs';
 import { check as contextCheck, helperSizeNotice } from './context-check.mjs';
 
@@ -125,16 +125,23 @@ test('helperSizeNotice: one fact line, no orders, said once per threshold, retur
   assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 130000, budget, announced: 'size-return' }), null, 'no warn after return');
 });
 
+test('the default size budgets are 80k/120k and coordinator 150k/200k, on purpose', () => {
+  assert.deepEqual(DEFAULT_POLICY.workers.size.default, { warnAt: 80000, returnAt: 120000 });
+  assert.deepEqual(DEFAULT_POLICY.workers.size['orch-coordinator'], { warnAt: 150000, returnAt: 200000 });
+});
+
 test('size budgets: defaults per role, a user override per field, a bad pair falls back', () => {
-  assert.deepEqual(sizeBudget('orchestrate:orch-implementer', policy), { warnAt: 80000, returnAt: 120000 });
-  assert.deepEqual(sizeBudget('orchestrate:orch-coordinator', policy), { warnAt: 150000, returnAt: 200000 });
-  assert.deepEqual(sizeBudget(null, policy), { warnAt: 80000, returnAt: 120000 }, 'an unresolved role uses default');
+  const DEF = DEFAULT_POLICY.workers.size.default;
+  const COORD = DEFAULT_POLICY.workers.size['orch-coordinator'];
+  assert.deepEqual(sizeBudget('orchestrate:orch-implementer', policy), DEF);
+  assert.deepEqual(sizeBudget('orchestrate:orch-coordinator', policy), COORD);
+  assert.deepEqual(sizeBudget(null, policy), DEF, 'an unresolved role uses default');
   const custom = loadPolicy(setPolicyValue({}, 'workers.size.orch-debugger.returnAt', '160000'));
-  assert.deepEqual(sizeBudget('orch-debugger', custom), { warnAt: 80000, returnAt: 160000 });
+  assert.deepEqual(sizeBudget('orch-debugger', custom), { warnAt: DEF.warnAt, returnAt: 160000 });
   const coord = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAt: 170000 } } } } });
-  assert.deepEqual(sizeBudget('orch-coordinator', coord), { warnAt: 170000, returnAt: 200000 });
+  assert.deepEqual(sizeBudget('orch-coordinator', coord), { warnAt: 170000, returnAt: COORD.returnAt });
   const bad = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAt: 250000 } } } } });
-  assert.deepEqual(sizeBudget('orch-coordinator', bad), { warnAt: 150000, returnAt: 200000 }, 'warnAt >= returnAt keeps the role default');
+  assert.deepEqual(sizeBudget('orch-coordinator', bad), COORD, 'warnAt >= returnAt keeps the role default');
   assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.limit', '1'), /workers\.size\.<role>\.warnAt/);
   assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.warnAt', '0'), /positive token count/);
 });

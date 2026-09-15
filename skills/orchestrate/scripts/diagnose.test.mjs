@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diagnose, humanDiagnosis, redactHome, registeredHooks } from './diagnose.mjs';
 import { loadPolicy } from './lib/policy.mjs';
+import { thresholds } from './lib/context.mjs';
 
 const NOW = Date.parse('2026-09-14T12:00:00Z');
 const assistant = (id, tokens, min) => JSON.stringify({
@@ -63,7 +64,7 @@ test('the home folder never appears in the diagnosis', () => {
 test('a large main context points to the growth report for this transcript', () => {
   const d = {
     at: 'now', versions: { installed: [] }, host: {}, policy: loadPolicy({}), hooks: {},
-    transcript: '~/project/sess.jsonl', context: { reading: { tokens: 120000, state: 'measured', stale: false }, advice: { action: 'checkpoint', why: 'large' } },
+    transcript: '~/project/sess.jsonl', context: { reading: { tokens: thresholds(null, loadPolicy({})).checkpointAt, state: 'measured', stale: false }, advice: { action: 'checkpoint', why: 'large' } },
     codex: 'skipped', claudeQuota: { fresh: false, note: 'n' }, errors: [],
   };
   assert.match(humanDiagnosis(d), /inspect growth: node measure\.mjs --growth ~\/project\/sess\.jsonl/);
