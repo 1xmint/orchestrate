@@ -225,10 +225,11 @@ A run this size is a **relay across fresh sessions, not one marathon.** A long
 conversation re-reads its whole self on every turn, and that re-read is the
 largest cost there is — bigger than any subagent. Do a wave or two, keep the
 Pickup line honest, and hand off: a fresh session resumes from the ledger and
-starts with a small, cheap context. The heartbeat reminds you when a run's
-session has gone long and its size is unknown; `--max-budget-usd` at launch and
-`CLAUDE_CODE_GOAL_CHECKIN_MINUTES` are the host's own levers if the user wants a
-hard cap or fewer idle `/goal` check-ins.
+starts with a small, cheap context. Context advice (below) owns the handoff
+call, since it is measured rather than guessed from a turn count;
+`--max-budget-usd` at launch and `CLAUDE_CODE_GOAL_CHECKIN_MINUTES` are the
+host's own levers if the user wants a hard cap or fewer idle `/goal`
+check-ins.
 
 Context advice comes from one reader (`scripts/context.mjs` for a report, the
 hooks for notices), measured from the last model response after the last
