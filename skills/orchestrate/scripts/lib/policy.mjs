@@ -50,9 +50,9 @@ export const DEFAULT_POLICY = Object.freeze({
     // A dispatch with no transcript activity for this long no longer counts
     // as running, however long ago it was dispatched.
     staleMin: 10,
-    // Each helper's own size budget in tokens: at warnAt, the hook tells it to
-    // write its progress file and keep going; at returnAt, to start no new
-    // work and return PARTIAL. Keyed by normalized role name; "default" is the
+    // Each helper's own size budget in tokens: at warnAt and again at returnAt
+    // the hook gives it one line of facts (size, turn, calls since its last
+    // edit, progress file). Keyed by normalized role name; "default" is the
     // fallback for any role with no entry of its own.
     size: Object.freeze({
       default: Object.freeze({ warnAt: 80000, returnAt: 120000 }),
