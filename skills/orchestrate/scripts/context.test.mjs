@@ -367,9 +367,11 @@ test('the size line can be turned off, and only speaks for a measured size', () 
 });
 
 test('the size line names the next step for where the size actually is', () => {
+  const { checkpointAt, compactAt } = thresholds(null, policy);
+  const ck = Math.round(checkpointAt / 1000), cp = Math.round(compactAt / 1000);
   const line = tokens => contextTick({ state: 'measured', tokens, capacity: null, compaction: null, compactions: 0 }, policy).text;
-  assert.match(line(60000), /Nothing to do until ~120k/);
-  assert.match(line(145000), /Past the checkpoint line; the switch recommendation comes at ~150k/);
-  assert.doesNotMatch(line(145000), /Nothing to do/);
-  assert.match(line(175000), /Past the switch line/);
+  assert.match(line(60000), new RegExp(`Nothing to do until ~${ck}k`));
+  assert.match(line(compactAt - 5000), new RegExp(`Past the checkpoint line; the switch recommendation comes at ~${cp}k`));
+  assert.doesNotMatch(line(compactAt - 5000), /Nothing to do/);
+  assert.match(line(compactAt + 25000), /Past the switch line/);
 });
