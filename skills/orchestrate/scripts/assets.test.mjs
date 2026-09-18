@@ -434,7 +434,7 @@ test('every plugin hook names a script that exists, through the plugin root', ()
   const root = join(SKILL, '..', '..');
   const hooks = JSON.parse(readFileSync(join(root, 'hooks', 'hooks.json'), 'utf8')).hooks;
   const events = Object.keys(hooks);
-  assert.deepEqual(events.sort(), ['PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
+  assert.deepEqual(events.sort(), ['PostCompact', 'PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
   // The one plugin-wide Stop hook is the persist loop, because the direct work it
   // exists for rarely loads the skill. It must stay a no-op for an unarmed session.
   assert.deepEqual(hooks.Stop.flatMap(g => g.hooks.map(h => /scripts\/(\S+?\.mjs)/.exec(h.command)[1])), ['persist-check.mjs']);
