@@ -268,6 +268,24 @@ test('a prompt naming a model family records userModel for guard-agent to read; 
   assert.equal(s2.userModel, undefined, 'no family named, nothing recorded');
 });
 
+test('naming a family records the earliest one in the prompt, not the ladder\'s own order; a later prompt naming only Sonnet leaves it alone', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  // FAMILY_ORDER is ['fable', 'opus', 'sonnet', 'haiku'], so .find used to
+  // check fable before opus regardless of where each word actually sits in
+  // the sentence — "use opus, not fable" recorded fable even though opus is
+  // what Josh asked for and fable is what he ruled out.
+  prompt(home, repo, 'use opus, not fable, for this one', { session_id: 's-order' });
+  const s1 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-order.json'), 'utf8'));
+  assert.equal(s1.userModel.family, 'opus', 'the earliest-named family wins, not the ladder position');
+
+  // A later prompt naming only Sonnet (or Haiku) must not overwrite the live
+  // Opus grant — Sonnet is already the default and needs no grant of its own.
+  prompt(home, repo, 'now run the sonnet-sized version of this too', { session_id: 's-order' });
+  const s2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-order.json'), 'utf8'));
+  assert.equal(s2.userModel.family, 'opus', 'naming only sonnet leaves an existing opus grant untouched');
+  assert.equal(s2.userModel.at, s1.userModel.at, 'the grant record itself is untouched, not just its family');
+});
+
 test('"router off" mutes the session; "router on" restores it; clear resets the card', () => {
   const home = makeHome(); const repo = makeRepo(false);
   prompt(home, repo, 'router off', { session_id: 's-mute' });

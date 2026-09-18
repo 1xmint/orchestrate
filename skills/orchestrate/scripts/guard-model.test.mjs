@@ -8,9 +8,36 @@ import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, AUT
 import { normalizeRole, estimateDollars } from './lib/prices.mjs';
 import { snapshotFrom, readQuota } from './lib/quota.mjs';
 import { quotaPhrase, quotaBand } from './router.mjs';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const GUARD = join(HERE, 'guard-agent.mjs');
+
+function sandbox() {
+  const home = mkdtempSync(join(tmpdir(), 'orch-grant-home-'));
+  mkdirSync(join(home, '.claude', 'orchestrate', 'sessions'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro' }));
+  return home;
+}
+
+function writeSession(home, sid, state) {
+  writeFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${sid}.json`), JSON.stringify({ v: 1, session_id: sid, ...state }));
+}
+
+function dispatch(home, sid, ti) {
+  const r = spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: sid, cwd: home, tool_use_id: `u-${Math.random()}`, tool_input: ti }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' },
+  });
+  let json = null;
+  try { json = r.stdout.trim() ? JSON.parse(r.stdout) : null; } catch {}
+  return { stdout: r.stdout, json };
+}
 
 const pro = { tier: 'pro' };
 
@@ -62,10 +89,12 @@ test('escalation is allowed only after an attempt at the same task by the same r
 test('a grant the user named unlocks one task id and refuses another by name', () => {
   const ti = { subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 9-18-0005\nfix it' };
   const grant = { family: 'opus', at: '2026-09-18T00:00:00Z' };
-  // First use: allowed, and it would bind to this task (checked via grantCheck directly).
-  assert.equal(modelDecision(ti, { ...pro, userModel: grant }), null, 'a fresh grant lets the named task through');
+  // First use: allowed, and it carries the id to claim (main() does the actual
+  // atomic claim; the pure function only says what to bind).
+  const first = modelDecision(ti, { ...pro, userModel: grant });
+  assert.deepEqual(first, { grantBind: '9-18-0005', at: grant.at, family: 'opus' }, 'a fresh grant lets the named task through and says what to bind');
   const bound = { ...grant, taskId: '9-18-0005' };
-  assert.equal(modelDecision(ti, { ...pro, userModel: bound }), null, 'the same task id the grant is bound to stays allowed');
+  assert.equal(modelDecision(ti, { ...pro, userModel: bound }), null, 'the same task id the grant is bound to stays allowed, nothing left to bind');
   const other = { ...ti, prompt: 'TASK: 9-18-0006\nfix something else' };
   const denied = modelDecision(other, { ...pro, userModel: bound });
   assert.equal(denied.prefix, 'model');
@@ -78,21 +107,32 @@ test('a grant needs a numeric TASK id in the packet; no id, no unlock', () => {
   const grant = { family: 'opus', at: '2026-09-18T00:00:00Z' };
   const d = modelDecision(ti, { ...pro, userModel: grant });
   assert.equal(d.prefix, 'model');
-  assert.equal(grantCheck(grant, 'opus', ti.prompt), null);
+  assert.equal(grantCheck(grant, 'opus', ti.prompt, null), null);
 });
 
 test('grantCheck: bind on first use, allow on the bound id, deny naming both ids', () => {
   const grant = { family: 'fable', at: '2026-09-18T00:00:00Z' };
-  const first = grantCheck(grant, 'fable', 'TASK: 1-1-0001\nx');
+  const first = grantCheck(grant, 'fable', 'TASK: 1-1-0001\nx', null);
   assert.deepEqual(first, { allow: true, bind: '1-1-0001' });
-  const bound = { ...grant, taskId: '1-1-0001' };
-  assert.deepEqual(grantCheck(bound, 'fable', 'TASK: 1-1-0001\nx'), { allow: true, bind: null });
-  const other = grantCheck(bound, 'fable', 'TASK: 1-1-0002\nx');
+  assert.deepEqual(grantCheck(grant, 'fable', 'TASK: 1-1-0001\nx', '1-1-0001'), { allow: true, bind: null });
+  const other = grantCheck(grant, 'fable', 'TASK: 1-1-0002\nx', '1-1-0001');
   assert.equal(other.deny, true);
   assert.match(other.reason, /1-1-0001/);
   assert.match(other.reason, /1-1-0002/);
-  assert.equal(grantCheck(null, 'fable', 'TASK: 1-1-0001\nx'), null, 'no record, no grant');
-  assert.equal(grantCheck(grant, 'opus', 'TASK: 1-1-0001\nx'), null, 'wrong family, no grant');
+  assert.equal(grantCheck(null, 'fable', 'TASK: 1-1-0001\nx', null), null, 'no record, no grant');
+  assert.equal(grantCheck(grant, 'opus', 'TASK: 1-1-0001\nx', null), null, 'wrong family, no grant');
+});
+
+test('modelDecision never returns grantBind for a judgment role or an already-cleared executor', () => {
+  const grant = { family: 'opus', at: '2026-09-18T00:00:00Z' };
+  // orch-planner is not an executor: never reaches the grant branch at all.
+  const planner = modelDecision({ subagent_type: 'orch-planner', model: 'opus', prompt: 'TASK: 1-1-0001\nplan it' }, { ...pro, userModel: grant });
+  assert.equal(planner, null, 'a judgment role needs no grant and binds nothing');
+  // An executor a prior Sonnet attempt already cleared for this task never
+  // reaches the grant branch either (the `tried` guard returns first).
+  const tried = [{ agent: 'orch-implementer', model: 'sonnet', key: '1-1-0002' }];
+  const cleared = modelDecision({ subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 1-1-0002\nfix it' }, { ...pro, userModel: grant, dispatches: tried });
+  assert.equal(cleared, null, 'a task already cleared on Sonnet does not touch the grant');
 });
 
 test('taskKey: same header, different ids, different keys once the id has no digit', () => {
@@ -153,6 +193,39 @@ test('a stale or empty quota snapshot reads as absent', () => {
   assert.equal(readQuota(now, p, 'org-a').fiveHour.pct, 50);
   writeFileSync(p, JSON.stringify(snapshotFrom({}, now, 'org-a')));
   assert.equal(readQuota(now, p, 'org-a'), null, 'an API-key session has no windows');
+});
+
+test('guard-agent as a process: a grant binds to the first task id it spends, refuses a second, and a judgment-role dispatch never burns it', () => {
+  const home = sandbox();
+  const at = '2026-09-18T00:00:00Z';
+
+  // Scenario A: the grant binds on first spend, and a second task id naming
+  // the same family is refused by name — even though nothing wrote the
+  // binding into session.userModel.taskId (the atomic claim file is the
+  // source of truth, not a read-modify-write on the session record).
+  writeSession(home, 's-grant-a', { userModel: { family: 'opus', at } });
+  const first = dispatch(home, 's-grant-a', { subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 1-1-0001\nfix it' });
+  assert.doesNotMatch(first.stdout, /permissionDecision/, 'the first spend on the named task id goes through');
+
+  const second = dispatch(home, 's-grant-a', { subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 1-1-0002\nfix something else' });
+  assert.equal(second.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(second.json.hookSpecificOutput.permissionDecisionReason, /1-1-0001/, 'names the task the grant is bound to');
+  assert.match(second.json.hookSpecificOutput.permissionDecisionReason, /1-1-0002/, 'names the task that was refused');
+
+  // Scenario B: a fresh session's grant survives a judgment-role dispatch
+  // (orch-planner never binds it, allowed on Opus on its own terms), so a
+  // later implementer on a brand-new task id can still spend the grant —
+  // the bug this fixes had the planner dispatch burn the grant on task 0001
+  // and refuse the implementer's own task.
+  writeSession(home, 's-grant-b', { userModel: { family: 'opus', at } });
+  const planner = dispatch(home, 's-grant-b', { subagent_type: 'orch-planner', model: 'opus', prompt: 'TASK: 1-1-0001\nplan it' });
+  assert.doesNotMatch(planner.stdout, /permissionDecision/, 'a judgment role runs on Opus without touching the grant');
+
+  const implementer = dispatch(home, 's-grant-b', { subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 1-1-0002\nfix it' });
+  assert.doesNotMatch(implementer.stdout, /permissionDecision/, 'the implementer on a new task id still spends the untouched grant');
+  const implementerAgain = dispatch(home, 's-grant-b', { subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 1-1-0003\nfix a third thing' });
+  assert.equal(implementerAgain.json.hookSpecificOutput.permissionDecision, 'deny', 'the grant is now bound to 1-1-0002, so a third id is refused');
+  assert.match(implementerAgain.json.hookSpecificOutput.permissionDecisionReason, /1-1-0002/);
 });
 
 test('a quota snapshot is enforced only for the provider and account it names', () => {

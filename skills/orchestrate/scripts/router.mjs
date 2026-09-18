@@ -408,7 +408,19 @@ function handlePrompt(input) {
   // family named here unlocks an executor above Sonnet for guard-agent.mjs —
   // for the one task id that first spends it, recorded there, not here. One
   // regex per prompt, nothing added to context.
-  const namedFamily = FAMILY_ORDER.find(f => new RegExp(`\\b${f}\\b`, 'i').test(trimmed));
+  //
+  // Only a family ranked above Sonnet is a grant worth recording (Sonnet is
+  // already the default, Haiku never needs one), and among those the earliest
+  // one named in the prompt wins — not FAMILY_ORDER's ladder position, which
+  // made "use opus, not fable" record fable because the ladder checks fable
+  // first. A prompt naming none of them leaves an existing grant alone: a
+  // later message about Sonnet or Haiku must not overwrite a live grant.
+  const grantFamilies = FAMILY_ORDER.filter(f => FAMILY_ORDER.indexOf(f) < FAMILY_ORDER.indexOf('sonnet'));
+  let namedFamily = null, namedAt = Infinity;
+  for (const f of grantFamilies) {
+    const m = new RegExp(`\\b${f}\\b`, 'i').exec(trimmed);
+    if (m && m.index < namedAt) { namedAt = m.index; namedFamily = f; }
+  }
   if (namedFamily) state.userModel = { family: namedFamily, at: new Date().toISOString() };
 
   if (/^router (off|on)$/i.test(trimmed)) { state.muted = /off$/i.test(trimmed); saveSession(state); return; }

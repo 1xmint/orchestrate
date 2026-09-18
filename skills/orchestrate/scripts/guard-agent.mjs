@@ -18,7 +18,7 @@
 // Reads the hook payload on stdin, prints one JSON object or nothing, always
 // exits 0.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -102,20 +102,62 @@ const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
 
 // Whether a `userModel` record the router wrote (the user naming a family in
 // their own prompt) unlocks this dispatch. A grant is spent on the first
-// numeric TASK id that uses it — recorded on the record itself — and refuses
-// every other id by name.
+// numeric TASK id that uses it, and refuses every other id by name. Pure and
+// testable: the caller reads the bound id (from the atomic claim file below,
+// never from a read-modify-write on the session record) and passes it in.
 //   null              no grant applies (no record, wrong family, no task id)
-//   { allow, bind }   allowed; `bind` is the id to store when not set yet
+//   { allow, bind }   allowed; `bind` is the id to claim when not bound yet
 //   { deny, reason }  a grant exists but is already spent on another task
-export function grantCheck(userModel, f, prompt) {
+export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!userModel || userModel.family !== f) return null;
   const id = numericTaskId(prompt);
   if (!id) return null;
-  if (!userModel.taskId) return { allow: true, bind: id };
-  if (userModel.taskId === id) return { allow: true, bind: null };
-  return { deny: true, reason: `Josh named ${f} for task ${userModel.taskId}; this is task ${id} — ask him or start on Sonnet.` };
+  if (!boundId) return { allow: true, bind: id };
+  if (boundId === id) return { allow: true, bind: null };
+  return { deny: true, reason: `Josh named ${f} for task ${boundId}; this is task ${id} — ask him or start on Sonnet.` };
 }
 
+// Where a grant's claim lives: one file per session+moment-the-user-named-it,
+// created exactly once. `fs.openSync(path, 'wx')` fails if the file already
+// exists, so two dispatches racing to spend the same grant can both try to
+// create it but only one wins; the loser reads back whatever the winner
+// wrote. That is what keeps the binding safe from the read-modify-write races
+// `seenBefore`'s comment above documents for the session file, and from a
+// second task id stealing a grant a first dispatch already claimed.
+export const GRANTS_DIR = join(DIR, 'grants');
+
+export function grantPath(session, at) {
+  return join(GRANTS_DIR, `${sanitizeId(session)}-${sanitizeId(String(at))}`);
+}
+
+// The id currently bound to this session's grant, or null if nothing has
+// claimed it yet.
+export function readGrantId(session, at) {
+  try { return readFileSync(grantPath(session, at), 'utf8').trim() || null; } catch { return null; }
+}
+
+// Claim the grant for `id`, atomically. Returns the id now bound: `id` itself
+// when this call is the one that created the claim file, or whatever id a
+// concurrent winner already wrote there.
+export function claimGrantId(session, at, id) {
+  const path = grantPath(session, at);
+  try {
+    mkdirSync(GRANTS_DIR, { recursive: true });
+    const fd = openSync(path, 'wx');
+    try { writeSync(fd, String(id)); } finally { closeSync(fd); }
+    return String(id);
+  } catch {
+    return readGrantId(session, at);
+  }
+}
+
+// Three shapes come back, and a caller that treats any non-null result as a
+// denial is wrong now that a grant exists:
+//   null                        allowed, nothing to record
+//   { prefix, reason }          denied
+//   { grantBind, at, family }   allowed, and the caller should claim the
+//                               grant for `grantBind` (via claimGrantId)
+//                               once every later gate (budget) also passes
 export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null, userModel = null } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const model = String(ti.model || '');
@@ -147,8 +189,16 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
     const key = taskKey(prompt);
     const tried = dispatches.some(d => d && normalizeRole(d.agent) === role && d.key === key && rank(d.model === 'inherit' ? 'sonnet' : d.model) >= rank('sonnet'));
     if (!tried) {
-      const g = grantCheck(userModel, f, prompt);
-      if (g && g.allow) return null;
+      const g = grantCheck(userModel, f, prompt, userModel && userModel.taskId);
+      if (g && g.allow) {
+        // The grant is the reason this is allowed. Only here does a bind
+        // belong: not for a judgment role (never reaches this branch), and
+        // not for an executor a prior Sonnet attempt already cleared (the
+        // `tried` branch above returns before this runs). `g.bind` is null
+        // once the grant is already bound to this same id, so there is
+        // nothing new to claim.
+        return g.bind ? { grantBind: g.bind, at: userModel.at, family: f } : null;
+      }
       if (g && g.deny) return { prefix: 'model', reason: g.reason };
       return { prefix: 'model', reason: `${role} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id.` };
     }
@@ -413,26 +463,24 @@ function main() {
     emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${m.prefix}: ${m.reason}` } });
     return;
   }
+  // A grant the caller should claim once every later gate also passes — never
+  // set from a judgment-role dispatch or an executor a prior Sonnet attempt
+  // already cleared, since modelDecision only returns this shape from the
+  // one branch where the grant is the actual reason a dispatch is allowed.
+  let grantToClaim = null;
   try {
     const state = loadSession(input.session_id) || {};
     const userModel = state.userModel || null;
+    const boundId = userModel ? readGrantId(input.session_id, userModel.at) : null;
     m = modelDecision(ti, {
       tier: detectTier().tier,
       dispatches: Array.isArray(state.dispatches) ? state.dispatches : [],
       leadContext: normalizeRole(ti.subagent_type) === 'fork' ? lastContextTokens(input.transcript_path) : null,
       quota: readQuota(),
-      userModel,
+      userModel: userModel ? { ...userModel, taskId: boundId } : null,
     });
-    // A grant just used for the first time binds to this dispatch's task id,
-    // so a later packet naming the same family for a different id is refused.
-    if (!m && userModel && !userModel.taskId) {
-      const g = grantCheck(userModel, family(String(ti.model || '')), String(ti.prompt || ''));
-      if (g && g.allow && g.bind) {
-        const s = loadSession(input.session_id);
-        if (s) { s.userModel = { ...s.userModel, taskId: g.bind }; saveSession(s); }
-      }
-    }
-  } catch { m = null; }
+    if (m && m.grantBind) { grantToClaim = m; m = null; }
+  } catch { m = null; grantToClaim = null; }
   if (m) {
     if (!repeat) recordDenial(input, ti, `${m.prefix}: ${m.reason.split('.')[0]}`);
     emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${m.prefix}: ${m.reason}` } });
@@ -449,6 +497,12 @@ function main() {
     emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate budget: this ${String(ti.subagent_type || 'dispatch')} is about $${b.est} at list price, and run ${b.runId} has already spent about $${b.already}, so it would cross the $${b.ceiling} ceiling. Raise the ceiling in the run's Budget section, or stop — nothing tightens or lifts it on its own.` } });
     return;
   }
+
+  // Bind only now, after every gate that could still refuse this dispatch has
+  // passed — a budget refusal must not burn the grant. The claim is atomic
+  // (see claimGrantId): a second dispatch racing this one for the same grant
+  // either creates the file first, or reads back the id this one just wrote.
+  if (grantToClaim) claimGrantId(input.session_id, grantToClaim.at, grantToClaim.grantBind);
 
   // Past here it is one real dispatch, and the side effects run once for it.
   // This hook can be registered twice (skill frontmatter plus settings.json).
