@@ -38,7 +38,10 @@ same folder but its dispatch path is documented, not exercised.
   subagent compaction and no focus argument for one; `/compact [instructions]`
   is lead-only. `PreCompact` and `PostCompact` hooks fire inside a subagent
   with its `agent_id`, but nothing outside can trigger one or replace its
-  result (code.claude.com/docs/en/hooks, read 2026-09-18). A helper at
+  result (code.claude.com/docs/en/hooks, read 2026-09-18). This skill's
+  `postcompact-check.mjs` saves the helper's `compact_summary` under the run
+  and the saved return says "compacted N× mid-task; kept: <path>": read it,
+  and correct a wrong summary with one `SendMessage` while the helper is warm. A helper at
   `maxTurns` returns marked partial with an id; `SendMessage` can resume it,
   and since Claude Code v2.1.198 a message to a still-running agent lands
   mid-run as direction, not only after it stops

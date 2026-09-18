@@ -2,7 +2,7 @@
 
 Resume point for building the `orchestrate` skill.
 
-## v0.15.8 — recipes, the grant's scope, and an outbox get written down, 2026-09-18
+## v0.15.8 — a scoped model grant, an outbox, honest Codex state, and helper compactions made visible, 2026-09-18
 
 Docs-only step of the orchestration-depth run (packet 9-18-0007; code lives in
 sibling packets 9-18-0005/0006). SKILL.md §5 names two recipes that were
@@ -25,6 +25,36 @@ choice, not the host's limit. assets/packet.md gains `BUILDS ON:` (packet
 side) and `SUGGEST:` (return side) in the optional-fields blocks.
 turn-check.mjs's `blocks on` column now accepts a short id (`0005`) as well as
 the full `9-18-0005`.
+
+Same version, second wave (packets 9-18-0008..0010, built on Claude while
+Codex was out of quota; the Codex path is tested with mocks only, not live):
+
+- **Codex tells the truth (0008).** `parseResetTime` reads the dated form
+  ("try again at Sep 19th, 2026 11:50 AM") that it used to read as a time
+  today, so the router stopped offering Codex hours before its reset. One
+  null or timed-out `codex login status` is retried once; a second null is
+  `unknown`, not `auth-failed`, and the worker goes on to `codex exec`, which
+  fails honestly if really signed out (two false auth-failed reports this run).
+  Every report.json names `model` and `effort`, even on an early return.
+  Exhaustion is matched per account, not per run, so run B does not re-probe
+  what run A already hit. The guard adds one fact line on an implementer
+  dispatch when Codex was seen ok recently.
+- **Work calls since the last dispatch (0009).** The lead's
+  `[orchestrate · context]` line says "N work calls since your last dispatch"
+  when N crosses 100, 200, 300, and the auto-continue reason carries it too.
+  Reset by an Agent dispatch or a `codex-worker` command. Measured: every bad
+  session had a stretch of 101+ work calls between dispatches (523, 637, 201),
+  every healthy one stayed at 83 or under. Replaces design D1's once-per-session
+  order at 30 calls, which would have fired once and then been silent for 1,800
+  calls. A fact, not an order; `policy lead.workCallsEvery` sets the step.
+- **A compacted helper's summary is kept (0010).** 36% of recent Sonnet
+  implementers were compacted by the host mid-task, on a summary nobody saw.
+  New PostCompact hook `postcompact-check.mjs`: inside a helper of a bound run
+  it saves `compact_summary` to `<run>/returns/<agent>-compact-<n>.md`, and the
+  ledger adds "compacted N× mid-task; kept: <path>" to that helper's saved
+  return, so the lead can read it and correct course with one `SendMessage`.
+  The lead's own compactions are untouched. Registered in hooks/hooks.json and
+  the script install; PreCompact stays frontmatter-scoped as before.
 
 ## v0.15.7 — the lead hears facts, not orders, 2026-09-14
 
