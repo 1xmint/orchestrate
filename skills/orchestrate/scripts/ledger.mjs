@@ -160,6 +160,27 @@ export function cappedReturn(turns, cap, parsedStatus) {
   return { capped, status: capped ? 'PARTIAL' : (parsedStatus || null), claimed: parsedStatus || null };
 }
 
+// What this helper's PostCompact hook (postcompact-check.mjs) already left
+// behind in this run's returns.jsonl, as one fact for the lead: how many
+// times it compacted mid-task and where the last kept summary is — nothing
+// when it never compacted. Read straight from the index rather than a
+// separate counter, same reasoning as postcompact-check.mjs's own count.
+export function compactFact(dir, agentId) {
+  if (!agentId) return null;
+  try {
+    const idx = join(dir, INDEX_NAME);
+    if (!existsSync(idx)) return null;
+    let n = 0, last = null;
+    for (const line of readFileSync(idx, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      if (o && o.kind === 'compact' && o.agentId === agentId) { n++; last = o.file; }
+    }
+    if (!n) return null;
+    return `compacted ${n}× mid-task; kept: ${last}`;
+  } catch { return null; }
+}
+
 export function formatUsage(u) {
   const k = n => (n >= 1000 ? `${Math.round(n / 100) / 10}k` : String(n));
   return `${k(u.input + u.cacheRead + u.cacheWrite)} in / ${k(u.output)} out, ${u.turns} turns`;
@@ -308,7 +329,9 @@ function main() {
   try {
     mkdirSync(dir, { recursive: true });
     const capNote = cap.capped ? ` · stopped at its ${usage.turns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
-    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote} -->\n\n`;
+    const compact = compactFact(dir, agentId);
+    const compactNote = compact ? ` · ${compact}` : '';
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${compactNote} -->\n\n`;
     writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
