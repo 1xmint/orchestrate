@@ -21,6 +21,7 @@
       }
     },
     "remaining": { "type": "array", "items": { "type": "string" } },
-    "notes": { "type": "string" }
+    "notes": { "type": "string" },
+    "suggestion": { "type": "string", "$comment": "Optional. One line: what the plugin could have done to make this task easier. Not a lesson about the repo." }
   }
 }
