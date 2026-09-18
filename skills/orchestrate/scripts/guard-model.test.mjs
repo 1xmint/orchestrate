@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelDecision, taskKey, FORK_MAX_CONTEXT, progressFact, AUTHOR_ROLES } from './guard-agent.mjs';
+import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, AUTHOR_ROLES } from './guard-agent.mjs';
 import { normalizeRole, estimateDollars } from './lib/prices.mjs';
 import { snapshotFrom, readQuota } from './lib/quota.mjs';
 import { quotaPhrase, quotaBand } from './router.mjs';
@@ -57,6 +57,49 @@ test('escalation is allowed only after an attempt at the same task by the same r
   assert.equal(modelDecision(ti, { ...pro, dispatches: other }).prefix, 'model');
   assert.equal(taskKey('Write the plan for\n the thing'), 'write the plan for', 'a TASK word that is not an id falls back to the first line');
   assert.equal(taskKey('TASK: Write the plan'), 'task: write the plan');
+});
+
+test('a grant the user named unlocks one task id and refuses another by name', () => {
+  const ti = { subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 9-18-0005\nfix it' };
+  const grant = { family: 'opus', at: '2026-09-18T00:00:00Z' };
+  // First use: allowed, and it would bind to this task (checked via grantCheck directly).
+  assert.equal(modelDecision(ti, { ...pro, userModel: grant }), null, 'a fresh grant lets the named task through');
+  const bound = { ...grant, taskId: '9-18-0005' };
+  assert.equal(modelDecision(ti, { ...pro, userModel: bound }), null, 'the same task id the grant is bound to stays allowed');
+  const other = { ...ti, prompt: 'TASK: 9-18-0006\nfix something else' };
+  const denied = modelDecision(other, { ...pro, userModel: bound });
+  assert.equal(denied.prefix, 'model');
+  assert.match(denied.reason, /9-18-0005/, 'names the task the grant is bound to');
+  assert.match(denied.reason, /9-18-0006/, 'names the task that was refused');
+});
+
+test('a grant needs a numeric TASK id in the packet; no id, no unlock', () => {
+  const ti = { subagent_type: 'orch-implementer', model: 'opus', prompt: 'fix the thing, no task id here' };
+  const grant = { family: 'opus', at: '2026-09-18T00:00:00Z' };
+  const d = modelDecision(ti, { ...pro, userModel: grant });
+  assert.equal(d.prefix, 'model');
+  assert.equal(grantCheck(grant, 'opus', ti.prompt), null);
+});
+
+test('grantCheck: bind on first use, allow on the bound id, deny naming both ids', () => {
+  const grant = { family: 'fable', at: '2026-09-18T00:00:00Z' };
+  const first = grantCheck(grant, 'fable', 'TASK: 1-1-0001\nx');
+  assert.deepEqual(first, { allow: true, bind: '1-1-0001' });
+  const bound = { ...grant, taskId: '1-1-0001' };
+  assert.deepEqual(grantCheck(bound, 'fable', 'TASK: 1-1-0001\nx'), { allow: true, bind: null });
+  const other = grantCheck(bound, 'fable', 'TASK: 1-1-0002\nx');
+  assert.equal(other.deny, true);
+  assert.match(other.reason, /1-1-0001/);
+  assert.match(other.reason, /1-1-0002/);
+  assert.equal(grantCheck(null, 'fable', 'TASK: 1-1-0001\nx'), null, 'no record, no grant');
+  assert.equal(grantCheck(grant, 'opus', 'TASK: 1-1-0001\nx'), null, 'wrong family, no grant');
+});
+
+test('taskKey: same header, different ids, different keys once the id has no digit', () => {
+  const a = taskKey('APPROVED BY USER: fable\nTASK: X\nfoo');
+  const b = taskKey('APPROVED BY USER: fable\nTASK: Y\nbar');
+  assert.notEqual(a, b, 'the header line is skipped so the fallback reaches the differing text');
+  assert.equal(taskKey('RISK: high\nBUILDS ON: 1\nfirst real line'), 'first real line');
 });
 
 test('built-in sweepers must name a cheap model', () => {

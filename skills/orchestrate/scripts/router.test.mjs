@@ -255,6 +255,19 @@ test('a session outside any repo is offered the run, never bound to it', () => {
   assert.equal(state.run, undefined);
 });
 
+test('a prompt naming a model family records userModel for guard-agent to read; an ordinary prompt records nothing', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'use opus for this one, it is worth it', { session_id: 's-model' });
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-model.json'), 'utf8'));
+  assert.equal(state.userModel.family, 'opus');
+  assert.ok(state.userModel.at);
+  assert.equal(state.userModel.taskId, undefined, 'router only records the naming; the grant binds to a task in guard-agent');
+
+  prompt(home, repo, 'add a --json flag to the status command and test it', { session_id: 's-nomodel' });
+  const s2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-nomodel.json'), 'utf8'));
+  assert.equal(s2.userModel, undefined, 'no family named, nothing recorded');
+});
+
 test('"router off" mutes the session; "router on" restores it; clear resets the card', () => {
   const home = makeHome(); const repo = makeRepo(false);
   prompt(home, repo, 'router off', { session_id: 's-mute' });

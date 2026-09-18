@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
-  DIR, readJson, writeJsonAtomic, staleRunsUnder,
+  DIR, readJson, writeJsonAtomic, staleRunsUnder, FAMILY_ORDER,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext, CONTEXT_DIR, thresholds } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
@@ -403,6 +403,14 @@ function handlePrompt(input) {
   if (promptKey) state.lastPromptId = promptKey;
 
   const trimmed = text.trim();
+
+  // The one party that sees Josh's own words, not a role agent's packet. A
+  // family named here unlocks an executor above Sonnet for guard-agent.mjs —
+  // for the one task id that first spends it, recorded there, not here. One
+  // regex per prompt, nothing added to context.
+  const namedFamily = FAMILY_ORDER.find(f => new RegExp(`\\b${f}\\b`, 'i').test(trimmed));
+  if (namedFamily) state.userModel = { family: namedFamily, at: new Date().toISOString() };
+
   if (/^router (off|on)$/i.test(trimmed)) { state.muted = /off$/i.test(trimmed); saveSession(state); return; }
   if (/^persist (off|on)$/i.test(trimmed)) {
     const off = /off$/i.test(trimmed);

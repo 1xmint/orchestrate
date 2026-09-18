@@ -78,17 +78,45 @@ export const PACKET_WARN_CHARS = 8000;
 
 // What identifies "the same task" across a retry: the packet's TASK id when it
 // is an id, else its first real line.
+// A packet header line, not the task's own text: skipped when falling back to
+// "the first real line", or two packets sharing a header and lacking a
+// numeric TASK id would collapse onto the same key.
+const HEADER_LINE = /^\s*(APPROVED BY USER|RISK|BUILDS ON)\s*:/i;
+
 export function taskKey(prompt) {
   const p = String(prompt || '');
   const id = (/^\s*TASK:\s*(\S+)/m.exec(p) || [])[1];
   if (id && /\d/.test(id)) return id;
-  const first = p.split('\n').map(l => l.trim()).find(Boolean) || '';
+  const first = p.split('\n').map(l => l.trim()).find(l => l && !HEADER_LINE.test(l)) || '';
   return first.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+// The packet's own numeric TASK id, or null — what a grant binds to. Distinct
+// from taskKey: a grant needs an actual id, never a first-line fallback.
+export function numericTaskId(prompt) {
+  const id = (/^\s*TASK:\s*(\S+)/m.exec(String(prompt || '')) || [])[1];
+  return id && /\d/.test(id) ? id : null;
 }
 
 const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
 
-export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null } = {}) {
+// Whether a `userModel` record the router wrote (the user naming a family in
+// their own prompt) unlocks this dispatch. A grant is spent on the first
+// numeric TASK id that uses it — recorded on the record itself — and refuses
+// every other id by name.
+//   null              no grant applies (no record, wrong family, no task id)
+//   { allow, bind }   allowed; `bind` is the id to store when not set yet
+//   { deny, reason }  a grant exists but is already spent on another task
+export function grantCheck(userModel, f, prompt) {
+  if (!userModel || userModel.family !== f) return null;
+  const id = numericTaskId(prompt);
+  if (!id) return null;
+  if (!userModel.taskId) return { allow: true, bind: id };
+  if (userModel.taskId === id) return { allow: true, bind: null };
+  return { deny: true, reason: `Josh named ${f} for task ${userModel.taskId}; this is task ${id} — ask him or start on Sonnet.` };
+}
+
+export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null, userModel = null } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const model = String(ti.model || '');
   const f = family(model);
@@ -118,7 +146,12 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
   if (EXECUTORS.has(role) && f && rank(model) < rank('sonnet')) {
     const key = taskKey(prompt);
     const tried = dispatches.some(d => d && normalizeRole(d.agent) === role && d.key === key && rank(d.model === 'inherit' ? 'sonnet' : d.model) >= rank('sonnet'));
-    if (!tried) return { prefix: 'model', reason: `${role} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead.` };
+    if (!tried) {
+      const g = grantCheck(userModel, f, prompt);
+      if (g && g.allow) return null;
+      if (g && g.deny) return { prefix: 'model', reason: g.reason };
+      return { prefix: 'model', reason: `${role} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id.` };
+    }
   }
   return null;
 }
@@ -382,12 +415,23 @@ function main() {
   }
   try {
     const state = loadSession(input.session_id) || {};
+    const userModel = state.userModel || null;
     m = modelDecision(ti, {
       tier: detectTier().tier,
       dispatches: Array.isArray(state.dispatches) ? state.dispatches : [],
       leadContext: normalizeRole(ti.subagent_type) === 'fork' ? lastContextTokens(input.transcript_path) : null,
       quota: readQuota(),
+      userModel,
     });
+    // A grant just used for the first time binds to this dispatch's task id,
+    // so a later packet naming the same family for a different id is refused.
+    if (!m && userModel && !userModel.taskId) {
+      const g = grantCheck(userModel, family(String(ti.model || '')), String(ti.prompt || ''));
+      if (g && g.allow && g.bind) {
+        const s = loadSession(input.session_id);
+        if (s) { s.userModel = { ...s.userModel, taskId: g.bind }; saveSession(s); }
+      }
+    }
   } catch { m = null; }
   if (m) {
     if (!repeat) recordDenial(input, ti, `${m.prefix}: ${m.reason.split('.')[0]}`);
