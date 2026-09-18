@@ -2,6 +2,30 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.15.8 — recipes, the grant's scope, and an outbox get written down, 2026-09-18
+
+Docs-only step of the orchestration-depth run (packet 9-18-0007; code lives in
+sibling packets 9-18-0005/0006). SKILL.md §5 names two recipes that were
+already being hand-derived every run: *second opinion* (`BUILDS ON: <path>`,
+one model reads another's written findings and goes deeper only where it is
+thin or wrong) and *hand-off* (default is a fresh agent per round from a
+lead-written brief; within the five-minute warm window `SendMessage` the brief
+out, then dispatch fresh — never resume a round cold; this run's own round-1
+agent was host-compacted at 143k before round 2, and the file, not the agent,
+carried the work forward). SKILL.md §0 and routing.md's escalation trigger 4
+now say what a model the user names actually scopes: the task they named it
+for, the first numeric id that uses it — not the run, and not a packet line;
+`APPROVED BY USER: <model>` stays the separate billing check for a model
+outside the plan. SKILL.md §10 gains one line on the suggestions outbox
+(`scripts/suggest.mjs add "<text>"`, read only on request, never injected).
+hosts.md's nesting facts now carry their source and date (depth 3, 20
+concurrent, mid-run `SendMessage` since v2.1.198 — code.claude.com/docs, read
+2026-09-18) and say plainly that this skill's own nesting caps are a cost
+choice, not the host's limit. assets/packet.md gains `BUILDS ON:` (packet
+side) and `SUGGEST:` (return side) in the optional-fields blocks.
+turn-check.mjs's `blocks on` column now accepts a short id (`0005`) as well as
+the full `9-18-0005`.
+
 ## v0.15.7 — the lead hears facts, not orders, 2026-09-14
 
 Step S2 of the rules-versus-judgment plan. The checkpoint notice, the compact

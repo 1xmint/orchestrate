@@ -43,6 +43,9 @@ Add a field only when the answer is not "none":
 RUN: <run id>                     when a coordinated run owns this task; the
                                   ledger files the return against it
 BLOCKS ON: <task ids>             when another task must land first
+BUILDS ON: <path>                 second-opinion round: read it, judge where
+                                  it is thin or wrong, go deeper there, do not
+                                  repeat; return agreed / disputed / added.
 WHERE: repo <path>  base <branch @ sha>  branch <agent/<id>-<slug>>
        worktree: <yes | no>  run dir <absolute path in the main checkout>
 OWNS: <globs>                     when another task is running at the same time;
@@ -75,6 +78,8 @@ CHANGED: <files, commits, branch — implementation roles>
 EVIDENCE: <commands run and result tails, or paths to them>
 NOT VERIFIED: <what you could not check and why>
 QUESTIONS: <only ones that block>
+SUGGEST: <optional, one line, up to 240 chars — what the plugin could have
+       done to make this task easier; not a lesson about the repo>
 ```
 
 Nothing rejects a return for its length or its shape. A long one is filed whole
