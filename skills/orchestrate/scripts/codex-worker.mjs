@@ -39,6 +39,7 @@ import { loadPolicy } from './lib/policy.mjs';
 import {
   packetFromMarkdown, newReport, registerWorker, unregisterWorker, runningExternal, runningNative,
   helperFiles, lockHolder, concurrencyDecision, markExhausted, exhaustedFor, accountKey, WORKERS_DIR,
+  recordCodexOk,
 } from './lib/workers.mjs';
 import { loadSession } from './lib/tier.mjs';
 import { addSuggestion, SUGGESTIONS_PATH } from './suggest.mjs';
@@ -436,6 +437,7 @@ export async function runWorker(opts, deps = {}) {
   // A definitive "not signed in" stops here. An unknown answer (both probes
   // came back with no exit code) is not treated as signed out: exec is tried
   // and fails honestly on its own if the account really is signed out.
+  recordCodexOk(login.ok, workersDir);
   if (!login.ok && !login.unknown) return finish({ status: 'auth-failed', why: `Codex is not signed in: ${login.text}`, evidence: { edited: false } }, EXIT.fallback);
   report.account = login.account;
   const exhausted = exhaustedFor({ provider: 'codex', account: login.account, scope }, workersDir);
@@ -532,6 +534,7 @@ export async function runWorker(opts, deps = {}) {
 export function status({ env = process.env, workersDir = WORKERS_DIR, wait } = {}) {
   const bin = findCodex(env);
   const login = bin ? loginStatus(bin, env, wait) : { ok: false, unknown: false, text: 'Codex CLI not found', account: null };
+  if (bin) recordCodexOk(login.ok, workersDir);
   let exhausted = [];
   try { exhausted = (JSON.parse(readFileSync(join(workersDir, 'provider-state.json'), 'utf8')).exhausted || []).slice(-10).map(e => ({ ...e, active: !!exhaustedFor(e, workersDir) })); } catch {}
   return { bin, login: { ok: login.ok, text: login.text }, model: loadPolicy().codex.model || configuredModel(env), running: runningExternal(workersDir), exhausted, policy: loadPolicy().codex };

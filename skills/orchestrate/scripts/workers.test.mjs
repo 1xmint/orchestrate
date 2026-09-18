@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workflowDecision, PLAN_READ_ROLES } from './guard-agent.mjs';
-import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal } from './lib/workers.mjs';
+import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal, recordCodexOk, freshCodexOk, CODEX_OK_FRESH_MS } from './lib/workers.mjs';
 import { modeTransition, modeNote, PLAN_NOTE, APPROVED_NOTE } from './lib/modes.mjs';
 import { cappedReturn, roleMaxTurns, sumUsage } from './ledger.mjs';
 import { loadPolicy, setPolicyValue, sizeBudget, DEFAULT_POLICY } from './lib/policy.mjs';
@@ -434,4 +434,15 @@ test('replay: the 274-call general-purpose helper is measured whole and would be
   const nestedOpts = { policy, installed: 7, dispatches: [{ agent: 'general-purpose', toolUseId: 'toolu_gp' }], files: helperFiles(leadPath) };
   assert.match(workflowDecision({ agent_id: 'gp1' }, { subagent_type: 'general-purpose', prompt: 'sub-task' }, nestedOpts).reason, /only orch-coordinator/);
   assert.equal(measure(readFileSync(leadPath, 'utf8')).dispatches.length, 1);
+});
+
+test('freshCodexOk: a recorded ok is fresh until CODEX_OK_FRESH_MS passes, and a recorded failure is never fresh', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-codex-ok-'));
+  assert.equal(freshCodexOk(dir), null, 'never probed');
+  const t0 = Date.now();
+  recordCodexOk(true, dir, t0);
+  assert.ok(freshCodexOk(dir, t0 + 1000), 'just recorded, still fresh');
+  assert.equal(freshCodexOk(dir, t0 + CODEX_OK_FRESH_MS + 1), null, 'stale once the window passes');
+  recordCodexOk(false, dir, t0);
+  assert.equal(freshCodexOk(dir, t0 + 1000), null, 'a recorded sign-out is never reported as ok');
 });

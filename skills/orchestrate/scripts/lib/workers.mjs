@@ -333,6 +333,33 @@ function lifted(e, now) {
   return Number.isFinite(reset) && reset <= now;
 }
 
+// ---- Codex fresh-ok state ---------------------------------------------------
+// A cheap fact the guard can read on every dispatch without ever starting
+// Codex itself: the last time codex-worker actually asked Codex whether it is
+// signed in, and what it heard. Written where codex-worker already computes
+// login.ok (a real dispatch, or an explicit `status` check) — never from the
+// guard, which only reads.
+export const codexOkPath = (dir = WORKERS_DIR) => join(dir, 'codex-ok.json');
+
+// How long a recorded ok is taken at face value before it goes stale. Chosen
+// short enough that a signed-out or rate-limited Codex from twenty minutes ago
+// is never handed to the lead as current.
+export const CODEX_OK_FRESH_MS = 30 * 60 * 1000;
+
+export function recordCodexOk(ok, dir = WORKERS_DIR, now = Date.now()) {
+  try { writeJsonAtomic(codexOkPath(dir), { ok: !!ok, at: new Date(now).toISOString() }); } catch {}
+}
+
+// Null when never probed, stale, or the last probe failed — the guard treats
+// all three the same: say nothing.
+export function freshCodexOk(dir = WORKERS_DIR, now = Date.now(), freshMs = CODEX_OK_FRESH_MS) {
+  const s = readJson(codexOkPath(dir));
+  if (!s || !s.ok || !s.at) return null;
+  const at = Date.parse(s.at);
+  if (!Number.isFinite(at) || now - at > freshMs) return null;
+  return { at };
+}
+
 // ---- the provider-neutral packet and report -------------------------------------
 
 export const REPORT_STATUSES = ['done', 'partial', 'blocked', 'checks-failed', 'quota-exhausted', 'auth-failed', 'throttled', 'permission-denied', 'timeout', 'malformed', 'failed'];
