@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, AUTHOR_ROLES } from './guard-agent.mjs';
+import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, AUTHOR_ROLES, claimOrDeny } from './guard-agent.mjs';
 import { normalizeRole, estimateDollars } from './lib/prices.mjs';
 import { snapshotFrom, readQuota } from './lib/quota.mjs';
 import { quotaPhrase, quotaBand } from './router.mjs';
@@ -12,10 +12,26 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GUARD = join(HERE, 'guard-agent.mjs');
+const GUARD_URL = pathToFileURL(GUARD).href;
+
+// tier.mjs pins its DIR to this process's real home the moment it is first
+// imported, so readGrantId/grantPath cannot be exercised safely in-process —
+// a test here would read and write the real user's home directory, and every
+// other test in this file already shares that one import. A child process
+// with HOME pointed at a sandbox is the only safe way to reach them.
+function evalInSandbox(home, code) {
+  const r = spawnSync(process.execPath, ['--input-type=module'], {
+    input: code,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+  });
+  if (r.status !== 0) throw new Error(`sandbox eval failed: ${r.stderr}`);
+  return r.stdout;
+}
 
 function sandbox() {
   const home = mkdtempSync(join(tmpdir(), 'orch-grant-home-'));
@@ -121,6 +137,51 @@ test('grantCheck: bind on first use, allow on the bound id, deny naming both ids
   assert.match(other.reason, /1-1-0002/);
   assert.equal(grantCheck(null, 'fable', 'TASK: 1-1-0001\nx', null), null, 'no record, no grant');
   assert.equal(grantCheck(grant, 'opus', 'TASK: 1-1-0001\nx', null), null, 'wrong family, no grant');
+});
+
+test('claimOrDeny: a different id winning the race is denied by name, on both sides', () => {
+  const grantToClaim = { grantBind: '1-1-0002', at: '2026-09-18T00:00:00Z', family: 'opus' };
+  // Inject a claim function that behaves like the loser of a race: the file
+  // already existed, and whoever created it bound task 1-1-0001.
+  const raced = claimOrDeny('s-race', grantToClaim, () => '1-1-0001');
+  assert.equal(raced.prefix, 'model');
+  assert.match(raced.reason, /1-1-0001/, 'names the task that actually won');
+  assert.match(raced.reason, /1-1-0002/, 'names the task that was refused');
+
+  // The winner's own claim call comes back with its own id: allowed, nothing
+  // to deny.
+  const won = claimOrDeny('s-race', grantToClaim, () => '1-1-0002');
+  assert.equal(won, null);
+});
+
+test('claimOrDeny: a claim that comes back empty (mid-write, or the claim failed outright) is denied with no id to name', () => {
+  const grantToClaim = { grantBind: '1-1-0002', at: '2026-09-18T00:00:00Z', family: 'fable' };
+  const gd = claimOrDeny('s-race', grantToClaim, () => null);
+  assert.equal(gd.prefix, 'model');
+  assert.doesNotMatch(gd.reason, /1-1-0002/, 'nothing to name; the claim itself failed or is still in flight');
+  assert.match(gd.reason, /could not be claimed/);
+});
+
+test('readGrantId: a claim file that exists but is still empty reads as pending, never as unclaimed', () => {
+  const home = sandbox();
+  const code = `
+    import { mkdirSync, closeSync, openSync } from 'node:fs';
+    import { readGrantId, grantPath, grantCheck, GRANTS_DIR } from ${JSON.stringify(GUARD_URL)};
+    const session = 's-pending';
+    const at = '2026-09-18T00:00:00Z';
+    mkdirSync(GRANTS_DIR, { recursive: true });
+    closeSync(openSync(grantPath(session, at), 'wx'));
+    const id = readGrantId(session, at);
+    // grantCheck must refuse to treat this as free to bind: an id that does
+    // not match the pending sentinel falls into the deny branch, not the
+    // "unclaimed, allow" branch.
+    const decision = grantCheck({ family: 'opus', at }, 'opus', 'TASK: 9-9-0001\\nx', id);
+    console.log(JSON.stringify({ id, decision }));
+  `;
+  const out = evalInSandbox(home, code);
+  const { id, decision } = JSON.parse(out.trim().split('\n').pop());
+  assert.notEqual(id, null, 'an existing empty file is not "no claim yet"');
+  assert.equal(decision.deny, true, 'a pending claim is never read as unclaimed');
 });
 
 test('modelDecision never returns grantBind for a judgment role or an already-cleared executor', () => {

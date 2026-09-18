@@ -131,9 +131,20 @@ export function grantPath(session, at) {
 }
 
 // The id currently bound to this session's grant, or null if nothing has
-// claimed it yet.
+// claimed it yet. `null` must mean "no file" and nothing else: the window
+// between a winner's `openSync(..., 'wx')` and its `writeSync` leaves the
+// claim file existing but empty for an instant, and a reader that lands in
+// that window must not read that as unclaimed — the file existing at all
+// means someone has already started (or finished) a claim. So a file that
+// exists but is empty reads back as the sentinel below, which never equals a
+// real task id and never satisfies `!boundId`, instead of `null`.
+const GRANT_PENDING = '(pending)';
+
 export function readGrantId(session, at) {
-  try { return readFileSync(grantPath(session, at), 'utf8').trim() || null; } catch { return null; }
+  let raw;
+  try { raw = readFileSync(grantPath(session, at), 'utf8'); } catch { return null; }
+  const id = raw.trim();
+  return id || GRANT_PENDING;
 }
 
 // Claim the grant for `id`, atomically. Returns the id now bound: `id` itself
@@ -149,6 +160,23 @@ export function claimGrantId(session, at, id) {
   } catch {
     return readGrantId(session, at);
   }
+}
+
+// The post-claim check main() runs once every other gate has passed: actually
+// claim the grant (via `claim`, injectable so a test can force the race
+// without a second process) and refuse the dispatch unless it is the one that
+// won. Two outcomes both deny: a different task id won the race (name both,
+// same message shape as grantCheck's), or the claim came back empty — the
+// file existed but was still being written, or the claim itself failed — in
+// which case there is nothing to name, so the dispatch is told to retry on
+// Sonnet instead of guessing who won.
+export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
+  const won = claim(session, grantToClaim.at, grantToClaim.grantBind);
+  if (won === grantToClaim.grantBind) return null;
+  if (won && won !== GRANT_PENDING) {
+    return { prefix: 'model', reason: `Josh named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask him or start on Sonnet.` };
+  }
+  return { prefix: 'model', reason: `the ${grantToClaim.family} grant could not be claimed; resend with model: "sonnet".` };
 }
 
 // Three shapes come back, and a caller that treats any non-null result as a
@@ -502,7 +530,17 @@ function main() {
   // passed — a budget refusal must not burn the grant. The claim is atomic
   // (see claimGrantId): a second dispatch racing this one for the same grant
   // either creates the file first, or reads back the id this one just wrote.
-  if (grantToClaim) claimGrantId(input.session_id, grantToClaim.at, grantToClaim.grantBind);
+  // claimOrDeny checks who actually won: the loser of that race (or a reader
+  // that caught an empty claim file mid-write) must be denied here, the same
+  // way every other model denial is — not silently let through.
+  if (grantToClaim) {
+    const gd = claimOrDeny(input.session_id, grantToClaim);
+    if (gd) {
+      if (!repeat) recordDenial(input, ti, `${gd.prefix}: ${gd.reason.split('.')[0]}`);
+      emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${gd.prefix}: ${gd.reason}` } });
+      return;
+    }
+  }
 
   // Past here it is one real dispatch, and the side effects run once for it.
   // This hook can be registered twice (skill frontmatter plus settings.json).
