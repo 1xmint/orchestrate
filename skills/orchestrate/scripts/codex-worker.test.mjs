@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -96,6 +96,58 @@ test('success: an isolated worktree, explicit arguments, the packet on stdin, a 
   assert.equal(runningExternal(deps.workersDir).length, 0, 'the worker is unregistered after it exits');
 });
 
+test('parseFinal reads an optional suggestion, and accepts a report without one', () => {
+  const withOne = parseFinal(JSON.stringify({ status: 'done', summary: 'ok', changed: [], checks: [], remaining: [], notes: '', suggestion: 'Ship the map path up front.' }));
+  assert.equal(withOne.suggestion, 'Ship the map path up front.');
+  const withoutOne = parseFinal(JSON.stringify({ status: 'done', summary: 'ok', changed: [], checks: [], remaining: [], notes: '' }));
+  assert.equal(withoutOne.suggestion, null);
+});
+
+test('a report with a suggestion passes the schema and appends a row to the suggestions outbox', async () => {
+  const r = repo();
+  const { deps } = setup('success');
+  // A fake Codex CLI, local to this test, whose report includes `suggestion` —
+  // a field the shared fixture does not produce.
+  const fake = join(deps.workersDir, '..', 'fake-codex-suggest.mjs');
+  mkdirSync(dirname(fake), { recursive: true });
+  const workFile = JSON.stringify(join(r, 'work.txt'));
+  writeFileSync(fake, [
+    "import { writeFileSync, appendFileSync } from 'node:fs';",
+    'const argv = process.argv.slice(2);',
+    "if (process.env.FAKE_CODEX_LOG) appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ argv }) + '\\n');",
+    "if (argv[0] === 'login') { process.stdout.write('Logged in using ChatGPT\\n'); process.exit(0); }",
+    "const flag = n => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : null; };",
+    'const out = o => process.stdout.write(JSON.stringify(o) + \'\\n\');',
+    "const last = flag('-o');",
+    `writeFileSync(${workFile}, 'changed\\n');`,
+    "out({ type: 'turn.completed', usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } });",
+    "if (last) writeFileSync(last, JSON.stringify({ status: 'done', summary: 'fake done', changed: ['work.txt'], checks: [], remaining: [], notes: '', suggestion: 'Codex worker suggestion.' }));",
+    'process.exit(0);',
+    '',
+  ].join('\n'));
+  const suggestionsPath = join(deps.workersDir, 'suggestions.jsonl');
+  const validate = schema => {
+    const report = JSON.parse(JSON.stringify({ status: 'done', summary: 'fake done', changed: ['work.txt'], checks: [], remaining: [], notes: '', suggestion: 'Codex worker suggestion.' }));
+    for (const key of schema.required) assert.ok(key in report, `${key} is required by the schema`);
+    for (const key of Object.keys(report)) assert.ok(key in schema.properties, `${key} is declared in the schema`);
+  };
+  const schema = JSON.parse(readFileSync(join(HERE, '..', 'assets', 'worker-report.schema.json'), 'utf8'));
+  validate(schema);
+
+  const { report } = await runWorker({ packetText: PACKET, repo: r, role: 'implement', run: join(deps.workersDir, '..', 'run-suggest'), task: '9-18-suggest' }, {
+    ...deps,
+    env: { ...deps.env, ORCH_CODEX_BIN: fake },
+    suggestionsPath,
+  });
+  assert.equal(report.status, 'done');
+  assert.equal(report.evidence.final.suggestion, 'Codex worker suggestion.');
+  assert.ok(existsSync(suggestionsPath));
+  const rows = readFileSync(suggestionsPath, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].text, 'Codex worker suggestion.');
+  assert.equal(rows[0].source, '9-18-suggest');
+});
+
 test('review runs read-only in place at high effort', async () => {
   const r = repo();
   const { deps, calls } = setup('success');
@@ -106,7 +158,7 @@ test('review runs read-only in place at high effort', async () => {
   assert.equal(report.worktree, r);
 });
 
-test('quota exhausted before any edit: marked for this run, never probed again, handed to Claude', async () => {
+test('quota exhausted before any edit: marked for the account, never probed again in a later run, handed to Claude', async () => {
   const r = repo();
   const { deps, calls } = setup('quota-before');
   const first = await run(r, deps);
@@ -128,7 +180,8 @@ test('quota exhausted before any edit: marked for this run, never probed again, 
   assert.equal(calls().filter(c => c.argv[0] === 'exec').length, execsBefore, 'the exhausted account is not tried again in this run');
 
   const otherRun = await runWorker({ packetText: PACKET.replace('9-14-0001', '9-14-0003'), repo: r, run: join(deps.workersDir, '..', 'run-other') }, { ...deps, env: { ...deps.env, FAKE_CODEX_MODE: 'success' } });
-  assert.equal(otherRun.report.status, 'done', 'a different run is not blocked by it');
+  assert.equal(otherRun.report.status, 'quota-exhausted', 'a later run for the same account is not re-probed');
+  assert.equal(calls().filter(c => c.argv[0] === 'exec').length, execsBefore, 'still not tried again, in a different run');
 });
 
 test('quota exhausted after edits: the diff is preserved and only the unfinished part goes to Claude', async () => {
@@ -162,6 +215,7 @@ test('login, auth, throttling and malformed output are told apart', async () => 
   const out = await run(r, setup('logged-out').deps);
   assert.equal(out.report.status, 'auth-failed');
   assert.equal(out.code, EXIT.fallback);
+  assert.ok(out.report.effort, 'effort is named even when the run stops before exec');
 
   const auth = await run(r, setup('auth').deps, { task: 'a1' });
   assert.equal(auth.report.status, 'auth-failed');
@@ -179,6 +233,38 @@ test('login, auth, throttling and malformed output are told apart', async () => 
   const failing = await run(r, setup('checks-fail').deps, { task: 'c1' });
   assert.equal(failing.report.status, 'checks-failed', 'a failing test is not a provider failure');
   assert.equal(failing.report.fallback, undefined);
+});
+
+test('a report always names model and effort, even a report written before exec ever runs', async () => {
+  const r = repo();
+  const { home, deps } = setup('logged-out');
+  mkdirSync(join(home, 'codex'), { recursive: true });
+  writeFileSync(join(home, 'codex', 'config.toml'), 'model = "gpt-5-codex"\n');
+  const { report } = await run(r, deps);
+  assert.equal(report.status, 'auth-failed');
+  assert.equal(report.model, 'gpt-5-codex', 'the config.toml default fills in for a dispatch with no --model');
+  assert.equal(report.effort, 'medium', 'the policy default fills in for a dispatch with no --effort');
+});
+
+test('a login status that times out once is retried, not read as signed out', async () => {
+  const r = repo();
+  const { home, deps } = setup('login-retry-once');
+  deps.env.FAKE_LOGIN_COUNT_FILE = join(home, 'login-count');
+  deps.wait = () => {}; // no real sleep in a test
+  deps.loginTimeoutMs = 300;
+  const { report } = await run(r, deps);
+  assert.notEqual(report.status, 'auth-failed', 'the first null is retried, not treated as signed out');
+  assert.equal(report.status, 'done', 'the retry succeeded and the worker proceeded');
+});
+
+test('a login status that never answers is unknown, not signed out: the worker still tries exec', async () => {
+  const r = repo();
+  const { deps, calls } = setup('login-retry-fail');
+  deps.wait = () => {};
+  deps.loginTimeoutMs = 300;
+  const { report } = await run(r, deps);
+  assert.notEqual(report.status, 'auth-failed', 'an unknown login state is not reported as signed out');
+  assert.ok(calls().some(c => c.argv[0] === 'exec'), 'exec was tried; it fails honestly on its own if truly signed out');
 });
 
 test('timeout: the worker is stopped, it has exited, partial work kept, not called exhaustion', async () => {

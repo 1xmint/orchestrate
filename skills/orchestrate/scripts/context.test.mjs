@@ -10,7 +10,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, appendFileSync, readFileSync, mkdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import {
   readContext, sampleContext, adviseContext, contextNotice, scanSlice, inputSide, thresholds,
   storedContext, markAnnounced, agentTranscriptPath, contextTick, formatReading, writeStatusCapacity, statusCapacity, checkpointPath,
@@ -18,6 +20,9 @@ import {
 } from './lib/context.mjs';
 import { loadPolicy, setPolicyValue } from './lib/policy.mjs';
 import { persistDecision } from './persist-check.mjs';
+import { stepWorkCalls, workCallsFact } from './context-check.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 import { buildReport } from './context.mjs';
 
 const T0 = Date.parse('2026-09-14T10:00:00Z');
@@ -406,4 +411,96 @@ test('the size line names the newest checkpoint, its age, and the tool calls sin
   utimesSync(cp, new Date(NOW - 3 * 60000), new Date(NOW - 3 * 60000));
   const withCp = contextTick(reading, policy, { policy, session: 'nc', dir, editCounter: 1, now: NOW }).text;
   assert.ok(withCp.includes(` · newest checkpoint: ${cp}, 3 min ago · 1 tool call since your last edit`), withCp);
+});
+
+// ---- work calls since the last dispatch (challenge.md D1) ---------------------
+
+test('stepWorkCalls: counts work tools, resets on a dispatch or a codex-worker Bash/PowerShell, leaves other tools alone', () => {
+  assert.equal(stepWorkCalls(5, 'Edit', {}), 6);
+  assert.equal(stepWorkCalls(5, 'Write', {}), 6);
+  assert.equal(stepWorkCalls(5, 'MultiEdit', {}), 6);
+  assert.equal(stepWorkCalls(5, 'NotebookEdit', {}), 6);
+  assert.equal(stepWorkCalls(5, 'Read', {}), 6);
+  assert.equal(stepWorkCalls(5, 'Grep', {}), 6);
+  assert.equal(stepWorkCalls(5, 'Glob', {}), 6);
+  assert.equal(stepWorkCalls(5, 'Bash', { command: 'ls' }), 6);
+  assert.equal(stepWorkCalls(5, 'PowerShell', { command: 'ls' }), 6);
+  assert.equal(stepWorkCalls(5, 'WebFetch', {}), 5, 'not a work tool: unchanged');
+  assert.equal(stepWorkCalls(5, 'TodoWrite', {}), 5, 'not a work tool: unchanged');
+  assert.equal(stepWorkCalls(5, 'Agent', { prompt: 'go' }), 0);
+  assert.equal(stepWorkCalls(5, 'Task', { prompt: 'go' }), 0);
+  assert.equal(stepWorkCalls(5, 'Bash', { command: 'node codex-worker.mjs --task 1' }), 0);
+  assert.equal(stepWorkCalls(5, 'PowerShell', { command: 'node codex-worker.mjs' }), 0);
+  assert.equal(stepWorkCalls(0, 'Edit', {}), 1, 'a missing count starts fresh, not NaN');
+});
+
+test('workCallsFact: says the count only on a crossing, never below or between crossings', () => {
+  assert.equal(workCallsFact(99, 100), null);
+  assert.equal(workCallsFact(100, 100), '100 work calls since your last dispatch');
+  assert.equal(workCallsFact(150, 100), null);
+  assert.equal(workCallsFact(200, 100), '200 work calls since your last dispatch');
+  assert.equal(workCallsFact(0, 100), null, 'a fresh reset says nothing');
+  assert.equal(workCallsFact(100, 0), null, 'threshold off');
+});
+
+test('replay: a healthy stretch of 83 calls then a dispatch produces zero facts (challenge.md D1 bound)', () => {
+  let count = 0;
+  let heard = false;
+  for (let i = 0; i < 83; i++) {
+    count = stepWorkCalls(count, 'Edit', {});
+    if (workCallsFact(count, policy.lead.workCallsEvery)) heard = true;
+  }
+  assert.equal(heard, false);
+  assert.equal(count, 83);
+  count = stepWorkCalls(count, 'Agent', { prompt: 'go' });
+  assert.equal(count, 0);
+});
+
+// ---- the lead's own hook, end to end -------------------------------------------
+function ctxSandbox() {
+  const home = mkdtempSync(join(tmpdir(), 'orch-ctxcheck-'));
+  mkdirSync(join(home, '.claude', 'orchestrate', 'sessions'), { recursive: true });
+  return home;
+}
+const wcSessionFile = (home, sid) => join(home, '.claude', 'orchestrate', 'sessions', `${sid}.json`);
+function runContextCheck(payload, home) {
+  const r = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' } });
+  let json = null;
+  try { json = r.stdout.trim() ? JSON.parse(r.stdout) : null; } catch {}
+  return json ? json.hookSpecificOutput.additionalContext : '';
+}
+const setWorkCalls = (home, sid, count) => writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, workCalls: { count } }));
+const readWorkCalls = (home, sid) => JSON.parse(readFileSync(wcSessionFile(home, sid), 'utf8')).workCalls.count;
+
+test('the lead hears "N work calls since your last dispatch" only on a crossing, and a dispatch resets it', () => {
+  const home = ctxSandbox();
+  const sid = 'wc-1';
+  const edit = { session_id: sid, tool_name: 'Edit', tool_input: { file_path: '/x' } };
+
+  setWorkCalls(home, sid, 98);
+  assert.doesNotMatch(runContextCheck(edit, home), /work calls/, 'the 99th: no fact yet');
+  assert.equal(readWorkCalls(home, sid), 99);
+
+  assert.match(runContextCheck(edit, home), /^\[orchestrate · context\] 100 work calls since your last dispatch$/, 'the 100th crosses');
+  assert.equal(readWorkCalls(home, sid), 100);
+
+  assert.doesNotMatch(runContextCheck(edit, home), /work calls/, '101: none');
+
+  setWorkCalls(home, sid, 199);
+  assert.match(runContextCheck(edit, home), /200 work calls since your last dispatch/, 'the 200th crosses');
+
+  // An Agent dispatch resets the count to 0.
+  setWorkCalls(home, sid, 83);
+  assert.equal(runContextCheck({ session_id: sid, tool_name: 'Agent', tool_input: { subagent_type: 'orch-implementer', prompt: 'go' } }, home), '');
+  assert.equal(readWorkCalls(home, sid), 0);
+
+  // A Bash running codex-worker resets it too.
+  setWorkCalls(home, sid, 50);
+  runContextCheck({ session_id: sid, tool_name: 'Bash', tool_input: { command: 'node codex-worker.mjs --task 1' } }, home);
+  assert.equal(readWorkCalls(home, sid), 0);
+
+  // Events with agent_id (a helper's own tool use) never touch the lead's count.
+  setWorkCalls(home, sid, 42);
+  runContextCheck({ session_id: sid, agent_id: 'a1', tool_name: 'Edit', tool_input: {} }, home);
+  assert.equal(readWorkCalls(home, sid), 42);
 });

@@ -246,13 +246,26 @@ const cellAt = (line, i) => {
 // 🧱 built-unverified is deliberately not enough: the artifact exists but
 // nothing has checked it, and a task built on an unchecked one inherits the
 // doubt. Loosening that is one glyph if it proves too strict in practice.
+// A `blocks on` cell can name the short id alone (`0005`) instead of the full
+// `9-18-0005`: same task, less to type in a table read every step. The task
+// column always carries the full id, so a blocker is matched under both.
+const shortId = id => {
+  const m = /-(\d+)$/.exec(String(id || '').trim());
+  return m ? m[1] : String(id || '').trim();
+};
+
 export function readyTasks(rows, header) {
   const cols = String(header || '').split('|').map(s => s.trim().toLowerCase());
   const blocksAt = cols.indexOf('blocks on');
   if (blocksAt < 0) return [];
 
   const phaseOf = new Map();
-  for (const r of rows) phaseOf.set(cellAt(r, 1), cellAt(r, 2));
+  for (const r of rows) {
+    const id = cellAt(r, 1);
+    phaseOf.set(id, cellAt(r, 2));
+    const short = shortId(id);
+    if (short !== id) phaseOf.set(short, cellAt(r, 2));
+  }
 
   // A blocker nobody wrote a row for is nothing to wait for.
   const landed = id => {

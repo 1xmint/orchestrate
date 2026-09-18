@@ -21,16 +21,31 @@ same folder but its dispatch path is documented, not exercised.
   results. Compact or continue from a checkpoint instead.
 - **Worker model.** A `model` on an `Agent` call beats both the agent file and
   `CLAUDE_CODE_SUBAGENT_MODEL`. Name it on every dispatch.
-- **Nesting.** The host allows three subagent layers and 20 concurrent
-  subagents by default. Set `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` as a host
-  backstop. Whether it counts the lead's own level is unverified, so the
-  coordinator guard remains the real rail.
+- **Nesting.** Nesting is on by default: the host allows three subagent layers
+  (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`) and 20 concurrent subagents
+  (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`), and a subagent's own subagents
+  inherit its tools minus `Agent` at the last layer
+  (code.claude.com/docs/en/sub-agents, read 2026-09-18). Set
+  `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` as a host backstop. Whether it
+  counts the lead's own level is unverified, so the coordinator guard remains
+  the real rail. This skill's own caps — coordinator-only nesting at depth
+  one, two children, concurrency two (three with a live coordinator) — are a
+  cost choice made here, not a host limit; the host allows much more.
 - **Helper compaction.** A helper compacts on its own when its window fills,
   "using the same logic as the main conversation" (sub-agents.md, 2026-09-14);
   seen once here, 167k to 63k. Nothing lets a helper ask for it on purpose, and
-  a turn cap usually ends a helper first. A helper at `maxTurns` returns marked
-  partial with an id `SendMessage` can resume; docs do not say whether a message
-  to a running helper lands mid-run.
+  a turn cap usually ends a helper first. There is no caller-initiated
+  subagent compaction and no focus argument for one; `/compact [instructions]`
+  is lead-only. `PreCompact` and `PostCompact` hooks fire inside a subagent
+  with its `agent_id`, but nothing outside can trigger one or replace its
+  result (code.claude.com/docs/en/hooks, read 2026-09-18). This skill's
+  `postcompact-check.mjs` saves the helper's `compact_summary` under the run
+  and the saved return says "compacted N× mid-task; kept: <path>": read it,
+  and correct a wrong summary with one `SendMessage` while the helper is warm. A helper at
+  `maxTurns` returns marked partial with an id; `SendMessage` can resume it,
+  and since Claude Code v2.1.198 a message to a still-running agent lands
+  mid-run as direction, not only after it stops
+  (code.claude.com/docs/en/sub-agents, read 2026-09-18).
 
 **Dispatch** is the `Agent` tool: `subagent_type` (a role agent, or `Explore` /
 `general-purpose`), `model` (`sonnet | opus | haiku | fable`; overrides the agent file), `prompt`

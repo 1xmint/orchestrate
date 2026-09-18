@@ -68,6 +68,15 @@ export const DEFAULT_POLICY = Object.freeze({
     effortHard: 'high',
     timeoutMin: 20,
   }),
+  lead: Object.freeze({
+    // A long stretch of work calls (Edit/Write/MultiEdit/NotebookEdit/Bash/
+    // PowerShell/Read/Grep/Glob) between dispatches is what let the lead run
+    // hundreds of steps solo (challenge.md D1). The count lives in session
+    // state, reset by a dispatch (Agent/Task, or a Bash/PowerShell running
+    // codex-worker); a fact is added to the context line each time it crosses
+    // a multiple of this.
+    workCallsEvery: 100,
+  }),
 });
 
 const EFFORTS = new Set(['minimal', 'low', 'medium', 'high', 'xhigh']);
@@ -95,7 +104,7 @@ const autocompact = (v, d) => {
 // value falls back to the default rather than breaking a hook.
 export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
   const p = (profile && typeof profile.policy === 'object' && profile.policy) || {};
-  const c = p.context || {}, w = p.workers || {}, x = p.codex || {};
+  const c = p.context || {}, w = p.workers || {}, x = p.codex || {}, l = p.lead || {};
   const D = DEFAULT_POLICY;
   const frac = Number(c.windowFraction);
   return {
@@ -132,6 +141,9 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
       effortImplement: EFFORTS.has(x.effortImplement) ? x.effortImplement : D.codex.effortImplement,
       effortHard: EFFORTS.has(x.effortHard) ? x.effortHard : D.codex.effortHard,
       timeoutMin: posNum(x.timeoutMin, D.codex.timeoutMin),
+    },
+    lead: {
+      workCallsEvery: Math.floor(posNum(l.workCallsEvery, D.lead.workCallsEvery)),
     },
   };
 }

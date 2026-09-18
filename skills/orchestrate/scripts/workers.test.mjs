@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workflowDecision, PLAN_READ_ROLES } from './guard-agent.mjs';
-import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal } from './lib/workers.mjs';
+import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal, recordCodexOk, freshCodexOk, CODEX_OK_FRESH_MS } from './lib/workers.mjs';
 import { modeTransition, modeNote, PLAN_NOTE, APPROVED_NOTE } from './lib/modes.mjs';
 import { cappedReturn, roleMaxTurns, sumUsage } from './ledger.mjs';
 import { loadPolicy, setPolicyValue, sizeBudget, DEFAULT_POLICY } from './lib/policy.mjs';
@@ -301,13 +301,13 @@ test('a live Codex worktree is locked against Claude helpers', () => {
   assert.deepEqual(runningExternal(dir, () => false), []);
 });
 
-test('quota exhaustion is scoped by provider, account and run; unidentified entries are ignored', () => {
+test('quota exhaustion is scoped by provider and account, not by run: a later run for the same account sees an earlier hit', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-prov-'));
   markExhausted({ provider: 'codex', account: 'acct1', scope: 'run:r1', message: 'usage limit' }, dir);
-  assert.ok(exhaustedFor({ provider: 'codex', account: 'acct1', scope: 'run:r1' }, dir));
-  assert.equal(exhaustedFor({ provider: 'codex', account: 'acct2', scope: 'run:r1' }, dir), null);
-  assert.equal(exhaustedFor({ provider: 'codex', account: 'acct1', scope: 'run:r2' }, dir), null);
-  assert.equal(exhaustedFor({ provider: 'claude', account: 'acct1', scope: 'run:r1' }, dir), null);
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'acct1', scope: 'run:r1' }, dir), 'the run that hit the limit sees it');
+  assert.ok(exhaustedFor({ provider: 'codex', account: 'acct1', scope: 'run:r2' }, dir), 'a later run for the same account is not re-probed');
+  assert.equal(exhaustedFor({ provider: 'codex', account: 'acct2', scope: 'run:r1' }, dir), null, 'a different account is unaffected');
+  assert.equal(exhaustedFor({ provider: 'claude', account: 'acct1', scope: 'run:r1' }, dir), null, 'a different provider is unaffected');
   assert.equal(markExhausted({ provider: 'codex', account: null, scope: 'run:r1' }, dir), false);
   assert.equal(exhaustedFor({ provider: 'codex', account: null, scope: 'run:r1' }, dir), null);
   // The block lifts at the reset time the provider stated, and not before.
@@ -315,15 +315,17 @@ test('quota exhaustion is scoped by provider, account and run; unidentified entr
   markExhausted({ provider: 'codex', account: 'acct3', scope: 'run:r3', message: "You've hit your usage limit. ... or try again at 2:31 PM.", now: t0 }, dir);
   assert.ok(exhaustedFor({ provider: 'codex', account: 'acct3', scope: 'run:r3' }, dir, t0 + 60 * 60000));
   assert.equal(exhaustedFor({ provider: 'codex', account: 'acct3', scope: 'run:r3' }, dir, t0 + 104 * 60000), null);
+  // A fresh hit for the same account replaces its earlier record rather than stacking on it.
+  markExhausted({ provider: 'codex', account: 'acct3', scope: 'run:r4', message: 'usage limit', now: t0 + 200 * 60000 }, dir);
+  const state = JSON.parse(readFileSync(join(dir, 'provider-state.json'), 'utf8'));
+  assert.equal(state.exhausted.filter(e => e.provider === 'codex' && e.account === 'acct3').length, 1);
   // An entry from before resetsAt was stored reads its reset from the message.
   const legacy = mkdtempSync(join(tmpdir(), 'orch-prov-'));
   writeFileSync(join(legacy, 'provider-state.json'), JSON.stringify({ v: 1, exhausted: [
     { provider: 'codex', account: 'a', scope: 's', at: new Date(t0).toISOString(), message: 'try again at 2:31 PM.' },
-    { provider: 'codex', account: 'a', scope: 'held', at: new Date(t0).toISOString(), message: 'usage limit' },
   ] }));
   assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 's' }, legacy, t0 + 60 * 60000));
   assert.equal(exhaustedFor({ provider: 'codex', account: 'a', scope: 's' }, legacy, t0 + 104 * 60000), null);
-  assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'held' }, legacy, t0 + 48 * 3600000), 'legacy entries retain their prior behavior');
   const five = mkdtempSync(join(tmpdir(), 'orch-prov-'));
   markExhausted({ provider: 'codex', account: 'a', scope: 'five', message: 'usage limit', now: t0 }, five);
   assert.ok(exhaustedFor({ provider: 'codex', account: 'a', scope: 'five' }, five, t0 + 4 * 3600000));
@@ -337,6 +339,23 @@ test('reset times are read from the provider message', async () => {
   assert.equal(new Date(parseResetTime('try again at 11:00 AM', noon)).getDate(), 15, 'a clock time already past means tomorrow');
   assert.equal(parseResetTime('try again in 3 days 4 hours.', noon), noon + 3 * 86400000 + 4 * 3600000);
   assert.equal(parseResetTime('usage limit reached', noon), null, 'no time stated, no expiry');
+  // A dated reset is read to the right day, not misread as a clock time today.
+  const today = new Date(2026, 8, 18, 14, 41).getTime();
+  const dated = new Date(parseResetTime('... try again at Sep 19th, 2026 11:50 AM.', today));
+  assert.equal(dated.getFullYear(), 2026);
+  assert.equal(dated.getMonth(), 8);
+  assert.equal(dated.getDate(), 19);
+  assert.equal(dated.getHours(), 11);
+  assert.equal(dated.getMinutes(), 50);
+  const datedSwapped = new Date(parseResetTime('try again at 11:50 AM on Sep 19th, 2026.', today));
+  assert.equal(datedSwapped.getDate(), 19);
+  assert.equal(datedSwapped.getHours(), 11);
+  assert.equal(datedSwapped.getMinutes(), 50);
+  // A bare clock time with no date is still read as today (or tomorrow if past).
+  const sameDay = new Date(parseResetTime('try again at 7:33 PM', today));
+  assert.equal(sameDay.getDate(), 18);
+  assert.equal(sameDay.getHours(), 19);
+  assert.equal(sameDay.getMinutes(), 33);
 });
 
 test('capped returns are partial, and the recovery note is said once', () => {
@@ -415,4 +434,15 @@ test('replay: the 274-call general-purpose helper is measured whole and would be
   const nestedOpts = { policy, installed: 7, dispatches: [{ agent: 'general-purpose', toolUseId: 'toolu_gp' }], files: helperFiles(leadPath) };
   assert.match(workflowDecision({ agent_id: 'gp1' }, { subagent_type: 'general-purpose', prompt: 'sub-task' }, nestedOpts).reason, /only orch-coordinator/);
   assert.equal(measure(readFileSync(leadPath, 'utf8')).dispatches.length, 1);
+});
+
+test('freshCodexOk: a recorded ok is fresh until CODEX_OK_FRESH_MS passes, and a recorded failure is never fresh', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-codex-ok-'));
+  assert.equal(freshCodexOk(dir), null, 'never probed');
+  const t0 = Date.now();
+  recordCodexOk(true, dir, t0);
+  assert.ok(freshCodexOk(dir, t0 + 1000), 'just recorded, still fresh');
+  assert.equal(freshCodexOk(dir, t0 + CODEX_OK_FRESH_MS + 1), null, 'stale once the window passes');
+  recordCodexOk(false, dir, t0);
+  assert.equal(freshCodexOk(dir, t0 + 1000), null, 'a recorded sign-out is never reported as ok');
 });

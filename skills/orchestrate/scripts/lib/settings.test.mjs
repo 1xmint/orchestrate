@@ -73,7 +73,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
   const report = applyRegistrations(s, entries);
 
   assert.equal(report.removed, 0);
-  assert.equal(report.added, 8);
+  assert.equal(report.added, 9);
   const gate = s.hooks.PreToolUse.find(g => JSON.stringify(g).includes('memory-write-gate.mjs'));
   assert.deepEqual(gate, REAL_SHAPE.hooks.PreToolUse[0], 'the memory-write-gate entry is untouched');
   assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
@@ -91,6 +91,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
   assert.ok(stops.includes(commandFor(join(SCRIPTS, 'persist-check.mjs'))), 'the router flag brings the persist loop that acts on its arming');
   assert.ok(stops.includes(commandFor(join(SCRIPTS, 'turn-check.mjs'))), 'the Pickup check is pinned by a script install too, not just SKILL.md\'s bare `node`');
   assert.equal(s.hooks.PreCompact[0].hooks[0].command, commandFor(join(SCRIPTS, 'precompact-check.mjs')));
+  assert.equal(s.hooks.PostCompact[0].hooks[0].command, commandFor(join(SCRIPTS, 'postcompact-check.mjs')), 'the compaction save is pinned by a script install too');
 });
 
 test('a second run replaces our entries instead of stacking them', () => {
@@ -99,13 +100,14 @@ test('a second run replaces our entries instead of stacking them', () => {
   const once = clone(s);
   const report = applyRegistrations(s, registrations(SCRIPTS, { router: true, guard: true }));
 
-  assert.equal(report.removed, 8, 'the stale copies are found by basename and dropped');
+  assert.equal(report.removed, 9, 'the stale copies are found by basename and dropped');
   assert.equal(s.hooks.PostToolUse.length, 1, 'the context sampler, once');
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.equal(s.hooks.SessionStart.length, 1);
   assert.equal(s.hooks.SubagentStop.length, 1);
   assert.equal(s.hooks.Stop.length, 2, 'the Pickup check and the persist loop');
   assert.equal(s.hooks.PreCompact.length, 1);
+  assert.equal(s.hooks.PostCompact.length, 1);
   assert.equal(s.hooks.PreToolUse.length, 2, 'the user hook plus one of ours');
   assert.deepEqual(new Set(Object.keys(s.hooks)), new Set(Object.keys(once.hooks)));
 });

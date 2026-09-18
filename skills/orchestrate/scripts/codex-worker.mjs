@@ -39,8 +39,10 @@ import { loadPolicy } from './lib/policy.mjs';
 import {
   packetFromMarkdown, newReport, registerWorker, unregisterWorker, runningExternal, runningNative,
   helperFiles, lockHolder, concurrencyDecision, markExhausted, exhaustedFor, accountKey, WORKERS_DIR,
+  recordCodexOk,
 } from './lib/workers.mjs';
 import { loadSession } from './lib/tier.mjs';
+import { addSuggestion, SUGGESTIONS_PATH } from './suggest.mjs';
 import { build as buildMap, status as mapStatus } from './map.mjs';
 import { readQuota, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 
@@ -95,17 +97,42 @@ export function configuredModel(env = process.env) {
   return null;
 }
 
+// A blocking wait with no async: `login status` is run with spawnSync (the
+// call sites are sync too, including the CLI `status` command), so a retry
+// on a stalled first attempt waits the same way. Tests inject a no-op.
+function blockingWait(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 // Signed in, and which login, without reading any credential: Codex answers
 // `login status` itself. The account key is a hash of where the login lives and
 // how it signs in, which separates two Codex homes on one machine.
-export function loginStatus(bin, env = process.env) {
-  if (!bin) return { ok: false, text: 'Codex CLI not found', account: null };
-  const c = command(bin, ['login', 'status']);
-  const r = spawnSync(c.file, c.args, { encoding: 'utf8', env, timeout: 20000, windowsHide: true });
+//
+// `login status` can come back with exit code null (killed by our own
+// timeout, or the process never really started) instead of ever answering.
+// That is not "signed out" — it is Codex not answering — so one retry after a
+// short wait is given before giving up. A second null still is not a signed-
+// out result: it means the login state is unknown, and the caller decides
+// what to do (codex-worker.mjs proceeds to `codex exec`, which fails honestly
+// if the account truly is signed out).
+export function loginStatus(bin, env = process.env, wait = blockingWait, timeoutMs = 20000) {
+  if (!bin) return { ok: false, unknown: false, text: 'Codex CLI not found', account: null };
+  const attempt = () => {
+    const c = command(bin, ['login', 'status']);
+    return spawnSync(c.file, c.args, { encoding: 'utf8', env, timeout: timeoutMs, windowsHide: true });
+  };
+  let r = attempt();
+  if (r.status === null || r.error) {
+    wait(3000);
+    r = attempt();
+  }
+  if (r.status === null || r.error) {
+    return { ok: false, unknown: true, text: 'Codex login status did not answer (tried twice)', account: null };
+  }
   const text = `${r.stdout || ''}${r.stderr || ''}`.trim();
   const ok = r.status === 0 && /logged in/i.test(text) && !/not logged in/i.test(text);
   const how = (/using (\w[\w ]*)/i.exec(text) || [])[1] || 'unknown';
-  return { ok, text: text.split('\n')[0] || `exit ${r.status}`, account: ok ? accountKey(`${codexHome(env)}|${how.toLowerCase()}`) : null };
+  return { ok, unknown: false, text: text.split('\n')[0] || `exit ${r.status}`, account: ok ? accountKey(`${codexHome(env)}|${how.toLowerCase()}`) : null };
 }
 
 // ---- classifying a stop ---------------------------------------------------------
@@ -168,6 +195,7 @@ export function parseFinal(text) {
     checks: Array.isArray(o.checks) ? o.checks.filter(c => c && typeof c === 'object').map(c => ({ command: String(c.command || ''), result: ['pass', 'fail', 'not-run'].includes(c.result) ? c.result : 'not-run', evidence: String(c.evidence || '') })) : [],
     remaining: Array.isArray(o.remaining) ? o.remaining.map(String) : [],
     notes: typeof o.notes === 'string' ? o.notes : '',
+    suggestion: typeof o.suggestion === 'string' ? o.suggestion : null,
   };
 }
 
@@ -383,14 +411,20 @@ export async function runWorker(opts, deps = {}) {
         const body = final ? JSON.stringify(final, null, 2) : `${report.status}: ${report.why || ''}`;
         writeFileSync(file, `<!-- ${report.endedAt} · codex · ${report.model || 'model unknown'} · ${report.effort || 'effort unknown'} -->\n\n${body}\n`);
         appendFileSync(join(returns, 'returns.jsonl'), JSON.stringify({ at: report.endedAt, session, run: packet.run || null, task: report.taskId, agent: 'codex', agentId: `codex-${report.taskId}`, runtime: 'codex', model: report.model || null, effort: report.effort || null, status: report.status, evidence: report.evidence || null, file, dollars: null }) + '\n');
+        if (final && final.suggestion) addSuggestion(final.suggestion, { source: report.taskId || null, path: deps.suggestionsPath || SUGGESTIONS_PATH });
       }
     } catch {}
     return { report, code };
   };
 
-  // Model and effort are per run; the policy only fills in what the dispatch left out.
+  // Model and effort are per run; the policy only fills in what the dispatch left
+  // out. Resolved up front, before any early return, so every report.json names
+  // both even when the run stops before ever reaching `codex exec`.
   if (opts.effort && !CODEX_EFFORTS.includes(opts.effort)) return finish({ status: 'blocked', why: `--effort must be one of ${CODEX_EFFORTS.join(', ')}`, evidence: { edited: false } }, EXIT.usage);
   const model = opts.model || policy.codex.model || null;
+  const effort = opts.effort || (hard || role === 'review' ? policy.codex.effortHard : policy.codex.effortImplement);
+  report.model = model || configuredModel(env);
+  report.effort = effort;
   if (model === ASTRA && !opts.approved && !/^\s*APPROVED BY USER:\s*astra\b/im.test(packetText)) {
     return finish({ status: 'blocked', why: `${ASTRA} needs the user's yes for this task: pass --approved or put "APPROVED BY USER: astra" in the packet`, evidence: { edited: false } }, EXIT.usage);
   }
@@ -399,8 +433,12 @@ export async function runWorker(opts, deps = {}) {
   const bin = deps.bin !== undefined ? deps.bin : findCodex(env);
   if (!bin) return finish({ status: 'unavailable', why: 'the Codex CLI was not found (set ORCH_CODEX_BIN, or install Codex)', evidence: { edited: false } }, EXIT.fallback);
 
-  const login = loginStatus(bin, env);
-  if (!login.ok) return finish({ status: 'auth-failed', why: `Codex is not signed in: ${login.text}`, evidence: { edited: false } }, EXIT.fallback);
+  const login = loginStatus(bin, env, deps.wait, deps.loginTimeoutMs);
+  // A definitive "not signed in" stops here. An unknown answer (both probes
+  // came back with no exit code) is not treated as signed out: exec is tried
+  // and fails honestly on its own if the account really is signed out.
+  recordCodexOk(login.ok, workersDir);
+  if (!login.ok && !login.unknown) return finish({ status: 'auth-failed', why: `Codex is not signed in: ${login.text}`, evidence: { edited: false } }, EXIT.fallback);
   report.account = login.account;
   const exhausted = exhaustedFor({ provider: 'codex', account: login.account, scope }, workersDir);
   if (exhausted) return finish({ status: 'quota-exhausted', why: `Codex hit its usage limit earlier in this ${scope.split(':')[0]} (${exhausted.at}); not trying the account again${exhausted.resetsAt ? ` before ${exhausted.resetsAt}` : ''}`, evidence: { edited: false, skipped: true, resetsAt: exhausted.resetsAt || null } }, EXIT.fallback);
@@ -428,7 +466,6 @@ export async function runWorker(opts, deps = {}) {
   if (holder) return finish({ status: 'blocked', why: `another worker (${holder.task}, pid ${holder.pid}) is running in ${wt.path}`, evidence: { edited: false } }, EXIT.followUp);
 
   const progressPath = role === 'review' ? null : join(checkpoint, 'progress.md');
-  const effort = opts.effort || (hard || role === 'review' ? policy.codex.effortHard : policy.codex.effortImplement);
   const lastMessagePath = join(checkpoint, 'last-message.json');
   const args = [
     'exec', '--json',
@@ -442,8 +479,6 @@ export async function runWorker(opts, deps = {}) {
     ...(progressPath ? ['--add-dir', checkpoint] : []),
     '-',
   ];
-  report.model = model || configuredModel(env);
-  report.effort = effort;
 
   const eventsPath = join(checkpoint, 'events.jsonl');
   const stderrPath = join(checkpoint, 'stderr.log');
@@ -496,9 +531,10 @@ export async function runWorker(opts, deps = {}) {
 
 // ---- status ----------------------------------------------------------------------
 
-export function status({ env = process.env, workersDir = WORKERS_DIR } = {}) {
+export function status({ env = process.env, workersDir = WORKERS_DIR, wait } = {}) {
   const bin = findCodex(env);
-  const login = bin ? loginStatus(bin, env) : { ok: false, text: 'Codex CLI not found', account: null };
+  const login = bin ? loginStatus(bin, env, wait) : { ok: false, unknown: false, text: 'Codex CLI not found', account: null };
+  if (bin) recordCodexOk(login.ok, workersDir);
   let exhausted = [];
   try { exhausted = (JSON.parse(readFileSync(join(workersDir, 'provider-state.json'), 'utf8')).exhausted || []).slice(-10).map(e => ({ ...e, active: !!exhaustedFor(e, workersDir) })); } catch {}
   return { bin, login: { ok: login.ok, text: login.text }, model: loadPolicy().codex.model || configuredModel(env), running: runningExternal(workersDir), exhausted, policy: loadPolicy().codex };

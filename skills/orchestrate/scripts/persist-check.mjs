@@ -112,7 +112,7 @@ export function scanTurn(tail) {
 // next record rather than writing it. `goal` is already-resolved text (the
 // bound run's Goal line, or '' when there is none) — this function does not
 // read files.
-export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', quota = null }) {
+export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', quota = null, workCalls = null }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -136,6 +136,7 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   const parts = [];
   if (g) parts.push(`"${g}"`);
   parts.push(`step ${steps} of ${PERSIST_STEP_CAP}`);
+  if (Number.isFinite(workCalls) && workCalls >= 100) parts.push(`${workCalls} work calls since your last dispatch`);
   if (scan.lastChange) parts.push(`last edited ${scan.lastChange}`);
   let why = `orchestrate: ${parts.join(' · ')}`;
   if (contextNotice) why += ` ${contextNotice}`;
@@ -186,7 +187,8 @@ export function check(input) {
   const tail = input.transcript_path && size > from ? readTail(input.transcript_path, Math.min(size - from, PERSIST_SCAN_CAP)) : '';
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: runGoalLine(bound) || p.goal || '', quota: readQuota() });
+  const workCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : null;
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: runGoalLine(bound) || p.goal || '', quota: readQuota(), workCalls });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };

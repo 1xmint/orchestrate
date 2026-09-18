@@ -25,7 +25,7 @@ test('installing twice registers each hook once and keeps the user\'s own', () =
   const first = readFileSync(join(home, '.claude', 'settings.json'), 'utf8');
   const b = once();
   assert.equal(b.status, 0, b.stderr);
-  assert.match(b.stdout, /8 stale orchestrate entries removed, 8 registered/);
+  assert.match(b.stdout, /9 stale orchestrate entries removed, 9 registered/);
   const s = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(s, JSON.parse(first), 'the second install changes nothing');
 

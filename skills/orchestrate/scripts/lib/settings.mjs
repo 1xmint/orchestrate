@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 
-export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];
+export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'postcompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];
 
 export function toPosix(p) {
   return String(p).replace(/\\/g, '/');
@@ -119,6 +119,10 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
     // flag nobody would think to pass.
     out.push({ event: 'Stop', matcher: null, command: commandFor(join(scriptsDir, 'turn-check.mjs')), timeout: 10 });
     out.push({ event: 'PreCompact', matcher: null, command: commandFor(join(scriptsDir, 'precompact-check.mjs')), timeout: 10 });
+    // Unlike precompact-check.mjs, this one is safe to register plugin-wide
+    // (hooks/hooks.json does the same): it only ever acts inside a helper
+    // whose session is already bound to a run, and does nothing otherwise.
+    out.push({ event: 'PostCompact', matcher: null, command: commandFor(join(scriptsDir, 'postcompact-check.mjs')), timeout: 10 });
   }
   return out;
 }

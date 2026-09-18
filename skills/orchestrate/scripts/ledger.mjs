@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
 import { roleMaxTurns } from './lib/workers.mjs';
+import { addSuggestion } from './suggest.mjs';
 export { roleMaxTurns };
 
 // Lenient on purpose, and it stays lenient: a return that got the shape almost
@@ -46,6 +47,9 @@ export function parseReturn(text) {
     lines,
     branch: field(/^\s*BRANCH:\s*(.+)$/im),
     changed: field(/^\s*CHANGED:\s*(.+)$/im),
+    // One line, optional: what the plugin could have done to make the task
+    // easier. Read only by suggest.mjs, on request — never injected anywhere.
+    suggest: field(/^\s*SUGGEST:\s*(.+)$/im),
     // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what older
     // reviewer instructions produced, and is still read.
     verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
@@ -154,6 +158,27 @@ export function readCosts(path = COSTS_PATH) {
 export function cappedReturn(turns, cap, parsedStatus) {
   const capped = cap != null && Number(turns) >= cap;
   return { capped, status: capped ? 'PARTIAL' : (parsedStatus || null), claimed: parsedStatus || null };
+}
+
+// What this helper's PostCompact hook (postcompact-check.mjs) already left
+// behind in this run's returns.jsonl, as one fact for the lead: how many
+// times it compacted mid-task and where the last kept summary is — nothing
+// when it never compacted. Read straight from the index rather than a
+// separate counter, same reasoning as postcompact-check.mjs's own count.
+export function compactFact(dir, agentId) {
+  if (!agentId) return null;
+  try {
+    const idx = join(dir, INDEX_NAME);
+    if (!existsSync(idx)) return null;
+    let n = 0, last = null;
+    for (const line of readFileSync(idx, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      if (o && o.kind === 'compact' && o.agentId === agentId) { n++; last = o.file; }
+    }
+    if (!n) return null;
+    return `compacted ${n}× mid-task; kept: ${last}`;
+  } catch { return null; }
 }
 
 export function formatUsage(u) {
@@ -286,6 +311,7 @@ function main() {
   if (alreadyHandled(input, agent, text)) return;
 
   const r = parseReturn(text);
+  if (r.suggest) { try { addSuggestion(r.suggest, { source: r.task || r.run || null }); } catch {} }
   const usage = sumUsage(input.agent_transcript_path);
   const cap = cappedReturn(usage.turns, roleMaxTurns(agentType), r.status);
   r.status = silent && !cap.capped ? 'PARTIAL' : cap.status;
@@ -303,7 +329,9 @@ function main() {
   try {
     mkdirSync(dir, { recursive: true });
     const capNote = cap.capped ? ` · stopped at its ${usage.turns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
-    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote} -->\n\n`;
+    const compact = compactFact(dir, agentId);
+    const compactNote = compact ? ` · ${compact}` : '';
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${compactNote} -->\n\n`;
     writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 

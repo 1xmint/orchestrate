@@ -18,13 +18,13 @@
 // Reads the hook payload on stdin, prints one JSON object or nothing, always
 // exits 0.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, AGENT_NAMES } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { helperFiles, nativeAgent, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision } from './lib/workers.mjs';
+import { helperFiles, nativeAgent, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
 import { priceTag, estimateDollars, family, normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { readCosts } from './ledger.mjs';
@@ -78,17 +78,115 @@ export const PACKET_WARN_CHARS = 8000;
 
 // What identifies "the same task" across a retry: the packet's TASK id when it
 // is an id, else its first real line.
+// A packet header line, not the task's own text: skipped when falling back to
+// "the first real line", or two packets sharing a header and lacking a
+// numeric TASK id would collapse onto the same key.
+const HEADER_LINE = /^\s*(APPROVED BY USER|RISK|BUILDS ON)\s*:/i;
+
 export function taskKey(prompt) {
   const p = String(prompt || '');
   const id = (/^\s*TASK:\s*(\S+)/m.exec(p) || [])[1];
   if (id && /\d/.test(id)) return id;
-  const first = p.split('\n').map(l => l.trim()).find(Boolean) || '';
+  const first = p.split('\n').map(l => l.trim()).find(l => l && !HEADER_LINE.test(l)) || '';
   return first.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
+}
+
+// The packet's own numeric TASK id, or null — what a grant binds to. Distinct
+// from taskKey: a grant needs an actual id, never a first-line fallback.
+export function numericTaskId(prompt) {
+  const id = (/^\s*TASK:\s*(\S+)/m.exec(String(prompt || '')) || [])[1];
+  return id && /\d/.test(id) ? id : null;
 }
 
 const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
 
-export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null } = {}) {
+// Whether a `userModel` record the router wrote (the user naming a family in
+// their own prompt) unlocks this dispatch. A grant is spent on the first
+// numeric TASK id that uses it, and refuses every other id by name. Pure and
+// testable: the caller reads the bound id (from the atomic claim file below,
+// never from a read-modify-write on the session record) and passes it in.
+//   null              no grant applies (no record, wrong family, no task id)
+//   { allow, bind }   allowed; `bind` is the id to claim when not bound yet
+//   { deny, reason }  a grant exists but is already spent on another task
+export function grantCheck(userModel, f, prompt, boundId = null) {
+  if (!userModel || userModel.family !== f) return null;
+  const id = numericTaskId(prompt);
+  if (!id) return null;
+  if (!boundId) return { allow: true, bind: id };
+  if (boundId === id) return { allow: true, bind: null };
+  return { deny: true, reason: `Josh named ${f} for task ${boundId}; this is task ${id} — ask him or start on Sonnet.` };
+}
+
+// Where a grant's claim lives: one file per session+moment-the-user-named-it,
+// created exactly once. `fs.openSync(path, 'wx')` fails if the file already
+// exists, so two dispatches racing to spend the same grant can both try to
+// create it but only one wins; the loser reads back whatever the winner
+// wrote. That is what keeps the binding safe from the read-modify-write races
+// `seenBefore`'s comment above documents for the session file, and from a
+// second task id stealing a grant a first dispatch already claimed.
+export const GRANTS_DIR = join(DIR, 'grants');
+
+export function grantPath(session, at) {
+  return join(GRANTS_DIR, `${sanitizeId(session)}-${sanitizeId(String(at))}`);
+}
+
+// The id currently bound to this session's grant, or null if nothing has
+// claimed it yet. `null` must mean "no file" and nothing else: the window
+// between a winner's `openSync(..., 'wx')` and its `writeSync` leaves the
+// claim file existing but empty for an instant, and a reader that lands in
+// that window must not read that as unclaimed — the file existing at all
+// means someone has already started (or finished) a claim. So a file that
+// exists but is empty reads back as the sentinel below, which never equals a
+// real task id and never satisfies `!boundId`, instead of `null`.
+const GRANT_PENDING = '(pending)';
+
+export function readGrantId(session, at) {
+  let raw;
+  try { raw = readFileSync(grantPath(session, at), 'utf8'); } catch { return null; }
+  const id = raw.trim();
+  return id || GRANT_PENDING;
+}
+
+// Claim the grant for `id`, atomically. Returns the id now bound: `id` itself
+// when this call is the one that created the claim file, or whatever id a
+// concurrent winner already wrote there.
+export function claimGrantId(session, at, id) {
+  const path = grantPath(session, at);
+  try {
+    mkdirSync(GRANTS_DIR, { recursive: true });
+    const fd = openSync(path, 'wx');
+    try { writeSync(fd, String(id)); } finally { closeSync(fd); }
+    return String(id);
+  } catch {
+    return readGrantId(session, at);
+  }
+}
+
+// The post-claim check main() runs once every other gate has passed: actually
+// claim the grant (via `claim`, injectable so a test can force the race
+// without a second process) and refuse the dispatch unless it is the one that
+// won. Two outcomes both deny: a different task id won the race (name both,
+// same message shape as grantCheck's), or the claim came back empty — the
+// file existed but was still being written, or the claim itself failed — in
+// which case there is nothing to name, so the dispatch is told to retry on
+// Sonnet instead of guessing who won.
+export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
+  const won = claim(session, grantToClaim.at, grantToClaim.grantBind);
+  if (won === grantToClaim.grantBind) return null;
+  if (won && won !== GRANT_PENDING) {
+    return { prefix: 'model', reason: `Josh named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask him or start on Sonnet.` };
+  }
+  return { prefix: 'model', reason: `the ${grantToClaim.family} grant could not be claimed; resend with model: "sonnet".` };
+}
+
+// Three shapes come back, and a caller that treats any non-null result as a
+// denial is wrong now that a grant exists:
+//   null                        allowed, nothing to record
+//   { prefix, reason }          denied
+//   { grantBind, at, family }   allowed, and the caller should claim the
+//                               grant for `grantBind` (via claimGrantId)
+//                               once every later gate (budget) also passes
+export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null, userModel = null } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const model = String(ti.model || '');
   const f = family(model);
@@ -118,7 +216,20 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
   if (EXECUTORS.has(role) && f && rank(model) < rank('sonnet')) {
     const key = taskKey(prompt);
     const tried = dispatches.some(d => d && normalizeRole(d.agent) === role && d.key === key && rank(d.model === 'inherit' ? 'sonnet' : d.model) >= rank('sonnet'));
-    if (!tried) return { prefix: 'model', reason: `${role} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead.` };
+    if (!tried) {
+      const g = grantCheck(userModel, f, prompt, userModel && userModel.taskId);
+      if (g && g.allow) {
+        // The grant is the reason this is allowed. Only here does a bind
+        // belong: not for a judgment role (never reaches this branch), and
+        // not for an executor a prior Sonnet attempt already cleared (the
+        // `tried` branch above returns before this runs). `g.bind` is null
+        // once the grant is already bound to this same id, so there is
+        // nothing new to claim.
+        return g.bind ? { grantBind: g.bind, at: userModel.at, family: f } : null;
+      }
+      if (g && g.deny) return { prefix: 'model', reason: g.reason };
+      return { prefix: 'model', reason: `${role} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id.` };
+    }
   }
   return null;
 }
@@ -269,6 +380,23 @@ export function progressFact(role, prompt, planMode) {
   return 'no PROGRESS line: a capped return will have nothing to resume from';
 }
 
+// A fact, not an order, said only on an orch-implementer dispatch: Codex was
+// last probed inside CODEX_OK_FRESH_MS and answered signed in, and the account
+// is not sitting out a usage limit right now. The guard never starts Codex to
+// find this out — it only reads what codex-worker already recorded (see
+// recordCodexOk in lib/workers.mjs). Stale, never probed, signed out, or
+// exhausted all produce the same silence: no line.
+export function codexFact(role, dir = WORKERS_DIR, now = Date.now()) {
+  if (normalizeRole(role) !== 'orch-implementer') return '';
+  const fresh = freshCodexOk(dir, now);
+  if (!fresh) return '';
+  const state = readJson(providerStatePath(dir));
+  const list = state && Array.isArray(state.exhausted) ? state.exhausted : [];
+  if (list.some(e => e && e.provider === 'codex' && exhaustedFor(e, dir, now))) return '';
+  const hhmm = new Date(fresh.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `Codex ok at ${hhmm}; Terra medium fits a bounded change with tests`;
+}
+
 // The run this packet belongs to: the `RUN:` line a coordinated packet carries,
 // or the run this session is bound to. The ledger resolves a return from this,
 // rather than from whichever run on the machine happens to be newest.
@@ -380,15 +508,24 @@ function main() {
     emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${m.prefix}: ${m.reason}` } });
     return;
   }
+  // A grant the caller should claim once every later gate also passes — never
+  // set from a judgment-role dispatch or an executor a prior Sonnet attempt
+  // already cleared, since modelDecision only returns this shape from the
+  // one branch where the grant is the actual reason a dispatch is allowed.
+  let grantToClaim = null;
   try {
     const state = loadSession(input.session_id) || {};
+    const userModel = state.userModel || null;
+    const boundId = userModel ? readGrantId(input.session_id, userModel.at) : null;
     m = modelDecision(ti, {
       tier: detectTier().tier,
       dispatches: Array.isArray(state.dispatches) ? state.dispatches : [],
       leadContext: normalizeRole(ti.subagent_type) === 'fork' ? lastContextTokens(input.transcript_path) : null,
       quota: readQuota(),
+      userModel: userModel ? { ...userModel, taskId: boundId } : null,
     });
-  } catch { m = null; }
+    if (m && m.grantBind) { grantToClaim = m; m = null; }
+  } catch { m = null; grantToClaim = null; }
   if (m) {
     if (!repeat) recordDenial(input, ti, `${m.prefix}: ${m.reason.split('.')[0]}`);
     emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${m.prefix}: ${m.reason}` } });
@@ -406,6 +543,22 @@ function main() {
     return;
   }
 
+  // Bind only now, after every gate that could still refuse this dispatch has
+  // passed — a budget refusal must not burn the grant. The claim is atomic
+  // (see claimGrantId): a second dispatch racing this one for the same grant
+  // either creates the file first, or reads back the id this one just wrote.
+  // claimOrDeny checks who actually won: the loser of that race (or a reader
+  // that caught an empty claim file mid-write) must be denied here, the same
+  // way every other model denial is — not silently let through.
+  if (grantToClaim) {
+    const gd = claimOrDeny(input.session_id, grantToClaim);
+    if (gd) {
+      if (!repeat) recordDenial(input, ti, `${gd.prefix}: ${gd.reason.split('.')[0]}`);
+      emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate ${gd.prefix}: ${gd.reason}` } });
+      return;
+    }
+  }
+
   // Past here it is one real dispatch, and the side effects run once for it.
   // This hook can be registered twice (skill frontmatter plus settings.json).
   if (repeat) return;
@@ -415,6 +568,8 @@ function main() {
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = progressFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
+  const cf = codexFact(ti.subagent_type);
+  if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
 

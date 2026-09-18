@@ -183,7 +183,9 @@ never by resuming the failed agent — when:
 1. one attempt failed on a complete packet (not a context gap);
 2. two competent results disagree;
 3. the agent reports a conceptual block rather than a missing fact;
-4. the user asks.
+4. the user names a model in their own message — for the task they named it
+   for, not for the run: it grants the first task id that uses it, and a
+   different task id is refused and starts back on the ladder.
 
 A reviewer disagreeing is not on that list. A FAIL with a concrete finding is a
 fix packet on the same model; a FAIL you cannot act on is a question for the
