@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AGENT_NAMES } from './lib/tier.mjs';
+import { AGENT_NAMES, readyTasks } from './lib/tier.mjs';
 
 const SKILL = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const AGENTS = join(SKILL, 'assets', 'agents');
@@ -185,12 +185,12 @@ test('assets/packet.md carries every field a dispatch needs', () => {
   // field that does not apply is cost with no benefit.
   const always = ['TASK:', 'OBJECTIVE', 'CONTEXT', 'SCOPE', 'DONE WHEN'];
   for (const f of always) assert.ok(packet.includes(f), `packet.md has ${f}`);
-  const whenTheyApply = ['RUN:', 'BLOCKS ON:', 'WHERE:', 'OWNS:', 'GATE:', 'VERIFY LIVE:',
+  const whenTheyApply = ['RUN:', 'BLOCKS ON:', 'BUILDS ON:', 'WHERE:', 'OWNS:', 'GATE:', 'VERIFY LIVE:',
     'PRIOR ATTEMPTS:', 'PATTERNS:', 'SKILLS:', 'STOP AND REPORT:'];
   for (const f of whenTheyApply) assert.ok(packet.includes(f), `packet.md still offers ${f}`);
   assert.match(packet, /Add a field only when the answer is not "none"/);
   // The return schema, and nothing that polices its shape.
-  for (const f of ['STATUS:', 'CHANGED:', 'EVIDENCE:', 'NOT VERIFIED:']) {
+  for (const f of ['STATUS:', 'CHANGED:', 'EVIDENCE:', 'NOT VERIFIED:', 'SUGGEST:']) {
     assert.ok(packet.includes(f), `packet.md has ${f}`);
   }
   assert.doesNotMatch(packet, /RESTATED/, 'a restatement is not a field a return is judged on');
@@ -201,6 +201,21 @@ test('assets/packet.md carries every field a dispatch needs', () => {
   assert.ok(packet.includes('ROLE: reviewer'), 'the reviewer packet is here too');
   assert.ok(packet.includes('VERDICT: PASS|FAIL'), 'with the one schema');
   assert.ok(packet.length < 6500, `packet.md is ${packet.length} bytes; it exists to be small`);
+});
+
+// turn-check.mjs's idle nudge reads `run.ready`, computed by readyTasks() from
+// the run's own task table. This belongs here rather than hooks.test.mjs,
+// which covers the hook's Stop-event plumbing, not the table parsing it reads.
+test('readyTasks reads a short id (0005) in `blocks on` the same as the full 9-18-0005', () => {
+  const header = '| id | phase | blocks on | owns | role · model | task | acceptance evidence | attempts | result |';
+  const rows = [
+    '| 9-18-0005 | ✅ done | — | | | | | | |',
+    '| 9-18-0006 | 📋 planned | 0005 | | | | | | |',
+    '| 9-18-0007 | 📋 planned | 9-18-0005 | | | | | | |',
+  ];
+  const ready = readyTasks(rows, header);
+  assert.ok(ready.includes('9-18-0006'), 'short id 0005 resolves to the landed 9-18-0005');
+  assert.ok(ready.includes('9-18-0007'), 'full id 9-18-0005 still works');
 });
 
 // The Fable cap was removed because a count answers the wrong question and
