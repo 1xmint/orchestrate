@@ -158,7 +158,7 @@ test('review runs read-only in place at high effort', async () => {
   assert.equal(report.worktree, r);
 });
 
-test('quota exhausted before any edit: marked for this run, never probed again, handed to Claude', async () => {
+test('quota exhausted before any edit: marked for the account, never probed again in a later run, handed to Claude', async () => {
   const r = repo();
   const { deps, calls } = setup('quota-before');
   const first = await run(r, deps);
@@ -180,7 +180,8 @@ test('quota exhausted before any edit: marked for this run, never probed again, 
   assert.equal(calls().filter(c => c.argv[0] === 'exec').length, execsBefore, 'the exhausted account is not tried again in this run');
 
   const otherRun = await runWorker({ packetText: PACKET.replace('9-14-0001', '9-14-0003'), repo: r, run: join(deps.workersDir, '..', 'run-other') }, { ...deps, env: { ...deps.env, FAKE_CODEX_MODE: 'success' } });
-  assert.equal(otherRun.report.status, 'done', 'a different run is not blocked by it');
+  assert.equal(otherRun.report.status, 'quota-exhausted', 'a later run for the same account is not re-probed');
+  assert.equal(calls().filter(c => c.argv[0] === 'exec').length, execsBefore, 'still not tried again, in a different run');
 });
 
 test('quota exhausted after edits: the diff is preserved and only the unfinished part goes to Claude', async () => {
@@ -214,6 +215,7 @@ test('login, auth, throttling and malformed output are told apart', async () => 
   const out = await run(r, setup('logged-out').deps);
   assert.equal(out.report.status, 'auth-failed');
   assert.equal(out.code, EXIT.fallback);
+  assert.ok(out.report.effort, 'effort is named even when the run stops before exec');
 
   const auth = await run(r, setup('auth').deps, { task: 'a1' });
   assert.equal(auth.report.status, 'auth-failed');
@@ -231,6 +233,38 @@ test('login, auth, throttling and malformed output are told apart', async () => 
   const failing = await run(r, setup('checks-fail').deps, { task: 'c1' });
   assert.equal(failing.report.status, 'checks-failed', 'a failing test is not a provider failure');
   assert.equal(failing.report.fallback, undefined);
+});
+
+test('a report always names model and effort, even a report written before exec ever runs', async () => {
+  const r = repo();
+  const { home, deps } = setup('logged-out');
+  mkdirSync(join(home, 'codex'), { recursive: true });
+  writeFileSync(join(home, 'codex', 'config.toml'), 'model = "gpt-5-codex"\n');
+  const { report } = await run(r, deps);
+  assert.equal(report.status, 'auth-failed');
+  assert.equal(report.model, 'gpt-5-codex', 'the config.toml default fills in for a dispatch with no --model');
+  assert.equal(report.effort, 'medium', 'the policy default fills in for a dispatch with no --effort');
+});
+
+test('a login status that times out once is retried, not read as signed out', async () => {
+  const r = repo();
+  const { home, deps } = setup('login-retry-once');
+  deps.env.FAKE_LOGIN_COUNT_FILE = join(home, 'login-count');
+  deps.wait = () => {}; // no real sleep in a test
+  deps.loginTimeoutMs = 300;
+  const { report } = await run(r, deps);
+  assert.notEqual(report.status, 'auth-failed', 'the first null is retried, not treated as signed out');
+  assert.equal(report.status, 'done', 'the retry succeeded and the worker proceeded');
+});
+
+test('a login status that never answers is unknown, not signed out: the worker still tries exec', async () => {
+  const r = repo();
+  const { deps, calls } = setup('login-retry-fail');
+  deps.wait = () => {};
+  deps.loginTimeoutMs = 300;
+  const { report } = await run(r, deps);
+  assert.notEqual(report.status, 'auth-failed', 'an unknown login state is not reported as signed out');
+  assert.ok(calls().some(c => c.argv[0] === 'exec'), 'exec was tried; it fails honestly on its own if truly signed out');
 });
 
 test('timeout: the worker is stopped, it has exited, partial work kept, not called exhaustion', async () => {

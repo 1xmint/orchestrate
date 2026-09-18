@@ -16,11 +16,24 @@ const flag = name => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1]
 
 if (argv[0] === 'login' && argv[1] === 'status') {
   if (mode === 'logged-out') { process.stderr.write('Not logged in\n'); process.exit(1); }
-  process.stdout.write('Logged in using ChatGPT\n');
-  process.exit(0);
-}
-
-if (argv[0] !== 'exec') { process.stderr.write('unexpected command\n'); process.exit(64); }
+  // Simulate a `login status` that never answers: the parent's spawnSync
+  // timeout kills this process, which is read back as exit code null. The
+  // hang branches deliberately never call process.exit, so nothing below
+  // this block ever runs for them.
+  if (mode === 'login-retry-fail') { setInterval(() => {}, 1e9); }
+  else if (mode === 'login-retry-once') {
+    const cf = process.env.FAKE_LOGIN_COUNT_FILE;
+    let n = 0;
+    try { n = Number(readFileSync(cf, 'utf8')); } catch {}
+    writeFileSync(cf, String(n + 1));
+    if (n === 0) setInterval(() => {}, 1e9);
+    else { process.stdout.write('Logged in using ChatGPT\n'); process.exit(0); }
+  } else {
+    process.stdout.write('Logged in using ChatGPT\n');
+    process.exit(0);
+  }
+} else {
+  if (argv[0] !== 'exec') { process.stderr.write('unexpected command\n'); process.exit(64); }
 
 let prompt = '';
 try { prompt = readFileSync(0, 'utf8'); } catch {}
@@ -35,6 +48,7 @@ out({ type: 'thread.started', thread_id: 'th_fake' });
 out({ type: 'turn.started' });
 
 switch (mode) {
+  case 'login-retry-once':
   case 'success':
     edit();
     out({ type: 'item.completed', item: { type: 'agent_message', text: 'done' } });
@@ -81,4 +95,5 @@ switch (mode) {
     break;
   default:
     process.exit(0);
+}
 }

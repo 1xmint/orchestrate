@@ -24,7 +24,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, AGENT_NAMES } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { helperFiles, nativeAgent, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision } from './lib/workers.mjs';
+import { helperFiles, nativeAgent, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
 import { priceTag, estimateDollars, family, normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { readCosts } from './ledger.mjs';
@@ -380,6 +380,23 @@ export function progressFact(role, prompt, planMode) {
   return 'no PROGRESS line: a capped return will have nothing to resume from';
 }
 
+// A fact, not an order, said only on an orch-implementer dispatch: Codex was
+// last probed inside CODEX_OK_FRESH_MS and answered signed in, and the account
+// is not sitting out a usage limit right now. The guard never starts Codex to
+// find this out — it only reads what codex-worker already recorded (see
+// recordCodexOk in lib/workers.mjs). Stale, never probed, signed out, or
+// exhausted all produce the same silence: no line.
+export function codexFact(role, dir = WORKERS_DIR, now = Date.now()) {
+  if (normalizeRole(role) !== 'orch-implementer') return '';
+  const fresh = freshCodexOk(dir, now);
+  if (!fresh) return '';
+  const state = readJson(providerStatePath(dir));
+  const list = state && Array.isArray(state.exhausted) ? state.exhausted : [];
+  if (list.some(e => e && e.provider === 'codex' && exhaustedFor(e, dir, now))) return '';
+  const hhmm = new Date(fresh.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return `Codex ok at ${hhmm}; Terra medium fits a bounded change with tests`;
+}
+
 // The run this packet belongs to: the `RUN:` line a coordinated packet carries,
 // or the run this session is bound to. The ledger resolves a return from this,
 // rather than from whichever run on the machine happens to be newest.
@@ -551,6 +568,8 @@ function main() {
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = progressFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
+  const cf = codexFact(ti.subagent_type);
+  if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
 

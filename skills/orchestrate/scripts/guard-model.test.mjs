@@ -4,9 +4,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, AUTHOR_ROLES, claimOrDeny } from './guard-agent.mjs';
+import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, AUTHOR_ROLES, claimOrDeny, codexFact } from './guard-agent.mjs';
 import { normalizeRole, estimateDollars } from './lib/prices.mjs';
 import { snapshotFrom, readQuota } from './lib/quota.mjs';
+import { recordCodexOk, markExhausted, CODEX_OK_FRESH_MS } from './lib/workers.mjs';
 import { quotaPhrase, quotaBand } from './router.mjs';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -305,4 +306,43 @@ test('a quota snapshot is enforced only for the provider and account it names', 
   assert.equal(readQuota(now, p, 'org-a'), null, 'an unidentified snapshot is not enforced');
   writeFileSync(p, JSON.stringify(snapshotFrom(busy, now, null)));
   assert.equal(readQuota(now, p, 'org-a'), null);
+});
+
+test('codexFact: an implementer dispatch gets one fact line when Codex is signed in and the probe is fresh', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-codex-fact-'));
+  recordCodexOk(true, dir);
+  const line = codexFact('orch-implementer', dir);
+  assert.match(line, /^Codex ok at .+; Terra medium fits a bounded change with tests$/);
+});
+
+test('codexFact: nothing for a non-implementer role', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-codex-fact-'));
+  recordCodexOk(true, dir);
+  assert.equal(codexFact('orch-planner', dir), '');
+  assert.equal(codexFact('orch-reviewer', dir), '');
+});
+
+test('codexFact: nothing when the last probe said signed out', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-codex-fact-'));
+  recordCodexOk(false, dir);
+  assert.equal(codexFact('orch-implementer', dir), '');
+});
+
+test('codexFact: nothing when Codex was never probed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-codex-fact-'));
+  assert.equal(codexFact('orch-implementer', dir), '');
+});
+
+test('codexFact: nothing once the probe has gone stale', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-codex-fact-'));
+  const now = Date.now();
+  recordCodexOk(true, dir, now - CODEX_OK_FRESH_MS - 60000);
+  assert.equal(codexFact('orch-implementer', dir, now), '');
+});
+
+test('codexFact: nothing while the codex account is sitting out a usage limit', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-codex-fact-'));
+  recordCodexOk(true, dir);
+  markExhausted({ provider: 'codex', account: 'acct-1', scope: 'run:1' }, dir);
+  assert.equal(codexFact('orch-implementer', dir), '');
 });
