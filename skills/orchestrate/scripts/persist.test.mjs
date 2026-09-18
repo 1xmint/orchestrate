@@ -87,6 +87,16 @@ test('continues on visible work with one line of facts: goal, step, last change'
   assert.doesNotMatch(d.why, /\n/);
 });
 
+test('the reason line carries the work-calls count at 100 or above, not below (challenge.md D1)', () => {
+  const below = persistDecision({ rec: {}, scan: base, goal: 'g', workCalls: 83 });
+  assert.doesNotMatch(below.why, /work calls/);
+  const at = persistDecision({ rec: {}, scan: base, goal: 'g', workCalls: 100 });
+  assert.equal(at.why, `orchestrate: "g" · step 1 of ${PERSIST_STEP_CAP} · 100 work calls since your last dispatch`);
+  const above = persistDecision({ rec: {}, scan: base, goal: 'g', workCalls: 237 });
+  assert.match(above.why, /237 work calls since your last dispatch/);
+  assert.doesNotMatch(persistDecision({ rec: {}, scan: base, goal: 'g', workCalls: null }).why, /work calls/);
+});
+
 test('scan: the last file an edit tool named is the last change', () => {
   const edit = file => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Edit', input: { file_path: file } }] } });
   assert.equal(scanTurn(tail(edit('a.js'), result('ok'), used('Bash'), edit('b.js'))).lastChange, 'b.js');

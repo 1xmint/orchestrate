@@ -33,6 +33,35 @@ import { loadPolicy, sizeBudget } from './lib/policy.mjs';
 // last written. Never reads the filesystem itself — `minutesAgo` is resolved
 // by the caller, since only it knows what "now" and "the file's mtime" mean
 // for this run.
+// Work calls: the tools a lead uses to actually do things, between dispatches.
+// Distinct from lib/context.mjs's EDIT_TOOLS, which counts only file edits for
+// the "tool calls since your last edit" line — this counts reading and
+// searching too, because a long solo stretch of Read/Grep/Glob is the same
+// failure as a long stretch of Edit/Bash (challenge.md D1).
+export const WORK_CALL_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell', 'Read', 'Grep', 'Glob']);
+
+// One PostToolUse's effect on the "work calls since your last dispatch" count:
+// a dispatch (Agent/Task, or a Bash/PowerShell running codex-worker) resets it
+// to 0; a work-call tool adds one; anything else leaves it where it was. Pure,
+// so a sequence of tool calls can be replayed without touching a session file.
+export function stepWorkCalls(count, toolName, toolInput) {
+  const c = Number.isFinite(count) ? count : 0;
+  if (toolName === 'Agent' || toolName === 'Task') return 0;
+  if (toolName === 'Bash' || toolName === 'PowerShell') {
+    const cmd = toolInput && typeof toolInput.command === 'string' ? toolInput.command : '';
+    if (cmd.includes('codex-worker')) return 0;
+  }
+  return WORK_CALL_TOOLS.has(toolName) ? c + 1 : c;
+}
+
+// The fact to add when the count just crossed a multiple of `every` (100,
+// 200, 300, …): said once per crossing, never on the way down, since a reset
+// only ever drops the count to 0. Null when there is nothing to say.
+export function workCallsFact(count, every) {
+  if (!every || !Number.isFinite(count) || count <= 0 || count % every !== 0) return null;
+  return `${count} work calls since your last dispatch`;
+}
+
 function progressFact(progress) {
   if (!progress || !progress.path) return 'progress file: none given';
   if (progress.minutesAgo == null) return `progress file: ${progress.path}, not written yet`;
@@ -100,18 +129,28 @@ export function check(input) {
   if (!routerSettings().enabled) return '';
   const out = [];
   const state = loadSession(session);
+  const prevWorkCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : 0;
+  const workCalls = stepWorkCalls(prevWorkCalls, input.tool_name, input.tool_input);
+  const workCallsChanged = workCalls !== prevWorkCalls;
+  let contextLine = '';
   if (input.transcript_path) {
     const bound = (state && state.run && state.run.runMd) || null;
     const r = sampleContext({ transcriptPath: input.transcript_path, session, runMd: bound, permissionMode: modeOf(input) });
-    if (r.notice) out.push(r.notice);
+    contextLine = r.notice;
   }
+  const fact = workCallsFact(workCalls, loadPolicy().lead.workCallsEvery);
+  if (fact) contextLine = contextLine ? `${contextLine} · ${fact}` : `[orchestrate · context] ${fact}`;
+  if (contextLine) out.push(contextLine);
   if (state) {
     const before = state.mode || null;
     const note = modeNote(state, input);
     if (note) out.push(note);
     const capped = cappedNote(state);
     if (capped) out.push(capped);
-    if ((state.mode || null) !== before || capped) { try { saveSession(state); } catch {} }
+    if (workCallsChanged) state.workCalls = { count: workCalls };
+    if ((state.mode || null) !== before || capped || workCallsChanged) { try { saveSession(state); } catch {} }
+  } else if (workCallsChanged) {
+    try { saveSession({ v: 1, session_id: session, started: new Date().toISOString(), workCalls: { count: workCalls } }); } catch {}
   }
   return out.join('\n');
 }
