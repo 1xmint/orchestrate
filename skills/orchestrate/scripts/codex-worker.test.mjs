@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -94,6 +94,58 @@ test('success: an isolated worktree, explicit arguments, the packet on stdin, a 
   const reportLine = JSON.parse(readFileSync(join(deps.workersDir, 'reports.jsonl'), 'utf8'));
   assert.equal(reportLine.effort, report.effort);
   assert.equal(runningExternal(deps.workersDir).length, 0, 'the worker is unregistered after it exits');
+});
+
+test('parseFinal reads an optional suggestion, and accepts a report without one', () => {
+  const withOne = parseFinal(JSON.stringify({ status: 'done', summary: 'ok', changed: [], checks: [], remaining: [], notes: '', suggestion: 'Ship the map path up front.' }));
+  assert.equal(withOne.suggestion, 'Ship the map path up front.');
+  const withoutOne = parseFinal(JSON.stringify({ status: 'done', summary: 'ok', changed: [], checks: [], remaining: [], notes: '' }));
+  assert.equal(withoutOne.suggestion, null);
+});
+
+test('a report with a suggestion passes the schema and appends a row to the suggestions outbox', async () => {
+  const r = repo();
+  const { deps } = setup('success');
+  // A fake Codex CLI, local to this test, whose report includes `suggestion` —
+  // a field the shared fixture does not produce.
+  const fake = join(deps.workersDir, '..', 'fake-codex-suggest.mjs');
+  mkdirSync(dirname(fake), { recursive: true });
+  const workFile = JSON.stringify(join(r, 'work.txt'));
+  writeFileSync(fake, [
+    "import { writeFileSync, appendFileSync } from 'node:fs';",
+    'const argv = process.argv.slice(2);',
+    "if (process.env.FAKE_CODEX_LOG) appendFileSync(process.env.FAKE_CODEX_LOG, JSON.stringify({ argv }) + '\\n');",
+    "if (argv[0] === 'login') { process.stdout.write('Logged in using ChatGPT\\n'); process.exit(0); }",
+    "const flag = n => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : null; };",
+    'const out = o => process.stdout.write(JSON.stringify(o) + \'\\n\');',
+    "const last = flag('-o');",
+    `writeFileSync(${workFile}, 'changed\\n');`,
+    "out({ type: 'turn.completed', usage: { input_tokens: 10, cached_input_tokens: 0, output_tokens: 5 } });",
+    "if (last) writeFileSync(last, JSON.stringify({ status: 'done', summary: 'fake done', changed: ['work.txt'], checks: [], remaining: [], notes: '', suggestion: 'Codex worker suggestion.' }));",
+    'process.exit(0);',
+    '',
+  ].join('\n'));
+  const suggestionsPath = join(deps.workersDir, 'suggestions.jsonl');
+  const validate = schema => {
+    const report = JSON.parse(JSON.stringify({ status: 'done', summary: 'fake done', changed: ['work.txt'], checks: [], remaining: [], notes: '', suggestion: 'Codex worker suggestion.' }));
+    for (const key of schema.required) assert.ok(key in report, `${key} is required by the schema`);
+    for (const key of Object.keys(report)) assert.ok(key in schema.properties, `${key} is declared in the schema`);
+  };
+  const schema = JSON.parse(readFileSync(join(HERE, '..', 'assets', 'worker-report.schema.json'), 'utf8'));
+  validate(schema);
+
+  const { report } = await runWorker({ packetText: PACKET, repo: r, role: 'implement', run: join(deps.workersDir, '..', 'run-suggest'), task: '9-18-suggest' }, {
+    ...deps,
+    env: { ...deps.env, ORCH_CODEX_BIN: fake },
+    suggestionsPath,
+  });
+  assert.equal(report.status, 'done');
+  assert.equal(report.evidence.final.suggestion, 'Codex worker suggestion.');
+  assert.ok(existsSync(suggestionsPath));
+  const rows = readFileSync(suggestionsPath, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].text, 'Codex worker suggestion.');
+  assert.equal(rows[0].source, '9-18-suggest');
 });
 
 test('review runs read-only in place at high effort', async () => {

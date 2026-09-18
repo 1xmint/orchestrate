@@ -41,6 +41,7 @@ import {
   helperFiles, lockHolder, concurrencyDecision, markExhausted, exhaustedFor, accountKey, WORKERS_DIR,
 } from './lib/workers.mjs';
 import { loadSession } from './lib/tier.mjs';
+import { addSuggestion, SUGGESTIONS_PATH } from './suggest.mjs';
 import { build as buildMap, status as mapStatus } from './map.mjs';
 import { readQuota, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 
@@ -168,6 +169,7 @@ export function parseFinal(text) {
     checks: Array.isArray(o.checks) ? o.checks.filter(c => c && typeof c === 'object').map(c => ({ command: String(c.command || ''), result: ['pass', 'fail', 'not-run'].includes(c.result) ? c.result : 'not-run', evidence: String(c.evidence || '') })) : [],
     remaining: Array.isArray(o.remaining) ? o.remaining.map(String) : [],
     notes: typeof o.notes === 'string' ? o.notes : '',
+    suggestion: typeof o.suggestion === 'string' ? o.suggestion : null,
   };
 }
 
@@ -383,6 +385,7 @@ export async function runWorker(opts, deps = {}) {
         const body = final ? JSON.stringify(final, null, 2) : `${report.status}: ${report.why || ''}`;
         writeFileSync(file, `<!-- ${report.endedAt} · codex · ${report.model || 'model unknown'} · ${report.effort || 'effort unknown'} -->\n\n${body}\n`);
         appendFileSync(join(returns, 'returns.jsonl'), JSON.stringify({ at: report.endedAt, session, run: packet.run || null, task: report.taskId, agent: 'codex', agentId: `codex-${report.taskId}`, runtime: 'codex', model: report.model || null, effort: report.effort || null, status: report.status, evidence: report.evidence || null, file, dollars: null }) + '\n');
+        if (final && final.suggestion) addSuggestion(final.suggestion, { source: report.taskId || null, path: deps.suggestionsPath || SUGGESTIONS_PATH });
       }
     } catch {}
     return { report, code };

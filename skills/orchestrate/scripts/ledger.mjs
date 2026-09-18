@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
 import { roleMaxTurns } from './lib/workers.mjs';
+import { addSuggestion } from './suggest.mjs';
 export { roleMaxTurns };
 
 // Lenient on purpose, and it stays lenient: a return that got the shape almost
@@ -46,6 +47,9 @@ export function parseReturn(text) {
     lines,
     branch: field(/^\s*BRANCH:\s*(.+)$/im),
     changed: field(/^\s*CHANGED:\s*(.+)$/im),
+    // One line, optional: what the plugin could have done to make the task
+    // easier. Read only by suggest.mjs, on request — never injected anywhere.
+    suggest: field(/^\s*SUGGEST:\s*(.+)$/im),
     // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what older
     // reviewer instructions produced, and is still read.
     verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
@@ -286,6 +290,7 @@ function main() {
   if (alreadyHandled(input, agent, text)) return;
 
   const r = parseReturn(text);
+  if (r.suggest) { try { addSuggestion(r.suggest, { source: r.task || r.run || null }); } catch {} }
   const usage = sumUsage(input.agent_transcript_path);
   const cap = cappedReturn(usage.turns, roleMaxTurns(agentType), r.status);
   r.status = silent && !cap.capped ? 'PARTIAL' : cap.status;
