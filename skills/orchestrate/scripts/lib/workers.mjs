@@ -227,9 +227,11 @@ export function concurrencyDecision(role, { native = [], external = [], policy =
 }
 
 // ---- provider state -----------------------------------------------------------
-// Quota exhaustion is remembered per provider, per account, per run (or per
-// session when there is no run), so an exhausted account is not probed again
-// for the same run and a different account or run is unaffected.
+// Quota exhaustion is remembered per provider, per account: once an account
+// hits its limit, every run and session sharing that account sees it, not
+// just the run that hit it. A different account is unaffected. The scope
+// that recorded the hit (run, session or day) is kept on the entry only to
+// explain where it happened; it is not part of the lookup.
 
 export const providerStatePath = (dir = WORKERS_DIR) => join(dir, 'provider-state.json');
 
@@ -237,11 +239,43 @@ export function accountKey(raw) {
   return raw ? createHash('sha256').update(String(raw)).digest('hex').slice(0, 12) : null;
 }
 
+const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+function monthIndex(name) {
+  const m = MONTHS[String(name || '').slice(0, 3).toLowerCase()];
+  return m === undefined ? null : m;
+}
+const DATE = '([A-Za-z]+)\\s+(\\d{1,2})(?:st|nd|rd|th)?,?\\s+(\\d{4})';
+const CLOCK = '(\\d{1,2}):(\\d{2})\\s*([AaPp][Mm])';
+
+// A dated reset ("try again at Sep 19th, 2026 11:50 AM", or the time and date
+// swapped: "try again at 11:50 AM on Sep 19th, 2026"), read in local time.
+function parseDatedReset(t, now) {
+  let mon, day, year, h, min, ap;
+  let m = new RegExp(`try again at ${DATE}\\s+${CLOCK}`, 'i').exec(t);
+  if (m) [, mon, day, year, h, min, ap] = m;
+  else {
+    m = new RegExp(`try again at ${CLOCK}\\s+on\\s+${DATE}`, 'i').exec(t);
+    if (m) [, h, min, ap, mon, day, year] = m;
+  }
+  if (!m) return undefined;
+  const monthIdx = monthIndex(mon);
+  if (monthIdx === null) return undefined;
+  let hour = Number(h) % 12;
+  if (/p/i.test(ap)) hour += 12;
+  const d = new Date(now);
+  d.setFullYear(Number(year), monthIdx, Number(day));
+  d.setHours(hour, Number(min), 0, 0);
+  return d.getTime();
+}
+
 // When the limit lifts, from the provider's own message: "try again at 2:31 PM"
-// (the next such clock time) or "try again in 3 days 4 hours". Null when the
-// message names no time; then the block lasts for the whole run.
+// (the next such clock time), a dated reset ("try again at Sep 19th, 2026
+// 11:50 AM"), or "try again in 3 days 4 hours". Null when the message names
+// no time; then the block lasts for the whole run.
 export function parseResetTime(message, now = Date.now()) {
   const t = String(message || '');
+  const dated = parseDatedReset(t, now);
+  if (dated !== undefined) return dated;
   const at = /try again at (\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?/.exec(t);
   if (at) {
     let h = Number(at[1]) % (at[3] ? 12 : 24);
@@ -266,7 +300,10 @@ export function markExhausted({ provider, account, scope, message = '', now = Da
   const p = providerStatePath(dir);
   const s = readJson(p) || { v: WORKERS_V, exhausted: [] };
   s.v = WORKERS_V;
-  s.exhausted = (Array.isArray(s.exhausted) ? s.exhausted : []).filter(e => !(e.provider === provider && e.account === account && e.scope === scope)).slice(-50);
+  // One live record per provider+account: a fresh hit replaces the account's
+  // earlier record (whatever run or session recorded it) instead of stacking
+  // on top of it.
+  s.exhausted = (Array.isArray(s.exhausted) ? s.exhausted : []).filter(e => !(e.provider === provider && e.account === account)).slice(-50);
   // Codex sometimes says only that its allowance is exhausted.  That is a
   // five-hour window, not a hold for the rest of the run; the next dispatch is
   // deliberately the probe once this conservative expiry has passed.
@@ -277,12 +314,15 @@ export function markExhausted({ provider, account, scope, message = '', now = Da
 }
 
 // Unidentified entries (no account or scope) are ignored rather than enforced,
-// and so is an entry whose stated reset time has passed.
-export function exhaustedFor({ provider, account, scope }, dir = WORKERS_DIR, now = Date.now()) {
-  if (!provider || !account || !scope) return null;
+// and so is an entry whose stated reset time has passed. The scope this call
+// is made with (the caller's own run/session/day) is not part of the match:
+// an account exhausted in one run stays exhausted for every other run and
+// session that shares it, until it is lifted.
+export function exhaustedFor({ provider, account }, dir = WORKERS_DIR, now = Date.now()) {
+  if (!provider || !account) return null;
   const s = readJson(providerStatePath(dir));
   const list = s && Array.isArray(s.exhausted) ? s.exhausted : [];
-  return list.find(e => e && e.provider === provider && e.account && e.scope && e.account === account && e.scope === scope && !lifted(e, now)) || null;
+  return list.find(e => e && e.provider === provider && e.account && e.scope && e.account === account && !lifted(e, now)) || null;
 }
 
 // An entry written before resetsAt existed works its reset out from the saved
