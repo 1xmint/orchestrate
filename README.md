@@ -37,7 +37,7 @@ claude plugin marketplace add 1xmint/orchestrate
 claude plugin install orchestrate@orchestrate --scope user
 ```
 
-Either way it brings the skill, the seven role agents, the output style and the
+Either way it brings the skill, the eight role agents, the output style and the
 three global hooks in one step.
 
 The agents are planner, implementer, researcher, browser, reviewer, debugger
@@ -67,7 +67,8 @@ node scripts/install.mjs --with-router --with-hook
 
 That copies the skill to `~/.claude/skills/orchestrate/` (and to
 `~/.agents/skills/orchestrate/` for Codex, skip with `--no-codex`), installs
-seven role agents into `~/.claude/agents/`, and registers the hooks below in
+eight role agents into `~/.claude/agents/` (skipped when the plugin already
+provides them, since a second copy lists each role twice), and registers the hooks below in
 `~/.claude/settings.json`. Both are picked up by a running session within a
 minute or so; a new session sees them at once. Type `/orchestrate <your
 goal>`, or just describe a multi-part goal; the skill triggers on its own.
@@ -134,7 +135,7 @@ While a run is open, the first message of each session carries one line of state
 [orchestrate] you: opus @ high effort · tier max5 · orch-agents 7/7 · run: 20260909-tidy (bound to this session) · 1 return to grade: 9-9-0001 · ready now: 9-9-0003 · limits today: none
 ```
 
-Read it left to right. What you are running on, which plan, whether the seven role
+Read it left to right. What you are running on, which plan, whether the eight role
 agents are installed, which run this session owns, then two things worth acting
 on: **returns to grade** is finished work waiting for someone to judge it, and
 **ready now** is a task whose blockers have all landed, so nothing should be
@@ -817,7 +818,7 @@ skills/orchestrate/
                         smoke, statusline
   scripts/lib/          context (the one context reader), policy, workers, modes, host,
                         quota, tier, settings, prices, listing, template
-  assets/               RUN.md template, packet template, worker report schema, seven role
+  assets/               RUN.md template, packet template, worker report schema, eight role
                         agents, the Plain output style
 .claude-plugin/          plugin manifest, so /plugin install works
 hooks/hooks.json         the global hooks, for the plugin path
