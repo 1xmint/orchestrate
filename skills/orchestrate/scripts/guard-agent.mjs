@@ -66,13 +66,16 @@ export function decide(input) {
 // says exactly what to send instead, so it costs one lead step, never the work.
 //
 // Executors start on Sonnet and move up only after a real attempt at the same
-// task; judgment roles (planner, reviewer, debugger) may use Opus. Built-in
+// task; judgment roles (planner, reviewer, debugger) may use Opus, and the two
+// verdict roles (reviewer, advisor) may not go below it. Built-in
 // sweepers take the lead's model unless told, so they must be told. A fork
 // copies the whole conversation into every step it takes. Fable on a plan that
 // does not include it spends the user's money. And near the user's plan limit,
 // a new helper is the one that gets cut off mid-edit.
 export const EXECUTORS = new Set(['orch-implementer', 'orch-researcher', 'orch-browser']);
 export const SWEEPERS = new Set(['Explore', 'general-purpose', 'claude']);
+// A verdict from a model weaker than Opus cannot be banked (STATE.md v0.16.1).
+export const JUDGES = new Set(['orch-reviewer', 'orch-advisor']);
 export const FORK_MAX_CONTEXT = 100000;
 export const PACKET_WARN_CHARS = 8000;
 
@@ -205,6 +208,10 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
 
   if (f === 'fable' && !['max5', 'max20', 'team'].includes(tier) && !/^\s*APPROVED BY USER:\s*fable/mi.test(prompt)) {
     return { prefix: 'model', reason: `Fable is not included in this plan (${tier}) and spends the user's credits. Ask the user first; if they say yes, add the line "APPROVED BY USER: fable" to the packet.` };
+  }
+
+  if (JUDGES.has(role) && f && rank(model) > rank('opus')) {
+    return { prefix: 'model', reason: `${role} on ${f} gives a verdict nobody can rely on: it exists to catch what the author's model missed. Resend with model: "opus". If Opus is out for now, hold the merge and tell the user; a weaker review is not a pass.` };
   }
 
   if (SWEEPERS.has(role)) {
