@@ -610,6 +610,10 @@ function handleSessionStart(input) {
   const out = [];
   const word = source === 'resume' ? 'resumed' : 'compacted';
 
+  // The summary keeps the conversation's gist, not the card that was injected
+  // into it, so without this the rest of a long session runs with no card.
+  if (source === 'compact' && !state.muted) out.push(cardBody());
+
   if (ctx.run) {
     const ex = resumeExcerpt(ctx.run.runMd);
     out.push(`[orchestrate · ${word}] run ${ctx.run.runMd}${ex ? `\n${ex}` : ' — nothing written under Goal or Pickup yet'}`);
