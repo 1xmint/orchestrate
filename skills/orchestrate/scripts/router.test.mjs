@@ -198,6 +198,19 @@ test('resume and compaction carry the goal, the constraints and the Pickup', () 
   assert.match(compacted, /Goal: Finish the tidy command/);
 });
 
+test('a compaction re-sends the card, ahead of the run excerpt, and a resume does not', () => {
+  const home = makeHome(); const repo = makeRepo(true);
+  const card = cardBody();
+  const compacted = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-card1', cwd: repo });
+  assert.ok(compacted.includes(card), 'the whole card comes back after a summary');
+  assert.ok(compacted.indexOf(card) < compacted.indexOf('Goal: Finish the tidy command'), 'the card comes first');
+  const resumed = run(home, { hook_event_name: 'SessionStart', source: 'resume', session_id: 's-card2', cwd: repo });
+  assert.ok(!resumed.includes(card), 'a resume keeps the conversation, card included');
+  run(home, { hook_event_name: 'UserPromptSubmit', prompt: 'router off', session_id: 's-card3', cwd: repo });
+  const muted = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-card3', cwd: repo });
+  assert.ok(!muted.includes(card), 'a muted card stays muted');
+});
+
 test('SessionStart compact with no bound run injects the checkpoint file, capped at 1,200 chars', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const sessionId = 's-checkpoint1';

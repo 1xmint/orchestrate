@@ -77,7 +77,7 @@ anyone has.
 
 ## Open questions for the user
 
-- <only what the user owns: money, public surfaces, credentials, destructive actions, strategy>
+- <only what the user owns: money, public surfaces, credentials, destructive actions, what the product should do>
 
 ## Pickup
 

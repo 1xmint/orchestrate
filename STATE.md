@@ -2,6 +2,25 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.16.0 — from work dispatcher to engineering partner, 2026-09-21 (in progress)
+
+Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` with its steering
+notes. Five pull requests.
+
+- **PR 1. The card survives a compaction.** `handleSessionStart` used to set
+  `cardSent` on `compact` and send nothing, so a long session ran most of its
+  length with no card (the cited Cortex session: ten compactions, card seen
+  once). It now pushes `cardBody()` first on `compact` (not on `resume`,
+  which keeps the conversation; not when muted). Ask rules: the user is asked
+  about what the product should do, money, public surfaces, credentials, legal
+  exposure and destructive actions; an engineering fork is the lead's to settle
+  (plain.md, SKILL.md §1 and §8, RUN.md). The planner may say once, under
+  VERDICT, that the goal is the wrong target. plain.md is 4,679 bytes of 4,700.
+  New `AGENTS.md` (with `CLAUDE.md` = `@AGENTS.md`, the pairing
+  code.claude.com/docs/en/memory recommends, read 2026-09-21): what this plugin
+  is for, and the rule that its wording follows Anthropic's current prompting
+  guidance.
+
 ## v0.15.8 — a scoped model grant, an outbox, honest Codex state, and helper compactions made visible, 2026-09-18
 
 Docs-only step of the orchestration-depth run (packet 9-18-0007; code lives in
