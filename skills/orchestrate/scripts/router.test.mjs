@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash } from './router.mjs';
+import { cardBody, compactionFact, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -210,6 +210,30 @@ test('a compaction re-sends the card, ahead of the run excerpt, and a resume doe
   run(home, { hook_event_name: 'UserPromptSubmit', prompt: 'router off', session_id: 's-card3', cwd: repo });
   const muted = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-card3', cwd: repo });
   assert.ok(!muted.includes(card), 'a muted card stays muted');
+});
+
+test('the after-compaction line states facts, not an instruction', () => {
+  const home = makeHome(); const repo = makeRepo(true);
+  const sid = 's-fact1';
+  run(home, { hook_event_name: 'UserPromptSubmit', prompt: 'finish the tidy command', session_id: sid, cwd: repo });
+  const p = join(home, '.claude', 'orchestrate', 'sessions', `${sid}.json`);
+  const state = JSON.parse(readFileSync(p, 'utf8'));
+  state.dispatches = [
+    { at: '2026-09-21T10:00:00Z', agent: 'orchestrate:orch-advisor', model: 'opus' },
+    { at: '2026-09-21T10:05:00Z', agent: 'orch-implementer', model: 'sonnet' },
+    { at: '2026-09-21T10:09:00Z', agent: 'Explore', model: 'haiku' },
+  ];
+  writeFileSync(p, JSON.stringify(state));
+  const first = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo });
+  assert.match(first, /\[orchestrate · after compaction\] The conversation was summarised\. The card below was in view before the summary and is not in it\. Compaction 1 of this session\. 3 helpers sent so far; orch-advisor last sent: 2 helpers ago\./);
+  assert.ok(first.indexOf('after compaction') < first.indexOf(cardBody()), 'the fact introduces the card');
+  const second = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo });
+  assert.match(second, /Compaction 2 of this session/);
+  // Facts only: nothing in the line tells the lead what to do.
+  const line = /\[orchestrate · after compaction\][^\n]*/.exec(second)[0];
+  assert.doesNotMatch(line, /\b(should|must|send|call|dispatch|consider)\b/i);
+  assert.match(compactionFact({ dispatches: [] }), /0 helpers sent so far; orch-advisor last sent: never\./);
+  assert.match(compactionFact({ dispatches: [{ agent: 'orch-advisor' }] }), /1 helper sent so far; orch-advisor last sent: the most recent helper\./);
 });
 
 test('SessionStart compact with no bound run injects the checkpoint file, capped at 1,200 chars', () => {
