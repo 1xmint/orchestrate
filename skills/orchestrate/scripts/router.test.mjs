@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash } from './router.mjs';
+import { cardBody, compactionFact, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -500,4 +500,73 @@ test('a long list of owed returns is trimmed like the ready one', () => {
   assert.match(phrase, /7 returns to grade: 9-8-0001, 9-8-0002, 9-8-0003, 9-8-0004 \+3 more/);
   assert.equal(ungradedPhrase({ ungraded: [] }), '');
   assert.equal(ungradedPhrase(null), '');
+});
+
+// ---- the brief: "What this is for" ------------------------------------------
+
+function makeBriefRepo({ file = 'CLAUDE.md', body = '## What this is for\n\nMakes toast, for people in a hurry.\n\nDeciding documents (these win when the code and the intent disagree):\n- docs/roadmap.md — where we are\n' } = {}) {
+  const repo = mkdtempSync(join(tmpdir(), 'orch-brief-repo-'));
+  mkdirSync(join(repo, '.git'), { recursive: true });
+  if (file) {
+    const p = join(repo, file);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, body);
+  }
+  return repo;
+}
+
+test('sectionExcerpt is capped and section-ordered, and the brief reader reuses it', () => {
+  const md = `## What this is for\n\n${'x'.repeat(BRIEF_CAP + 200)}\n`;
+  const ex = sectionExcerpt(md, [{ pattern: /(?:^|\n)##\s+What this is for\b[ \t]*\n([\s\S]*?)(?:\n##\s|\s*$)/i }], BRIEF_CAP, { intro: false });
+  assert.ok(ex.length <= BRIEF_CAP, `${ex.length} <= ${BRIEF_CAP}`);
+  assert.match(ex, /^x+\.\.\.$/);
+  // resumeExcerpt still orders Goal before Pickup, unchanged by the generalisation.
+  const goalFirst = sectionExcerpt('## Pickup\n\ndo the thing\n\n## Goal\n\nship it\n', ['Goal', 'Pickup'], RESUME_CAP);
+  assert.equal(goalFirst.indexOf('Goal:'), 0);
+});
+
+test('a missing brief section prints one fact line, once', () => {
+  const repo = makeBriefRepo({ file: 'CLAUDE.md', body: '# Just some notes\n\nNo section here.\n' });
+  const ctx = { repoRoot: repo, cwd: repo, run: null };
+  const state = {};
+  const first = briefNote(ctx, state);
+  assert.match(first, /\[orchestrate · brief\] no "What this is for" section between/);
+  assert.match(first, /Template: .*assets[\\/]BRIEF\.md/);
+  assert.equal(briefNote(ctx, state), '', 'said once per session');
+});
+
+test('a brief the host loads prints nothing', () => {
+  const repo = makeBriefRepo();
+  const ctx = { repoRoot: repo, cwd: repo, run: null };
+  const state = {};
+  assert.equal(briefState(ctx, state).kind, 'kept');
+  assert.equal(briefNote(ctx, state), '');
+});
+
+test('a brief the host does not keep in view is printed once per epoch and again after a compaction', () => {
+  const repo = makeBriefRepo();
+  // No repoRoot: the session was started above the project, and the working
+  // project is known only from touched paths (context-check.mjs's state.work).
+  const ctx = { repoRoot: null, cwd: null, run: null };
+  const state = { work: { root: repo, dir: repo, counts: {} } };
+  const b = briefState(ctx, state);
+  assert.equal(b.kind, 'other');
+  const first = briefNote(ctx, state);
+  assert.match(first, /\[orchestrate · brief\] from .*CLAUDE\.md/);
+  assert.match(first, /Makes toast/);
+  assert.equal(briefNote(ctx, state), '', 'once per epoch');
+  // A compaction is a new epoch: the router forces it, whatever was said before.
+  const again = briefNote(ctx, state, { force: true });
+  assert.match(again, /Makes toast/);
+});
+
+test('the brief section is found in AGENTS.md', () => {
+  const repo = makeBriefRepo({ file: 'AGENTS.md', body: '## What this is for\n\nRuns the payroll for one small shop.\n' });
+  const ctx = { repoRoot: repo, cwd: repo, run: null };
+  const state = {};
+  const b = briefState(ctx, state);
+  assert.match(b.file, /AGENTS\.md$/);
+  assert.match(b.text, /Runs the payroll/);
+  // A bare AGENTS.md nobody pulls in with @AGENTS.md is not kept in view.
+  assert.equal(b.kind, 'other');
 });

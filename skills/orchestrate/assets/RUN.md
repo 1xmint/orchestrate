@@ -11,6 +11,13 @@ this run.
 
 Why it matters: <what the user gets that they do not have now>
 
+## Where this sits
+
+Brief: <path of the instruction file holding it | "none yet">
+Roadmap: <the document the brief names for where we are>
+This run serves: <one sentence joining this goal to the roadmap>
+Direction checked: <never | date and verdict>
+
 ## Done when
 
 - <evidence that would prove it, one line each; a command, a file, a page state>
