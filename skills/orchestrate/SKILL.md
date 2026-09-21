@@ -424,10 +424,29 @@ because you are the one who read it.
 to see: an authorisation or security boundary, money moving, a destructive or
 irreversible data change, a compatibility contract someone else consumes, or
 architectural uncertainty you could not resolve. A cosmetic change to a public
-page is not one of those. Give the reviewer the concrete risk and the acceptance
-criteria, not "look for problems". Correctness findings decide the verdict;
-everything else is optional and must not start a repair loop. After a fix,
-review the fix, not the whole project again. Never review your own edits.
+page is not one of those.
+
+Decide that work owes a review before it is designed, and write the review's
+questions then: the ways it could go wrong that a passing test would not show.
+For money, who could be charged twice, too much or not at all; which way each
+rounding goes and what that costs; what two at once does; what is left behind
+when a step fails, is cancelled, or the process restarts. One list, used three
+times unchanged: in the planner's packet so the design answers it, in the
+builder's DONE WHEN so the answers are built and tested, and as the reviewer's
+ACCEPTANCE. Asked only at review, the same questions find design flaws after the
+code rests on them, and each costs a fix round dearer than the review. When the
+design cannot answer one, have the reviewer read that part of the design before
+the build.
+
+The reviewer runs on Opus or stronger; the guard refuses less, because a PASS
+from the author's own model cannot be banked. Send it when the change is
+pushed, beside CI, not after CI. A review that cannot stop the merge is not a
+gate: the pull request stays a draft until the verdict is PASS, then
+`gh pr ready <n>`. GitHub merges no draft, by hand or by an auto-merge rule.
+
+Correctness findings decide the verdict; everything else is optional and must
+not start a repair loop. After a fix, review the fix, not the whole project
+again. Never review your own edits.
 
 ## 7. When it is not right
 
@@ -469,7 +488,9 @@ state in one pasteable snapshot.
 work survives; pushing to a shared branch, merging, releasing, tagging and
 deploying follow the user's authorisation and the repo's policy, and never from
 the mere existence of a remote. If they authorised it once for this run, you do
-not ask again.
+not ask again. Where a repo merges by itself once checks pass, marking a pull
+request ready is the merge decision, so it is yours and never a helper's: read
+the return and the diff first, and wait for PASS when a review is owed.
 
 Keep `RUN.md` current at every state change and its Pickup line honest: a
 session can end at any turn. Ask only about what the product should do, money,

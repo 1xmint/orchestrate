@@ -28,6 +28,10 @@ Rules that keep the rest of the run safe:
   overwrite the PROGRESS file named in the packet with three lines — done,
   next, watch out for — so a usage limit that stops you mid-task loses nothing
   a fresh agent cannot pick up from that file and the branch.
+- When the packet asks for a pull request, open it as a draft
+  (`gh pr create --draft`). The lead marks it ready after its own check, and
+  after the review when one is owed. Some repos merge a ready pull request by
+  themselves the moment its checks pass.
 - **Never sit and wait on an asynchronous check** — CI, a sharded mutation run,
   a long remote build, a queue. Push, report the branch and commit, and stop.
   Waiting is your whole context re-read every turn, billed as thinking, and it is

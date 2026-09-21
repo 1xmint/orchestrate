@@ -62,6 +62,9 @@ TESTS FOR SCOPE: <`map.mjs tests-for` on the SCOPE files> — run these first
 PATTERNS: <path to an existing example of the shape wanted>
 SKILLS: <invoke `/name` through the Skill tool for step N, because it already
        does that procedure>
+REVIEW QUESTIONS: <the reviewer's ACCEPTANCE list, verbatim>  when the work
+       owes a review (SKILL.md §6): a planner answers each in the design; a
+       builder makes each a DONE WHEN line, naming the test or code answering it
 STOP AND REPORT: <a condition meaning the packet was wrong or the world differs
        from CONTEXT>              always implied: a credential, payment,
                                   publish, delete or production action, and the
@@ -92,7 +95,8 @@ REVIEW OF: <task id> on <branch> @ <sha>, worktree <path>
 THE RISK: <the concrete thing that would be bad if wrong — an authorisation
   boundary, money moving, data rewritten, a contract others consume, an
   architectural choice still in doubt>
-ACCEPTANCE: <what would make this change acceptable, as criteria you can check>
+ACCEPTANCE: <the REVIEW QUESTIONS the author was given, verbatim, plus anything
+  learned since>
 OBJECTIVE THE AUTHOR HAD: <their OBJECTIVE and SCOPE, verbatim>
 DIFF: `git diff <base>..<sha>` in that worktree
 CALLERS: <`map.mjs who-uses` per changed file, if mapped>
@@ -129,10 +133,6 @@ The agent picks an output shape, touches the shared arg parser, adds a
 dependency, and reports "tests pass" from a subset. OBJECTIVE, CONTEXT, SCOPE
 and DONE WHEN stop each of those. The rest each stop something narrower; a
 field that stops nothing here is noise in the packet and cost in context.
-
-The GATE commands come from `.orchestrator/gate.json`, written by `run-init.mjs`
-when the ledger is created. Paste them; do not re-derive them from Cargo.toml
-and the CI file.
 
 Do not write a DONE WHEN that makes the worker **wait on an asynchronous
 check** — CI shards, a remote build, a queue. A worker watching CI is billed

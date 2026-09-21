@@ -2,6 +2,104 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.16.1 — a review that can stop the merge, 2026-09-21
+
+Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` (replaced the
+0.16.0 steering plan). Two pull requests: #23 (guard floor) and this release.
+
+**What happened.** A Cortex session built live-call billing
+(`1xmint/cortex` #20). Times UTC, from that session's records and GitHub:
+
+| When | What | Model |
+|---|---|---|
+| 15:36 | design for the voice phase written (`voice_plan.md`) | Fable |
+| 16:50 | builder sent, from a spec the lead wrote from that design | Sonnet |
+| 17:10 | #20 opened, not as a draft | |
+| 17:11 | review 1 sent; FAIL, two findings | Sonnet |
+| 17:17 | fresh builder sent to fix; redesigns the segment accounting | Sonnet |
+| 17:53 | tests green, Cortex's auto-merge merges #20; review 2 sent that minute | Opus |
+| 17:56 | review 2: FAIL, three blocking payment findings, none fixed in main | |
+| 17:57 | another fresh builder sent to fix | Sonnet |
+
+**Three causes.**
+1. The flaws were in the design, and the hard questions came after the build.
+   The design already held the settle rule that later failed CI and accepted
+   "one credit rounding per segment" (a 2.5-credit segment charged as 3, the
+   last segment free when the final deduction fails). It said nothing about
+   two sessions at once, a cancelled start, a dropped connection or a restart.
+   The lead wrote six sharp questions at 17:11 — for the reviewer, after about
+   a thousand lines rested on the design. A stronger builder would have built
+   the same design.
+2. The first review ran on the builder's own model and nothing refused it.
+   `routing.md` said a reviewer is never weaker than the author; the guard
+   enforced only the executor rows. The Sonnet review missed the overcharge;
+   the Opus review found it in four minutes. Josh's note said "never send a
+   helper without naming a cheap model", with no exception for judges.
+3. On a repo that merges by itself, opening a ready pull request is the merge
+   decision, and the builder made it. Cortex's `automerge.yml` arms auto-merge
+   on every non-draft pull request; review 1's FAIL stopped nothing.
+
+Cost: each review read about 70k tokens; each fix went to a fresh builder that
+grew to about 145k over 56 and 110 steps, more than the build. Fix rounds are
+the expensive part, so the lever is fewer of them.
+
+**Decisions.** None is a new lesson: the floor enforces a rule already in
+`routing.md`, the draft default hands a decision back to its owner, and the
+questions move an existing sentence earlier.
+- **Guard floor (#23).** `JUDGES = {orch-reviewer, orch-advisor}`; a dispatch
+  naming a family weaker than Opus is refused with "resend on Opus, or hold the
+  merge and tell the user". No model named falls to the role file's Opus; an
+  unknown family passes; `normalizeRole` already folds `orchestrate:` names.
+  The `APPROVED BY USER:` header only unlocks Fable on plans without it; the
+  floor does not honour it, since a user approving a cheaper review is not a
+  reason to bank its verdict. Codex review does not pass through this hook.
+- **Drafts.** `orch-implementer` and `orch-debugger` (it has a shell and pushes,
+  so it can open one) open pull requests as drafts; SKILL.md §8 says marking
+  ready is the lead's merge decision. Orchestrate's CI runs on every
+  `pull_request` event, drafts included; where a repo skips CI on drafts, the
+  lead marks ready to get CI and merges by hand after PASS.
+- **Questions first.** SKILL.md §6: decide a review is owed before the design,
+  write its questions then, and use one list three times (planner packet,
+  builder DONE WHEN, reviewer ACCEPTANCE). `packet.md` gains the optional
+  `REVIEW QUESTIONS:` field and the reviewer's ACCEPTANCE points at it. To stay
+  under the 7,000-byte cap, the paragraph repeating the GATE field's own
+  "verbatim from gate.json" was cut.
+- **Reviewer description** carries the three points (send at push, draft until
+  PASS, Opus or stronger), because the helper list is what survives a summary;
+  the Cortex lead had been summarised 13 times.
+- **Josh's note** now separates judging helpers (Opus or stronger) from bulk
+  helpers (Sonnet or Haiku). That line caused the Sonnet review, so it is
+  changed rather than answered with a louder one.
+
+**Left alone, on purpose.** Fable for money reviews stays "judge on its
+merits" (Opus found all three in four minutes). The builder stays on Sonnet:
+the evidence blames the design and the late questions. A fresh builder per fix
+round stays (helper cache lasts five minutes, a review takes longer;
+`subagentPromptCacheTtl: "1h"` stays off, its plan-quota effect undocumented).
+No path-based auto-merge block in Cortex (upkeep, and misses sign-in and
+deletion). No card change, no scheduled reviews, no hook reading packets for a
+draft flag, no floor for the planner or debugger (authors whose work gets
+checked).
+
+Evals 28-30: a payment pull request stays a draft until PASS; a Sonnet review
+is refused and resent on Opus, not dropped; the review questions exist before
+the planner or builder is sent and reach the reviewer word for word.
+
+Guidance pages (prompting best practices; memory; context window) as checked
+2026-09-21 for 0.16.0: reason given with each rule; the helper described by its
+moment; the limit is a hook, the judgement is prose.
+
+**Judge it from records, nothing staged.** Over the next five risky changes
+(money, sign-in, data deletion) on any repo: every review on Opus or stronger
+(`measure.mjs <transcript> --tree`); each pull request a draft until PASS
+(GitHub's timeline); the questions in the builder's packet word for word; one
+fix round or none. Two or more with the questions asked first means the builder
+is the weak point: move risky builds to Opus then, not now.
+
+Cortex itself is fixed from its own session (another repo, mid-fix in the same
+checkout): Josh pastes it a short note to open the follow-up as a draft, review
+on Opus at push, ready only on PASS, and add the draft rule to its AGENTS.md.
+
 ## v0.16.0 — from work dispatcher to engineering partner, 2026-09-21
 
 Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` with its steering

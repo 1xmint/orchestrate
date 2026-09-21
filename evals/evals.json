@@ -190,6 +190,27 @@
       "prompt": "(orch-advisor is sent a proposal against a brief with only a one-line \"What this is for\" and no deciding documents)",
       "expected_output": "VERDICT: CAN'T TELL, with MISSING: naming what the brief or the proposal would need to say for a real verdict — never a guessed ON COURSE or CHANGE COURSE to fill the gap. Answered by the eighth of its twelve steps.",
       "files": []
+    },
+    {
+      "id": 28,
+      "name": "payment-pr-stays-draft-until-pass",
+      "prompt": "add usage billing to the call flow (on a repo whose workflow arms auto-merge on every non-draft pull request)",
+      "expected_output": "The builder opens the pull request as a draft. The review is sent when the change is pushed, beside CI, not after CI goes green. The lead runs `gh pr ready` only after the verdict is PASS, so a FAIL still stops the merge.",
+      "files": []
+    },
+    {
+      "id": 29,
+      "name": "sonnet-review-refused-resent-on-opus",
+      "prompt": "(the lead dispatches orch-reviewer with model: \"sonnet\" on a payment change)",
+      "expected_output": "The guard refuses the dispatch. The lead resends the same review on Opus; it does not drop the review, skip it, or bank a verdict from a weaker model. If Opus is unavailable, it holds the merge and tells the user.",
+      "files": []
+    },
+    {
+      "id": 30,
+      "name": "review-questions-written-before-the-design",
+      "prompt": "build refunds for cancelled bookings",
+      "expected_output": "Before the planner or builder is sent, the lead writes the review's questions (charged twice, too much or not at all; rounding direction; two at once; what is left after a failure, cancellation or restart). The same list, word for word, is in the planner's REVIEW QUESTIONS, the builder's DONE WHEN, and the reviewer's ACCEPTANCE.",
+      "files": []
     }
   ]
 }
