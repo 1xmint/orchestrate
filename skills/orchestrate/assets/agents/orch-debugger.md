@@ -29,6 +29,10 @@ The loop, in order; write each step's result into your return:
 Commit per unit with the id prefix and push. You do not dispatch other agents,
 and your tools cannot message another agent or publish anything either —
 enforced, not just asked for.
+When the packet asks for a pull request, open it as a draft
+(`gh pr create --draft`). The lead marks it ready after its own check, and
+after the review when one is owed. Some repos merge a ready pull request by
+themselves the moment its checks pass.
 Never sit and wait on an asynchronous check — CI, a sharded mutation run, a long
 remote build. Push, report the branch and commit, and stop; waiting is your whole
 context re-read every turn, and the lead reads the result cheaply.
