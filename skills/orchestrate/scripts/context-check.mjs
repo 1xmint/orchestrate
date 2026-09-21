@@ -20,13 +20,66 @@
 // blocks, never exits non-zero, never fails the tool call.
 
 import { readFileSync, statSync } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
+import { resolve as resolvePath, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sampleContext, agentTranscriptPath, markAnnounced, storedAdvisedKey } from './lib/context.mjs';
 import { modeNote, modeOf } from './lib/modes.mjs';
 import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, transcriptTurns } from './lib/workers.mjs';
-import { loadSession, saveSession, routerSettings } from './lib/tier.mjs';
+import { loadSession, saveSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
 import { loadPolicy, sizeBudget } from './lib/policy.mjs';
+
+// ---- the working project ----------------------------------------------------
+// Which repo and folder this session is actually touching, learned from the
+// only signal a hook that runs after every tool call has cheaply: the path a
+// call carries. The folder matters because a project is not always a repo
+// root — Cortex is the `cortex` folder inside the heyvera repo. Paths outside
+// the launch folder (plan files, the plugin cache) are ignored; a path under
+// the root already learned is a string-prefix check, no disk read.
+const WORK_PATH_KEYS = ['file_path', 'path', 'notebook_path'];
+
+export function pathFromToolInput(toolInput) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  for (const k of WORK_PATH_KEYS) if (typeof toolInput[k] === 'string' && toolInput[k]) return toolInput[k];
+  return null;
+}
+
+const normSlashes = p => String(p || '').replace(/\\/g, '/');
+const underRoot = (path, root) => root && normSlashes(path).toLowerCase().startsWith(`${normSlashes(root).toLowerCase()}/`);
+
+// The folder a path counts toward: the root itself, unless the path sits one
+// level or more inside it, in which case its immediate child of the root is
+// the folder — the level a project's own instruction file lives at.
+function folderOf(path, root) {
+  const dir = normSlashes(dirname(resolvePath(path)));
+  const r = normSlashes(root);
+  if (dir.toLowerCase() === r.toLowerCase()) return root;
+  if (!underRoot(dir, root) && dir.toLowerCase() !== r.toLowerCase()) return root;
+  const rest = dir.slice(r.length).replace(/^\/+/, '');
+  const first = rest.split('/')[0];
+  return first ? join(root, first) : root;
+}
+
+// Steps `work` ({ counts, root, dir } or null/undefined) by one tool call's
+// path, or returns it unchanged when the path is not under the launch folder.
+// `root` and `dir` are always the most-touched pair so far; ties keep the
+// existing leader, so a single stray read elsewhere does not flip them.
+export function stepWork(work, launchRoot, path) {
+  if (!launchRoot || !path) return work || null;
+  const abs = resolvePath(path);
+  if (!underRoot(abs, launchRoot) && normSlashes(abs).toLowerCase() !== normSlashes(launchRoot).toLowerCase()) return work || null;
+  const root = (work && work.root && (underRoot(abs, work.root) || normSlashes(abs).toLowerCase() === normSlashes(work.root).toLowerCase()))
+    ? work.root
+    : (findRepoRoot(dirname(abs)) || launchRoot);
+  const folder = folderOf(abs, root);
+  const counts = { ...(work && work.counts) };
+  const key = `${root}\u0000${folder}`;
+  counts[key] = (counts[key] || 0) + 1;
+  let bestKey = (work && work.root) ? `${work.root}\u0000${work.dir}` : key;
+  let bestN = counts[bestKey] || 0;
+  for (const [k, n] of Object.entries(counts)) if (n > bestN) { bestN = n; bestKey = k; }
+  const i = bestKey.indexOf('\u0000');
+  return { counts, root: bestKey.slice(0, i), dir: bestKey.slice(i + 1) };
+}
 
 // The progress-file fact, in the order a reader needs it: no path at all,
 // a path that has not been written yet, or a path with how long ago it was
@@ -94,11 +147,26 @@ export function helperSizeNotice({ role, tokens, budget, announced = null, turn 
   return { key, text: `[orchestrate · size] ${parts.join(' · ')}` };
 }
 
+// Records the working project onto whichever state object the caller already
+// has open, by the lead or a helper alike — a helper's edits are as much a
+// sign of where the work is as the lead's own. Saves only when it changed.
+function trackWork(state, input) {
+  const path = pathFromToolInput(input.tool_input);
+  if (!path) return false;
+  const launchRoot = findRepoRoot(input.cwd);
+  if (!launchRoot) return false;
+  const next = stepWork(state.work, launchRoot, path);
+  if (!next || next === state.work) return false;
+  state.work = next;
+  return true;
+}
+
 export function check(input) {
   if (!input || typeof input !== 'object' || !input.session_id) return '';
   const session = input.session_id;
   const agent = input.agent_id ? String(input.agent_id) : null;
   if (agent) {
+    { const s = loadSession(session); if (s && trackWork(s, input)) { try { saveSession(s); } catch {} } }
     const t = input.agent_transcript_path || agentTranscriptPath(input.transcript_path, agent);
     if (t) {
       const sample = sampleContext({ transcriptPath: t, session, agent, announce: false });
@@ -148,7 +216,8 @@ export function check(input) {
     const capped = cappedNote(state);
     if (capped) out.push(capped);
     if (workCallsChanged) state.workCalls = { count: workCalls };
-    if ((state.mode || null) !== before || capped || workCallsChanged) { try { saveSession(state); } catch {} }
+    const workChanged = trackWork(state, input);
+    if ((state.mode || null) !== before || capped || workCallsChanged || workChanged) { try { saveSession(state); } catch {} }
   } else if (workCallsChanged) {
     try { saveSession({ v: 1, session_id: session, started: new Date().toISOString(), workCalls: { count: workCalls } }); } catch {}
   }

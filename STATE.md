@@ -54,6 +54,27 @@ notes. Five pull requests.
   per compaction. After a compaction a fact line now leads the card:
   compaction count, helpers sent, and when orch-advisor was last sent, from
   `state.dispatches`. It states facts only, and a test holds that.
+- **PR 4. Brief from the project's instruction file.** The brief is no longer a
+  file this plugin keeps; it is the `## What this is for` section of the
+  project's own `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` or
+  `AGENTS.md` (`assets/BRIEF.md` is now a section to paste, not a file to
+  drop in). `context-check.mjs` learns the working project (`state.work.root`,
+  `.dir`) from the paths a session's own tool calls carry, string-prefixed
+  against the launch folder so it costs no disk read after the first; the
+  counts reset each compaction so a session that moves projects relearns one.
+  `router.mjs`'s `briefState`/`briefNote` walk from that folder up to the repo
+  root, nearest first, and print nothing when Claude Code is already showing
+  the section (a `CLAUDE.md`-family file at or above the session's own launch
+  folder, or a bare `AGENTS.md` one of those pulls in with `@AGENTS.md`);
+  otherwise the section's text once per epoch and the "missing" line once per
+  session. `resumeExcerpt`'s reader generalised to `sectionExcerpt(md,
+  sections, cap, {intro})`, `resumeExcerpt` now a one-line wrapper over it.
+  `resolveRun` was left as-is (no `state.work.root` fallback for binding): the
+  brief only ever reads a run's `root` field for its own fallback chain, and
+  widening what a hook can *write* through felt like a second, riskier change
+  better done with its own test once the read-only path has run for a while.
+  `ctx.run.root` holds the run's repo root (`readRun`'s existing `root` field,
+  unchanged by this PR).
 
 ## v0.15.8 — a scoped model grant, an outbox, honest Codex state, and helper compactions made visible, 2026-09-18
 

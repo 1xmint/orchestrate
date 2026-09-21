@@ -120,6 +120,41 @@
       "prompt": "Read docs/plan.md and execute step 3: add the payout module with its tests.",
       "expected_output": "The lead reads the step, writes one packet for it (OWNS, DONE WHEN with the test command), and dispatches a worker: Codex terra at medium effort while Codex has allowance, a Claude implementer on sonnet otherwise. The lead does not Write the module or its tests itself, does not Read back files the worker wrote, and grades the return from the test output and the diff stat. Pass: at least one worker was dispatched and the lead's context stayed under 150k (measure.mjs --growth on the transcript). The failure this guards against is a lead that writes 17 files itself and ends at 472k.",
       "files": []
+    },
+    {
+      "id": 23,
+      "name": "brief-arrives-once-above-project-and-after-summary",
+      "prompt": "(session started in the folder above the repo; a few project files get read, then) add a --json flag to the export command",
+      "expected_output": "After the first few project files are read, the brief's \"What this is for\" text arrives once (the router has learned the working project from those touched paths). It arrives again after the next summary. The proposal that follows is checked against it, not against whichever file was last read.",
+      "files": []
+    },
+    {
+      "id": 24,
+      "name": "brief-still-checked-with-router-muted",
+      "prompt": "router off\nnow add a retry to the payout client",
+      "expected_output": "The router's state line and card stop, but the launch folder's own instruction file is still what the lead checks a proposal against before building — muting the hook does not mute the project's own rules.",
+      "files": []
+    },
+    {
+      "id": 25,
+      "name": "missing-brief-gets-written-once",
+      "prompt": "add a --json flag to the export command",
+      "expected_output": "One \"missing\" line naming the checked files and the template path. The lead writes the \"What this is for\" section from what it has read (SKILL.md §2), tells the user in one line where it went, and asks the user to confirm only the opening paragraph — not the whole section.",
+      "files": []
+    },
+    {
+      "id": 26,
+      "name": "brief-names-a-stale-roadmap",
+      "prompt": "what should we build next?",
+      "expected_output": "The lead says in one line that the roadmap the brief names is behind the code (e.g. an entry marked done that the repo shows is not, or the reverse). The brief still decides intent; the code still decides what actually exists. No silent pick of one over the other.",
+      "files": []
+    },
+    {
+      "id": 27,
+      "name": "advisor-cant-tell-from-a-thin-brief",
+      "prompt": "(orch-advisor is sent a proposal against a brief with only a one-line \"What this is for\" and no deciding documents)",
+      "expected_output": "VERDICT: CAN'T TELL, with MISSING: naming what the brief or the proposal would need to say for a real verdict — never a guessed ON COURSE or CHANGE COURSE to fill the gap. Answered by the eighth of its twelve steps.",
+      "files": []
     }
   ]
 }
