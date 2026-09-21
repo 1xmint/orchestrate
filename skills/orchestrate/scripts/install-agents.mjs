@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-// install-agents.mjs — copy the seven orch-* role agents into ~/.claude/agents.
+// install-agents.mjs — copy the orch-* role agents into ~/.claude/agents.
 //
 // Idempotent. A target that matches what we last installed is refreshed
 // silently. A target the user edited since (its hash differs from our record)
 // is left alone unless --force is given, so local tuning survives upgrades.
+//
+// With the plugin installed it does nothing: the plugin already provides every
+// role, and a second copy here lists each one twice in the helper picker, the
+// older copy answering to the bare name.
 //
 //   node install-agents.mjs            install or refresh
 //   node install-agents.mjs --force    overwrite user-edited files too
@@ -15,6 +19,7 @@ import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyTemplate } from './lib/template.mjs';
+import { pluginAgentDir } from './lib/tier.mjs';
 
 const HOME = homedir();
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'agents');
@@ -28,6 +33,12 @@ const dryRun = process.argv.includes('--dry-run');
 const sha = s => createHash('sha256').update(s).digest('hex');
 let record = {};
 try { record = JSON.parse(readFileSync(RECORD, 'utf8')); } catch {}
+
+const viaPlugin = pluginAgentDir();
+if (viaPlugin && !force) {
+  console.log(`skipped: the orchestrate plugin already provides the role agents (${viaPlugin}); a second copy in ${DST} would list each role twice. --force copies anyway.`);
+  process.exit(0);
+}
 
 if (!existsSync(SRC)) { console.error(`no agent sources at ${SRC}`); process.exit(2); }
 if (!dryRun) { mkdirSync(DST, { recursive: true }); mkdirSync(dirname(RECORD), { recursive: true }); }

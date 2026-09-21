@@ -515,7 +515,7 @@ if (wantJson) {
   console.log(`host: ${host}`);
   console.log(`tier: ${tier.tier}  (${tier.source})`);
   console.log(`providers: ${provLine}`);
-  console.log(`agents: ${agents.installed}/${agents.expected} orch-* files in ${agents.dir}${agents.missing.length ? ' — missing: ' + agents.missing.join(', ') + ' (run scripts/install-agents.mjs)' : ' (a running session lists newly installed ones after a short delay)'}`);
+  console.log(`agents: ${agents.installed}/${agents.expected} orch-* files in ${agents.dir}${agents.missing.length ? ' — missing: ' + agents.missing.join(', ') + (agents.source === 'plugin' ? ' (update the plugin)' : ' (run scripts/install-agents.mjs)') : ' (a running session lists newly installed ones after a short delay)'}`);
   console.log(`repo: ${repo || 'not in a git repo (worktree isolation unavailable)'}`);
   console.log(`runs: ${runs.count} under ${runs.dir}${runs.latest ? ' — latest: ' + runs.latest : ''}`);
   console.log(`skills: ${skills.length ? skills.join(', ') : 'none installed'}`);

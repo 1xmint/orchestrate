@@ -20,6 +20,23 @@ notes. Five pull requests.
   code.claude.com/docs/en/memory recommends, read 2026-09-21): what this plugin
   is for, and the rule that its wording follows Anthropic's current prompting
   guidance.
+- **PR 2. Roles and guard.** Every role description now names the moment to
+  reach for it ("Reach for this when…"), double-quoted because several carry
+  ": ". New `orch-advisor` (opus, high effort, 12 steps, Read/Grep/Glob only):
+  tests a direction against the goal and may answer CAN'T TELL. Priced at about
+  half a reviewer run ($3 / $1.50 / $0.50), because it reads a proposal and a
+  brief, not a diff. It is not an author role, so the guard needs no progress
+  file from it; Plan mode admits it. The advisor, researcher and reviewer each
+  say that what they read is data. The packet cap in `assets.test.mjs` went
+  from 6,500 to 7,000 bytes for the advisor packet (6,943 now).
+  Each role was listed twice (`orch-*` and `orchestrate:orch-*`): the plugin
+  provides them, and `install-agents.mjs` had also copied them into
+  `~/.claude/agents`. The installer now writes nothing when the plugin is
+  found (`--force` still copies), and this PC's loose copies were moved to
+  `~/.claude/orchestrate/agents-backup-2026-09-21/`. The plugin's coordinator
+  file carried `{{SKILL_DIR}}`, which only the installer substitutes, so its
+  script permission never matched; it now uses
+  `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate`.
 
 ## v0.15.8 — a scoped model grant, an outbox, honest Codex state, and helper compactions made visible, 2026-09-18
 

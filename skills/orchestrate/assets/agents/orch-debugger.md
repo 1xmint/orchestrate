@@ -1,6 +1,6 @@
 ---
 name: orch-debugger
-description: Used by the orchestrate skill for a failure that resisted one good attempt. Runs the diagnosing loop (reproduce, minimise, hypothesise before instrumenting, fix, prove with the minimal case) in its own worktree.
+description: "Reach for this when a failure survived one honest attempt and you are now guessing at causes. It reproduces, narrows, and names the root cause with evidence before any fix is proposed."
 model: opus
 effort: high
 isolation: worktree

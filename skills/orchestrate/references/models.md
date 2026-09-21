@@ -37,10 +37,10 @@ re-reads; Sonnet instead of Opus is 40% of the per-token price. So:
    progress file, at ~120k to return PARTIAL (a coordinator 150k and 200k;
    `workers.size` in the policy). The role step caps (`maxTurns`: implementer
    100, debugger 120, coordinator 150, researcher, browser and planner 80,
-   reviewer 60) are only a backstop behind it.
+   reviewer 60, advisor 12) are only a backstop behind it.
 2. **Then model.** Executors (implementer, researcher, browser) start on Sonnet;
    the guard refuses anything higher before a real attempt at the same task.
-   Planner, reviewer and debugger may use Opus.
+   Planner, reviewer, debugger and advisor may use Opus.
 3. **Then effort.** Pinned per role, never above `high` (below).
 
 ## Effort
@@ -170,6 +170,7 @@ this reasoned table:
 | `orch-planner` | $8 | $4 | $1.20 | — |
 | `orch-debugger` | $8 | $4 | $1.50 | — |
 | `orch-reviewer` | $6 | $3 | $1 | — |
+| `orch-advisor` | $3 | $1.50 | $0.50 | — |
 | `orch-implementer` | — | $4 | $1.50 | — |
 | `orch-browser` | — | $3 | $1 | — |
 | `Explore` | — | — | $0.50 | $0.10 |

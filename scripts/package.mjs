@@ -66,6 +66,7 @@ export function toSpec(text) {
   body = body.replace(/^Tier `unknown` above:/m, 'Start by running `profile.mjs` in the skill folder. Tier `unknown`:');
   body = body.replace(/The ledger hook saves and indexes the return; you set the row,\nbecause you are the one who read it\./, 'Save the return under the run folder and set the row yourself.');
   body = body.split('${CLAUDE_SKILL_DIR}').join('<skill folder>');
+  body = body.split('${CLAUDE_PLUGIN_ROOT}/skills/orchestrate').join('<skill folder>').split('{{SKILL_DIR}}').join('<skill folder>');
   // No installer runs on these hosts, so nothing would substitute the
   // interpreter placeholder; plain `node` is the honest fallback there.
   body = body.split('{{NODE}} ').join('node ').split('{{NODE}}').join('node');

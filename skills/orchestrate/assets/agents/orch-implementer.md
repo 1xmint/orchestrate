@@ -1,6 +1,6 @@
 ---
 name: orch-implementer
-description: Used by the orchestrate skill. Implements one bounded task from a packet in its own git worktree, with tests, commits per unit, and an evidence-first return. Not for planning or review.
+description: "Reach for this when a change is decided and bounded — files known, done-when checkable — and it is more than about eight tool calls of your own. Works in a worktree on sonnet and returns a diff summary with evidence, not a narrative."
 model: sonnet
 effort: medium
 isolation: worktree

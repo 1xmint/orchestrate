@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
-  DIR, readJson, writeJsonAtomic, staleRunsUnder, FAMILY_ORDER,
+  DIR, readJson, writeJsonAtomic, staleRunsUnder, FAMILY_ORDER, AGENT_NAMES,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext, CONTEXT_DIR, thresholds } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
@@ -86,7 +86,7 @@ export function stateLine(ctx, prefix) {
   const you = ctx.self && ctx.self.model
     ? `you: ${ctx.self.model}${ctx.self.effort ? ` @ ${ctx.self.effort} effort` : ''}`
     : 'you: model not known here';
-  const agents = `orch-agents ${ctx.agents}/7`;
+  const agents = `orch-agents ${ctx.agents}/${AGENT_NAMES.length}`;
   const limits = (ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none') + contextPhrase(ctx.context);
   return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · codex: ${ctx.codex || codexState()} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
 }

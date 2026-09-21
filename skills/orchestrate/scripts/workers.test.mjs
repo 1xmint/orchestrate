@@ -11,6 +11,8 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workflowDecision, PLAN_READ_ROLES } from './guard-agent.mjs';
+import { AGENT_NAMES } from './lib/tier.mjs';
+const ALL = AGENT_NAMES.length;
 import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal, recordCodexOk, freshCodexOk, CODEX_OK_FRESH_MS } from './lib/workers.mjs';
 import { modeTransition, modeNote, PLAN_NOTE, APPROVED_NOTE } from './lib/modes.mjs';
 import { cappedReturn, roleMaxTurns, sumUsage } from './ledger.mjs';
@@ -45,10 +47,10 @@ test('only a recorded depth-1 coordinator may dispatch a named capped child', ()
 });
 
 test('general-purpose is replaced by capped role agents while they are installed', () => {
-  const d = workflowDecision({}, ti('general-purpose'), { policy, installed: 7 });
+  const d = workflowDecision({}, ti('general-purpose'), { policy, installed: ALL });
   assert.match(d.reason, /no turn cap/);
   assert.match(d.reason, /orch-implementer/);
-  assert.match(workflowDecision({}, ti('claude'), { policy, installed: 7 }).reason, /no turn cap/);
+  assert.match(workflowDecision({}, ti('claude'), { policy, installed: ALL }).reason, /no turn cap/);
   assert.equal(workflowDecision({}, ti('general-purpose'), { policy, installed: 0 }), null, 'without the role agents it is the only choice');
   assert.equal(workflowDecision({}, ti('general-purpose'), { policy, installed: 3 }), null, 'a partial install still falls back on it');
   assert.equal(workflowDecision({}, ti('orchestrate:orch-implementer'), { policy, installed: 6 }), null);
@@ -58,7 +60,14 @@ test('general-purpose is replaced by capped role agents while they are installed
 test('Plan mode: helpers only read, return inline, no worktrees or progress files', () => {
   const plan = { permission_mode: 'plan' };
   assert.match(workflowDecision(plan, ti('orchestrate:orch-implementer'), { policy, installed: 6 }).reason, /Plan mode, where helpers only read/);
-  assert.match(workflowDecision(plan, ti('orchestrate:orch-planner'), { policy, installed: 6 }).reason, /only read/, 'only the lead maintains the plan');
+  // The planner and the advisor read and return inline, which is what Plan mode
+  // is for; the planner is still refused a progress file below.
+  assert.equal(workflowDecision(plan, ti('orchestrate:orch-planner'), { policy, installed: 6 }), null, 'the planner is admitted');
+  assert.equal(workflowDecision(plan, ti('orchestrate:orch-advisor'), { policy, installed: 6 }), null, 'the advisor is admitted');
+  assert.match(workflowDecision(plan, ti('orchestrate:orch-planner', 'TASK: 1
+PROGRESS: /r/progress/1.md'), { policy, installed: 6 }).reason, /no progress files/, 'only the lead maintains the plan');
+  const refusal = workflowDecision(plan, ti('orchestrate:orch-implementer'), { policy, installed: 6 }).reason;
+  for (const role of PLAN_READ_ROLES) if (/^orch-|^Explore$/.test(role)) assert.match(refusal, new RegExp(role), `the Plan-mode refusal names ${role}`);
   assert.match(workflowDecision(plan, ti('orchestrate:orch-debugger'), { policy, installed: 6 }).reason, /only read/);
   for (const role of PLAN_READ_ROLES) assert.equal(workflowDecision(plan, ti(role === 'Explore' || role === 'Plan' || role === 'claude-code-guide' ? role : `orchestrate:${role}`), { policy, installed: 6 }), null, `${role} may read`);
   assert.match(workflowDecision(plan, ti('orchestrate:orch-researcher', 'x', { isolation: 'worktree' }), { policy, installed: 6 }).reason, /no worktrees/);
@@ -430,7 +439,7 @@ test('replay: the 274-call general-purpose helper is measured whole and would be
   assert.equal(sumUsage(join(sub, 'agent-gp1.jsonl')).turns, 274);
 
   // What the guard says now to the same two dispatches.
-  assert.match(workflowDecision({}, { subagent_type: 'general-purpose', model: 'sonnet', prompt: 'do everything' }, { policy, installed: 7 }).reason, /no turn cap/);
+  assert.match(workflowDecision({}, { subagent_type: 'general-purpose', model: 'sonnet', prompt: 'do everything' }, { policy, installed: ALL }).reason, /no turn cap/);
   const nestedOpts = { policy, installed: 7, dispatches: [{ agent: 'general-purpose', toolUseId: 'toolu_gp' }], files: helperFiles(leadPath) };
   assert.match(workflowDecision({ agent_id: 'gp1' }, { subagent_type: 'general-purpose', prompt: 'sub-task' }, nestedOpts).reason, /only orch-coordinator/);
   assert.equal(measure(readFileSync(leadPath, 'utf8')).dispatches.length, 1);

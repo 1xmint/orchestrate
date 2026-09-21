@@ -14,7 +14,7 @@ export const DIR = join(HOME, '.claude', 'orchestrate');
 export const SESSIONS_DIR = join(DIR, 'sessions');
 export const PROFILE_PATH = join(DIR, 'profile.json');
 export const TIERS = ['pro', 'max5', 'max20', 'team', 'api', 'unknown'];
-export const AGENT_NAMES = ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger', 'orch-coordinator'];
+export const AGENT_NAMES = ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger', 'orch-coordinator', 'orch-advisor'];
 export const OPEN_GLYPHS = /📋|🔨|🔍|◐|⛔/;
 
 export function readJson(path) {
@@ -141,7 +141,7 @@ export function routerSettings() {
 // therefore reported "agents 0/6 (missing …)" on a working plugin install, and
 // sent the model off to run install-agents.mjs, which would have created a
 // second set that then shadowed the plugin's. Look in both places.
-function pluginAgentDir() {
+export function pluginAgentDir() {
   const base = join(HOME, '.claude', 'plugins', 'cache');
   try {
     for (const market of readdirSync(base)) {
