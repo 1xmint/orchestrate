@@ -63,14 +63,17 @@ export function codexState(now = Date.now()) {
 // the file cannot be read; it used to be a shorter, separately-maintained
 // summary that silently fell two paragraphs behind the real card.
 export const FALLBACK_CARD = [
-  'orchestrate is loaded. Your context is for judgment. Do a step yourself when it fits in about 8 tool calls with small outputs. Everything else goes to a worker, and you keep only its return: writing a file over ~150 lines, changing three or more files, a build or test suite, a read whose answer is a paragraph. Workers run on Codex (codex-worker.mjs --model --effort) until it runs out; Claude workers for what Codex cannot reach. A plan: one packet per step; three or more independent steps go to orch-coordinator. Never Write a file you could Edit, never Read back what you wrote; filter output. Open a run ledger when several tracks run at once or the work outlives this session.',
-  'Answer a settled question from the record and say where. Answer a question about the world from the source that settles it. Answer a judgment question with a recommendation and what would change it. An installed skill that does what a built-in tool cannot beats rebuilding it; name it in any packet that needs it.',
-  'Before adding a dependency, an abstraction or another worker, name the problem it solves now.',
-  'Evidence decides done: reuse a check that passed, test a real uncovered behaviour, drive a user flow when reading cannot settle it. Independent review is for money, auth, destructive data, a contract others consume, or real architectural doubt.',
-  'Stop and ask, recommendation first, only for money, a public surface, credentials, or a destructive or irreversible action. Authorisation already given is not asked for twice. Mute this card: type "router off".',
+  "orchestrate is loaded. The user owns what the product should do; you own how it is built: decide, say why, take the next step. Before you propose building anything, check it against what this project is for — the brief (\"What this is for\" in the project's CLAUDE.md or AGENTS.md, and the documents it names) and the goal, not the file you just read. Where they disagree, the brief wins until the user changes it.",
+  "At a turning point, zoom out before you act. Look two steps ahead and name what is missing — research, a legal or licence question, a root cause under the symptom, an unchecked fact, a decision that is the user's. Then send orch-advisor your proposal before you commit, without waiting to be asked; its description lists the moments. While it runs, keep preparing whatever does not hang on its answer.",
+  "Your context is for judgment. Do a step yourself when it fits in about eight tool calls with small outputs; hand over anything larger and keep only the return. One packet per plan step; three or more independent steps go to orch-coordinator. Change a file with Edit rather than rewriting it, trust a write that did not error, and filter long output before it reaches you. Open a run ledger with a budget when tracks run at once or the work outlives this session.",
+  "Engineering forks are yours: choose, record why in one line, move. Answer a settled question from the record and say where; a question about the world from the source that settles it; a judgment call with a recommendation and what would change it. Before adding a dependency, an abstraction or another worker, name the problem it solves now.",
+  "Evidence decides done: reuse a check that passed, test real uncovered behaviour, drive a user flow when reading cannot settle it. Buy independent review for money, auth, destructive data, a contract others consume, or architectural doubt you could not resolve. Stop and ask only about what the product should do, money, a public surface, credentials, legal exposure, or something destructive or irreversible: recommendation first. Authority already given is not asked for again. End a turn on the step you are taking, not a menu. Mute this card: type \"router off\".",
 ].join('\n');
 
-export const CARD_CAP = 1550;
+// 1,550 until 0.16.0: the new card measured 2,184, and the cap is that
+// rounded up to the next 50. It is paid once per session and once per
+// compaction, against a compaction that frees 100k or more.
+export const CARD_CAP = 2200;
 
 export function cardBody() {
   try {
@@ -596,6 +599,18 @@ export function pluginFitReport(transcriptPath, { path = LISTING_REPORT_PATH, pr
   } catch { return ''; }
 }
 
+// Facts the lead lost with the summary and cannot see from here: how many
+// summaries this session has had, how many helpers were sent, and when the
+// advisor last was. No instruction; the card that follows carries those.
+export function compactionFact(state) {
+  const sent = Array.isArray(state && state.dispatches) ? state.dispatches : [];
+  let last = -1;
+  sent.forEach((d, i) => { if (normalizeRole(d && d.agent) === 'orch-advisor') last = i; });
+  const since = sent.length - 1 - last;
+  const advisor = last < 0 ? 'never' : since === 0 ? 'the most recent helper' : `${since} helper${since === 1 ? '' : 's'} ago`;
+  return `[orchestrate · after compaction] The conversation was summarised. The card below was in view before the summary and is not in it. Compaction ${(state && state.compactions) || 1} of this session. ${sent.length} helper${sent.length === 1 ? '' : 's'} sent so far; orch-advisor last sent: ${advisor}.`;
+}
+
 // Resume and compaction are the two moments the goal is actually at risk, so
 // this is where the excerpt earns its tokens.
 function handleSessionStart(input) {
@@ -612,7 +627,8 @@ function handleSessionStart(input) {
 
   // The summary keeps the conversation's gist, not the card that was injected
   // into it, so without this the rest of a long session runs with no card.
-  if (source === 'compact' && !state.muted) out.push(cardBody());
+  if (source === 'compact') state.compactions = (state.compactions || 0) + 1;
+  if (source === 'compact' && !state.muted) out.push(compactionFact(state), cardBody());
 
   if (ctx.run) {
     const ex = resumeExcerpt(ctx.run.runMd);

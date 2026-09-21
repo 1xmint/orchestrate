@@ -37,6 +37,23 @@ notes. Five pull requests.
   file carried `{{SKILL_DIR}}`, which only the installer substitutes, so its
   script permission never matched; it now uses
   `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate`.
+- **PR 3. New card.** The old card was all delegation mechanics. The new one
+  opens with who owns what (the user: what the product does; the lead: how it
+  is built), checks proposals against the brief ("What this is for" in the
+  project's CLAUDE.md or AGENTS.md), and sends orch-advisor at a turning point
+  without waiting to be asked; the moments themselves live in the advisor's
+  description, which Claude Code keeps in view through a summary. It keeps
+  working while the advisor runs (Fable 5.1 prompting page: do not make the lead
+  stop and wait). "Never Write / never Read back" became what to do. The Codex
+  lane and installed-skills sentences left, because other hooks say them at the
+  moment they matter (`guard-agent.mjs` Codex lane, `pluginFitReport`). These
+  are ownership facts and a list of moments, things the lead cannot derive, so
+  they do not contradict the earlier cut of "how to think" instructions.
+  Measured 2,184 characters; `CARD_CAP` 1,550 → 2,200 (rounded up to the next
+  50, as 1,400 → 1,550 was). Cost: about 550 tokens once per session and once
+  per compaction. After a compaction a fact line now leads the card:
+  compaction count, helpers sent, and when orch-advisor was last sent, from
+  `state.dispatches`. It states facts only, and a test holds that.
 
 ## v0.15.8 — a scoped model grant, an outbox, honest Codex state, and helper compactions made visible, 2026-09-18
 
