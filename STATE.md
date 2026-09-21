@@ -2,7 +2,7 @@
 
 Resume point for building the `orchestrate` skill.
 
-## v0.16.0 — from work dispatcher to engineering partner, 2026-09-21 (in progress)
+## v0.16.0 — from work dispatcher to engineering partner, 2026-09-21
 
 Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` with its steering
 notes. Five pull requests.
@@ -75,6 +75,17 @@ notes. Five pull requests.
   better done with its own test once the read-only path has run for a while.
   `ctx.run.root` holds the run's repo root (`readRun`'s existing `root` field,
   unchanged by this PR).
+- **PR 5. Release.** Version 0.16.0 in `plugin.json` and `marketplace.json`;
+  the README counts eight roles, and says the installer skips its loose copies
+  when the plugin already provides them, since a second copy lists each role
+  twice. Evals 18-22 cover the direction check, the scope file outranking the
+  code just read, an engineering fork settled rather than asked, guidance after
+  a compaction, and a review bought before real spending merges. The `.skill`
+  bundles stay out of git; CI builds them. The router's compaction count
+  (`state.compactions`) is its own number; the context line's "compacted N×"
+  comes from reading the transcript in `lib/context.mjs`, so nothing is counted
+  twice. Known gap: `orch-coordinator` has no price row in REASONED. Guidance
+  pages checked 2026-09-21.
 
 ## v0.15.8 — a scoped model grant, an outbox, honest Codex state, and helper compactions made visible, 2026-09-18
 
