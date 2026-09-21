@@ -1,8 +1,7 @@
 <!--
 A section to paste into the project's own instruction file (CLAUDE.md,
-CLAUDE.local.md or AGENTS.md), not a file to keep on its own. See
-skills/orchestrate/SKILL.md and AGENTS.md's "AGENTS.md and CLAUDE.md" note for
-where it goes.
+CLAUDE.local.md or AGENTS.md), not a file to keep on its own. "The brief" in
+skills/orchestrate/SKILL.md says which file it goes in.
 -->
 
 ## What this is for
