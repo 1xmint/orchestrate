@@ -64,8 +64,7 @@ test('Plan mode: helpers only read, return inline, no worktrees or progress file
   // is for; the planner is still refused a progress file below.
   assert.equal(workflowDecision(plan, ti('orchestrate:orch-planner'), { policy, installed: 6 }), null, 'the planner is admitted');
   assert.equal(workflowDecision(plan, ti('orchestrate:orch-advisor'), { policy, installed: 6 }), null, 'the advisor is admitted');
-  assert.match(workflowDecision(plan, ti('orchestrate:orch-planner', 'TASK: 1
-PROGRESS: /r/progress/1.md'), { policy, installed: 6 }).reason, /no progress files/, 'only the lead maintains the plan');
+  assert.match(workflowDecision(plan, ti('orchestrate:orch-planner', 'TASK: 1\nPROGRESS: /r/progress/1.md'), { policy, installed: 6 }).reason, /no progress files/, 'only the lead maintains the plan');
   const refusal = workflowDecision(plan, ti('orchestrate:orch-implementer'), { policy, installed: 6 }).reason;
   for (const role of PLAN_READ_ROLES) if (/^orch-|^Explore$/.test(role)) assert.match(refusal, new RegExp(role), `the Plan-mode refusal names ${role}`);
   assert.match(workflowDecision(plan, ti('orchestrate:orch-debugger'), { policy, installed: 6 }).reason, /only read/);

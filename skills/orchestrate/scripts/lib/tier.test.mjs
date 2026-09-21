@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { isWritten, latestRun, readyTasks, ungradedReturns, returnedTasks, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot, seenRecently, recordSeen, trimLog } from './tier.mjs';
+import { isWritten, latestRun, readyTasks, ungradedReturns, returnedTasks, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot, AGENT_NAMES, seenRecently, recordSeen, trimLog } from './tier.mjs';
 
 const TIER = new URL('./tier.mjs', import.meta.url).href;
 
@@ -278,8 +278,8 @@ test('the pointer never shows one repo the ledger of another', () => {
 // reported "agents 0/6 (missing ...)" on a perfectly good plugin install, and
 // would have sent the model off to install a second set that then shadowed the
 // plugin's own.
-test('the seven agents count whether they are loose files or inside a plugin', () => {
-  const names = ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger', 'orch-coordinator'];
+test('every role agent counts whether they are loose files or inside a plugin', () => {
+  const names = AGENT_NAMES;
   const ask = home => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e',
     `const { agentsInstalled } = await import(${JSON.stringify(TIER)}); console.log(JSON.stringify(agentsInstalled()));`,
   ], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } }).stdout.trim());
@@ -294,11 +294,11 @@ name: ${n}
 ---
 `);
   const viaPlugin = ask(home);
-  assert.equal(viaPlugin.installed, 7, 'found inside the plugin');
+  assert.equal(viaPlugin.installed, names.length, 'found inside the plugin');
   assert.deepEqual(viaPlugin.missing, []);
   assert.equal(viaPlugin.source, 'plugin');
 
-  // Loose files still win when all seven are there, so a script install is
+  // Loose files still win when every role is there, so a script install is
   // unaffected and still reports its own directory.
   const loose = join(home, '.claude', 'agents');
   mkdirSync(loose, { recursive: true });
@@ -307,7 +307,7 @@ name: ${n}
 ---
 `);
   const viaFiles = ask(home);
-  assert.equal(viaFiles.installed, 7);
+  assert.equal(viaFiles.installed, names.length);
   assert.equal(viaFiles.source, 'files');
 });
 
