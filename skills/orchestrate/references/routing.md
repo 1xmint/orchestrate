@@ -87,7 +87,7 @@ They are the same failure.
 
 Work that is hard to check and expensive to get wrong: an adversarial audit, an
 ambiguous plan crossing modules, a failure that survived a good attempt on Opus,
-sources that disagree and must be reconciled.
+sources that disagree and must be reconciled, choosing a direction.
 
 Not when something else can check the answer: a tight packet with strong tests,
 a sweep, an extraction, a mechanical change.
@@ -134,6 +134,7 @@ cap; an uncapped expensive one is not. The guard enforces the executor rows.
 | `orch-reviewer` | opus | opus | opus; fable for security, release, public, money |
 | `orch-debugger` | opus | opus | opus; fable after Opus is stuck |
 | `orch-coordinator` | opus | opus | opus |
+| `orch-advisor` | opus | opus; fable when choosing a direction | same as Max 5x |
 | any Fable dispatch | **the user's call each time** | judge each on its merits | judge each on its merits |
 
 Pass it on the `Agent` call (`model: sonnet | opus | haiku | fable`).

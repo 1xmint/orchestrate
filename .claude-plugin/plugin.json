@@ -24,7 +24,8 @@
     "./skills/orchestrate/assets/agents/orch-browser.md",
     "./skills/orchestrate/assets/agents/orch-reviewer.md",
     "./skills/orchestrate/assets/agents/orch-debugger.md",
-    "./skills/orchestrate/assets/agents/orch-coordinator.md"
+    "./skills/orchestrate/assets/agents/orch-coordinator.md",
+    "./skills/orchestrate/assets/agents/orch-advisor.md"
   ],
   "outputStyles": "./skills/orchestrate/assets/output-styles/"
 }

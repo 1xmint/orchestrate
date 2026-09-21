@@ -106,6 +106,17 @@ RETURN: TASK, STATUS: DONE, VERDICT: PASS|FAIL, FINDINGS (numbered, file:line,
 Name the risk. A reviewer sent to look for gaps will find some in any change; a
 reviewer sent to decide one question answers that question.
 
+## Advisor packet
+
+```
+TASK: <id>  ROLE: advisor
+GOAL: <the goal in the owner's words, not yours>
+BRIEF: <path to the project instruction file holding "What this is for", and the documents it names>
+PROPOSAL: <what you are about to do, five lines or fewer, and why you think it is right>
+ALREADY RULED OUT: <what you considered and dropped, one line each — or "nothing">
+DECIDE: is this the right next move for the goal
+```
+
 ## Why so few fields
 
 The same task, badly briefed:

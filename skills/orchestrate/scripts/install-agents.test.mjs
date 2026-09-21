@@ -1,4 +1,4 @@
-// install-agents.test.mjs — the upgrade path for the seven role agents. The
+// install-agents.test.mjs — the upgrade path for the role agents. The
 // promise it makes is that a file the user tuned locally is not silently
 // overwritten by the next install, and these are the cases that promise turns
 // on. Every run uses a fake HOME, so the machine's own agents are untouched.
@@ -29,7 +29,7 @@ const run = (h, ...args) => spawnSync(process.execPath, [SCRIPT, ...args], {
 
 const agentPath = (h, n) => join(h, '.claude', 'agents', `${n}.md`);
 
-test('a first install writes all seven, with {{SKILL_DIR}} substituted', () => {
+test('a first install writes every role, with {{SKILL_DIR}} substituted', () => {
   const h = home();
   const r = run(h);
   assert.equal(r.status, 0, r.stderr);
@@ -40,7 +40,7 @@ test('a first install writes all seven, with {{SKILL_DIR}} substituted', () => {
   // a finished return back to be reformatted, which spent a model turn to buy a
   // shape. Nothing in an installed agent file can now cost a turn.
   assert.doesNotMatch(reviewer, /^hooks:/m, 'no per-agent hook survives the install');
-  assert.match(r.stdout, /7 installed, 0 refreshed/);
+  assert.match(r.stdout, new RegExp(`${AGENT_NAMES.length} installed, 0 refreshed`));
 });
 
 test('a second install changes nothing and says so', () => {
@@ -48,7 +48,7 @@ test('a second install changes nothing and says so', () => {
   run(h);
   const before = readFileSync(agentPath(h, 'orch-planner'), 'utf8');
   const r = run(h);
-  assert.match(r.stdout, /0 installed, 0 refreshed, 7 unchanged/);
+  assert.match(r.stdout, new RegExp(`0 installed, 0 refreshed, ${AGENT_NAMES.length} unchanged`));
   assert.equal(readFileSync(agentPath(h, 'orch-planner'), 'utf8'), before);
 });
 
@@ -89,6 +89,19 @@ test('--dry-run reports without writing anything', () => {
   const h = home();
   const r = run(h, '--dry-run');
   assert.equal(r.status, 0);
-  assert.match(r.stdout, /\[dry-run\] 7 installed/);
+  assert.match(r.stdout, new RegExp(`\\[dry-run\\] ${AGENT_NAMES.length} installed`));
   assert.equal(existsSync(join(h, '.claude', 'agents')), false);
+});
+
+test('with the plugin installed it writes nothing, since a second copy lists every role twice', () => {
+  const h = home();
+  const pdir = join(h, '.claude', 'plugins', 'cache', 'market', 'orchestrate', '0.16.0', 'skills', 'orchestrate', 'assets', 'agents');
+  mkdirSync(pdir, { recursive: true });
+  for (const n of AGENT_NAMES) writeFileSync(join(pdir, `${n}.md`), `---\nname: ${n}\n---\n`);
+  const r = run(h);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /skipped: the orchestrate plugin already provides the role agents/);
+  assert.equal(existsSync(join(h, '.claude', 'agents')), false);
+  const forced = run(h, '--force');
+  assert.match(forced.stdout, new RegExp(`${AGENT_NAMES.length} installed`), '--force still copies');
 });

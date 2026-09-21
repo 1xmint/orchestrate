@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cardBody, CARD_CAP, resumeExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash } from './router.mjs';
+import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTER = join(HERE, 'router.mjs');
@@ -29,7 +30,7 @@ function makeHome() {
   // Most router tests are about ordinary prompts, not this one-time migration.
   writeFileSync(join(home, '.claude', 'orchestrate', 'autocompact-default.json'), '{}');
   mkdirSync(join(home, '.claude', 'agents'), { recursive: true });
-  for (const n of ['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-reviewer', 'orch-debugger', 'orch-coordinator']) {
+  for (const n of AGENT_NAMES) {
     writeFileSync(join(home, '.claude', 'agents', `${n}.md`), `---\nname: ${n}\n---\n`);
   }
   return home;
@@ -100,7 +101,7 @@ test('the first substantive prompt gets the state line and the card, once', () =
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
   assert.match(first, /\[orchestrate\]/);
   assert.match(first, /tier max5/);
-  assert.match(first, /orch-agents 7\/7/);
+  assert.match(first, new RegExp(`orch-agents ${AGENT_NAMES.length}/${AGENT_NAMES.length}`));
   assert.match(first, /run: none/);
   assert.match(first, /orchestrate is loaded/);
 

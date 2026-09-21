@@ -245,7 +245,7 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
 //   uncapped     general-purpose/claude while capped role agents are installed
 //   worktree     a Claude helper aimed at a worktree a live Codex worker holds
 //   concurrency  two workers normally, three while a coordinator holds a slot
-export const PLAN_READ_ROLES = new Set(['orch-researcher', 'orch-reviewer', 'Explore', 'Plan', 'claude-code-guide']);
+export const PLAN_READ_ROLES = new Set(['orch-advisor', 'orch-planner', 'orch-researcher', 'orch-reviewer', 'Explore', 'Plan', 'claude-code-guide']);
 export const UNCAPPED = new Set(['general-purpose', 'claude']);
 export const COORDINATOR_CHILD_ROLES = new Set(['orch-implementer', 'orch-researcher', 'orch-reviewer', 'Explore']);
 
@@ -268,7 +268,7 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
   }
 
   if (input && input.permission_mode === 'plan') {
-    if (!PLAN_READ_ROLES.has(role)) return { prefix: 'plan', reason: `the host is in Plan mode, where helpers only read. ${role} can change files. Send orch-researcher, orch-reviewer or Explore (with a model named) and ask for findings returned inline, or do the inspection yourself.` };
+    if (!PLAN_READ_ROLES.has(role)) return { prefix: 'plan', reason: `the host is in Plan mode, where helpers only read. ${role} can change files. Send orch-advisor to test a direction, orch-planner for an ordered plan returned inline, orch-researcher for facts outside the code, orch-reviewer to judge a change, or Explore (naming a model) to find things. Or do the inspection yourself.` };
     if (ti.isolation === 'worktree' || /^\s*WHERE:.*worktree:\s*yes/mi.test(prompt) || /^\s*worktree:\s*yes/mi.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: no worktrees. Remove the worktree and ask for read-only findings returned inline.' };
     if (/^\s*PROGRESS:/m.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: helpers write no progress files. Remove the PROGRESS line and ask for findings returned inline; only the lead maintains the plan.' };
   }
@@ -276,7 +276,7 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
   // Only once all six role agents are present: a partial script install still
   // falls back on general-purpose for a writing role (SKILL.md §0).
   if (UNCAPPED.has(role) && installed >= AGENT_NAMES.length && policy.workers.generalPurpose !== 'allow') {
-    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orchestrate:orch-implementer (model "sonnet") to change code, orchestrate:orch-researcher or Explore (model "haiku") to find things, orchestrate:orch-reviewer to review. Or do a small task yourself.` };
+    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orch-implementer (model "sonnet") to change code, orch-researcher or Explore (model "haiku") to find things, orch-planner when you cannot yet name the steps, orch-debugger for a failure that survived one attempt, orch-reviewer before shipping something expensive to get wrong, orch-advisor before committing to a direction, orch-browser when only a real browser settles it. Or do a small task yourself.` };
   }
 
   const locked = lockedWorktreeIn(prompt, external);
