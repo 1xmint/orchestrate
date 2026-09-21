@@ -121,7 +121,9 @@ task moves up only after it fails a check on Sonnet. The evidence for starting
 cheap: running at a lower setting and re-running only the failures passed ~93%
 of tasks at half the cost of running everything at the default (Anthropic,
 optimizing-for-cost-and-intelligence). A cheap attempt is bounded by its step
-cap; an uncapped expensive one is not. The guard enforces the executor rows.
+cap; an uncapped expensive one is not. The guard enforces the executor rows
+and a floor under the two verdict roles: a reviewer or an advisor named weaker
+than Opus is refused.
 
 | Role | Pro | Max 5x | Max 20x |
 |---|---|---|---|
@@ -170,7 +172,9 @@ whether this change is risky.
 
 Two rules stay absolute. **Never review your own edits**: dispatch. And a
 reviewer weaker than the author produces a PASS you cannot bank, so a reviewer
-is never weaker than the author.
+is never weaker than the author. The guard holds that floor at Opus. When the
+author itself ran on Opus, review on Fable or through the Codex lane, and judge
+the Fable spend on its merits.
 
 Give the reviewer the concrete risk and the acceptance criteria. A reviewer
 asked to look for gaps will find some in any change.

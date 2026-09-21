@@ -91,6 +91,22 @@ test('executors start on Sonnet; judgment roles may use Opus', () => {
   }
 });
 
+test('the two verdict roles hold a floor at Opus: weaker is refused, Opus and Fable pass', () => {
+  for (const role of ['orch-reviewer', 'orchestrate:orch-reviewer', 'orch-advisor', 'orchestrate:orch-advisor']) {
+    for (const model of ['sonnet', 'haiku', 'claude-sonnet-5']) {
+      const d = modelDecision({ subagent_type: role, model, prompt: 'TASK: 9-21-0001\nreview it' }, pro);
+      assert.equal(d && d.prefix, 'model', `${role} on ${model} is refused`);
+      assert.match(d.reason, /model: "opus"/, 'says what to resend with');
+      assert.match(d.reason, /hold the merge/, 'says what to do if Opus is out');
+    }
+    for (const model of ['opus', 'fable', 'claude-opus-5']) {
+      assert.equal(modelDecision({ subagent_type: role, model, prompt: 'x' }, { tier: 'max5' }), null, `${role} on ${model} passes`);
+    }
+    assert.equal(modelDecision({ subagent_type: role, prompt: 'x' }, pro), null, `${role} with no model runs on its file's Opus`);
+    assert.equal(modelDecision({ subagent_type: role, model: 'mystery-7', prompt: 'x' }, pro), null, `${role} on an unknown family is not judged`);
+  }
+});
+
 test('escalation is allowed only after an attempt at the same task by the same role', () => {
   const ti = { subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 9-9-0002\nfix it' };
   const same = [{ agent: 'orchestrate:orch-implementer', model: 'sonnet', key: '9-9-0002' }];

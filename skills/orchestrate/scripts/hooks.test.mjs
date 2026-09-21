@@ -247,7 +247,7 @@ test('guard: the packet notice names a missing PROGRESS line on an author-role d
 
   const reviewer = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's5', cwd: home,
-    tool_input: { subagent_type: 'orch-reviewer', model: 'sonnet', prompt: 'TASK: 9-9-0004\nreview it' },
+    tool_input: { subagent_type: 'orch-reviewer', model: 'opus', prompt: 'TASK: 9-9-0004\nreview it' },
   }, home);
   assert.doesNotMatch(reviewer.stdout, /no PROGRESS line/, 'a reviewer returns a verdict, not partial work');
 
