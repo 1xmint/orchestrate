@@ -136,7 +136,17 @@ test('the manager\'s own model comes from the last assistant record in the tail'
     JSON.stringify({ type: 'assistant', effort: 'high', entrypoint: 'claude-desktop', message: { model: 'claude-opus-5' } }),
     JSON.stringify({ type: 'queue-operation', operation: 'enqueue' }),
   ].join('\n') + '\n');
-  assert.deepEqual(selfModel(p), { model: 'opus', effort: 'high', entrypoint: 'claude-desktop' }, 'the newest record wins, host and all');
+  // The session's own CLAUDE_EFFORT beats the transcript; pin it so the result
+  // does not depend on who runs the tests.
+  const savedEffort = process.env.CLAUDE_EFFORT;
+  try {
+    delete process.env.CLAUDE_EFFORT;
+    assert.deepEqual(selfModel(p), { model: 'opus', effort: 'high', entrypoint: 'claude-desktop' }, 'the newest record wins, host and all');
+    process.env.CLAUDE_EFFORT = 'medium';
+    assert.equal(selfModel(p).effort, 'medium', 'the environment wins over the transcript');
+  } finally {
+    if (savedEffort === undefined) delete process.env.CLAUDE_EFFORT; else process.env.CLAUDE_EFFORT = savedEffort;
+  }
   assert.equal(selfModel(join(dir, 'absent.jsonl')), null);
   assert.equal(selfModel(''), null);
 
