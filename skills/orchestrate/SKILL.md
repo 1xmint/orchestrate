@@ -17,25 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.15.8"
-hooks:
-  PreToolUse:
-    - matcher: "Agent|Task"
-      hooks:
-        - type: command
-          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/guard-agent.mjs"'
-  SubagentStop:
-    - hooks:
-        - type: command
-          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/ledger.mjs"'
-  Stop:
-    - hooks:
-        - type: command
-          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/turn-check.mjs"'
-  PreCompact:
-    - hooks:
-        - type: command
-          command: 'node "${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/precompact-check.mjs"'
+  version: "0.16.1"
 ---
 
 # Orchestrate
