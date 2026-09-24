@@ -293,7 +293,7 @@ export function callsOf(text, { lead = false, seen = new Set() } = {}) {
       if (b.name === 'Agent' || b.name === 'Task') r.nestedDispatches++;
     }
     if (!msg.usage) continue;
-    const id = msg.id || `anon-${anon++}-${Math.random()}`;
+    const id = msg.id || `anon-${anon++}`;
     if (seen.has(id) && !byId.has(id)) continue;
     seen.add(id);
     byId.set(id, msg.usage);
