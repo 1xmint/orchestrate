@@ -846,6 +846,18 @@ test('precompact: a bound run with a stale Pickup blocks compaction once, and na
   assert.equal(second.stdout.trim(), '', 'it blocks once, not in a loop, and lets compaction proceed');
 });
 
+test('precompact: agent_id present (a subagent compacting its own transcript) is never blocked, even with a stale Pickup', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'spc1b', repo);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const state = JSON.parse(readFileSync(join(sessions, 'spc1b.json'), 'utf8'));
+  state.lastDispatchAt = new Date().toISOString();
+  writeFileSync(join(sessions, 'spc1b.json'), JSON.stringify(state));
+  const out = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1b', cwd: repo.dir, trigger: 'auto', agent_id: 'agent-1' }, home);
+  assert.equal(out.stdout.trim(), '', "a subagent is not the lead's Pickup line to demand");
+});
+
 test('precompact: a written Pickup, or no dispatch yet, never blocks', () => {
   const home = sandbox();
   const written = fixtureRepo({ pickup: 'continue from the reviewer FAIL' });

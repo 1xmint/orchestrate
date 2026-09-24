@@ -544,6 +544,11 @@ function promptText(input) {
 // changes. A message whose wording differs from the last one is not a change of
 // state, and the old router treated it as one.
 function handlePrompt(input) {
+  // A hook fires inside a subagent's own call too, with `agent_id` set on the
+  // stdin payload (hooks doc, "common input fields"). Nothing here is about
+  // that subagent's own work — the plan tier, the run ledger, the card — so
+  // printing it there was pure noise a helper paid to read about itself.
+  if (input && input.agent_id) return;
   if (!routerSettings().enabled) return;
   const text = promptText(input);
   if (text == null) return;
@@ -769,6 +774,9 @@ export function compactionFact(state) {
 // Resume and compaction are the two moments the goal is actually at risk, so
 // this is where the excerpt earns its tokens.
 function handleSessionStart(input) {
+  // Same as handlePrompt: a SessionStart:compact fired inside a subagent (the
+  // helper's own compaction) is not this session's card to reprint.
+  if (input && input.agent_id) return;
   if (!routerSettings().enabled) return;
   const source = input.source || 'startup';
   if (source === 'clear') { try { unlinkSync(sessionPath(input.session_id)); } catch {} return; }

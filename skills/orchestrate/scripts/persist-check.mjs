@@ -150,6 +150,12 @@ function emitBlock(reason) {
 }
 
 export function check(input) {
+  // A subagent's own Stop is not the lead's auto-continue loop — `agent_id`
+  // on the payload (hooks doc, "common input fields") marks a call that fires
+  // inside a subagent. Refusing a helper's own Stop with the lead's goal text
+  // would be both wrong (the helper does not own that loop) and pure noise
+  // read back into a context that did not ask for it.
+  if (input && input.agent_id) return null;
   const state = loadSession(input.session_id);
   const p = state && state.persist;
 

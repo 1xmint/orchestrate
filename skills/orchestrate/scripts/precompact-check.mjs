@@ -70,6 +70,10 @@ function main() {
   let input = null;
   try { input = JSON.parse(payload); } catch { return; }
   if (!input || typeof input !== 'object') return;
+  // A subagent compacting its own transcript is not the lead's Pickup line to
+  // demand — `agent_id` on the payload (hooks doc, "common input fields")
+  // marks the call as coming from inside a subagent.
+  if (input.agent_id) return;
 
   const run = sessionRun(input.session_id);
   const state = loadSession(input.session_id) || {};

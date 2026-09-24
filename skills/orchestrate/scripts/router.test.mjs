@@ -109,6 +109,22 @@ test('the first substantive prompt gets the state line and the card, once', () =
   assert.equal(second, '', 'nothing changed, so there is nothing to say');
 });
 
+test('a hook firing inside a subagent (agent_id present) prints nothing on UserPromptSubmit, and prints the card without it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const inside = prompt(home, repo, 'add a --json flag to the status command and test it', { agent_id: 'agent-1' });
+  assert.equal(inside, '', 'a subagent call is not the lead session, so it gets no card');
+  const outside = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(outside, /\[orchestrate\]/, 'the same payload without agent_id still gets the card');
+});
+
+test('a hook firing inside a subagent (agent_id present) prints nothing on SessionStart, and prints the card without it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const inside = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-agent', cwd: repo, agent_id: 'agent-1' });
+  assert.equal(inside, '', 'a subagent compacting its own transcript gets no card');
+  const outside = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-agent2', cwd: repo });
+  assert.match(outside, /\[orchestrate/, 'the same payload without agent_id still prints');
+});
+
 test('the wording of a message never produces an instruction', () => {
   // Every one of these used to trigger a rung line naming an agent, a research
   // depth, a reviewer or a permission request. A pattern in the wording is not
@@ -278,18 +294,49 @@ test('a single unambiguous open run binds itself; two do not', () => {
   assert.equal(s2.run, undefined, 'ambiguous means unbound, not a guess');
 });
 
-test('a session outside any repo is offered the run, never bound to it', () => {
-  const home = makeHome(); const repo = makeRepo(true);
+test('a session above its own repo, with nothing else in play, is offered the run as a candidate, never bound to it', () => {
+  // The pointer root itself carries no .git, so findRepoRoot never finds it —
+  // this is the "session started above the project" shape the pointer exists
+  // for, not an ordinary repo session (which resolves its own open runs and
+  // never reads the pointer at all).
+  const home = makeHome();
+  const pointerRoot = mkdtempSync(join(tmpdir(), 'orch-pointer-root-'));
+  const runDir = join(pointerRoot, '.orchestrator', 'runs', '20260908-tidy-finish');
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'RUN.md'), '# Run\n\n## Tasks\n\n| id | p | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n');
   writeFileSync(join(home, '.claude', 'orchestrate', 'active-run.json'), JSON.stringify({
-    v: 1, root: repo, runMd: join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md'), at: new Date().toISOString(),
+    v: 1, root: pointerRoot, runMd: join(runDir, 'RUN.md'), at: new Date().toISOString(),
   }));
-  const outside = mkdtempSync(join(tmpdir(), 'orch-outside-'));
-  const out = prompt(home, outside, 'pick up where we left off on the tidy work', { session_id: 's-outside' });
-  // The run's picture is shown so a session above its repo can still see what is
-  // ready, but it is labelled a candidate and the session is not bound: display
-  // is read-only, and a hook that writes still needs the binding.
-  assert.match(out, /candidate, not bound/);
-  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-outside.json'), 'utf8'));
+
+  // cwd under the pointer's own root: the run's picture is shown so a session
+  // above its repo can still see what is ready, but it is labelled a
+  // candidate and the session is not bound: display is read-only, and a hook
+  // that writes still needs the binding.
+  const sub = join(pointerRoot, 'sub');
+  mkdirSync(sub, { recursive: true });
+  const under = prompt(home, sub, 'pick up where we left off on the tidy work', { session_id: 's-under' });
+  assert.match(under, /candidate, not bound/);
+  const stateUnder = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-under.json'), 'utf8'));
+  assert.equal(stateUnder.run, undefined);
+});
+
+test('active-run.json names a project the session has nothing to do with: no run phrase at all', () => {
+  // The bug this guards: a session in one project must not be told about a
+  // run from another project just because that one happened to be the last
+  // run opened on the machine.
+  const home = makeHome();
+  const pointerRoot = mkdtempSync(join(tmpdir(), 'orch-pointer-root-'));
+  const runDir = join(pointerRoot, '.orchestrator', 'runs', '20260908-tidy-finish');
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'RUN.md'), '# Run\n\n## Tasks\n\n| id | p | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n');
+  writeFileSync(join(home, '.claude', 'orchestrate', 'active-run.json'), JSON.stringify({
+    v: 1, root: pointerRoot, runMd: join(runDir, 'RUN.md'), at: new Date().toISOString(),
+  }));
+  const unrelated = mkdtempSync(join(tmpdir(), 'orch-unrelated-'));
+  const out = prompt(home, unrelated, 'pick up where we left off on the tidy work', { session_id: 's-unrelated' });
+  assert.match(out, /run: none/);
+  assert.doesNotMatch(out, /candidate/);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-unrelated.json'), 'utf8'));
   assert.equal(state.run, undefined);
 });
 
