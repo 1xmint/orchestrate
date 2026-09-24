@@ -369,7 +369,7 @@ test('the Plain output style ships, is valid, and says the same thing as §9', (
   // Without this the style would drop Claude Code's engineering instructions,
   // which is right for a writing assistant and wrong for an orchestrator.
   assert.match(fm, /^keep-coding-instructions: true$/m);
-  // Josh's decision, 2026-09-09: installed as a plugin, the voice is on without
+  // Decision of 2026-09-09: installed as a plugin, the voice is on without
   // anybody choosing it, and disabling the plugin is the way off.
   assert.match(fm, /^force-for-plugin: true$/m);
 

@@ -7,7 +7,7 @@ Resume point for building the `orchestrate` skill.
 A scored audit (`docs/scoresheet-audit-prompt.md`, report
 `docs/audits/2026-09-24-scoresheet-r1.md`) put the plugin at 49/100 for its
 audience, with the first five areas capped at 6 because nothing had been run
-live. Josh asked for every area at 10 and for the project rules to serve
+live. The user asked for every area at 10 and for the project rules to serve
 long-term development, so `AGENTS.md` changed on 2026-09-24:
 
 - "Not doing: staged runs" became "not doing: unmeasured staged runs". The
@@ -66,7 +66,7 @@ Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` (replaced the
 2. The first review ran on the builder's own model and nothing refused it.
    `routing.md` said a reviewer is never weaker than the author; the guard
    enforced only the executor rows. The Sonnet review missed the overcharge;
-   the Opus review found it in four minutes. Josh's note said "never send a
+   the Opus review found it in four minutes. The user's note said "never send a
    helper without naming a cheap model", with no exception for judges.
 3. On a repo that merges by itself, opening a ready pull request is the merge
    decision, and the builder made it. Cortex's `automerge.yml` arms auto-merge
@@ -100,7 +100,7 @@ questions move an existing sentence earlier.
 - **Reviewer description** carries the three points (send at push, draft until
   PASS, Opus or stronger), because the helper list is what survives a summary;
   the Cortex lead had been summarised 13 times.
-- **Josh's note** now separates judging helpers (Opus or stronger) from bulk
+- **The user's note** now separates judging helpers (Opus or stronger) from bulk
   helpers (Sonnet or Haiku). That line caused the Sonnet review, so it is
   changed rather than answered with a louder one.
 
@@ -130,7 +130,7 @@ fix round or none. Two or more with the questions asked first means the builder
 is the weak point: move risky builds to Opus then, not now.
 
 Cortex itself is fixed from its own session (another repo, mid-fix in the same
-checkout): Josh pastes it a short note to open the follow-up as a draft, review
+checkout): the user pastes it a short note to open the follow-up as a draft, review
 on Opus at push, ready only on PASS, and add the draft rule to its AGENTS.md.
 
 ## v0.16.0 — from work dispatcher to engineering partner, 2026-09-21

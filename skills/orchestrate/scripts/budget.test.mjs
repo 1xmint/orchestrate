@@ -111,8 +111,8 @@ test('budgetDecision denies over the ceiling, passes under it, and passes with n
 // of a plan wrote its blocking edges as prose, with no `blocks on` column, so
 // the old code returned [] and the router showed nothing ready. The fix reports
 // it instead. Skipped cleanly on any machine that does not have this checkout.
-test('the real radar ledger is correctly flagged as edges-missing', () => {
-  const real = 'C:\\Users\\Josh\\Desktop\\GitHub\\radar-advanced-assistant\\.orchestrator\\runs\\20260909-plan-0011-private-trader\\RUN.md';
+test('a real ledger named by ORCHESTRATE_REAL_LEDGER is correctly flagged as edges-missing', () => {
+  const real = process.env.ORCHESTRATE_REAL_LEDGER || '';
   if (!existsSync(real)) return; // portable: only runs where the checkout exists
   const r = readRun(real);
   assert.ok(r, 'the ledger reads');

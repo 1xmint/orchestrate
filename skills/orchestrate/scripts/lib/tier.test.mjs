@@ -191,8 +191,8 @@ test('a session whose cwd is above the repo still finds the open run', () => {
     '## Pickup', '', 'Pickup prompt: carry on at step two', '',
   ].join('\n'));
 
-  // This is the layout Josh actually works in: the session starts in the folder
-  // that contains his repos, so findRepoRoot(cwd) is null and every hook that
+  // This is a common layout: the session starts in the folder
+  // that contains several repos, so findRepoRoot(cwd) is null and every hook that
   // asked cwd found nothing.
   assert.equal(findRepoRoot(parent), null);
 

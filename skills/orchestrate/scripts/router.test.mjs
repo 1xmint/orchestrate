@@ -358,7 +358,7 @@ test('naming a family records the earliest one in the prompt, not the ladder\'s 
   // FAMILY_ORDER is ['fable', 'opus', 'sonnet', 'haiku'], so .find used to
   // check fable before opus regardless of where each word actually sits in
   // the sentence — "use opus, not fable" recorded fable even though opus is
-  // what Josh asked for and fable is what he ruled out.
+  // what the user asked for and fable is what they ruled out.
   prompt(home, repo, 'use opus, not fable, for this one', { session_id: 's-order' });
   const s1 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-order.json'), 'utf8'));
   assert.equal(s1.userModel.family, 'opus', 'the earliest-named family wins, not the ladder position');

@@ -562,7 +562,7 @@ function handlePrompt(input) {
 
   const trimmed = text.trim();
 
-  // The one party that sees Josh's own words, not a role agent's packet. A
+  // The one party that sees the user's own words, not a role agent's packet. A
   // family named here unlocks an executor above Sonnet for guard-agent.mjs —
   // for the one task id that first spends it, recorded there, not here. One
   // regex per prompt, nothing added to context.
