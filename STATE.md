@@ -2,6 +2,39 @@
 
 Resume point for building the `orchestrate` skill.
 
+## Unreleased — the scoresheet audit, and rules that can be measured, 2026-09-24
+
+A scored audit (`docs/scoresheet-audit-prompt.md`, report
+`docs/audits/2026-09-24-scoresheet-r1.md`) put the plugin at 49/100 for its
+audience, with the first five areas capped at 6 because nothing had been run
+live. Josh asked for every area at 10 and for the project rules to serve
+long-term development, so `AGENTS.md` changed on 2026-09-24:
+
+- "Not doing: staged runs" became "not doing: unmeasured staged runs". The
+  user-felt claims (delivery, cost, recovery, safety) are now measured with
+  `claude plugin eval` against a no-plugin baseline and with the audit's live
+  scenarios, each under a written spend cap. Tests still need no quota; evals
+  are the separate, budgeted layer. `claude plugin eval --help` works on
+  Claude Code 2.1.274 (STATE.md v0.14-era note that it refused is stale).
+- New always-true lines: doc numbers are generated or pinned by a drift test,
+  one version string in `plugin.json`; every hook registered once in
+  `hooks/hooks.json` and silent inside helpers; limits held by hooks or
+  removed tools, not prose; install/uninstall leave the machine as found, with
+  no person's name in the code; `STATE.md` keeps two releases and archives
+  the rest under `docs/state/`.
+- The scoresheet audit joined the deciding documents: the newest report is
+  the roadmap, and an area that drops needs a decision here saying why.
+
+Guidance re-checked 2026-09-24 against the same pages listed below plus
+https://code.claude.com/docs/en/hooks (a plugin's and a skill's copy of one
+handler both run, which is why "registered once" is a rule now).
+
+Work in progress on branch `audit/scoresheet-to-ten`, ledger
+`.orchestrator/runs/20260924-audit-to-ten/RUN.md` (git-ignored): wave 1 is
+seven tracks (docs truth pass, install hygiene, hooks quiet in helpers,
+deterministic ledger, Bash guard with all hooks in hooks.json, three eval
+cases, live scenario runs), then a re-audit on Fable.
+
 ## v0.16.1 — a review that can stop the merge, 2026-09-21
 
 Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` (replaced the
