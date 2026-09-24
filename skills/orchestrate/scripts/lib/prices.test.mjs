@@ -7,18 +7,27 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dollars, family, priceTag, reasonedPrice, PRICES, REASONED } from './prices.mjs';
+import { dollars, family, priceTag, reasonedPrice, PRICES, REASONED, PRICES_AS_OF, checked } from './prices.mjs';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'prices.mjs'), 'utf8');
 
 test('a known usage prices to a hand-computed figure', () => {
-  // 1M fresh input at $5, 1M output at $25, 1M cache read at $0.50,
-  // 1M cache write at $6.25 = $36.75 on Opus.
+  // Opus 5.5 ($4/$20): 1M fresh input at $4, 1M output at $20, 1M cache
+  // read at $0.40 (10% of input), 1M cache write at $5 (125% of input) =
+  // $29.40.
   const d = dollars({ input: 1e6, output: 1e6, cacheRead: 1e6, cacheWrite: 1e6 }, 'opus');
-  assert.equal(Number(d.toFixed(2)), 36.75);
-  // Sonnet is 2/10, so the same usage is 2/5 of Opus on input and output.
+  assert.equal(Number(d.toFixed(2)), 29.4);
+  // Sonnet is 2/10, so the same usage is half of Opus on input and output.
   assert.equal(Number(dollars({ input: 1e6 }, 'sonnet').toFixed(2)), 2);
   assert.equal(dollars({}, 'opus'), 0, 'no tokens, no dollars');
+});
+
+test('opus prices to the current opus alias, Opus 5.5, and the check date is current', () => {
+  assert.equal(PRICES.opus.in, 4);
+  assert.equal(PRICES.opus.out, 20);
+  assert.equal(checked, '2026-09-24');
+  assert.equal(PRICES_AS_OF, '2026-09-24');
+  assert.match(SOURCE, /https:\/\/claude\.com\/pricing/);
 });
 
 test('an unnamed model has no family and no price', () => {
