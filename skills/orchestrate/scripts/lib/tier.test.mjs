@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { isWritten, latestRun, readyTasks, ungradedReturns, returnedTasks, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot, AGENT_NAMES, seenRecently, recordSeen, trimLog } from './tier.mjs';
+import { isWritten, latestRun, readyTasks, ungradedReturns, returnedTasks, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot, AGENT_NAMES, seenRecently, recordSeen, trimLog, isUnderRoot } from './tier.mjs';
 
 const TIER = new URL('./tier.mjs', import.meta.url).href;
 
@@ -157,6 +157,15 @@ test('the family ladder decides who is stronger, and a limit steps a family down
   assert.equal(applyLimits('opus', ['opus']), 'sonnet');
   assert.equal(applyLimits('opus', []), 'opus');
   assert.equal(applyLimits('haiku', ['haiku']), 'haiku', 'the bottom of the ladder has nowhere to go');
+});
+
+test('isUnderRoot: same branch of the tree either way round, never an unrelated path', () => {
+  assert.equal(isUnderRoot('/a', '/a'), true, 'the same folder');
+  assert.equal(isUnderRoot('/a/sub', '/a'), true, 'cwd below root');
+  assert.equal(isUnderRoot('/a', '/a/sub'), true, 'cwd above root');
+  assert.equal(isUnderRoot('/b', '/a'), false, 'unrelated paths');
+  assert.equal(isUnderRoot('/a-other', '/a'), false, 'a name prefix is not containment');
+  assert.equal(isUnderRoot(null, '/a'), false);
 });
 
 test('dates are local, and ids are safe to use as filenames', () => {
@@ -500,6 +509,14 @@ test('a pipe in the task text cannot shift the columns that matter', () => {
   // rubric of "exit 0 | 41 passed" moves the phase.
   const rows = [row('9-9-0001', '📋 planned', '—', 'run `rg foo | head` and check exit 0 | 41 passed')];
   assert.deepEqual(readyTasks(rows, HEADER), ['9-9-0001']);
+});
+
+test('a row whose role is "owner" (a human, not an agent) never shows up as ready', () => {
+  const rows = [
+    row('9-9-0001', '📋 planned'),
+    '| 9-9-0002 | 📋 planned | — | src/9-9-0002.ts | owner | sign off on the design | n/a | 0 | — |',
+  ];
+  assert.deepEqual(readyTasks(rows, HEADER), ['9-9-0001'], 'the owner row is excluded, the agent row is not');
 });
 
 test('a ledger written before the columns existed reports nothing rather than guessing', () => {

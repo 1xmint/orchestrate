@@ -247,6 +247,18 @@ test('plugin-wide Stop (not armed) blocks once per epoch at or above compactAt, 
   assert.equal(run('persist-check.mjs', stop, home).stdout.trim(), '');
 });
 
+test('agent_id present (a subagent\'s own Stop) is silent even at high context, and even while armed', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
+  const transcript = join(dir, 't.jsonl');
+  writeFileSync(transcript, JSON.stringify({"type":"assistant","timestamp":new Date().toISOString(),"message":{"id":"m1b","model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"x"}],"usage":{"input_tokens":2,"cache_read_input_tokens":158000,"cache_creation_input_tokens":1000,"output_tokens":50}}}) + '\n');
+
+  // The same payload without agent_id would block (see the test above); with
+  // it present the call is a subagent's own Stop, not the lead's loop.
+  const stop = { hook_event_name: 'Stop', session_id: 'p5b', cwd: dir, transcript_path: transcript, agent_id: 'agent-1' };
+  assert.equal(run('persist-check.mjs', stop, home).stdout.trim(), '', "a helper's own Stop is not the lead's auto-continue loop");
+});
+
 test('plugin-wide Stop: silent below compactAt, once a checkpoint exists, and when stop_hook_active', () => {
   const home = sandbox();
   const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
