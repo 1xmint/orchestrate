@@ -132,9 +132,10 @@ When the user asks in plain words to keep going toward a goal ("keep coding unti
 done", "execute the plan"), the router pins that goal and `persist-check.mjs` refuses a Stop while
 each step does real work (an edit, a command, a dispatch). It needs no run ledger. It ends, and
 disarms, on the first of: you say the goal is met; your last message asks the user something; a
-dispatch is denied; the same error comes back twice; a step does no work; 25 steps. Every sixth
-step asks for a one-line check-in so the user can catch drift, and a long session gets a cost
-warning before each further step. After a compaction the goal is restored verbatim.
+dispatch is denied; the same error comes back twice; a step does no work; 25 steps; the 5-hour
+usage window passes 90%. Each continued step's message names the step count, the goal and the
+last file changed, so the user can catch drift without a separate check-in. After a compaction
+the goal is restored verbatim.
 `persist off` turns it off for the session.
 
 It saves quota by removing idle turns, not by running more in parallel: two agents cost what

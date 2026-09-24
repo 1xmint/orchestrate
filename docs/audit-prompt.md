@@ -3,7 +3,9 @@
 Run this as a `fable` subagent on a Max plan (or paste it into a fresh chat on
 the strongest model available) after a version is built and its tests pass. It
 is pre-filled so the auditor spends its effort on judgment rather than
-re-discovery. Replace `<path>`. Current for v0.4.0.
+re-discovery. Replace `<path>`. Current for v0.4.0; the plugin is at v0.16.1
+now, so treat the facts below as historical and use `scoresheet-audit-prompt.md`
+(current for v0.16.1) for a fresh audit.
 
 ```
 You are auditing a Claude Code skill called `orchestrate` before it ships. Be

@@ -35,7 +35,7 @@ test('a Python layout: pytest and ruff from pyproject, and the AGENTS.md warning
   assert.equal(pick(g, 'lint'), 'ruff check .');
   assert.deepEqual(g.standards, ['AGENTS.md']);
   assert.equal(g.agentsNotLoaded, true);
-  assert.match(block(g), /AGENTS\.md is NOT loaded by Claude Code/);
+  assert.match(block(g), /AGENTS\.md is loaded by Claude Code 2\.1\.277\+/);
 });
 
 test('a Cargo workspace: the four cargo commands, and CLAUDE.md turns the warning off', () => {

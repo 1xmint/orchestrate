@@ -1,20 +1,21 @@
 # Routing: which model for which task, by plan
 
-Facts, not procedure. Checked 2026-09-08 against the sources at the bottom.
-Plans and prices move; before a run that will spend heavily, re-open the pricing
-page and correct this file where they disagree.
+Facts, not procedure. Checked 2026-09-08, re-checked 2026-09-24 against the
+sources at the bottom (model-config: default Opus 5.5 on Pro, Max, Team and
+API). Plans and prices move; before a run that will spend heavily, re-open the
+pricing page and correct this file where they disagree.
 
 ## What each plan includes
 
 | Plan | Included | Fable | Default model |
 |---|---|---|---|
 | Free | Sonnet, Haiku (app only) | no | no Claude Code |
-| Pro ($20/mo) | Opus, Sonnet, Haiku | **not included**: bills usage credits, real money. Interactive sessions prompt once; `-p` and SDK runs bill without asking | Sonnet 5 |
-| Max 5x ($100/mo) | Opus, Sonnet, Haiku, Fable | included **up to 50% of the weekly limit**, then credits or switch | Opus 5 |
-| Max 20x ($200/mo) | same | same 50% rule, four times the allowance | Opus 5 |
-| Team standard seat | like Pro | usage credits | Sonnet 5 |
-| Team premium, Enterprise premium | like Max | 50% rule | Opus 5 |
-| API key / Console | all | pay per token, Fable most expensive by a wide margin; treat like Pro | Opus 5 |
+| Pro ($20/mo) | Opus, Sonnet, Haiku | **not included**: bills usage credits, real money. Interactive sessions prompt once; `-p` and SDK runs bill without asking | Opus 5.5 |
+| Max 5x ($100/mo) | Opus, Sonnet, Haiku, Fable | included **up to 50% of the weekly limit**, then credits or switch | Opus 5.5 |
+| Max 20x ($200/mo) | same | same 50% rule, four times the allowance | Opus 5.5 |
+| Team standard seat | like Pro | usage credits | Opus 5.5 |
+| Team premium, Enterprise premium | like Max | 50% rule | Opus 5.5 |
+| API key / Console | all | pay per token, Fable most expensive by a wide margin; treat like Pro | Opus 5.5 |
 
 Limits are a rolling five-hour window plus a weekly one, shared across the
 Claude app, Cowork and Claude Code. Every subagent draws from the same pool as

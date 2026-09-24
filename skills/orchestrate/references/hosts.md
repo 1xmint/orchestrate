@@ -2,7 +2,8 @@
 
 Checked 2026-09-08 against code.claude.com/docs; the desktop app bundled Claude Code 2.1.260,
 the CLI on PATH was 2.1.209. Re-checked 2026-09-10 against code.claude.com/docs/en/sub-agents
-for the agent-file frontmatter fields below. Built and tested on Claude Code; Codex loads the
+for the agent-file frontmatter fields below. Re-checked 2026-09-24 against Claude Code 2.1.274
+(scoresheet audit r1); nothing below changed. Built and tested on Claude Code; Codex loads the
 same folder but its dispatch path is documented, not exercised.
 
 ## Claude Code (desktop app or CLI)
@@ -106,8 +107,9 @@ start small. A `fork` inherits the whole conversation instead.
 repo, wins). Fields used here: `name`, `description`, `model`, `tools`,
 `disallowedTools`, `maxTurns`, `isolation`, `color`, `memory` (`user` → `~/.claude/agent-memory/
 <name>/`, `project`, `local`), `hooks` (`Stop` in an agent file becomes `SubagentStop` for that
-agent). `install-agents.mjs` installs the seven and substitutes the skill's absolute path into
+agent). `install-agents.mjs` installs the eight and substitutes the skill's absolute path into
 their paths. New agent files appear in a running session after a minute or two; a new
+session sees them at once.
 
 The full field list also has `model: inherit` (run on whatever the session is on, rather than a
 named family), `permissionMode`, `skills` (preloaded at startup; a subagent can still invoke an
@@ -115,14 +117,13 @@ unlisted one through the Skill tool), `mcpServers` (per-subagent, including inli
 definitions), `background` (stay backgrounded even if Claude asks to run it in the foreground),
 `effort` (overrides the session's effort for that subagent only — every role here sets it, see
 `models.md`; it is honoured on a plugin install), `initialPrompt`, and `experimental.cacheTtl`
-(`5m` or `1h`, the file-level form of `subagentPromptCacheTtl`). **The seven role agents use only
+(`5m` or `1h`, the file-level form of `subagentPromptCacheTtl`). **The eight role agents use only
 `effort` among these**, and one omission is worth naming why: **a plugin-installed subagent ignores
 `hooks`, `mcpServers` and `permissionMode` in its own frontmatter entirely** (documented
 2026-09-10). Since the plugin path is this skill's primary distribution channel, per-role
 `permissionMode` narrowing is not a lever available here — `tools`/`disallowedTools` (which
 plugin subagents do respect) is the only mechanism that reaches every install path, which is why
 `SKILL.md §10` / `assets/agents/*.md` lean on that one exclusively.
-session sees them at once.
 
 **Skill files** load from `~/.claude/skills/<name>/SKILL.md` or `.claude/skills/`. Descriptions
 of all skills sit in context every turn (the listing gets ~1% of the context window; a

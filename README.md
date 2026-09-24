@@ -38,7 +38,7 @@ claude plugin install orchestrate@orchestrate --scope user
 ```
 
 Either way it brings the skill, the eight role agents, the output style and the
-three global hooks in one step.
+seven global hooks in one step.
 
 The agents are planner, implementer, researcher, browser, reviewer, debugger
 and coordinator. The coordinator runs a wave of three or more independent
@@ -535,8 +535,10 @@ for hosts that have no output styles at all.
 Every dispatch that names a model arrives with a price on it, in list-price
 dollars — the same unit `/usage` computes its Session figure in. **List price is
 not what a subscription is billed.** A dispatch that names no model gets no
-price, because nothing knows what it will run on. There is no running counter,
-because a counter reads as an allowance and invites spending up to it.
+price, because nothing knows what it will run on. A running counter shows only
+when a run has a budget ceiling, as spend against that ceiling; there is no
+open-ended counter, because one with no ceiling reads as an allowance and
+invites spending up to it.
 
 A price carries no "% of your week". The only weekly figure to divide by came
 from **one observation** on 2026-09-09, and a percentage computed from that
@@ -810,7 +812,7 @@ supported path. See `skills/orchestrate/references/hosts.md`.
 
 ```
 skills/orchestrate/
-  SKILL.md              the skill (433 body lines; stays in context)
+  SKILL.md              the skill (loads on invocation, stays in context)
   references/           ladder, routing, evaluation, lanes, hosts, models
   scripts/              router, guard, ledger, turn-check, precompact-check, persist-check,
                         context-check, context, codex-worker, gate, profile, run-init,
