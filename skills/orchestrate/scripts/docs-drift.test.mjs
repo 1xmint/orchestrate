@@ -168,3 +168,14 @@ test('models.md\'s Opus price matches prices.mjs, and its checked date is not ol
   assert.ok(modelsChecked[1] >= routingChecked,
     `models.md was checked ${modelsChecked[1]}, older than routing.md's ${routingChecked}`);
 });
+
+test('README\'s "What the hooks do" table has a row for every script hooks.json registers', () => {
+  const scripts = scriptsFromHooksJson(HOOKS);
+  const start = README.indexOf('What the hooks do');
+  assert.ok(start >= 0, 'README no longer has a "What the hooks do" section to check');
+  const section = README.slice(start, README.indexOf('\n## ', start + 1));
+  for (const script of scripts) {
+    assert.ok(new RegExp(`^\| \`${script.replace('.', '\.')}\``, 'm').test(section),
+      `README's hooks table has no row for ${script}`);
+  }
+});
