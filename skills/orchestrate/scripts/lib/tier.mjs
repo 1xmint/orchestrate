@@ -143,17 +143,32 @@ export function routerSettings() {
 // second set that then shadowed the plugin's. Look in both places.
 export function pluginAgentDir() {
   const base = join(HOME, '.claude', 'plugins', 'cache');
+  // An update leaves the old version's cache directory in place alongside the
+  // new one (nothing prunes it), so more than one version can have an agents
+  // folder at once. Picking whichever `readdirSync` lists first read a stale
+  // pre-update directory missing agents added since, and reported them
+  // "missing" on an install that was actually complete. Score every version
+  // found and keep the one with the most agent files present, newest
+  // directory first on a tie, so a stale partial copy never outranks a
+  // complete one.
+  let best = null;
   try {
     for (const market of readdirSync(base)) {
       for (const plugin of readdirSync(join(base, market))) {
         for (const version of readdirSync(join(base, market, plugin))) {
           const d = join(base, market, plugin, version, 'skills', 'orchestrate', 'assets', 'agents');
-          if (existsSync(join(d, `${AGENT_NAMES[0]}.md`))) return d;
+          if (!existsSync(join(d, `${AGENT_NAMES[0]}.md`))) continue;
+          const count = AGENT_NAMES.filter(n => existsSync(join(d, `${n}.md`))).length;
+          let mtime = 0;
+          try { mtime = statSync(d).mtimeMs; } catch {}
+          if (!best || count > best.count || (count === best.count && mtime > best.mtime)) {
+            best = { dir: d, count, mtime };
+          }
         }
       }
     }
   } catch {}
-  return null;
+  return best ? best.dir : null;
 }
 
 export function agentsInstalled() {
