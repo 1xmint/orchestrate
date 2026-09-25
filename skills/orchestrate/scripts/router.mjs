@@ -84,6 +84,17 @@ export function cardBody() {
   return FALLBACK_CARD;
 }
 
+// One line in plain words for a one-time migration: what changed, that it
+// starts next session, and how to undo it. No raw settings path — the user
+// does not need one to act on this.
+export function compactNote(compact) {
+  const amount = compact.value % 1000 ? compact.value : `${compact.value / 1000}k`;
+  const backupClause = compact.backup
+    ? 'A copy of your old settings was saved in the orchestrate settings folder first.'
+    : 'No earlier settings file existed, so there was nothing to back up.';
+  return `Claude Code's auto-compact setting was changed to ${amount} tokens; it takes effect from your next session. ${backupClause} To undo it, run \`profile.mjs --autocompact off\`.`;
+}
+
 // ---- state ------------------------------------------------------------------
 export function stateLine(ctx, prefix) {
   const you = ctx.self && ctx.self.model
@@ -641,7 +652,6 @@ function handlePrompt(input) {
   const compact = applyAutocompactDefault({
     settingsPath: join(dirname(DIR), 'settings.json'), markerDir: DIR, policy: loadPolicy(),
   });
-  if (compact.applied) out.push(`orchestrate set auto-compact to ${compact.value % 1000 ? compact.value : `${compact.value / 1000}k`} in ~/.claude/settings.json (it applies from the next session; backup at ${compact.backup || 'none'}). To undo: \`profile.mjs --autocompact off\`.`);
   // The mode the host reports, on every prompt: a switch into or out of Plan
   // mode is said once, whatever the prompt looks like.
   const mode = modeNote(state, input);
@@ -661,6 +671,10 @@ function handlePrompt(input) {
     if (state.lastStateHash && hash !== state.lastStateHash) out.push(stateLine(ctx, '[orchestrate · changed]'));
     state.lastStateHash = hash;
   }
+
+  // Said once, after the state line rather than before it: what changed, that
+  // it starts next session, and how to undo it, in the user's own words.
+  if (compact.applied) out.push(compactNote(compact));
 
   if (substantive) {
     const brief = briefNote(ctx, state);

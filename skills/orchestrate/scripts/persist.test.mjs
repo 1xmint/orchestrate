@@ -36,7 +36,7 @@ test('arms on an explicit ask to keep going, never on a question or a one-off', 
 test('context compact advice stops an armed loop before its did-work check', () => {
   const d = persistDecision({ scan: { progressed: true, denied: false, errors: [], asked: false, goalMet: false }, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: { session: 's', tokens: 151000, compaction: null } });
   assert.equal(d.kind, 'stop');
-  assert.match(d.why, /context is ~151k/);
+  assert.match(d.why, /~151k/);
   assert.match(d.why, /checkpoint/);
 });
 
@@ -193,9 +193,13 @@ test('replay: the stall — no ledger, a step with work, then a step that only t
   appendFileSync(transcript, tail(used('Edit'), result('ok'), said('Added the footer.')));
   assert.equal(run('persist-check.mjs', { ...stop, stop_hook_active: true }, home).json.decision, 'block');
 
-  // A step that only talks ends the loop and disarms.
+  // A step that only talks ends the loop and disarms, and the user is told why,
+  // in one plain line that does not block.
   appendFileSync(transcript, tail(said('The header and footer are in; CI is still running.')));
-  assert.equal(run('persist-check.mjs', { ...stop, stop_hook_active: true }, home).stdout.trim(), '');
+  const ended = run('persist-check.mjs', { ...stop, stop_hook_active: true }, home);
+  assert.equal(ended.json.decision, undefined, 'a Stop that ends the loop never blocks');
+  assert.match(ended.json.systemMessage, /^Auto-continue stopped: the last step did no visible work/);
+  assert.match(ended.json.systemMessage, /keep going/i);
   const s = session(home, 'p1');
   assert.equal(s.persist.armed, false);
   assert.match(s.persist.endReason, /no visible work/);
@@ -273,7 +277,7 @@ test('plugin-wide Stop: silent below compactAt, once a checkpoint exists, and wh
   writeFileSync(bigTranscript, JSON.stringify({"type":"assistant","timestamp":new Date().toISOString(),"message":{"id":"m3","model":"claude-opus-5","role":"assistant","content":[{"type":"text","text":"x"}],"usage":{"input_tokens":2,"cache_read_input_tokens":158000,"cache_creation_input_tokens":1000,"output_tokens":50}}}) + '\n');
   const checkpointDir = join(home, '.claude', 'orchestrate', 'context', 'p7');
   mkdirSync(checkpointDir, { recursive: true });
-  writeFileSync(join(checkpointDir, 'checkpoint-none.md'), 'already written');
+  writeFileSync(join(checkpointDir, 'checkpoint-p7.md'), 'already written');
   assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'p7', cwd: dir, transcript_path: bigTranscript }, home).stdout.trim(), '');
 
   // At or above compactAt, but this Stop is itself already re-entered: never block itself again.

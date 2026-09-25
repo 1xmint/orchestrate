@@ -276,7 +276,12 @@ export function contextEpochStart(reading) {
 }
 
 export function checkpointPath(session, reading, dir = CONTEXT_DIR) {
-  return join(dir, idPart(session || 'nosession'), `checkpoint-${idPart(contextEpoch(reading))}.md`);
+  const epoch = contextEpoch(reading);
+  // "none" means no compaction has happened yet this session, not that the
+  // file itself is nameless — say what the file is instead of echoing that
+  // internal sentinel into a name a user might read.
+  const id = epoch === 'none' ? idPart(session || 'nosession') : idPart(epoch);
+  return join(dir, idPart(session || 'nosession'), `checkpoint-${id}.md`);
 }
 
 export const PLANS_DIR = join(homedir(), '.claude', 'plans');

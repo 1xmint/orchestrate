@@ -293,7 +293,9 @@ test('guard: a dispatch that names no model is recorded as inherited and not pri
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's9', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0001\nPROGRESS: /r/progress/1.md\ndo it' },
   }, home);
-  assert.equal(out.stdout.trim(), '', 'no model named means no figure to give, and the packet already names its progress file');
+  // No model named means no price figure to give; the packet already names its
+  // progress file, so the only context line left is the worktree fallback for it.
+  assert.match(out.json.hookSpecificOutput.additionalContext, /write the same relative path inside your own worktree/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit');
 });
