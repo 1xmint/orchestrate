@@ -154,6 +154,7 @@ test('grantCheck: bind on first use, allow on the bound id, deny naming both ids
   assert.match(other.reason, /1-1-0002/);
   assert.equal(grantCheck(null, 'fable', 'TASK: 1-1-0001\nx', null), null, 'no record, no grant');
   assert.equal(grantCheck(grant, 'opus', 'TASK: 1-1-0001\nx', null), null, 'wrong family, no grant');
+  assert.doesNotMatch(other.reason, /Josh/, 'no person\'s name hard-coded into the denial text');
 });
 
 test('claimOrDeny: a different id winning the race is denied by name, on both sides', () => {
@@ -164,6 +165,7 @@ test('claimOrDeny: a different id winning the race is denied by name, on both si
   assert.equal(raced.prefix, 'model');
   assert.match(raced.reason, /1-1-0001/, 'names the task that actually won');
   assert.match(raced.reason, /1-1-0002/, 'names the task that was refused');
+  assert.doesNotMatch(raced.reason, /Josh/, 'no person\'s name hard-coded into the denial text');
 
   // The winner's own claim call comes back with its own id: allowed, nothing
   // to deny.

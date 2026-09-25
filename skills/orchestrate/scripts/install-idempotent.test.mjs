@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -25,9 +25,14 @@ test('installing twice registers each hook once and keeps the user\'s own', () =
   const first = readFileSync(join(home, '.claude', 'settings.json'), 'utf8');
   const b = once();
   assert.equal(b.status, 0, b.stderr);
-  assert.match(b.stdout, /10 stale orchestrate entries removed, 10 registered/);
+  assert.match(b.stdout, /nothing written/, 'a no-op second run says so and does not rewrite settings.json');
+  assert.doesNotMatch(b.stdout, /stale orchestrate entries removed/, 'a no-op second run does not re-register');
   const s = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
   assert.deepEqual(s, JSON.parse(first), 'the second install changes nothing');
+
+  const backupDir = join(home, '.claude', 'orchestrate');
+  const backups = existsSync(backupDir) ? readdirSync(backupDir).filter(f => /^settings\.backup\..*\.json$/.test(f)) : [];
+  assert.equal(backups.length, 1, `exactly one backup kept after two installs, found: ${backups.join(', ')}`);
 
   const pairs = [];
   for (const [ev, groups] of Object.entries(s.hooks)) for (const g of groups) for (const h of g.hooks) {

@@ -117,7 +117,7 @@ export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!id) return null;
   if (!boundId) return { allow: true, bind: id };
   if (boundId === id) return { allow: true, bind: null };
-  return { deny: true, reason: `Josh named ${f} for task ${boundId}; this is task ${id} — ask him or start on Sonnet.` };
+  return { deny: true, reason: `the user named ${f} for task ${boundId}; this is task ${id} — ask them or start on Sonnet.` };
 }
 
 // Where a grant's claim lives: one file per session+moment-the-user-named-it,
@@ -177,7 +177,7 @@ export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
   const won = claim(session, grantToClaim.at, grantToClaim.grantBind);
   if (won === grantToClaim.grantBind) return null;
   if (won && won !== GRANT_PENDING) {
-    return { prefix: 'model', reason: `Josh named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask him or start on Sonnet.` };
+    return { prefix: 'model', reason: `the user named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask them or start on Sonnet.` };
   }
   return { prefix: 'model', reason: `the ${grantToClaim.family} grant could not be claimed; resend with model: "sonnet".` };
 }

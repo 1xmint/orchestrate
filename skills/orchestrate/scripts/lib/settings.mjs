@@ -12,7 +12,7 @@
 // Pure functions, so the unit test can run the whole merge on a copy of a real
 // settings.json without touching the machine.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 
 export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'guard-bash.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'postcompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];
@@ -144,9 +144,17 @@ export function readSettings(path) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return {}; }
 }
 
+// Only one backup is ever kept: a fresh one replaces whatever backup(s) the
+// last run left, so an install run daily does not leave dozens of these
+// behind in ~/.claude/orchestrate.
 export function backupSettings(path, backupDir, now = new Date()) {
   if (!existsSync(path)) return null;
   mkdirSync(backupDir, { recursive: true });
+  for (const f of readdirSync(backupDir)) {
+    if (/^settings\.backup\..*\.json$/.test(f)) {
+      try { unlinkSync(join(backupDir, f)); } catch {}
+    }
+  }
   const stamp = now.toISOString().replace(/[:.]/g, '-');
   const dest = join(backupDir, `settings.backup.${stamp}.json`);
   copyFileSync(path, dest);
