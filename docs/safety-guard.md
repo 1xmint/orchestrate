@@ -1,12 +1,14 @@
 # The Bash safety guard
 
 `skills/orchestrate/scripts/guard-bash.mjs` runs before every shell command,
-in the main session and inside every helper. It looks only at a short,
-fixed list of shapes that throw away something a person cannot get back —
-a shared branch, a folder of files, a published package, a live deployment,
-or real money — and stops those. Everything else, including loud everyday
-commands like `npm test` or `rm -rf node_modules`, passes through with no
-output at all.
+in the main session and inside every helper — whether the command runs
+through the Bash tool or, on a Windows host, the PowerShell tool. Both tools
+carry the command text the same way, so one guard and one set of patterns
+covers both shells. It looks only at a short, fixed list of shapes that
+throw away something a person cannot get back — a shared branch, a folder
+of files, a published package, a live deployment, or real money — and stops
+those. Everything else, including loud everyday commands like `npm test` or
+`rm -rf node_modules`, passes through with no output at all.
 
 ## What it stops
 
@@ -16,14 +18,19 @@ output at all.
 - `git branch -D <branch>` and `git branch -d <branch>` (deletes a local
   branch). `-D` and a merged `-d` cannot be told apart without doing the
   merge check the command itself would do, so both are stopped — a plain
-  `git branch` (listing branches) is untouched.
+  `git branch` (listing branches) is untouched. Git commands work the same
+  way in Bash and PowerShell, so this and every other `git ...` shape below
+  is stopped in either shell.
 - `git rm -r <path>` (removes tracked files from the project)
 - `git clean -f`/`-fd` (permanently deletes untracked files, no undo)
-- `rm -rf <path>` / `rm -fr <path>`, unless every target is either a
-  well-known, reproducible folder (`node_modules`, `dist`, `build`, `out`,
-  `coverage`, `.cache`, `.next`, `.nuxt`, `.turbo`, `.parcel-cache`, `target`,
-  `__pycache__`, `.pytest_cache`, `.tox`, `venv`, `.venv`, `tmp`, `temp`) or
-  already inside the OS temp directory
+- `rm -rf <path>` / `rm -fr <path>` in Bash, and `Remove-Item -Recurse
+  -Force <path>` in PowerShell — including PowerShell's own aliases for
+  `Remove-Item` (`rm`, `del`, `ri`, `rmdir`) and its short `-r` form of
+  `-Recurse` — unless every target is either a well-known, reproducible
+  folder (`node_modules`, `dist`, `build`, `out`, `coverage`, `.cache`,
+  `.next`, `.nuxt`, `.turbo`, `.parcel-cache`, `target`, `__pycache__`,
+  `.pytest_cache`, `.tox`, `venv`, `.venv`, `tmp`, `temp`) or already inside
+  the OS temp directory
 - `npm publish` / `yarn publish` / `pnpm publish`
 - `gh release create`
 - `vercel --prod`, `fly deploy`, `wrangler publish`/`deploy`,

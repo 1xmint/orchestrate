@@ -89,12 +89,12 @@ test('the Stop and PreCompact hooks that used to live only in SKILL.md frontmatt
   assert.ok(regs.some(r => r.event === 'PreCompact' && r.script === 'precompact-check.mjs'), 'precompact-check.mjs must run on PreCompact');
 });
 
-test('guard-bash.mjs is registered on PreToolUse for Bash', () => {
+test('guard-bash.mjs is registered on PreToolUse for both Bash and PowerShell — a Windows host routes shell commands through the PowerShell tool instead of Bash, and the guard payload/logic covers both', () => {
   const json = JSON.parse(readFileSync(HOOKS_JSON, 'utf8'));
   const pre = json.hooks.PreToolUse || [];
   const entry = pre.find(e => (e.hooks || []).some(h => scriptName(h.command) === 'guard-bash.mjs'));
   assert.ok(entry, 'guard-bash.mjs must be registered on PreToolUse');
-  assert.equal(entry.matcher, 'Bash');
+  assert.equal(entry.matcher, 'Bash|PowerShell');
 });
 
 test('every known hook script this plugin ships is registered somewhere', () => {

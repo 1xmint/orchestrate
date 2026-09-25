@@ -4,3 +4,4 @@ orchestrate-workspace/
 *.zip
 node_modules/
 .claude/worktrees/
+evals/results/

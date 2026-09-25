@@ -28,6 +28,10 @@ function bash(command, extra = {}) {
   return { hook_event_name: 'PreToolUse', tool_name: 'Bash', session_id: 's1', cwd: process.cwd(), tool_input: { command }, ...extra };
 }
 
+function powershell(command, extra = {}) {
+  return { hook_event_name: 'PreToolUse', tool_name: 'PowerShell', session_id: 's1', cwd: process.cwd(), tool_input: { command }, ...extra };
+}
+
 // ---- the destructive / publishing / paying shapes --------------------------
 
 test('git push --force is stopped', () => {
@@ -89,6 +93,59 @@ test('npm publish, gh release create, and deploy commands are stopped', () => {
 test('a stripe CLI command that changes something is stopped', () => {
   assert.equal(decide('stripe charges create --amount=1000').kind, 'ask');
   assert.equal(decide('stripe login').kind, 'pass');
+});
+
+// ---- the PowerShell tool: same decision, same patterns -----------------------
+
+test('PowerShell Remove-Item -Recurse -Force on a real path is stopped, aliases too', () => {
+  assert.equal(decide('Remove-Item -Recurse -Force src', { cwd: '/home/user/project' }).kind, 'ask');
+  assert.equal(decide('rm -Recurse -Force src', { cwd: '/home/user/project' }).kind, 'ask');
+  assert.equal(decide('del -Recurse -Force src', { cwd: '/home/user/project' }).kind, 'ask');
+  assert.equal(decide('ri -Recurse -Force src', { cwd: '/home/user/project' }).kind, 'ask');
+  assert.equal(decide('rmdir -Recurse -Force src', { cwd: '/home/user/project' }).kind, 'ask');
+  assert.equal(decide('Remove-Item -r -Force src', { cwd: '/home/user/project' }).kind, 'ask');
+});
+
+test('PowerShell Remove-Item -Recurse -Force node_modules is ordinary and passes through', () => {
+  assert.equal(decide('Remove-Item -Recurse -Force node_modules', { cwd: '/home/user/project' }).kind, 'pass');
+});
+
+test('PowerShell Remove-Item without both -Recurse and -Force passes through', () => {
+  assert.equal(decide('Remove-Item -Force src', { cwd: '/home/user/project' }).kind, 'pass');
+  assert.equal(decide('Remove-Item -Recurse src', { cwd: '/home/user/project' }).kind, 'pass');
+  assert.equal(decide('Remove-Item src', { cwd: '/home/user/project' }).kind, 'pass');
+});
+
+test('git branch -D via the PowerShell tool is stopped, same as Bash', () => {
+  assert.equal(decide('git branch -D old').kind, 'ask');
+});
+
+test('a PowerShell tool call is recognised by the hook process, same as Bash', () => {
+  const r = run(powershell('Remove-Item -Recurse -Force src'));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'ask');
+
+  const safe = run(powershell('Remove-Item -Recurse -Force node_modules'));
+  assert.equal(safe.stdout, '');
+});
+
+// ---- the bypassPermissions deny path actually denies an unsafe target ------
+
+test('an unsafe Bash rm -rf under bypassPermissions is denied, not silently allowed', () => {
+  const r = run(bash('rm -rf src', { permission_mode: 'bypassPermissions', cwd: '/home/user/project' }));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+});
+
+test('an unsafe PowerShell Remove-Item under bypassPermissions is denied, not silently allowed', () => {
+  const r = run(powershell('Remove-Item -Recurse -Force src', { permission_mode: 'bypassPermissions', cwd: '/home/user/project' }));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+});
+
+test('an unsafe Bash rm -rf from a subagent is denied with a report-back reason', () => {
+  const r = run(bash('rm -rf src', { agent_id: 'helper-1', cwd: '/home/user/project' }));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
 });
 
 // ---- ordinary commands pass through with no output -------------------------
