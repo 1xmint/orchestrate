@@ -657,7 +657,10 @@ function handlePrompt(input) {
     if (word === 'off') {
       emit('UserPromptSubmit', autocompactOffNote(removeAutocompact({ settingsPath, markerDir: DIR })));
     } else {
-      const value = word === 'on' ? loadPolicy().context.autocompactDefault : parseAutocompact(word);
+      // 'on' with the tip switched off in the policy still means 200k: the
+      // user asked for it by name, so the opt-out of the tip does not apply.
+      const policyValue = loadPolicy().context.autocompactDefault;
+      const value = word === 'on' ? (parseAutocompact(policyValue) || 200000) : parseAutocompact(word);
       const applied = applyAutocompact({ settingsPath, markerDir: DIR, tokens: value });
       emit('UserPromptSubmit', compactNote(applied));
     }

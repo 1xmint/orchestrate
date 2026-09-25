@@ -78,7 +78,9 @@ already set it: type `autocompact on` to accept, or ignore the tip and
 nothing changes. Nothing is written until you type that. Opt the tip out
 before it appears with `profile.mjs --policy context.autocompactDefault=off`;
 once set, `autocompact off` (or `profile.mjs --autocompact off`) removes it
-and keeps it off. Also set
+and keeps it off. The one place it is set without the tip is the manual
+`node scripts/install.mjs`, an action you take yourself; pass
+`--no-autocompact` there to skip it. Also set
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` in the settings `env`. The first keeps
 the manager's context bounded. The second is a host backstop for coordinator
 nesting; the plugin guard still enforces the real limit.
