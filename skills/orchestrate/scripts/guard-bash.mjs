@@ -1,5 +1,8 @@
 #!/usr/bin/env node
-// guard-bash.mjs — a PreToolUse hook on the Bash tool. It never rewrites a
+// guard-bash.mjs — a PreToolUse hook on the Bash tool and the PowerShell
+// tool (Windows hosts route shell commands through PowerShell instead of
+// Bash; both tools carry the command text in the same `tool_input.command`
+// field, so one hook and one `decide()` cover both). It never rewrites a
 // command; it only decides whether one should run at all.
 //
 // A small, fixed list of shell commands throw away something a person cannot
@@ -129,6 +132,26 @@ function rmRule(cmd, cwd) {
   return { name: 'rm-recursive', reason: 'This would permanently delete files or folders that cannot be recovered. Say yes to continue.' };
 }
 
+// The PowerShell equivalent of `rm -rf`: `Remove-Item` (or one of its
+// aliases `rm`, `del`, `ri`, `rmdir`) with both a recurse flag
+// (`-Recurse` or `-r`) and `-Force` present, in either order — that
+// combination is what makes the delete both cross directories and skip the
+// "are you sure" prompt PowerShell otherwise shows. Same
+// safe-target/OS-temp-dir exception as the Bash rule.
+function psRemoveRule(cmd, cwd) {
+  const m = /\b(Remove-Item|rm|del|ri|rmdir)\b(.*)$/i.exec(cmd);
+  if (!m) return null;
+  const rest = m[2];
+  const hasRecurse = /(^|\s)-r(ecurse)?\b/i.test(rest);
+  const hasForce = /(^|\s)-f(orce)?\b/i.test(rest);
+  if (!hasRecurse || !hasForce) return null;
+  const list = targets(rest);
+  if (!list.length) return null;
+  const unsafe = list.some(t => !isSafeDeleteTarget(t, cwd));
+  if (!unsafe) return null;
+  return { name: 'ps-remove-recursive', reason: 'This would permanently delete files or folders that cannot be recovered. Say yes to continue.' };
+}
+
 // Deny, ask, or pass — the pure decision, given the command string and who is
 // asking. `ctx.cwd` resolves relative delete targets; `ctx.subagent` and
 // `ctx.headless` change deny-vs-ask, never which commands match.
@@ -136,7 +159,7 @@ export function decide(command, ctx = {}) {
   const cmd = String(command || '').replace(/\s+/g, ' ').trim();
   if (!cmd) return { kind: 'pass' };
 
-  const hit = RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd);
+  const hit = RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
 
   if (ctx.subagent) {
@@ -178,7 +201,7 @@ function main() {
   try { payload = readFileSync(0, 'utf8'); } catch {}
   let input = null;
   try { input = JSON.parse(payload); } catch { return; }
-  if (!input || input.tool_name !== 'Bash') return;
+  if (!input || (input.tool_name !== 'Bash' && input.tool_name !== 'PowerShell')) return;
 
   const ti = input.tool_input || {};
   const command = String(ti.command || '');
