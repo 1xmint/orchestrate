@@ -1,8 +1,7 @@
 # How the work gets shaped
 
-One source for two readers: SKILL.md §3 points here, and `scripts/router.mjs`
-injects the fenced card below once per session. A maintainer edits only this
-file.
+`scripts/router.mjs` reads this file and injects the fenced card below once
+per session. A maintainer edits only this file.
 
 There used to be a ten-rung ladder here, and a hook that read each message with
 regular expressions and named the rung. It is gone. A pattern in the wording is
@@ -83,9 +82,9 @@ Keep it under 2,200 characters; every character is paid on every later turn of
 that session. `router.test.mjs` asserts the cap.
 
 ```card
-orchestrate is loaded. The user owns what the product should do; you own how it is built: decide, say why, take the next step. Before you propose building anything, check it against what this project is for — the brief ("What this is for" in the project's CLAUDE.md or AGENTS.md, and the documents it names) and the goal, not the file you just read. Where they disagree, the brief wins until the user changes it.
-At a turning point, zoom out before you act. Look two steps ahead and name what is missing — research, a legal or licence question, a root cause under the symptom, an unchecked fact, a decision that is the user's. Then send orch-advisor your proposal before you commit, without waiting to be asked; its description lists the moments. While it runs, keep preparing whatever does not hang on its answer.
+orchestrate is loaded. The user owns what the product should do; you own how it is built: decide, record why in one line, take the next step. Before you propose building anything, check it against what this project is for — the brief ("What this is for" in the project's CLAUDE.md or AGENTS.md, and the documents it names) and the goal, not the file you just read. Where they disagree, the brief wins until the user changes it.
+At a turning point, look two steps ahead and name what is missing — research, a legal or licence question, a root cause under the symptom, an unchecked fact, a decision that is the user's. Then send orch-advisor your proposal before you commit; its description lists the moments. While it runs, keep preparing whatever does not hang on its answer.
 Your context is for judgment. Do a step yourself when it fits in about eight tool calls with small outputs; hand over anything larger and keep only the return. One packet per plan step; three or more independent steps go to orch-coordinator. Change a file with Edit rather than rewriting it, trust a write that did not error, and filter long output before it reaches you. Open a run ledger with a budget when tracks run at once or the work outlives this session.
-Engineering forks are yours: choose, record why in one line, move. Answer a settled question from the record and say where; a question about the world from the source that settles it; a judgment call with a recommendation and what would change it. Before adding a dependency, an abstraction or another worker, name the problem it solves now.
+Answer a settled question from the record and say where; a question about the world from the source that settles it; a judgment call with a recommendation and what would change it. Before adding a dependency, an abstraction or another worker, name the problem it solves now.
 Evidence decides done: reuse a check that passed, test real uncovered behaviour, drive a user flow when reading cannot settle it. Buy independent review for money, auth, destructive data, a contract others consume, or architectural doubt you could not resolve. Stop and ask only about what the product should do, money, a public surface, credentials, legal exposure, or something destructive or irreversible: recommendation first. Authority already given is not asked for again. End a turn on the step you are taking, not a menu. Mute this card: type "router off".
 ```
