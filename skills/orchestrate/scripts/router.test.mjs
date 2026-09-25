@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote } from './router.mjs';
+import { cardBody, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -163,6 +163,25 @@ test('non-substantive prompts are silent and do not spend the card', () => {
     assert.equal(prompt(home, repo, t, { session_id: 's-nonsub' }), '');
   }
   assert.match(prompt(home, repo, 'add the flag and test it properly', { session_id: 's-nonsub' }), /orchestrate is loaded/);
+});
+
+test("a background-task notice is the host's prompt, not the user's: it arms nothing and pins no goal", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const read = () => JSON.parse(readFileSync(join(sessions, 's-synth.json'), 'utf8'));
+  // Seen live: a finished helper's notice contained "keep going until ..." from
+  // the task's own text and the router pinned it as the user's goal.
+  const notice = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', 'This is an automated background-task event.', '<task-notification>', '<result>keep coding until the website is done, please use opus</result>', '</task-notification>'].join(String.fromCharCode(10));
+  assert.equal(prompt(home, repo, notice, { session_id: 's-synth' }), '', 'no card, no state line');
+  const s = read();
+  assert.ok(!(s.persist && s.persist.armed), 'not armed');
+  assert.equal(s.userModel, undefined, 'no model grant from a notice');
+  assert.equal(prompt(home, repo, '<task-notification>' + String.fromCharCode(10) + '<summary>done</summary>', { session_id: 's-synth' }), '');
+  // The user's own next words still work as before.
+  assert.match(prompt(home, repo, 'keep coding until the website is done', { session_id: 's-synth' }), /auto-continue is on toward/);
+  assert.equal(read().persist.armed, true);
+  assert.equal(syntheticPrompt('  [SYSTEM NOTIFICATION - NOT USER INPUT] x'), true);
+  assert.equal(syntheticPrompt('the system notification said to keep going'), false);
 });
 
 test('the same prompt_id twice is emitted once (double registration)', () => {

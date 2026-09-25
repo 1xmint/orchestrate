@@ -518,6 +518,12 @@ function gatherContext(input, state) {
 // the session.
 export const PERSIST_INTENT = /\b(keep (going|coding|working|building|at it)|don'?t stop|until (it'?s |it is |they'?re |the [\w-]+( [\w-]+)? (is|are) |everything is |all (of it |of them )?(is |are )?)?(done|finished|complete|working|green|passing|shipped|live)\b|(execute|implement|carry out|work through|finish) (the|this|that|my) (whole |full |entire |rest of the )?(plan|roadmap|spec|checklist|task list|todo list|backlog)|finish (it|everything|all of it|the rest)\b|build (out )?the (whole|entire|full) )/i;
 
+// A prompt the host wrote, not the user: a background task's completion
+// notice. The text is the only signal the hook payload carries for this.
+export function syntheticPrompt(text) {
+  return /^\s*(\[SYSTEM NOTIFICATION - NOT USER INPUT\]|<task-notification>)/i.test(String(text || ''));
+}
+
 export function persistIntent(text) {
   const t = String(text || '').trim();
   if (!t || /\?\s*$/.test(t)) return false;
@@ -577,6 +583,13 @@ function handlePrompt(input) {
   if (promptKey) state.lastPromptId = promptKey;
 
   const trimmed = text.trim();
+
+  // The host also submits its own notices through this hook: a background
+  // task finishing arrives as a prompt that opens "[SYSTEM NOTIFICATION - NOT
+  // USER INPUT]" or "<task-notification>". Nothing in it is the user's words,
+  // so it must not arm a loop, pin a goal, grant a model or spend the card.
+  // Seen live: a finished helper's notice became the persist goal.
+  if (syntheticPrompt(trimmed)) { saveSession(state); return; }
 
   // The one party that sees the user's own words, not a role agent's packet. A
   // family named here unlocks an executor above Sonnet for guard-agent.mjs —
