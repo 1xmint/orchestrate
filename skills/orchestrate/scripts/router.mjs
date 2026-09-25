@@ -36,7 +36,7 @@ import { cappedNote, runningNative, helperFiles } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
-import { applyAutocompactDefault } from './lib/settings.mjs';
+import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -84,15 +84,32 @@ export function cardBody() {
   return FALLBACK_CARD;
 }
 
-// One line in plain words for a one-time migration: what changed, that it
-// starts next session, and how to undo it. No raw settings path — the user
-// does not need one to act on this.
+// One line in plain words for the write `autocompact on` (or `autocompact
+// <N>k`) makes: what changed, that it starts next session, and how to undo
+// it. No raw settings path — the user does not need one to act on this.
 export function compactNote(compact) {
   const amount = compact.value % 1000 ? compact.value : `${compact.value / 1000}k`;
   const backupClause = compact.backup
     ? 'A copy of your old settings was saved in the orchestrate settings folder first.'
     : 'No earlier settings file existed, so there was nothing to back up.';
-  return `Claude Code's auto-compact setting was changed to ${amount} tokens; it takes effect from your next session. ${backupClause} To undo it, run \`profile.mjs --autocompact off\`.`;
+  return `Claude Code's auto-compact setting was changed to ${amount} tokens; it takes effect from your next session. ${backupClause} To undo it, type \`autocompact off\`.`;
+}
+
+// The one-time tip: offered once, plain words, never a write on its own. Said
+// after the state line so it reads as a footnote, not a demand.
+function autocompactTip(value) {
+  const amount = value % 1000 ? value : `${value / 1000}k`;
+  return `Tip: this plugin works best with Claude Code's auto-compact set to ${amount} tokens. Type \`autocompact on\` to set it (it starts from your next session and \`autocompact off\` undoes it), or ignore this and nothing changes.`;
+}
+
+// What `autocompact off` reports: the key is gone (or was already gone) and
+// whether a backup of the file exists.
+function autocompactOffNote(result) {
+  if (!result.removed) return "Claude Code's auto-compact setting was already off; nothing to undo.";
+  const backupClause = result.backup
+    ? 'A copy of your old settings was saved in the orchestrate settings folder first.'
+    : 'No earlier settings file existed, so there was nothing to back up.';
+  return `Claude Code's auto-compact setting was removed; it takes effect from your next session. ${backupClause}`;
 }
 
 // ---- state ------------------------------------------------------------------
@@ -630,6 +647,24 @@ function handlePrompt(input) {
     return;
   }
 
+  // The typed answer to the one-time tip (or a change of mind later): never
+  // sends the card, never arms auto-continue. Matched on the whole prompt so
+  // it never fires mid-sentence.
+  const autoCmd = /^autocompact (on|off|\d+k?)$/i.exec(trimmed);
+  if (autoCmd) {
+    const settingsPath = join(dirname(DIR), 'settings.json');
+    const word = autoCmd[1].toLowerCase();
+    if (word === 'off') {
+      emit('UserPromptSubmit', autocompactOffNote(removeAutocompact({ settingsPath, markerDir: DIR })));
+    } else {
+      const value = word === 'on' ? loadPolicy().context.autocompactDefault : parseAutocompact(word);
+      const applied = applyAutocompact({ settingsPath, markerDir: DIR, tokens: value });
+      emit('UserPromptSubmit', compactNote(applied));
+    }
+    saveSession(state);
+    return;
+  }
+
   // Armed before the mute check: "router off" silences the card, not a loop
   // the user asked for by name.
   let armedNow = false;
@@ -647,11 +682,13 @@ function handlePrompt(input) {
   const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed) && trimmed.split(/\s+/).length >= 4;
   const ctx = gatherContext(input, state);
   const out = [];
-  // Plugin settings cannot carry env vars.  Do this once, before the normal
-  // card logic; after the marker exists this only stats one tiny file.
-  const compact = applyAutocompactDefault({
+  // Plugin settings cannot carry env vars, and this plugin never writes to
+  // them without being asked. Offered once, on the first substantive prompt
+  // only — a non-substantive prompt (a slash command, "ok") must not spend
+  // the one-time marker before the user ever sees the tip.
+  const offer = substantive ? autocompactOffer({
     settingsPath: join(dirname(DIR), 'settings.json'), markerDir: DIR, policy: loadPolicy(),
-  });
+  }) : { offer: false };
   // The mode the host reports, on every prompt: a switch into or out of Plan
   // mode is said once, whatever the prompt looks like.
   const mode = modeNote(state, input);
@@ -672,9 +709,9 @@ function handlePrompt(input) {
     state.lastStateHash = hash;
   }
 
-  // Said once, after the state line rather than before it: what changed, that
-  // it starts next session, and how to undo it, in the user's own words.
-  if (compact.applied) out.push(compactNote(compact));
+  // Said once, after the state line rather than before it: a question, not a
+  // notice — nothing is written until the user types the command back.
+  if (offer.offer) out.push(autocompactTip(offer.value));
 
   if (substantive) {
     const brief = briefNote(ctx, state);

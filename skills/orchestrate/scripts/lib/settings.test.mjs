@@ -10,7 +10,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   registrations, applyRegistrations, readSettings, writeSettings, backupSettings,
-  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys, setEnv, OUR_SCRIPTS, applyAutocompactDefault, autocompactMarkerPath,
+  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys, setEnv, OUR_SCRIPTS,
+  autocompactOffer, applyAutocompact, removeAutocompact, autocompactMarkerPath,
 } from './settings.mjs';
 
 // A settings file shaped like a real user's: an unrelated PreToolUse hook that
@@ -37,30 +38,41 @@ test('autocompact settings merge writes only the env key', () => {
   assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
 });
 
-test('auto-compact default applies once, preserving existing settings with backup and marker', () => {
+test('the offer fires once and never writes settings.json on its own', () => {
   const dir = tmp(), settingsPath = join(dir, 'settings.json'), markerDir = join(dir, 'orchestrate');
   writeSettings(settingsPath, REAL_SHAPE);
-  const r = applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } }, now: new Date('2026-09-14T00:00:00Z') });
+  const o = autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } }, now: new Date('2026-09-14T00:00:00Z') });
+  assert.equal(o.offer, true);
+  assert.equal(o.value, 200000);
+  assert.deepEqual(readSettings(settingsPath), REAL_SHAPE, 'the offer itself never touches settings.json');
+  assert.deepEqual(JSON.parse(readFileSync(o.marker, 'utf8')).value, 'asked');
+  assert.equal(autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).offer, false, 'asked once per HOME, never again');
+  assert.equal(autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker');
+});
+
+test('the offer never fires again once a value exists, whether the user or a prior write set it', () => {
+  const dir = tmp(), settingsPath = join(dir, 'settings.json'), markerDir = join(dir, 'orchestrate');
+  writeSettings(settingsPath, { env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '12345' } });
+  assert.equal(autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'existing');
+  assert.equal(readSettings(settingsPath).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '12345');
+  assert.equal(autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker', 'the user\'s own value is remembered, so settings.json is not re-read');
+  const offDir = join(dir, 'off');
+  assert.equal(autocompactOffer({ settingsPath: join(offDir, 'settings.json'), markerDir: join(offDir, 'orchestrate'), policy: { context: { autocompactDefault: 'off' } } }).reason, 'off');
+  assert.equal(existsSync(autocompactMarkerPath(join(offDir, 'orchestrate'))), false);
+});
+
+test('applyAutocompact writes the key, backs up first, and records a marker; removeAutocompact undoes it', () => {
+  const dir = tmp(), settingsPath = join(dir, 'settings.json'), markerDir = join(dir, 'orchestrate');
+  writeSettings(settingsPath, REAL_SHAPE);
+  const r = applyAutocompact({ settingsPath, markerDir, tokens: 200000, now: new Date('2026-09-14T00:00:00Z') });
   assert.equal(r.applied, true);
   assert.equal(readSettings(settingsPath).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
   assert.deepEqual(readSettings(r.backup), REAL_SHAPE);
   assert.deepEqual(JSON.parse(readFileSync(r.marker, 'utf8')).value, 200000);
-  assert.equal(applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker');
-  delete readSettings(settingsPath).env; // prove an intentional later removal is not undone
-  const s = readSettings(settingsPath); delete s.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW; writeSettings(settingsPath, s);
-  assert.equal(applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker');
+  const u = removeAutocompact({ settingsPath, markerDir, now: new Date('2026-09-14T00:05:00Z') });
+  assert.equal(u.removed, true);
   assert.equal(readSettings(settingsPath).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
-});
-
-test('auto-compact default never overwrites a value and honors off policy', () => {
-  const dir = tmp(), settingsPath = join(dir, 'settings.json'), markerDir = join(dir, 'orchestrate');
-  writeSettings(settingsPath, { env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '12345' } });
-  assert.equal(applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'existing');
-  assert.equal(readSettings(settingsPath).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '12345');
-  assert.equal(applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker', 'the user\'s own value is remembered, so settings.json is not re-read');
-  const offDir = join(dir, 'off');
-  assert.equal(applyAutocompactDefault({ settingsPath: join(offDir, 'settings.json'), markerDir: join(offDir, 'orchestrate'), policy: { context: { autocompactDefault: 'off' } } }).reason, 'off');
-  assert.equal(existsSync(autocompactMarkerPath(join(offDir, 'orchestrate'))), false);
+  assert.equal(removeAutocompact({ settingsPath, markerDir }).removed, false, 'a second undo has nothing left to remove');
 });
 
 function tmp() {

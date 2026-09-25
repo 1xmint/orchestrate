@@ -73,10 +73,12 @@ provides them, since a second copy lists each role twice), and registers the hoo
 minute or so; a new session sees them at once. Type `/orchestrate <your
 goal>`, or just describe a multi-part goal; the skill triggers on its own.
 
-Orchestrate sets auto-compact to 200k once on the first prompt (or a manual
-install), unless you already set it. Opt out before then with
-`profile.mjs --policy context.autocompactDefault=off`; use
-`profile.mjs --autocompact off` to remove it and keep it off. Also set
+Orchestrate offers auto-compact at 200k once, on the first prompt, unless you
+already set it: type `autocompact on` to accept, or ignore the tip and
+nothing changes. Nothing is written until you type that. Opt the tip out
+before it appears with `profile.mjs --policy context.autocompactDefault=off`;
+once set, `autocompact off` (or `profile.mjs --autocompact off`) removes it
+and keeps it off. Also set
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` in the settings `env`. The first keeps
 the manager's context bounded. The second is a host backstop for coordinator
 nesting; the plugin guard still enforces the real limit.
