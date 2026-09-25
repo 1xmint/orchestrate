@@ -282,6 +282,17 @@ test('timeout: the worker is stopped, it has exited, partial work kept, not call
   assert.match(report.next, /Continue only the remaining work/);
 });
 
+test('a broken/missing binary at spawn time fails gracefully, never an uncaught ENOENT', async () => {
+  const r = repo();
+  const { deps } = setup('success');
+  deps.wait = () => {}; // login status will not answer either; skip the real sleep
+  deps.bin = join(deps.workersDir, '..', 'no-such-codex-binary-xyz');
+  const { report, code } = await run(r, deps);
+  assert.equal(report.status, 'unavailable');
+  assert.match(report.why, /[Cc]odex CLI/);
+  assert.equal(code, EXIT.fallback);
+});
+
 test('two workers already running: a third is not started', async () => {
   const r = repo();
   const { deps, calls } = setup('success');

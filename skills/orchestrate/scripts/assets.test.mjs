@@ -81,7 +81,10 @@ test('the coordinator owns one bounded wave and one graded return', () => {
   assert.match(text, /^--- name: orch-coordinator .* model: opus effort: high /);
   assert.match(text, /depth 1 and may dispatch capped workers only one level down/);
   assert.match(text, /codex-worker\.mjs run --model <model> --effort <effort>/);
-  assert.match(text, /Claude workers only after Codex reports exhaustion, or when Codex cannot do the task/);
+  assert.match(text, /Use Claude workers when Codex cannot do the task/);
+  assert.match(text, /unavailable.*auth-failed.*blocked.*quota-exhausted.*not only .*quota-exhausted/);
+  assert.match(text, /do not try Codex again in this wave/);
+  assert.doesNotMatch(text, /only after Codex reports exhaustion/);
   assert.match(text, /Write and Edit only files inside the run directory/);
   assert.match(text, /Grade every return against that task's DONE WHEN/);
   assert.match(text, /integrate their branches in dependency order/);
