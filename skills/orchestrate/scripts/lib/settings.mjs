@@ -15,7 +15,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 
-export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'postcompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];
+export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'guard-bash.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'postcompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];
 
 export function toPosix(p) {
   return String(p).replace(/\\/g, '/');
@@ -110,13 +110,12 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
   }
   if (guard) {
     out.push({ event: 'PreToolUse', matcher: 'Agent|Task', command: commandFor(join(scriptsDir, 'guard-agent.mjs')), timeout: 10 });
+    // The Bash guard: a destructive, public or paid shell command is asked
+    // about in the main session and refused inside a helper (docs/safety-guard.md).
+    out.push({ event: 'PreToolUse', matcher: 'Bash', command: commandFor(join(scriptsDir, 'guard-bash.mjs')), timeout: 5 });
     out.push({ event: 'SubagentStop', matcher: null, command: commandFor(join(scriptsDir, 'ledger.mjs')), timeout: 10 });
-    // SKILL.md's own frontmatter also registers this on Stop, with a bare
-    // `node` that only resolves on a plugin install. A script install is the
-    // one path that can pin the interpreter's absolute path, and `--with-hook`
-    // is already the flag that does that for the other two money-mechanics
-    // hooks, so the Pickup check belongs in the same group rather than a third
-    // flag nobody would think to pass.
+    // The Pickup check belongs with the other money-mechanics hooks under
+    // `--with-hook`, rather than a third flag nobody would think to pass.
     out.push({ event: 'Stop', matcher: null, command: commandFor(join(scriptsDir, 'turn-check.mjs')), timeout: 10 });
     out.push({ event: 'PreCompact', matcher: null, command: commandFor(join(scriptsDir, 'precompact-check.mjs')), timeout: 10 });
     // Unlike precompact-check.mjs, this one is safe to register plugin-wide

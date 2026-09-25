@@ -73,7 +73,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
   const report = applyRegistrations(s, entries);
 
   assert.equal(report.removed, 0);
-  assert.equal(report.added, 9);
+  assert.equal(report.added, 10);
   const gate = s.hooks.PreToolUse.find(g => JSON.stringify(g).includes('memory-write-gate.mjs'));
   assert.deepEqual(gate, REAL_SHAPE.hooks.PreToolUse[0], 'the memory-write-gate entry is untouched');
   assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
@@ -100,7 +100,7 @@ test('a second run replaces our entries instead of stacking them', () => {
   const once = clone(s);
   const report = applyRegistrations(s, registrations(SCRIPTS, { router: true, guard: true }));
 
-  assert.equal(report.removed, 9, 'the stale copies are found by basename and dropped');
+  assert.equal(report.removed, 10, 'the stale copies are found by basename and dropped');
   assert.equal(s.hooks.PostToolUse.length, 1, 'the context sampler, once');
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.equal(s.hooks.SessionStart.length, 1);
@@ -108,7 +108,7 @@ test('a second run replaces our entries instead of stacking them', () => {
   assert.equal(s.hooks.Stop.length, 2, 'the Pickup check and the persist loop');
   assert.equal(s.hooks.PreCompact.length, 1);
   assert.equal(s.hooks.PostCompact.length, 1);
-  assert.equal(s.hooks.PreToolUse.length, 2, 'the user hook plus one of ours');
+  assert.equal(s.hooks.PreToolUse.length, 3, 'the user hook plus the agent guard and the Bash guard');
   assert.deepEqual(new Set(Object.keys(s.hooks)), new Set(Object.keys(once.hooks)));
 });
 
@@ -117,7 +117,7 @@ test('an old entry under a different path is still recognised as ours', () => {
   s.hooks.PreToolUse.push({ matcher: 'Agent', hooks: [{ type: 'command', command: 'node "/home/someone/else/guard-agent.mjs"' }] });
   const report = applyRegistrations(s, registrations(SCRIPTS, { guard: true }));
   assert.equal(report.removed, 1);
-  assert.equal(s.hooks.PreToolUse.length, 2);
+  assert.equal(s.hooks.PreToolUse.length, 3);
   assert.match(JSON.stringify(s.hooks.PreToolUse), /skills\/orchestrate\/scripts\/guard-agent\.mjs/);
 });
 

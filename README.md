@@ -38,7 +38,7 @@ claude plugin install orchestrate@orchestrate --scope user
 ```
 
 Either way it brings the skill, the eight role agents, the output style and the
-seven global hooks in one step.
+ten global hooks in one step.
 
 The agents are planner, implementer, researcher, browser, reviewer, debugger
 and coordinator. The coordinator runs a wave of three or more independent

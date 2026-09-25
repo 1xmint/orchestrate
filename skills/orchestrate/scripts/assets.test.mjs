@@ -462,10 +462,11 @@ test('every plugin hook names a script that exists, through the plugin root', ()
   const root = join(SKILL, '..', '..');
   const hooks = JSON.parse(readFileSync(join(root, 'hooks', 'hooks.json'), 'utf8')).hooks;
   const events = Object.keys(hooks);
-  assert.deepEqual(events.sort(), ['PostCompact', 'PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
-  // The one plugin-wide Stop hook is the persist loop, because the direct work it
-  // exists for rarely loads the skill. It must stay a no-op for an unarmed session.
-  assert.deepEqual(hooks.Stop.flatMap(g => g.hooks.map(h => /scripts\/(\S+?\.mjs)/.exec(h.command)[1])), ['persist-check.mjs']);
+  assert.deepEqual(events.sort(), ['PostCompact', 'PostToolUse', 'PreCompact', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
+  // The Stop hooks are the persist loop first (the direct work it exists for
+  // rarely loads the skill, so it must stay a no-op for an unarmed session) and
+  // then the Pickup-line check, which only speaks for a bound run.
+  assert.deepEqual(hooks.Stop.flatMap(g => g.hooks.map(h => /scripts\/(\S+?\.mjs)/.exec(h.command)[1])), ['persist-check.mjs', 'turn-check.mjs']);
 
   for (const groups of Object.values(hooks)) {
     for (const g of groups) {
@@ -477,17 +478,20 @@ test('every plugin hook names a script that exists, through the plugin root', ()
       }
     }
   }
-  // turn-check and return-check are deliberately absent: they come from the
-  // skill's own frontmatter and each agent file, so they are live only when the
-  // skill is, rather than on every turn of every session.
+  // Every hook is registered here and nowhere else (hooks-registered-once
+  // .test.mjs proves the skill frontmatter carries none). turn-check and
+  // precompact-check speak only for a session bound to a run, so registering
+  // them plugin-wide costs an unbound session nothing. return-check is retired.
   const all = JSON.stringify(hooks);
-  assert.doesNotMatch(all, /turn-check|return-check/);
+  assert.match(all, /turn-check\.mjs/);
+  assert.match(all, /precompact-check\.mjs/);
+  assert.doesNotMatch(all, /return-check/);
 });
 
-// A plugin install gets its hooks from hooks.json plus SKILL.md's frontmatter; a
-// script install gets them from registrations(). The two must register the same
-// scripts on the same events, or one install path silently lacks a check — or,
-// worse, a script both register runs twice and injects twice.
+// A plugin install gets its hooks from hooks.json; a script install gets them
+// from registrations(). The two must register the same scripts on the same
+// events, or one install path silently lacks a check — or, worse, a script both
+// register runs twice and injects twice.
 test('plugin hooks and script-install registrations name the same scripts on the same events', async () => {
   const { registrations } = await import('./lib/settings.mjs');
   const root = join(SKILL, '..', '..');
