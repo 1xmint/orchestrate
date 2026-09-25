@@ -71,6 +71,35 @@ test('progressFact: a plain fact for an author-role packet with no PROGRESS line
   assert.equal(progressFact('Explore', 'x', false), '', 'a built-in sweeper is not an author role');
 });
 
+test('progressFact: a prompt that only points at a packet file is checked against that file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-packet-'));
+  const withLine = join(dir, 'with-progress.md');
+  const withoutLine = join(dir, 'without-progress.md');
+  writeFileSync(withLine, 'TASK: 1\nPROGRESS: /r/p.md\nfind it\n');
+  writeFileSync(withoutLine, 'TASK: 1\nfind it\n');
+
+  assert.equal(
+    progressFact('orch-implementer', `Your packet is in ${withLine}, lines 1-3 (see above)`, false),
+    '',
+    'the PROGRESS line lives in the file the prompt points at, not in the prompt itself',
+  );
+  assert.equal(
+    progressFact('orch-implementer', `packet: ${withoutLine}\nfind it`, false),
+    'no PROGRESS line: a capped return will have nothing to resume from',
+    'the named file has no PROGRESS line either, so this still warns',
+  );
+});
+
+test('progressFact: an inline PROGRESS line never opens a file', () => {
+  const missing = join(tmpdir(), 'orch-packet-does-not-exist', 'nope.md');
+  const readFile = () => { throw new Error('file read path was taken'); };
+  assert.equal(
+    progressFact('orch-implementer', `packet: ${missing}\nPROGRESS: /r/p.md\nfind it`, false, readFile),
+    '',
+    'the inline line already answers it; the file-read path must not run',
+  );
+});
+
 test('role names are one name whatever the install path calls them', () => {
   assert.equal(normalizeRole('orchestrate:orch-planner'), 'orch-planner');
   assert.equal(normalizeRole('orchestrate_orch-planner'), 'orch-planner');
