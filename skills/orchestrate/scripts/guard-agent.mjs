@@ -378,14 +378,38 @@ export function tagFor(ti) {
 // (its own packet is the lead's business, not a worker's).
 export const AUTHOR_ROLES = new Set(['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-debugger']);
 
+// A short prompt that only points at a packet file ("Your packet is in
+// <path>, lines ..." or "packet: <path>") carries no PROGRESS line itself
+// even when the file it names does. Cheapest match first: a bare path token
+// that follows the word "packet" up to its extension.
+const PACKET_PATH_RE = /\bpacket\b[^\n,]{0,40}?([^\s,]+\.[A-Za-z0-9]+)(?=[,\s]|$)/i;
+
+function packetPathFrom(prompt) {
+  const m = PACKET_PATH_RE.exec(String(prompt || ''));
+  return m ? m[1] : null;
+}
+
 // A fact, not a denial: Plan mode already forbids a PROGRESS line (its own
 // rule above), so this says nothing there. Elsewhere, an author-role packet
 // with no PROGRESS line is named as what it is before the dispatch happens,
 // since M4's two worst-shaped helpers had none and nothing told the lead.
-export function progressFact(role, prompt, planMode) {
+//
+// The prompt text is checked first and is the only check for the common case
+// (a PROGRESS line inline): no file is ever opened then. Only when that check
+// fails and the prompt names a packet file is that file opened and checked
+// too, so a dispatch pointing at a packet on disk is not warned about a line
+// that is right there, just not in the short prompt the guard first saw.
+export function progressFact(role, prompt, planMode, readFile = readFileSync) {
   if (planMode) return '';
   if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
-  if (/^\s*PROGRESS:\s*\S+/m.test(String(prompt || ''))) return '';
+  const text = String(prompt || '');
+  if (/^\s*PROGRESS:\s*\S+/m.test(text)) return '';
+  const packetPath = packetPathFrom(text);
+  if (packetPath) {
+    try {
+      if (/^\s*PROGRESS:\s*\S+/m.test(String(readFile(packetPath, 'utf8')))) return '';
+    } catch {}
+  }
   return 'no PROGRESS line: a capped return will have nothing to resume from';
 }
 
