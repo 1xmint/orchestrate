@@ -13,14 +13,14 @@ import {
   commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys, setEnv, OUR_SCRIPTS, applyAutocompactDefault, autocompactMarkerPath,
 } from './settings.mjs';
 
-// A settings file shaped like Josh's: an unrelated PreToolUse hook that must
-// survive, plus the keys the app writes around it.
+// A settings file shaped like a real user's: an unrelated PreToolUse hook that
+// must survive, plus the keys the app writes around it.
 const REAL_SHAPE = {
   permissions: { defaultMode: 'auto' },
   model: 'sonnet',
   hooks: {
     PreToolUse: [
-      { matcher: 'Write|Edit', hooks: [{ type: 'command', command: 'node "C:/Users/Josh/.claude/hooks/memory-write-gate.mjs"' }] },
+      { matcher: 'Write|Edit', hooks: [{ type: 'command', command: 'node "C:/Users/someone/.claude/hooks/memory-write-gate.mjs"' }] },
     ],
   },
   effortLevel: 'low',
@@ -28,7 +28,7 @@ const REAL_SHAPE = {
 };
 
 const clone = o => JSON.parse(JSON.stringify(o));
-const SCRIPTS = 'C:/Users/Josh/.claude/skills/orchestrate/scripts';
+const SCRIPTS = 'C:/Users/someone/.claude/skills/orchestrate/scripts';
 
 test('autocompact settings merge writes only the env key', () => {
   const s = clone(REAL_SHAPE);
@@ -143,7 +143,7 @@ test('commands name the interpreter by absolute path, quoted, with no shell oper
   // Bare `node` is not enough: a desktop app launched from the dock or Start
   // menu has the OS login environment, not a shell's, so an nvm or Homebrew
   // Node is not on its PATH and every hook would fail silently.
-  for (const e of registrations('C:\\Users\\Josh\\.claude\\skills\\orchestrate\\scripts', { router: true, guard: true })) {
+  for (const e of registrations('C:\\Users\\someone\\.claude\\skills\\orchestrate\\scripts', { router: true, guard: true })) {
     assert.match(e.command, /^"[^"]+" "[^"]+\.mjs"$/);
     assert.ok(e.command.startsWith(`"${process.execPath.split('\\').join('/')}"`));
     assert.doesNotMatch(e.command, /\\|&&|\||;|\$\(/, 'no backslashes and no shell operators');

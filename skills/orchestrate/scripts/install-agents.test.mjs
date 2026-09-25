@@ -15,6 +15,14 @@ import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'install-agents.mjs');
+const PLUGIN_JSON = join(HERE, '..', '..', '..', '.claude-plugin', 'plugin.json');
+
+test('plugin.json lists all 8 agents, matching AGENT_NAMES', () => {
+  const manifest = JSON.parse(readFileSync(PLUGIN_JSON, 'utf8'));
+  assert.equal(manifest.agents.length, 8);
+  const names = manifest.agents.map(p => p.split('/').pop().replace(/\.md$/, ''));
+  assert.deepEqual(names.sort(), [...AGENT_NAMES].sort());
+});
 
 function home() {
   const h = mkdtempSync(join(tmpdir(), 'orch-agents-'));
@@ -33,7 +41,12 @@ test('a first install writes every role, with {{SKILL_DIR}} substituted', () => 
   const h = home();
   const r = run(h);
   assert.equal(r.status, 0, r.stderr);
+  assert.equal(AGENT_NAMES.length, 8, 'all 8 roles, including orch-advisor, are expected');
+  assert.ok(AGENT_NAMES.includes('orch-advisor'), 'orch-advisor is one of the installed roles');
   assert.deepEqual(readdirSync(join(h, '.claude', 'agents')).sort(), AGENT_NAMES.map(n => `${n}.md`).sort());
+  const record = JSON.parse(readFileSync(join(h, '.claude', 'orchestrate', 'agents.installed.json'), 'utf8'));
+  assert.equal(Object.keys(record).length, 8, 'agents.installed.json records all 8 agents');
+  assert.ok('orch-advisor.md' in record, 'orch-advisor is hashed and recorded');
   const reviewer = readFileSync(agentPath(h, 'orch-reviewer'), 'utf8');
   assert.doesNotMatch(reviewer, /\{\{SKILL_DIR\}\}|CLAUDE_PLUGIN_ROOT/, 'no unresolved path reaches the installed file');
   // The role files carry no hooks of their own any more. The one they had sent
