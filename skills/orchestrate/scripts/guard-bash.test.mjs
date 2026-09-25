@@ -134,6 +134,9 @@ test('an unsafe Bash rm -rf under bypassPermissions is denied, not silently allo
   const r = run(bash('rm -rf src', { permission_mode: 'bypassPermissions', cwd: '/home/user/project' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  // Nobody can answer in this mode, so the reason must not invite a "yes".
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /allow-bash\.json/);
 });
 
 test('an unsafe PowerShell Remove-Item under bypassPermissions is denied, not silently allowed', () => {

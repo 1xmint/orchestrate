@@ -166,7 +166,9 @@ export function decide(command, ctx = {}) {
     return { kind: 'deny', reason: `${hit.reason} A background helper cannot ask, so this is refused; report back to the lead instead of retrying.` };
   }
   if (ctx.headless) {
-    return { kind: 'deny', reason: hit.reason };
+    // Nobody can answer a question in this mode, so "say yes" would be a
+    // lie: name the two real ways forward instead.
+    return { kind: 'deny', reason: `${hit.reason.replace(/ Say yes to continue\.$/, '')} Nobody can say yes in this mode, so it is refused: run it yourself in a normal session, or add the exact command to .orchestrator/allow-bash.json.` };
   }
   return { kind: 'ask', reason: hit.reason };
 }
