@@ -132,7 +132,7 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
     if (!alive) continue;
     const cap = f && f.path ? capOf(d.agent) : null;
     if (cap && turnsOf(f.path) >= cap) continue;
-    out.push({ provider: 'claude', role, task: d.task || null, at: d.at, agentId: f ? f.agentId : null });
+    out.push({ provider: 'claude', role, task: d.task || null, at: d.at, agentId: f ? f.agentId : null, parent: d.parent || null });
   }
   return out;
 }
@@ -207,21 +207,44 @@ export function lockHolder(worktree, external) {
 
 // ---- the concurrency rule (pure) ----------------------------------------------
 
-export function concurrencyDecision(role, { native = [], external = [], policy = loadPolicy() } = {}) {
+// The rule (written out because the rail and the code have disagreed before):
+// `policy.workers.maxConcurrent` counts only direct dispatches — the lead's
+// own helpers plus each live coordinator's own one slot — never a
+// coordinator's children. Each live coordinator (a native entry with role
+// orch-coordinator and an agentId) gets its own reserved pool of exactly two
+// child slots, on top of that direct-dispatch pool, tracked by matching a
+// child's `parent` field to that coordinator's agentId. Two coordinators live
+// at once each keep their own two-slot pool; one coordinator's children never
+// borrow or spend another coordinator's slots, and never count against
+// maxConcurrent at all.
+export function concurrencyDecision(role, { native = [], external = [], policy = loadPolicy(), coordinatorParentId = null } = {}) {
   const all = [...native, ...external];
   const r = roleOf(role);
-  // A coordinator occupies one ordinary slot while scheduling its two capped
-  // children. The extra slot exists only while that coordinator is live.
-  const maxConcurrent = all.some(w => roleOf(w.role) === 'orch-coordinator')
-    ? Math.max(policy.workers.maxConcurrent, 3)
-    : policy.workers.maxConcurrent;
   const list = xs => xs.map(w => `${w.provider === 'claude' ? w.role : `${w.provider} ${w.role || 'worker'}`}${w.task ? ` ${w.task}` : ''}`).join(', ');
   if (r === 'orch-browser') {
     const b = all.filter(w => roleOf(w.role) === 'orch-browser');
     if (b.length >= policy.workers.browserConcurrent) return `browser work is serial and ${list(b)} is still using the browser. Wait for it to return, then send this one.`;
   }
-  if (all.length >= maxConcurrent) {
-    return `${all.length} worker${all.length === 1 ? ' is' : 's are'} already running (${list(all)}), and the limit is ${maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for ${policy.workers.staleMin} minutes stops counting.`;
+
+  // This candidate is itself a live coordinator's child: it draws only on
+  // that coordinator's own two-slot pool, never on the session-wide pool.
+  if (coordinatorParentId) {
+    const ownChildren = native.filter(w => w && w.parent === coordinatorParentId);
+    if (ownChildren.length >= 2) {
+      return `this coordinator already has ${ownChildren.length} of its own children running (${list(ownChildren)}), and each coordinator holds exactly two child slots. Wait for one to return before sending another.`;
+    }
+    return null;
+  }
+
+  // Every other dispatch — the lead's own direct helpers and each live
+  // coordinator's own single slot — draws on the session-wide pool. A
+  // coordinator's children are excluded from this pool entirely so they
+  // never eat into what the rest of the session is using.
+  const liveCoordinatorIds = new Set(native.filter(w => roleOf(w.role) === 'orch-coordinator' && w.agentId).map(w => w.agentId));
+  const directPool = all.filter(w => !(w && w.parent && liveCoordinatorIds.has(w.parent)));
+  const maxConcurrent = policy.workers.maxConcurrent;
+  if (directPool.length >= maxConcurrent) {
+    return `${directPool.length} worker${directPool.length === 1 ? ' is' : 's are'} already running (${list(directPool)}), and the limit is ${maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for ${policy.workers.staleMin} minutes stops counting.`;
   }
   return null;
 }

@@ -485,7 +485,19 @@ export async function runWorker(opts, deps = {}) {
   const timeoutMs = Math.round((Number(opts.timeoutMin) || policy.codex.timeoutMin) * 60000);
   const started = Date.now();
   const c = command(bin, args);
-  const child = spawn(c.file, c.args, { cwd: wt.path, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
+  // A missing/broken binary is caught two ways: a synchronous throw (some
+  // platforms raise ENOENT directly from spawn), and the async 'error' event
+  // Node normally emits instead. Either way this returns the same graceful
+  // `unavailable` shape `finish()` already uses for a missing bin two lines
+  // above — never an uncaught exception or a raw ENOENT.
+  let child;
+  let spawnFailed = null;
+  try {
+    child = spawn(c.file, c.args, { cwd: wt.path, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' });
+  } catch (e) {
+    return finish({ status: 'unavailable', why: `the Codex CLI failed to start (${e && e.code ? e.code : (e && e.message) || 'spawn error'})`, evidence: { edited: false } }, EXIT.fallback);
+  }
+  child.on('error', e => { spawnFailed = e; });
   registerWorker({ provider: 'codex', role, taskId: packet.taskId, pid: process.pid, childPid: child.pid, worktree: wt.path, startedAt: report.startedAt, session, run: packet.run, checkpoint }, workersDir);
 
   let timedOut = false;
@@ -509,6 +521,10 @@ export async function runWorker(opts, deps = {}) {
   process.removeListener('SIGTERM', onSignal);
   await Promise.all([new Promise(r => events.end(r)), new Promise(r => errs.end(r))]);
   unregisterWorker(packet.taskId, workersDir);
+
+  if (spawnFailed) {
+    return finish({ status: 'unavailable', why: `the Codex CLI failed to start (${spawnFailed.code || spawnFailed.message || 'spawn error'})`, evidence: { edited: false } }, EXIT.fallback);
+  }
 
   const parsed = parseEvents(stdoutText);
   let lastMessage = '';

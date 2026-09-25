@@ -261,12 +261,13 @@ const nestedReason = 'this nested dispatch cannot be attributed to a recorded co
 export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, native = [], external = [], dispatches = [], files = new Map() } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const prompt = String(ti.prompt || '');
+  const nestedParent = input && input.agent_id ? nativeAgent(dispatches, files, input.agent_id) : null;
 
   if (input && input.agent_id && policy.workers.nested !== 'allow') {
     if (policy.workers.nested === 'deny') {
       return { prefix: 'workers', reason: 'nested dispatches are disabled by policy.workers.nested=deny' };
     }
-    const parent = nativeAgent(dispatches, files, input.agent_id);
+    const parent = nestedParent;
     if (!parent || parent.depth == null) return { prefix: 'workers', reason: nestedReason };
     if (parent.role !== 'orch-coordinator') return { prefix: 'workers', reason: `only orch-coordinator may dispatch workers; recorded parent ${parent.agentId} is ${parent.role}` };
     if (!COORDINATOR_CHILD_ROLES.has(role)) return { prefix: 'workers', reason: `orch-coordinator may dispatch only orch-implementer, orch-researcher, orch-reviewer, or Explore; ${role} is not allowed` };
@@ -289,7 +290,8 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
   const locked = lockedWorktreeIn(prompt, external);
   if (locked) return { prefix: 'workers', reason: `a Codex worker (${locked.task || 'task'}, pid ${locked.pid}) is still running in ${locked.worktree}. Two providers never work in one worktree at once: wait for it to exit, then send only the unfinished part.` };
 
-  const busy = concurrencyDecision(role, { native, external, policy });
+  const coordinatorParentId = nestedParent && nestedParent.role === 'orch-coordinator' ? nestedParent.agentId : null;
+  const busy = concurrencyDecision(role, { native, external, policy, coordinatorParentId });
   if (busy) return { prefix: 'workers', reason: busy };
   return null;
 }
