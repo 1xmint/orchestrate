@@ -75,6 +75,14 @@ test('a price tag is measured when there is anything to measure, reasoned when t
   assert.match(priceTag('orch-researcher', '', rows, 'max5', null), /not priced/);
 });
 
+test('orch-coordinator has a reasoned row, priced on opus, its only model', () => {
+  // orch-coordinator.md pins model: opus with no cheaper fallback, so the
+  // reasoned table has no fable or sonnet figure to omit by mistake.
+  assert.ok(REASONED['orch-coordinator'], 'orch-coordinator is missing from REASONED');
+  assert.deepEqual(Object.keys(REASONED['orch-coordinator']), ['opus']);
+  assert.equal(reasonedPrice('orch-coordinator', 'opus'), 1.5);
+});
+
 test('every reasoned row is ordered by what the model costs', () => {
   for (const [role, row] of Object.entries(REASONED)) {
     const fams = Object.keys(row);

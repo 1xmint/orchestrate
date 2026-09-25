@@ -9,12 +9,37 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { PRICES } from './lib/prices.mjs';
 
 const SKILL = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = resolve(SKILL, '..', '..');
 const README = readFileSync(join(ROOT, 'README.md'), 'utf8');
 const HOOKS = JSON.parse(readFileSync(join(ROOT, 'hooks', 'hooks.json'), 'utf8'));
 const PLUGIN = JSON.parse(readFileSync(join(ROOT, '.claude-plugin', 'plugin.json'), 'utf8'));
+const MODELS_MD = readFileSync(join(SKILL, 'references', 'models.md'), 'utf8');
+const ROUTING_MD = readFileSync(join(SKILL, 'references', 'routing.md'), 'utf8');
+
+// One name per registered hook script, across every event and matcher group.
+function scriptsFromHooksJson(hooksJson) {
+  const names = new Set();
+  for (const groups of Object.values(hooksJson.hooks || {})) {
+    for (const g of groups) {
+      for (const h of g.hooks || []) {
+        const m = /scripts\/([a-zA-Z0-9_-]+\.mjs)/.exec(h.command || '');
+        if (m) names.add(m[1]);
+      }
+    }
+  }
+  return [...names];
+}
+
+// The short role name (no `orch-` prefix) for each agent plugin.json ships,
+// derived from its file path so a renamed or added agent needs no edit here.
+function agentNamesFromPlugin() {
+  return (PLUGIN.agents || [])
+    .map(p => p.split('/').pop().replace(/\.md$/, '').replace(/^orch-/, ''))
+    .sort();
+}
 
 // One leaf per registered command, across every event and every matcher group.
 function countHooks(hooksJson) {
@@ -93,4 +118,53 @@ test('no doc claims a "sixth step" check-in unless persist-check.mjs implements 
     assert.doesNotMatch(text, /every sixth step/i, `${f} claims a sixth-step check-in that persist-check.mjs does not implement`);
   }
   assert.doesNotMatch(README, /every sixth step/i);
+});
+
+test('README\'s "The agents are ..." sentence names exactly the agents plugin.json ships', () => {
+  const m = /The agents are ([\s\S]*?)\./.exec(README);
+  assert.ok(m, 'README no longer has a "The agents are ..." sentence to check');
+  const named = m[1].replace(/\n/g, ' ').split(/,| and /).map(s => s.trim()).filter(Boolean).sort();
+  assert.deepEqual(named, agentNamesFromPlugin(),
+    `README names [${named}] but plugin.json's agents are [${agentNamesFromPlugin()}]`);
+});
+
+test('README\'s manual-uninstall list names every hook script hooks.json registers', () => {
+  const scripts = scriptsFromHooksJson(HOOKS);
+  const m = /delete the hook entries naming([\s\S]*?)\. Your own/.exec(README);
+  assert.ok(m, 'README no longer has the manual-uninstall hook-entry sentence to check');
+  for (const script of scripts) {
+    assert.ok(m[1].includes(`\`${script}\``), `README's manual-uninstall list omits ${script}`);
+  }
+});
+
+test('README\'s sample "agents N/N" lines match the real agent count', () => {
+  const n = agentCount();
+  const re = /agents?\s+(\d+)\/(\d+)/gi;
+  let m;
+  let saw = false;
+  while ((m = re.exec(README))) {
+    saw = true;
+    assert.equal(Number(m[1]), n, `README shows "${m[0]}" but plugin.json lists ${n} agents`);
+    assert.equal(Number(m[2]), n, `README shows "${m[0]}" but plugin.json lists ${n} agents`);
+  }
+  assert.ok(saw, 'README has no sample "agents N/N" line to check');
+});
+
+test('README does not claim a hook this plugin ships is registered twice', () => {
+  assert.doesNotMatch(README, /registers?\s+(?:each of\s+)?[^.]*?twice/i,
+    'SKILL.md\'s frontmatter carries no hooks key, so nothing this plugin registers runs twice');
+});
+
+test('models.md\'s Opus price matches prices.mjs, and its checked date is not older than routing.md\'s', () => {
+  const priceRow = /\|\s*Opus[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/.exec(MODELS_MD);
+  assert.ok(priceRow, 'models.md has no "| Opus ... | $in / $out |" row to check');
+  assert.equal(Number(priceRow[1]), PRICES.opus.in, 'models.md\'s Opus input price does not match prices.mjs');
+  assert.equal(Number(priceRow[2]), PRICES.opus.out, 'models.md\'s Opus output price does not match prices.mjs');
+
+  const modelsChecked = /checked (\d{4}-\d{2}-\d{2})/.exec(MODELS_MD);
+  const routingChecked = [...ROUTING_MD.matchAll(/checked (\d{4}-\d{2}-\d{2})/gi)].map(x => x[1]).sort().pop();
+  assert.ok(modelsChecked, 'models.md has no "checked YYYY-MM-DD" date to compare');
+  assert.ok(routingChecked, 'routing.md has no "checked YYYY-MM-DD" date to compare against');
+  assert.ok(modelsChecked[1] >= routingChecked,
+    `models.md was checked ${modelsChecked[1]}, older than routing.md's ${routingChecked}`);
 });
