@@ -36,31 +36,61 @@ function makeHome() {
   return home;
 }
 
-test('the first substantive router prompt applies auto-compact once, after the state line, in plain words', () => {
+test('the first substantive router prompt offers auto-compact once, after the state line, and writes nothing', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
   unlinkSync(marker);
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
-  assert.match(first, /auto-compact setting was changed to 200k/);
-  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
-  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
-  assert.doesNotMatch(first, /backup at/, 'no raw "backup at none" phrasing');
-  assert.doesNotMatch(first, /~[\\/]\.claude[\\/]settings\.json/, 'no raw settings path');
-  assert.match(first, /No earlier settings file existed, so there was nothing to back up\./);
+  assert.match(first, /Tip: this plugin works best with Claude Code's auto-compact set to 200k tokens\. Type `autocompact on`/);
+  assert.equal(existsSync(join(home, '.claude', 'settings.json')), false, 'the offer alone never writes settings.json');
   const stateIdx = first.indexOf('[orchestrate]');
-  const compactIdx = first.indexOf('auto-compact setting was changed');
-  assert.ok(stateIdx >= 0 && compactIdx > stateIdx, 'the compact note comes after the state line, not before it');
-  assert.equal(prompt(home, repo, 'another substantive prompt goes here too'), '', 'the marker makes later prompts cheap and silent');
+  const tipIdx = first.indexOf('Tip: this plugin works best');
+  assert.ok(stateIdx >= 0 && tipIdx > stateIdx, 'the tip comes after the state line, not before it');
+  assert.equal(prompt(home, repo, 'another substantive prompt goes here too'), '', 'the marker makes later prompts cheap and silent, offer or not');
 });
 
-test('auto-compact names where the backup went, in plain words, when settings already existed', () => {
+test('a non-substantive first prompt does not spend the one-time offer', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
   unlinkSync(marker);
-  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ model: 'sonnet' }));
+  assert.equal(prompt(home, repo, 'ok'), '', 'too short to be substantive, so no tip and no marker spent');
+  assert.equal(existsSync(marker), false);
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
-  assert.match(first, /A copy of your old settings was saved in the orchestrate settings folder first\./);
-  assert.doesNotMatch(first, /backup at/);
+  assert.match(first, /Tip: this plugin works best/, 'the tip still arrives on the first substantive prompt');
+});
+
+test('a HOME whose settings.json already sets auto-compact gets no tip and no write', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '12345' } }));
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.doesNotMatch(first, /Tip: this plugin/);
+  assert.equal(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '12345', 'untouched');
+});
+
+test('"autocompact on" writes the key, replies with the compact note, and sends no card or persist arming', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'autocompact on', { session_id: 's-auto-on' });
+  assert.match(first, /auto-compact setting was changed to 200k/);
+  assert.doesNotMatch(first, /\[orchestrate\]/, 'no card');
+  assert.doesNotMatch(first, /\[orchestrate · persist\]/, 'no auto-continue armed');
+  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
+  assert.doesNotMatch(first, /~[\\/]\.claude[\\/]settings\.json/, 'no raw settings path');
+
+  const off = prompt(home, repo, 'autocompact off', { session_id: 's-auto-on' });
+  assert.match(off, /auto-compact setting was removed/);
+  const after = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(after.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined, 'the key is gone');
+});
+
+test('the typed command is case- and space-insensitive', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = prompt(home, repo, '  AUTOCOMPACT ON  ', { session_id: 's-auto-case' });
+  assert.match(out, /auto-compact setting was changed to 200k/);
+  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
 });
 
 function makeRepo(withRun, opts = {}) {
