@@ -60,7 +60,7 @@ export function unboundDecision({ session, reading, prev = {}, checkpoint = fals
   const path = checkpointPath(session, reading);
   return {
     block: true, epoch,
-    reason: `orchestrate: write the checkpoint to ${path} (goal, decisions, files changed, verification, next action), then compaction proceeds.`,
+    reason: `orchestrate: write a checkpoint first (the goal, decisions made, files changed, verification, and the next action), then compaction proceeds. Save it to ${path}.`,
   };
 }
 

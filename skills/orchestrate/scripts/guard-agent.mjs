@@ -413,6 +413,25 @@ export function progressFact(role, prompt, planMode, readFile = readFileSync) {
   return 'no PROGRESS line: a capped return will have nothing to resume from';
 }
 
+// The opposite fact from progressFact: a packet that does name a PROGRESS
+// path, for a helper that may be working in its own worktree and so cannot
+// write under the main checkout the path is written relative to. Said once,
+// plainly, so a refused write is not a dead end.
+export function progressWorktreeNote(role, prompt, planMode, readFile = readFileSync) {
+  if (planMode) return '';
+  if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
+  const text = String(prompt || '');
+  let has = /^\s*PROGRESS:\s*\S+/m.test(text);
+  if (!has) {
+    const packetPath = packetPathFrom(text);
+    if (packetPath) {
+      try { has = /^\s*PROGRESS:\s*\S+/m.test(String(readFile(packetPath, 'utf8'))); } catch {}
+    }
+  }
+  if (!has) return '';
+  return 'if writing the progress file is refused, write the same relative path inside your own worktree instead, and say so in your return';
+}
+
 // A fact, not an order, said only on an orch-implementer dispatch: Codex was
 // last probed inside CODEX_OK_FRESH_MS and answered signed in, and the account
 // is not sitting out a usage limit right now. The guard never starts Codex to
@@ -601,6 +620,8 @@ function main() {
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = progressFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
+  const pw = progressWorktreeNote(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
+  if (pw) tag = `${tag ? `${tag}; ` : ''}${pw}`;
   const cf = codexFact(ti.subagent_type);
   if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });

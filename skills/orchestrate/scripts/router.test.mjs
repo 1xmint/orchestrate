@@ -36,16 +36,31 @@ function makeHome() {
   return home;
 }
 
-test('the first router prompt applies auto-compact once and carries its notice', () => {
+test('the first substantive router prompt applies auto-compact once, after the state line, in plain words', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
   unlinkSync(marker);
-  const first = prompt(home, repo, 'short prompt');
-  assert.match(first, /set auto-compact to 200k/);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(first, /auto-compact setting was changed to 200k/);
   const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
   assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
-  assert.match(first, /backup at/);
-  assert.equal(prompt(home, repo, 'another short prompt'), '', 'the marker makes later prompts cheap and silent');
+  assert.doesNotMatch(first, /backup at/, 'no raw "backup at none" phrasing');
+  assert.doesNotMatch(first, /~[\\/]\.claude[\\/]settings\.json/, 'no raw settings path');
+  assert.match(first, /No earlier settings file existed, so there was nothing to back up\./);
+  const stateIdx = first.indexOf('[orchestrate]');
+  const compactIdx = first.indexOf('auto-compact setting was changed');
+  assert.ok(stateIdx >= 0 && compactIdx > stateIdx, 'the compact note comes after the state line, not before it');
+  assert.equal(prompt(home, repo, 'another substantive prompt goes here too'), '', 'the marker makes later prompts cheap and silent');
+});
+
+test('auto-compact names where the backup went, in plain words, when settings already existed', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ model: 'sonnet' }));
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(first, /A copy of your old settings was saved in the orchestrate settings folder first\./);
+  assert.doesNotMatch(first, /backup at/);
 });
 
 function makeRepo(withRun, opts = {}) {
