@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP } from './router.mjs';
+import { cardBody, compactionFact, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -277,6 +277,108 @@ test('the resume excerpt is bounded', () => {
   const ex = resumeExcerpt(runMd);
   assert.ok(ex.length <= RESUME_CAP, `${ex.length} <= ${RESUME_CAP}`);
   assert.match(ex, /\.\.\.$/);
+});
+
+test('a bullet crossing the cap is cut at the line boundary before it, never mid-word (bug: was a raw character cut)', () => {
+  const repo = makeRepo(true);
+  const runMd = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md');
+  // A "not doing" bullet long enough that RESUME_CAP lands inside one of its
+  // words, the shape observed live: the run card came back truncated at
+  // "not doing: rewriting SKILL.md body wholesale in wave..." mid-word.
+  const bullet = `- not doing: rewriting SKILL.md body wholesale in wave two, since that would blow the token budget for this one task and leave nothing for the ${'x'.repeat(2000)} rest`;
+  const runMdText = readFileSync(runMd, 'utf8').replace(
+    '- constraint: the never-delete rule holds',
+    `- constraint: the never-delete rule holds\n${bullet}`,
+  );
+  writeFileSync(runMd, runMdText);
+
+  // Reproduce first: the old raw cut landed inside a run of "x"s (mid-word).
+  const rawCut = runMdText
+    .split('## Constraints and non-goals\n\n')[1].split('\n\n## Approach')[0]
+    .split('\n').filter(l => l.trim()).join('\n');
+  const budget = RESUME_CAP - 3;
+  // Sanity: the raw slice used to land inside a word (a run of "x"s), which is
+  // exactly the bug — confirms this fixture reproduces it before the fix is
+  // trusted to have changed anything.
+  assert.match(rawCut.slice(budget - 5, budget + 5), /xxxxxxxxxx/, 'fixture must actually cross mid-word under a raw cut');
+
+  const ex = resumeExcerpt(runMd);
+  assert.ok(ex.length <= RESUME_CAP, `${ex.length} <= ${RESUME_CAP}`);
+  assert.match(ex, /\.\.\.$/);
+  // The excerpt must end at a full line (the bullet before the giant one), not
+  // mid-word inside the run of "x"s.
+  assert.doesNotMatch(ex, /x{2,}\.\.\.$/);
+  assert.match(ex, /rule holds\.\.\.$/, `expected the cut to fall back to the previous bullet's line boundary, got: ${JSON.stringify(ex.slice(-60))}`);
+});
+
+test('sectionExcerpt cuts at a sentence boundary, never mid-word', () => {
+  const body = 'The approach keeps changes small. Not doing: rewriting SKILL.md body wholesale in wave two, since that would blow the budget for this task entirely.';
+  const md = `## Approach\n\n${body}\n`;
+  const wordStart = body.indexOf('wholesale');
+  const cap = wordStart + 5 + 3; // lands mid-word under the old raw cut ("whol|esale")
+  const rawCut = body.slice(0, cap - 3);
+  assert.match(rawCut, /whole$/, 'fixture must cross mid-word under a raw cut');
+
+  const ex = sectionExcerpt(md, ['Approach'], cap);
+  assert.ok(ex.length <= cap, `${ex.length} <= ${cap}`);
+  assert.match(ex, /\.\.\.$/);
+  // Falls back to the last sentence boundary before the cap: "...small."
+  assert.equal(ex, 'Approach: The approach keeps changes small....');
+});
+
+test('checkpointExcerpt cuts at the last newline before the cap, never mid-word', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessionId = 's-checkpoint2';
+  const dir = join(home, '.claude', 'orchestrate', 'context', sessionId);
+  mkdirSync(dir, { recursive: true });
+  // Short lines so a newline boundary sits well before the raw cut point.
+  const lines = [];
+  for (let i = 0; i < 60; i++) lines.push(`line ${i}: some notes about the work done so far, nothing longer`);
+  const long = lines.join('\n');
+  writeFileSync(join(dir, 'checkpoint-e1.md'), long);
+
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo });
+  const m = /\[orchestrate · compacted\] checkpoint\n([\s\S]*)/.exec(out);
+  assert.ok(m, `expected a checkpoint block: ${out}`);
+  const excerpt = m[1];
+  assert.ok(excerpt.length <= 1200, `${excerpt.length} <= 1200`);
+  assert.match(excerpt, /\.\.\.$/);
+  // Raw cut at 1197 chars would land inside a line; confirm the fixture
+  // reproduces that before checking the fix.
+  assert.doesNotMatch(long.slice(1194, 1200), /\n/, 'fixture must cross mid-line under a raw cut');
+  // The fix cuts back to the end of the last whole line before the cap.
+  const lastFullLine = long.slice(0, 1197).split('\n').slice(0, -1).join('\n');
+  assert.equal(excerpt, `${lastFullLine}...`);
+});
+
+test('unreturned excludes a dispatch runningNative still counts as alive, and softens the wording for the rest', () => {
+  const state = {
+    dispatches: [
+      { agent: 'orch-implementer', task: '9-1-0001', at: '2026-09-01T00:00:00Z' },
+      { agent: 'orch-researcher', task: '9-1-0002', at: '2026-09-01T00:05:00Z' },
+    ],
+    returned: [],
+  };
+  // runningNative still sees 9-1-0001 as alive; it has nothing to say about
+  // 9-1-0002 (it may be alive too — runningNative just can't tell from here).
+  const native = [{ provider: 'claude', role: 'orch-implementer', task: '9-1-0001', at: state.dispatches[0].at, agentId: 'a1', parent: null }];
+
+  const list = unreturned(state, { native });
+  assert.equal(list.length, 1, 'the one runningNative still sees alive is excluded');
+  assert.equal(list[0].task, '9-1-0002');
+
+  const note = unreturnedNote(state, { native });
+  assert.match(note, /9-1-0002/);
+  assert.doesNotMatch(note, /9-1-0001/, 'the still-alive dispatch is not listed');
+  // Softened wording: not a settled "never returned" verdict.
+  assert.doesNotMatch(note, /never returned/i);
+  assert.match(note, /no return seen/i);
+
+  // With no runningNative cross-check at all, both are still listed (the
+  // check only narrows the list; it is not required for the note to fire).
+  const noteNoNative = unreturnedNote(state);
+  assert.match(noteNoNative, /9-1-0001/);
+  assert.match(noteNoNative, /9-1-0002/);
 });
 
 test('a single unambiguous open run binds itself; two do not', () => {

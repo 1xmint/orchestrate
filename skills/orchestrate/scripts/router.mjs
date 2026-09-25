@@ -32,7 +32,7 @@ import {
 } from './lib/tier.mjs';
 import { sampleContext, storedContext, CONTEXT_DIR, thresholds } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
-import { cappedNote } from './lib/workers.mjs';
+import { cappedNote, runningNative, helperFiles } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
@@ -224,6 +224,22 @@ export function stateHash(ctx) {
 // which is long, mostly finished, and already on disk.
 export const RESUME_CAP = 1200;
 
+// Cuts `text` to at most `cap` characters (plus the trailing `...`), ending at
+// the last newline or sentence-ending `.`/`!`/`?` at or before the cut point —
+// never past it — so a resumed or compacted session never picks the excerpt
+// back up mid-word. Falls back to the raw character cut only when no such
+// boundary exists anywhere in the kept window.
+function boundaryCut(text, cap) {
+  const budget = cap - 3;
+  const window = text.slice(0, budget);
+  let cut = window.lastIndexOf('\n');
+  const sentenceEnd = /[.!?](?=\s|$)/g;
+  let m;
+  while ((m = sentenceEnd.exec(window))) cut = Math.max(cut, m.index + 1);
+  const body = cut < 0 ? window : window.slice(0, cut);
+  return `${body.replace(/\s+$/, '')}...`;
+}
+
 // One reader for "a section of this markdown file, capped". `sections` is a
 // list of either a heading name (`"## <name>"`, the run-ledger shape) or
 // `{ pattern }`, a regex whose capture group 1 is the section body, for a
@@ -243,7 +259,7 @@ export function sectionExcerpt(md, sections, cap = RESUME_CAP, { intro = true } 
   };
   const parts = sections.map(section).filter(Boolean);
   let out = parts.join('\n');
-  if (out.length > cap) out = `${out.slice(0, cap - 3)}...`;
+  if (out.length > cap) out = boundaryCut(out, cap);
   return out;
 }
 
@@ -397,7 +413,7 @@ export function checkpointExcerpt(session, cap = RESUME_CAP) {
     const path = paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
     if (!path) return '';
     const text = readFileSync(path, 'utf8').trim();
-    return text.length > cap ? `${text.slice(0, cap - 3)}...` : text;
+    return text.length > cap ? boundaryCut(text, cap) : text;
   } catch { return ''; }
 }
 
@@ -664,7 +680,7 @@ function handlePrompt(input) {
     // A usage limit just landed: the moment helpers may have died mid-task.
     const limitKey = ctx.limits.join(',');
     if (limitKey && state.recoverShownFor !== limitKey) {
-      const lost = unreturnedNote(state);
+      const lost = unreturnedNote(state, { native: stillRunningNative(input, state) });
       if (lost) out.push(lost);
       state.recoverShownFor = limitKey;
     }
@@ -686,24 +702,44 @@ function handlePrompt(input) {
 // Dispatches with no matching return. Matched in order, by role and, when both
 // sides carry one, by task id. Said only at the moments work may have died —
 // a resume, a compaction, a usage limit — because a helper still running looks
-// exactly the same from here.
-export function unreturned(state) {
+// exactly the same from here. `native` (lib/workers.mjs's `runningNative`, when
+// the caller has one) excludes anything it still counts as alive: a helper
+// mid-task reads identically to one that died, so without this every one of
+// them would be reported as gone. It only narrows the list, never closes it —
+// `runningNative` itself can't see a helper stopped by a limit versus one still
+// working, so what remains is "not seen back yet", not "never coming back".
+// The helpers lib/workers.mjs's own concurrency check still counts as alive,
+// for this session's transcript — the same read guard-agent.mjs uses to admit
+// a new dispatch, reused here so "never returned" only ever means what it says.
+function stillRunningNative(input, state) {
+  try {
+    return runningNative(Array.isArray(state.dispatches) ? state.dispatches : [], {
+      returned: Array.isArray(state.returned) ? state.returned : [],
+      files: helperFiles(input && input.transcript_path),
+    });
+  } catch { return []; }
+}
+
+export function unreturned(state, { native = [] } = {}) {
   const returns = (state && Array.isArray(state.returned) ? state.returned : []).map(r => ({ ...r, used: false }));
+  const stillAlive = (native || []).map(w => ({ role: normalizeRole(w.role), task: w.task || null, used: false }));
   const out = [];
   for (const d of (state && Array.isArray(state.dispatches) ? state.dispatches : [])) {
     const role = normalizeRole(d.agent);
     const hit = returns.find(r => !r.used && r.agent === role && (!d.task || !r.task || r.task === d.task));
-    if (hit) hit.used = true;
-    else out.push({ role, task: d.task || d.key || null, progress: d.progress || null, at: d.at });
+    if (hit) { hit.used = true; continue; }
+    const alive = stillAlive.find(w => !w.used && w.role === role && (!d.task || !w.task || w.task === d.task));
+    if (alive) { alive.used = true; continue; }
+    out.push({ role, task: d.task || d.key || null, progress: d.progress || null, at: d.at });
   }
   return out;
 }
 
-export function unreturnedNote(state, max = 5) {
-  const list = unreturned(state);
+export function unreturnedNote(state, { native = [], max = 5 } = {}) {
+  const list = unreturned(state, { native });
   if (!list.length) return '';
   const shown = list.slice(-max).map(u => `${u.role}${u.task ? ` ${u.task}` : ''}${u.progress ? ` — progress ${u.progress}` : ' — no PROGRESS file named'}`).join('; ');
-  return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session never returned: ${shown}. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
+  return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session, no return seen yet: ${shown}. The still-running check only narrows this list, not clears it — one of these may yet be working, not stopped; check before treating any as dead. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
 }
 
 // Helpers that stopped at their turn cap (lib/workers.mjs), said once each.
@@ -812,7 +848,7 @@ function handleSessionStart(input) {
   // unattended loop there may be no user prompt to bring it back. Restore it
   // verbatim here, the same moment the run excerpt is restored.
   if (state.persist && state.persist.armed) out.push(`[orchestrate · ${word}] ${persistLine(state.persist)}`);
-  const lost = unreturnedNote(state);
+  const lost = unreturnedNote(state, { native: stillRunningNative(input, state) });
   if (lost) out.push(lost);
   // After a compaction the reading starts over from the boundary. Usually that
   // says nothing until a response measures it; a summary that is itself huge
