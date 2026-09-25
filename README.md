@@ -40,9 +40,9 @@ claude plugin install orchestrate@orchestrate --scope user
 Either way it brings the skill, the eight role agents, the output style and the
 ten global hooks in one step.
 
-The agents are planner, implementer, researcher, browser, reviewer, debugger
-and coordinator. The coordinator runs a wave of three or more independent
-tasks; it is not used for one task.
+The agents are planner, implementer, researcher, browser, reviewer, debugger,
+coordinator and advisor. The coordinator runs a wave of three or more
+independent tasks; it is not used for one task.
 
 **A fresh install is not always live in the session you ran it from.** From
 inside Claude Code, the install summary tells you which case you are in: either
@@ -132,7 +132,7 @@ independent review. A cosmetic change to a public page does not.
 While a run is open, the first message of each session carries one line of state:
 
 ```
-[orchestrate] you: opus @ high effort · tier max5 · orch-agents 7/7 · run: 20260909-tidy (bound to this session) · 1 return to grade: 9-9-0001 · ready now: 9-9-0003 · limits today: none
+[orchestrate] you: opus @ high effort · tier max5 · orch-agents 8/8 · run: 20260909-tidy (bound to this session) · 1 return to grade: 9-9-0001 · ready now: 9-9-0003 · limits today: none
 ```
 
 Read it left to right. What you are running on, which plan, whether the eight role
@@ -207,14 +207,14 @@ install. You should not need to type them.
 
 The router, the guard and the ledger are global, registered once from the
 plugin's own `hooks/hooks.json` so they run whether or not the skill is
-currently in play — **for a plugin install.** `guard-agent.mjs` and
-`ledger.mjs` are also named in `SKILL.md`'s frontmatter, which means a plugin
-install registers each of those two twice — see "A hook registered in two
-places runs twice" in `references/hosts.md` for why that is safe: both are
-keyed to be idempotent. **A script install (`--with-hook`) additionally
-registers the turn check in `settings.json`** with the interpreter's absolute
-path pinned in, the same way it pins the other two; only there does it not
-depend on `node` being on the launching app's PATH.
+currently in play — **for a plugin install.** `SKILL.md`'s frontmatter carries
+no hooks of its own, so `hooks/hooks.json` is the one place any hook is
+registered — see "A hook registered in two places runs twice" in
+`references/hosts.md` for why that would matter if it ever changed. **A
+script install (`--with-hook`) additionally registers the turn check in
+`settings.json`** with the interpreter's absolute path pinned in, the same
+way it pins the other two; only there does it not depend on `node` being on
+the launching app's PATH.
 
 ### If it has your plan wrong
 
@@ -470,7 +470,7 @@ whatever you chose.
 
 | Your plan | Model | Effort |
 |---|---|---|
-| Pro, $20 | Sonnet | high |
+| Pro, $20 | Opus | high |
 | Max 5x, $100 | Opus | high |
 | Max 20x, $200 | Opus | high |
 
@@ -583,8 +583,9 @@ rm -rf ~/.claude/skills/orchestrate ~/.agents/skills/orchestrate ~/.claude/agent
 ```
 
 Then open `~/.claude/settings.json` and delete the hook entries naming
-`router.mjs`, `guard-agent.mjs`, `ledger.mjs`, `turn-check.mjs`,
-`precompact-check.mjs`, `persist-check.mjs` or `context-check.mjs`. Your own
+`router.mjs`, `guard-agent.mjs`, `guard-bash.mjs`, `ledger.mjs`,
+`turn-check.mjs`, `precompact-check.mjs`, `postcompact-check.mjs`,
+`persist-check.mjs` or `context-check.mjs`. Your own
 hooks sit in the same arrays, so read before you cut; a backup from before the
 first install is in `~/.claude/orchestrate/`.
 
@@ -654,7 +655,7 @@ Nothing here dispatches an agent.
 2. The second prompt shows nothing. Silence is the default, and the only thing
    that breaks it is one of those facts changing.
 3. `~/.claude/orchestrate/sessions/` has a file named for the session id.
-4. `/orchestrate` shows an `orchestrate: tier … · agents 7/7` line at the top
+4. `/orchestrate` shows an `orchestrate: tier … · agents 8/8` line at the top
    of the skill, with no Bash turn before it. That is the injected profile.
 5. `~/.claude/settings.json` still has whatever hooks you had before, and
    `~/.claude/orchestrate/` holds a `settings.backup.*.json`.

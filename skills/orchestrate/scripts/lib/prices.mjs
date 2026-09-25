@@ -71,6 +71,9 @@ export const REASONED = {
   'orch-browser': { opus: 3, sonnet: 1 },
   // About half a reviewer run: twelve read-only steps and a twenty-line return.
   'orch-advisor': { fable: 3, opus: 1.5, sonnet: 0.5 },
+  // Fixed to opus in its own frontmatter, no cheaper model to fall back to.
+  // models.md: "about 40 steps near 60k on Opus, roughly $1-2 list price per wave".
+  'orch-coordinator': { opus: 1.5 },
   Explore: { haiku: 0.1, sonnet: 0.5 },
 };
 export const REASONED_AS_OF = '2026-09-09';
