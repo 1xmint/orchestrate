@@ -670,6 +670,11 @@ Then, after `/compact` or resuming, it prints the run's goal, what done looks
 like, the constraints, the decisions already made and the Pickup line. That
 block is what a session needs back; the task history stays on disk.
 
+Even a short session that never opened a run leaves something behind: type
+"continue" (or "resume", "keep going", "where were we") as the first prompt
+of a brand-new session in the same folder, and it names what the last session
+there was working on and where to find what it left off.
+
 ## Measure a real run
 
 ```bash

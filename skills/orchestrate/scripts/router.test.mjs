@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote } from './router.mjs';
+import { cardBody, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, handoffLine } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -782,4 +782,81 @@ test('the brief section is found in AGENTS.md', () => {
   assert.match(b.text, /Runs the payroll/);
   // A bare AGENTS.md nobody pulls in with @AGENTS.md is not kept in view.
   assert.equal(b.kind, 'other');
+});
+
+// ---- fresh-session handoff ---------------------------------------------------
+
+test('CONTINUE_WORD matches only the whole trimmed prompt', () => {
+  for (const w of ['continue', 'keep going', 'resume', 'pick up where we left off', 'where were we', "what's next", 'whats next', 'carry on', 'CONTINUE', ' Resume ']) {
+    assert.ok(CONTINUE_WORD.test(w.trim()), w);
+  }
+  assert.equal(CONTINUE_WORD.test('continue adding tests'), false);
+  assert.equal(CONTINUE_WORD.test('should I continue'), false);
+});
+
+test('the first substantive prompt stores it as the session goal, capped and collapsed', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  assert.equal(prompt(home, repo, 'ok'), '' , 'too short to be substantive');
+  prompt(home, repo, '  add   a --json   flag\nto the status command  ', { session_id: 'sess-goal' });
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sess-goal.json'), 'utf8'));
+  assert.equal(state.goal, 'add a --json flag to the status command');
+  const before = state.goal;
+  prompt(home, repo, 'a second substantive prompt in the same session', { session_id: 'sess-goal', prompt_id: 'p2' });
+  const state2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sess-goal.json'), 'utf8'));
+  assert.equal(state2.goal, before, 'the goal is set once, from the first substantive prompt only');
+});
+
+function seedSession(home, id, rec) {
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${id}.json`), JSON.stringify({ v: 1, session_id: id, prompts: 1, cardSent: true, ...rec }));
+}
+
+test('a fresh session that says "continue" in the same folder gets the previous goal', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 30 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.match(out, /Your last session in this folder, 30 minutes ago, was working on: "add a --json flag to the status command"\./);
+  assert.match(out, /run `git status`/, 'no run and no checkpoint here, so the plain git-status clause');
+});
+
+test('a different cwd gets no handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false); const other = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 5 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: other, goal: 'work on the other project', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.doesNotMatch(out, /Your last session in this folder/);
+});
+
+test('a previous session older than 7 days gets no handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 8 * 86400000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'stale work', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.doesNotMatch(out, /Your last session in this folder/);
+});
+
+test('a second "continue" in the same session does not repeat the handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 5 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  const first = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.match(first, /Your last session in this folder/);
+  const second = prompt(home, repo, 'continue', { session_id: 'sess-new', prompt_id: 'p2' });
+  assert.doesNotMatch(second, /Your last session in this folder/);
+});
+
+test('handoffLine names a written Pickup section over plain git status', () => {
+  const runMd = join(mkdtempSync(join(tmpdir(), 'orch-run-')), 'RUN.md');
+  writeFileSync(runMd, '## Pickup\n\nPickup prompt: dispatch the next task\nPickup confidence: high\n');
+  const ctx = { run: { runMd } };
+  const line = handoffLine({ goal: 'ship the login page', lastSeen: new Date(Date.now() - 60000).toISOString() }, ctx);
+  assert.match(line, /Pickup section of/);
+  assert.doesNotMatch(line, /git status/);
+});
+
+test('handoffLine falls back to git status when there is no run or checkpoint', () => {
+  const line = handoffLine({ goal: 'ship the login page', session_id: 'no-such-session', lastSeen: new Date(Date.now() - 60000).toISOString() }, { run: null });
+  assert.match(line, /run `git status`/);
 });

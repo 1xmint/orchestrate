@@ -29,6 +29,7 @@ import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, staleRunsUnder, FAMILY_ORDER, AGENT_NAMES,
+  SESSIONS_DIR, sanitizeId,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext, CONTEXT_DIR, thresholds } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
@@ -38,6 +39,8 @@ import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
+import { findPreviousSession, formatAgo } from './lib/handoff.mjs';
+import { pickupSection, pickupWritten } from './turn-check.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CODEX_STATUS_CACHE = join(DIR, 'workers', 'codex-status.json');
@@ -295,6 +298,41 @@ export function resumeExcerpt(runMd, cap = RESUME_CAP) {
   let text = '';
   try { text = readFileSync(runMd, 'utf8'); } catch { return ''; }
   return sectionExcerpt(text, ['Goal', 'Done when', 'Constraints and non-goals', 'Approach', 'Decisions', 'Pickup'], cap);
+}
+
+// A brand-new session that opens with one of these (the whole trimmed prompt,
+// nothing else) means "tell me what I was doing", not "start counting steps
+// toward a goal" — though it may still do that too (persistIntent matches
+// "keep going" on its own).
+export const CONTINUE_WORD = /^(continue|keep going|resume|pick up where we left off|where were we|what'?s next|carry on)$/i;
+
+// The newest checkpoint file this previous session wrote, if any — same
+// layout precompact-check.mjs and lib/context.mjs read from.
+function latestCheckpointFor(sessionId) {
+  try {
+    const dir = join(CONTEXT_DIR, sanitizeId(sessionId));
+    const paths = readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)).map(n => join(dir, n));
+    return paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] || null;
+  } catch { return null; }
+}
+
+// One line naming what the previous session in this folder was doing and
+// where to look for what it left behind: a run's Pickup section when one is
+// written, else that session's own checkpoint file, else plain `git status`.
+export function handoffLine(prev, ctx) {
+  const ago = formatAgo(Date.now() - Date.parse(prev.lastSeen));
+  let tail = 'Uncommitted changes, if any, are what it left behind; run `git status` to see them, then carry on from there or say what you want instead.';
+  let runText = '';
+  if (ctx && ctx.run && ctx.run.runMd) {
+    try { runText = readFileSync(ctx.run.runMd, 'utf8'); } catch { runText = ''; }
+  }
+  if (runText && pickupWritten(pickupSection(runText))) {
+    tail = `The Pickup section of ${ctx.run.runMd} has what it left off at; open it, then carry on from there or say what you want instead.`;
+  } else {
+    const cp = latestCheckpointFor(prev.session_id);
+    if (cp) tail = `${cp} has what it left off at; open it, then carry on from there or say what you want instead.`;
+  }
+  return `Your last session in this folder, ${ago} ago, was working on: "${prev.goal}". ${tail}`;
 }
 
 // ---- the brief: the project's own "What this is for" -----------------------
@@ -619,6 +657,10 @@ function handlePrompt(input) {
   // Seen live: a finished helper's notice became the persist goal.
   if (syntheticPrompt(trimmed)) { saveSession(state); return; }
 
+  // A fresh session reading this record later (findPreviousSession) needs to
+  // know this one is still recent, on every real prompt, not only the first.
+  state.lastSeen = new Date().toISOString();
+
   // The one party that sees the user's own words, not a role agent's packet. A
   // family named here unlocks an executor above Sonnet for guard-agent.mjs —
   // for the one task id that first spends it, recorded there, not here. One
@@ -683,6 +725,11 @@ function handlePrompt(input) {
   // A slash command, a paste or a two-word reply is not the start of a session's
   // work, and the card is worth its tokens only on something substantive.
   const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed) && trimmed.split(/\s+/).length >= 4;
+
+  // What this session is for, recorded once so a later session in the same
+  // folder can answer "continue what?" for itself.
+  if (substantive && !state.goal) state.goal = trimmed.replace(/\s+/g, ' ').trim().slice(0, 300);
+
   const ctx = gatherContext(input, state);
   const out = [];
   // Plugin settings cannot carry env vars, and this plugin never writes to
@@ -697,6 +744,7 @@ function handlePrompt(input) {
   const mode = modeNote(state, input);
   if (mode) out.push(mode);
 
+  const freshSession = !state.cardSent;
   if (!state.cardSent && substantive) {
     out.push(stateLine(ctx, '[orchestrate]'));
     out.push(cardBody());
@@ -710,6 +758,15 @@ function handlePrompt(input) {
     const hash = stateHash(ctx);
     if (state.lastStateHash && hash !== state.lastStateHash) out.push(stateLine(ctx, '[orchestrate · changed]'));
     state.lastStateHash = hash;
+  }
+
+  // A brand-new session's first prompt naming no goal of its own — "continue"
+  // is one word and never trips the substantive gate above, so this checks
+  // for it on its own. Said once per session, whether or not the card fired.
+  if (freshSession && !state.handoffShown && CONTINUE_WORD.test(trimmed)) {
+    const prev = findPreviousSession({ sessionsDir: SESSIONS_DIR, cwd: input.cwd, exceptId: input.session_id, now: Date.now() });
+    if (prev) out.push(handoffLine(prev, ctx));
+    state.handoffShown = true;
   }
 
   // Said once, after the state line rather than before it: a question, not a
