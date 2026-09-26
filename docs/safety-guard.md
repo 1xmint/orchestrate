@@ -65,6 +65,17 @@ outside the local repo.
   payload, so it is not treated as headless here; it still gets asked. If
   that turns out wrong in practice, the fix is a better-documented field to
   key on, not guessing at one now.
+- **The same command asked twice in one session:** the second identical
+  command gets the same "ask" decision, but the reason starts "Asked
+  already: " instead of reading like the first time. This is for a model
+  that cannot see an answer to its first ask (a headless run, or a helper
+  relaying the guard's own wording back as if it were an instruction) and
+  would otherwise send the same command again and again; a person who
+  already said yes in an interactive session is not affected by this — the
+  session applies their answer before the guard ever sees a next call. The
+  guard keeps one small file per session under the plugin's own state
+  directory to remember what it already asked; a missing or unreadable file
+  reads as "nothing asked yet".
 - **On malformed or unreadable input:** the guard prints nothing and exits
   0. A hook that crashes or prints broken JSON degrades the whole session,
   which is worse than letting one command through unexamined by this
@@ -98,7 +109,9 @@ for another delete-target rule) with:
 - `test(cmd)` — a predicate over the whole command string (already
   whitespace-collapsed and trimmed); and
 - `reason` — one plain sentence a person who has never used git or this CLI
-  can act on: what would happen, ending with "Say yes to continue."
+  can act on: what would happen, ending with "Say yes to continue. If
+  nobody can answer here, stop and tell the user what you were about to run
+  instead of trying again."
 
 Add a case to `guard-bash.test.mjs` for the new shape, and a case proving
 the command it must *not* catch still passes through silently — a rule that

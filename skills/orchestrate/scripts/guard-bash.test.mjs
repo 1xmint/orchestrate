@@ -182,6 +182,55 @@ test('a session with no one able to answer an interactive prompt (bypassPermissi
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
 });
 
+// ---- the "ask" tail tells a headless model to stop instead of retrying -----
+
+test('every "ask" reason ends with the plain instruction to stop and tell the user rather than retry', () => {
+  const commands = ['git push --force', 'git push origin --delete a', 'git branch -D x', 'git rm -r uploads', 'git clean -fd', 'npm publish', 'gh release create v1.0.0', 'vercel --prod', 'stripe charges create --amount=1000'];
+  for (const command of commands) {
+    const d = decide(command);
+    assert.equal(d.kind, 'ask');
+    assert.match(d.reason, /Say yes to continue\. If nobody can answer here, stop and tell the user what you were about to run instead of trying again\.$/);
+  }
+});
+
+// ---- the repeat guard: same command twice in one session is not re-asked fresh --
+
+test('the same command asked twice in one session gets "Asked already: " the second time', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-bash-home-'));
+  const first = run(bash('git push --force'), home);
+  assert.equal(first.json.hookSpecificOutput.permissionDecision, 'ask');
+  assert.doesNotMatch(first.json.hookSpecificOutput.permissionDecisionReason, /^Asked already:/);
+
+  const second = run(bash('git push --force'), home);
+  assert.equal(second.json.hookSpecificOutput.permissionDecision, 'ask');
+  assert.match(second.json.hookSpecificOutput.permissionDecisionReason, /^Asked already: /);
+});
+
+test('a different command in the same session is not prefixed "Asked already: "', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-bash-home-'));
+  run(bash('git push --force'), home);
+  const other = run(bash('git branch -D x'), home);
+  assert.equal(other.json.hookSpecificOutput.permissionDecision, 'ask');
+  assert.doesNotMatch(other.json.hookSpecificOutput.permissionDecisionReason, /^Asked already:/);
+});
+
+test('the same command in a different session is asked fresh, not prefixed', () => {
+  const homeA = mkdtempSync(join(tmpdir(), 'orch-bash-home-'));
+  const homeB = mkdtempSync(join(tmpdir(), 'orch-bash-home-'));
+  run(bash('git push --force'), homeA);
+  const inOther = run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', session_id: 's2', cwd: process.cwd(), tool_input: { command: 'git push --force' } }, homeB);
+  assert.doesNotMatch(inOther.json.hookSpecificOutput.permissionDecisionReason, /^Asked already:/);
+});
+
+test('the subagent deny path is unchanged by the repeat guard', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-bash-home-'));
+  run(bash('git push --force'), home);
+  const r = run(bash('git push --force', { agent_id: 'helper-1' }), home);
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /^Asked already:/);
+});
+
 // ---- malformed input never crashes or blocks --------------------------------
 
 test('malformed stdin exits 0 with empty stdout', () => {
