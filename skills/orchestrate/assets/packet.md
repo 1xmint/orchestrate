@@ -83,8 +83,8 @@ QUESTIONS: <only ones that block>
 SUGGEST: <optional, one line, ≤240 chars — how the plugin could ease this task>
 ```
 
-Nothing rejects a return for its length or shape. A long one is filed whole and
-read; a missing EVIDENCE means the task is unverified, not that the work is
+Nothing rejects a return for its length or shape; it is filed whole and read.
+A missing EVIDENCE line means DONE is recorded as PARTIAL, unverified — not
 redone.
 
 ## Reviewer packet
