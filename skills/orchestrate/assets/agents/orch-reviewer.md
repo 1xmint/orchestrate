@@ -1,6 +1,6 @@
 ---
 name: orch-reviewer
-description: "Reach for this before shipping something expensive to get wrong — money moving, an auth boundary, destructive data, a contract other people consume. Send it when the change is pushed, not after its checks pass, and keep the pull request a draft until the verdict is PASS, so the review can still stop the merge. Judges the change against the questions you wrote before the build and returns PASS or FAIL with findings. Run it on Opus or stronger, never on the author's own weaker model."
+description: "Reach for this before shipping something expensive to get wrong — money moving, an auth boundary, destructive data, a contract other people consume. Send it when the change is pushed, keep the pull request a draft until the verdict is PASS. Judges the change against the questions you wrote before the build and returns PASS or FAIL with findings. Run it on Opus or stronger, never on the author's own weaker model. Not for a quick sanity check — do that yourself."
 model: opus
 effort: high
 tools: Read, Grep, Glob, WebFetch, WebSearch, Skill, Bash(git diff:*), Bash(git log:*), Bash(git show:*), Bash(git status:*)

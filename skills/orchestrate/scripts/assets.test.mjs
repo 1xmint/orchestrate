@@ -125,6 +125,17 @@ test('every description names the moment to reach for the role', () => {
   }
 });
 
+test('every description also names when the built-in agent or doing it yourself beats the role', () => {
+  // Every word here sits in the model's context on every turn; a description
+  // that only says "reach for this" spends nothing on "and skip it when".
+  for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
+    const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
+    const d = (/^description: "(.+)"$/m.exec(fm) || [])[1];
+    assert.match(d, /Not for/, f);
+    assert.ok(d.length <= 500, `${f} description is ${d.length} chars, over the 500 cap`);
+  }
+});
+
 test('the advisor only reads, and may say it cannot tell', () => {
   // Its value is a fresh view of the direction; a tool that changes anything
   // would make it a second author with no review.
