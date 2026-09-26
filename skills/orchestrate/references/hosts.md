@@ -76,6 +76,17 @@ than the session's own working directory. Two other stops in the same session ar
 before it treats a stop as a return; without that check the lead's own messages were being
 filed under `returns/`.
 
+**A role's tool scope is a guarantee, not a description.** `orch-planner`,
+`orch-researcher`, `orch-reviewer` and `orch-advisor` cannot edit code;
+`orch-reviewer` cannot write at all; `orch-implementer`, `orch-debugger` and
+`orch-browser` cannot message another agent or publish anything, and the
+browser cannot reach the network or a shell outside its own pane. Enforced by
+the host's tool restrictions on each agent file, not by an instruction the
+agent could ignore — a reviewer's PASS is bankable partly because it was never
+able to fix what it found. `orch-coordinator` is the one role with `Agent`; it
+may write only under the run directory and may dispatch only the bounded
+child roles the guard allows.
+
 **Nesting** is allowed only through `orch-coordinator`. The guard finds the
 parent from its dispatch record, allows only `orch-implementer`,
 `orch-researcher`, `orch-reviewer` or `Explore` with a named model, refuses a
@@ -103,6 +114,14 @@ CLAUDE.md level the main session loads (**not `AGENTS.md`**; a repo wanting both
 field, and the sibling roster. Not loaded: the conversation, files already read, the main
 session's auto memory. `Explore` and `Plan` skip CLAUDE.md and git status, which is why they
 start small. A `fork` inherits the whole conversation instead.
+
+**`AGENTS.md` vs `CLAUDE.md` in the main session**: Claude Code (v2.1.277 and
+later) reads a project's `AGENTS.md` only while that project has no
+`CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md` — creating any of those
+switches `AGENTS.md` off for Claude, so a repo that has both needs a
+`@AGENTS.md` line in the one Claude reads. Codex workers read `AGENTS.md`
+natively either way. A helper does not reliably get project instructions at
+all, so `AGENTS.md` rules that matter to it go in the packet too.
 
 **Agent files** live in `~/.claude/agents/<name>.md` (all projects) or `.claude/agents/` (one
 repo, wins). Fields used here: `name`, `description`, `model`, `tools`,

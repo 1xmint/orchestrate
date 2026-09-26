@@ -90,8 +90,8 @@ test('both builds carry the revised policy, and neither names a hook that is gon
   for (const [name, text] of [['plugin', SKILL], ['portable', spec]]) {
     // The three execution choices replaced the ten-rung routing ladder.
     assert.match(text, /\*\*Direct\.\*\*/, name);
-    assert.match(text, /\*\*Assisted\.\*\*/, name);
-    assert.match(text, /\*\*Coordinated\.\*\*/, name);
+    assert.match(text, /\*\*Assisted\*\*[.:]/, name);
+    assert.match(text, /\*\*Coordinated\*\*[.:]/, name);
     // Review is bought for a named risk, not scheduled by model rank.
     assert.match(text, /authorisation or security boundary/, name);
     // Evidence is reused rather than rerun by ritual.
