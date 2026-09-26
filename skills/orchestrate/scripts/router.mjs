@@ -21,7 +21,7 @@
 //   node router.mjs --cost <transcript.jsonl>     what the router cost that session
 //   node router.mjs --prune                       delete session state older than 7 days
 
-import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,9 +29,9 @@ import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, staleRunsUnder, FAMILY_ORDER, AGENT_NAMES,
-  SESSIONS_DIR, sanitizeId,
+  SESSIONS_DIR,
 } from './lib/tier.mjs';
-import { sampleContext, storedContext, CONTEXT_DIR, thresholds } from './lib/context.mjs';
+import { sampleContext, storedContext } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote, runningNative, helperFiles } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
@@ -39,346 +39,27 @@ import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { findPreviousSession, formatAgo } from './lib/handoff.mjs';
-import { pickupSection, pickupWritten } from './turn-check.mjs';
+import { findPreviousSession } from './lib/handoff.mjs';
+import { CARD, CARD_CAP, cardBody, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
+import {
+  stateLine, statusReply, actionableLine, contextBand, contextPhrase, quotaPhrase, quotaBand,
+  READY_SHOWN, readyPhrase, ungradedPhrase, budgetPhrase, progressPhrase, edgesPhrase, runPhrase,
+  stateHash, codexState,
+} from './lib/state-line.mjs';
+import {
+  RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt,
+  handoffLine, continueIntent, CONTINUE_WORD,
+} from './lib/resume.mjs';
+
+export { CARD, CARD_CAP, cardBody, compactNote };
+export {
+  stateLine, statusReply, actionableLine, contextBand, contextPhrase, quotaPhrase, quotaBand,
+  READY_SHOWN, readyPhrase, ungradedPhrase, budgetPhrase, progressPhrase, edgesPhrase, runPhrase,
+  stateHash, codexState,
+};
+export { RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt, handoffLine, continueIntent, CONTINUE_WORD };
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const CODEX_STATUS_CACHE = join(DIR, 'workers', 'codex-status.json');
-
-export function codexState(now = Date.now()) {
-  const c = readJson(CODEX_STATUS_CACHE);
-  // A newly learned quota stop wins over an older successful probe.  This is
-  // read-only and never starts Codex from a hook.
-  const provider = readJson(join(DIR, 'workers', 'provider-state.json')) || {};
-  const exhausted = Array.isArray(provider.exhausted) && provider.exhausted.some(e => e && e.provider === 'codex' && e.resetsAt && Date.parse(e.resetsAt) > now);
-  if (exhausted) return 'limit';
-  if (!c || !c.at || now - Date.parse(c.at) > 3600000) return 'off';
-  return c.status === 'limit' ? 'limit' : c.status === 'ok' ? 'ok' : 'off';
-}
-
-// ---- the card ----------------------------------------------------------------
-// Five short paragraphs: how the work is shaped, how a question is answered,
-// when a dependency or a worker earns its cost, what evidence decides done,
-// and what always stops and asks. No rung numbers and no agent names, because
-// nothing here has read the work. It carries only the behaviour rules — no
-// counters, no state — so it has exactly one home: here.
-export const CARD = [
-  "orchestrate is loaded. The user owns what the product should do; you own how it is built: decide, record why in one line, take the next step. Before you propose building anything, check it against what this project is for — the brief (\"What this is for\" in the project's CLAUDE.md or AGENTS.md, and the documents it names) and the goal, not the file you just read. Where they disagree, the brief wins until the user changes it.",
-  "At a turning point, look two steps ahead and name what is missing — research, a legal or licence question, a root cause under the symptom, an unchecked fact, a decision that is the user's. Then send orch-advisor your proposal before you commit; its description lists the moments. While it runs, keep preparing whatever does not hang on its answer.",
-  "Your context is for judgment. Do a step yourself when it fits in about eight tool calls with small outputs; hand over anything larger and keep only the return. One packet per plan step; three or more independent steps go to orch-coordinator. Change a file with Edit rather than rewriting it, trust a write that did not error, and filter long output before it reaches you. Open a run ledger with a budget when tracks run at once or the work outlives this session.",
-  "Answer a settled question from the record and say where; a question about the world from the source that settles it; a judgment call with a recommendation and what would change it. Before adding a dependency, an abstraction or another worker, name the problem it solves now.",
-  "Evidence decides done: reuse a check that passed, test real uncovered behaviour, drive a user flow when reading cannot settle it. Buy independent review for money, auth, destructive data, a contract others consume, or architectural doubt you could not resolve. Stop and ask only about what the product should do, money, a public surface, credentials, legal exposure, or something destructive or irreversible: recommendation first. Authority already given is not asked for again. End a turn on the step you are taking, not a menu. Mute this card: type \"router off\".",
-].join('\n');
-
-// 1,550 until 0.16.0: the new card measured 2,184, and the cap is that
-// rounded up to the next 50. It is paid once per session and once per
-// compaction, against a compaction that frees 100k or more.
-export const CARD_CAP = 2200;
-
-export function cardBody() {
-  return CARD;
-}
-
-// One line in plain words for the write `autocompact on` (or `autocompact
-// <N>k`) makes: what changed, that it starts next session, and how to undo
-// it. No raw settings path — the user does not need one to act on this.
-export function compactNote(compact) {
-  const amount = compact.value % 1000 ? compact.value : `${compact.value / 1000}k`;
-  const backupClause = compact.backup
-    ? 'A copy of your old settings was saved in the orchestrate settings folder first.'
-    : 'No earlier settings file existed, so there was nothing to back up.';
-  return `Claude Code's auto-compact setting was changed to ${amount} tokens; it takes effect from your next session. ${backupClause} To undo it, type \`autocompact off\`.`;
-}
-
-// The one-time tip: offered once, plain words, never a write on its own. Said
-// after the state line so it reads as a footnote, not a demand.
-function autocompactTip(value) {
-  const amount = value % 1000 ? value : `${value / 1000}k`;
-  return `Tip: this plugin works best with Claude Code's auto-compact set to ${amount} tokens. Type \`autocompact on\` to set it (it starts from your next session and \`autocompact off\` undoes it), or ignore this and nothing changes.`;
-}
-
-// What `autocompact off` reports: the key is gone (or was already gone) and
-// whether a backup of the file exists.
-function autocompactOffNote(result) {
-  if (!result.removed) return "Claude Code's auto-compact setting was already off; nothing to undo.";
-  const backupClause = result.backup
-    ? 'A copy of your old settings was saved in the orchestrate settings folder first.'
-    : 'No earlier settings file existed, so there was nothing to back up.';
-  return `Claude Code's auto-compact setting was removed; it takes effect from your next session. ${backupClause}`;
-}
-
-// ---- state ------------------------------------------------------------------
-export function stateLine(ctx, prefix) {
-  const you = ctx.self && ctx.self.model
-    ? `you: ${ctx.self.model}${ctx.self.effort ? ` @ ${ctx.self.effort} effort` : ''}`
-    : 'you: model not known here';
-  const agents = `orch-agents ${ctx.agents}/${AGENT_NAMES.length}`;
-  const limits = (ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none') + contextPhrase(ctx.context);
-  return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · codex: ${ctx.codex || codexState()} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
-}
-
-// What `router status` prints on request. The full state line has no other
-// home now — see actionableLine for what the card carries unasked.
-export function statusReply(ctx) {
-  return stateLine(ctx, '[orchestrate]');
-}
-
-// The one sentence the card (and a later "changed" line) carries unasked,
-// only when something is actionable right now: a usage limit hit today, a run
-// this session continues, or auto-continue armed. No counters, no model name,
-// no tier word — the full picture is `router status`, read on demand.
-// Checked in this order because a limit that refuses helpers is the most
-// urgent of the three.
-export function actionableLine(ctx) {
-  if (ctx.limits && ctx.limits.length) {
-    const names = ctx.limits.map(f => f.charAt(0).toUpperCase() + f.slice(1));
-    const pronoun = names.length > 1 ? 'them' : 'it';
-    return `Today's limit on ${names.join(', ')} is reached; helpers on ${pronoun} are refused until it resets.`;
-  }
-  if (ctx.run && ctx.run.runMd) return `This session continues the run at ${ctx.run.runMd}.`;
-  if (ctx.persist) return 'Auto-continue is on; say "persist off" to stop it.';
-  return '';
-}
-
-// One policy number decides each cut, read from lib/context.mjs's own
-// thresholds() rather than a private copy: checkpointAt and compactAt (or a
-// known smaller window's share of it) are the only two bands there are.
-export function contextBand(reading, policy = loadPolicy()) {
-  const n = reading && reading.tokens;
-  if (!Number.isFinite(n)) return 'none';
-  const { checkpointAt, compactAt } = thresholds(reading, policy);
-  if (n >= compactAt) return 'compact';
-  if (n >= checkpointAt) return 'checkpoint';
-  return 'none';
-}
-
-export function contextPhrase(reading) {
-  // Always the measured number when there is one, so the lead never guesses it.
-  return reading && Number.isFinite(reading.tokens) ? ` · ctx ~${Math.round(reading.tokens / 1000)}k` : '';
-}
-
-// Live plan usage, when the status line has reported it. Past the caution line
-// it says what that means for the next choice, once per crossing.
-export function quotaPhrase(q) {
-  if (!q) return '';
-  const parts = [];
-  if (q.fiveHour) parts.push(`5h ${Math.round(q.fiveHour.pct)}%`);
-  if (q.week) parts.push(`wk ${Math.round(q.week.pct)}%`);
-  return parts.length ? ` · usage ${parts.join(' ')}` : '';
-}
-
-export function quotaBand(q) {
-  if (!q || !q.fiveHour) return 'none';
-  if (q.fiveHour.pct >= HELPER_STOP_FIVE_HOUR) return 'stop';
-  if (q.fiveHour.pct >= CAUTION_FIVE_HOUR) return 'caution';
-  return 'ok';
-}
-
-// Which planned tasks have nothing left to wait for. This is a fact the model
-// cannot see without re-reading the whole ledger, which is the router's one
-// remaining job. It is reported, never demanded: a lead that should wait is
-// still free to wait. It exists because a session was watched sitting idle on
-// one agent with a finished plan on the board, and idle turns in a `/goal` loop
-// cost quota and buy nothing.
-export const READY_SHOWN = 4;
-
-const trim = ids => `${ids.slice(0, READY_SHOWN).join(', ')}${ids.length > READY_SHOWN ? ` +${ids.length - READY_SHOWN} more` : ''}`;
-
-export function readyPhrase(run) {
-  const ready = (run && run.ready) || [];
-  return ready.length ? ` · ready now: ${trim(ready)}` : '';
-}
-
-// Work that came back while nobody was looking. The ledger hook files a return
-// and indexes it; setting the row is the lead's, because that is the moment
-// anyone actually judges it. This is the other half of that trade: the row
-// stays honest, and the router carries the reminder that one is owed. It also
-// keeps `ready now` truthful, since readiness is computed from those same rows.
-export function ungradedPhrase(run) {
-  const ungraded = (run && run.ungraded) || [];
-  if (!ungraded.length) return '';
-  const n = ungraded.length;
-  return ` · ${n} return${n === 1 ? '' : 's'} to grade: ${trim(ungraded)}`;
-}
-
-const round1 = n => Math.round(Number(n) * 10) / 10;
-
-// How much of the run's stated budget the subagents have spent. Shown only when
-// a ceiling exists, so it is a progress-to-limit reading, never an open-ended
-// running total — the thing the plugin refuses because it reads as an allowance.
-// With a ceiling it is exactly the "how close to the wall" number the user asked
-// to see. The lead conversation's own cost is not in it; no hook sees that.
-export function budgetPhrase(run) {
-  const c = run && run.budget && run.budget.ceiling;
-  if (c == null) return '';
-  const spent = Number(run && run.spend) || 0;
-  return ` · subagent spend ~$${round1(spent)}/$${c}`;
-}
-
-export function progressPhrase(run) {
-  const total = Number(run && run.rows) || 0;
-  if (!total) return '';
-  return ` · ${Number(run.done) || 0}/${total} done`;
-}
-
-// The difference between "nothing is ready" and "I cannot see the edges". The
-// second is a fixable ledger problem — the task table has no `blocks on` column
-// — and saying so is what turns a silent, misleading empty into a one-line fix.
-export function edgesPhrase(run) {
-  return run && run.edgesMissing
-    ? ' · ⚠ task table has no "blocks on" column, so I cannot tell which tasks are ready to run in parallel — add it (see the template)'
-    : '';
-}
-
-function runPhrase(ctx) {
-  // Show the run's management picture even when this session has not bound it.
-  // A session that starts above its repo never auto-binds, so the readiness and
-  // budget lines never rendered — the whole reason a run could sit with three
-  // unblocked tasks and nobody starting them. Displaying is read-only; a hook
-  // that writes still needs the binding, which is a separate thing.
-  const focus = ctx.run || (ctx.candidates.length === 1 ? ctx.candidates[0] : null);
-  if (focus) {
-    const how = ctx.run ? ctx.runHow : 'candidate, not bound — bind before a dispatch writes through it';
-    return `run: ${focus.runId} (${how})${budgetPhrase(focus)}${progressPhrase(focus)}${ungradedPhrase(focus)}${readyPhrase(focus)}${edgesPhrase(focus)}`;
-  }
-  if (ctx.candidates.length > 1) return `run: none bound; ${ctx.candidates.length} candidates in this repo`;
-  return 'run: none';
-}
-
-export function stateHash(ctx) {
-  // The focus run is what the line actually reports, bound or a lone candidate,
-  // so its readiness and progress are what should trigger a reprint.
-  const focus = ctx.run || (ctx.candidates.length === 1 ? ctx.candidates[0] : null);
-  return [
-    ctx.tier, ctx.agents, focus ? focus.runId : '', ctx.candidates.length,
-    // A task becoming ready is the moment the line is worth reprinting, and the
-    // moment a waiting lead has something better to do. A return landing, a row
-    // finally being set, or a wave completing is the same kind of moment.
-    focus && focus.ready ? focus.ready.join(',') : '',
-    focus && focus.ungraded ? focus.ungraded.join(',') : '',
-    focus ? `${focus.done || 0}/${focus.rows || 0}` : '',
-    focus && focus.edgesMissing ? 'edges?' : '',
-    ctx.limits.join(','), ctx.self ? `${ctx.self.model}/${ctx.self.effort}` : '',
-    // The band, not the number: a line every percent would be noise.
-    quotaBand(ctx.quota), contextBand(ctx.context), ctx.codex || codexState(),
-  ].join('|');
-}
-
-// A bounded excerpt of what the run is for, for a session that has lost the
-// thread: resumed, compacted, or picking up someone else's ledger. Outcome,
-// constraints, current approach and the Pickup line — never the task history,
-// which is long, mostly finished, and already on disk.
-export const RESUME_CAP = 1200;
-
-// Cuts `text` to at most `cap` characters (plus the trailing `...`), ending at
-// the last newline or sentence-ending `.`/`!`/`?` at or before the cut point —
-// never past it — so a resumed or compacted session never picks the excerpt
-// back up mid-word. Falls back to the raw character cut only when no such
-// boundary exists anywhere in the kept window.
-function boundaryCut(text, cap) {
-  const budget = cap - 3;
-  const window = text.slice(0, budget);
-  let cut = window.lastIndexOf('\n');
-  const sentenceEnd = /[.!?](?=\s|$)/g;
-  let m;
-  while ((m = sentenceEnd.exec(window))) cut = Math.max(cut, m.index + 1);
-  const body = cut < 0 ? window : window.slice(0, cut);
-  return `${body.replace(/\s+$/, '')}...`;
-}
-
-// One reader for "a section of this markdown file, capped". `sections` is a
-// list of either a heading name (`"## <name>"`, the run-ledger shape) or
-// `{ pattern }`, a regex whose capture group 1 is the section body, for a
-// heading whose wording is not fixed (the brief's "## What this is for").
-// `intro` (default true) prefixes a named section's body with `name: `, the
-// way the run excerpt reads; the brief excerpt wants the body alone.
-export function sectionExcerpt(md, sections, cap = RESUME_CAP, { intro = true } = {}) {
-  const text = String(md || '');
-  const section = spec => {
-    const name = typeof spec === 'string' ? spec : spec.name;
-    const re = (spec && spec.pattern) || new RegExp(`## ${name}\\s*\\n([\\s\\S]*?)(?:\\n## |\\s*$)`);
-    const m = re.exec(text);
-    if (!m) return '';
-    const body = m[1].split('\n').filter(l => l.trim() && !/^<.*>$/.test(l.trim())).join('\n').trim();
-    if (!body) return '';
-    return intro && name ? `${name}: ${body}` : body;
-  };
-  const parts = sections.map(section).filter(Boolean);
-  let out = parts.join('\n');
-  if (out.length > cap) out = boundaryCut(out, cap);
-  return out;
-}
-
-export function resumeExcerpt(runMd, cap = RESUME_CAP) {
-  let text = '';
-  try { text = readFileSync(runMd, 'utf8'); } catch { return ''; }
-  return sectionExcerpt(text, ['Goal', 'Done when', 'Constraints and non-goals', 'Approach', 'Decisions', 'Pickup'], cap);
-}
-
-// A brand-new session that opens with one of these (the whole trimmed prompt,
-// nothing else) means "tell me what I was doing", not "start counting steps
-// toward a goal" — though it may still do that too (persistIntent matches
-// "keep going" on its own).
-export const CONTINUE_WORD = /^(continue|keep going|resume|pick up where we left off|where were we|what'?s next|carry on)$/i;
-
-// A short lead phrase that opens a "pick up where we left off" prompt, not
-// necessarily the whole prompt (CONTINUE_WORD is the exact-match case; this is
-// the looser "starts with" case for a prompt that says a little more).
-const CONTINUE_LEAD = /^(continue|keep going|carry on|resume|go on|pick up( where we left off)?|where were we|what'?s next|status|what were we doing)\b/i;
-
-// A "?"-only prompt that asks where things stand without any of the lead
-// words above ("where are we?", "what's left?").
-const STATUS_QUESTION = /^(where are we|where('?s| is) (this|it|that)|what'?s (left|the status)|how far did we get|what'?s going on|how'?s it going)\s*\??$/i;
-
-// A build verb followed by another word means the prompt names a new goal,
-// even when it opens with a continue-word ("continue and add a login page").
-// This is the one signal that overrides an otherwise-matching lead phrase.
-const NEW_GOAL_VERB = /\b(build|add|make|fix|create|write|implement|change|remove|update|refactor)\b\s+\S/i;
-
-// True for a prompt that means "tell me what I was doing / keep doing it",
-// false the moment it also names a new goal. CONTINUE_WORD is the strict
-// exact-match subset of this; everything else here is looser on purpose,
-// because a fresh session's first words are rarely typed exactly.
-export function continueIntent(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return false;
-  const stripped = raw.replace(/[.!?]+$/, '').trim();
-  if (CONTINUE_WORD.test(stripped)) return true;
-  if (STATUS_QUESTION.test(raw)) return true;
-  if (!CONTINUE_LEAD.test(stripped)) return false;
-  if (NEW_GOAL_VERB.test(stripped)) return false;
-  const words = stripped.split(/\s+/).filter(Boolean);
-  return words.length < 12;
-}
-
-// The newest checkpoint file this previous session wrote, if any — same
-// layout precompact-check.mjs and lib/context.mjs read from.
-function latestCheckpointFor(sessionId) {
-  try {
-    const dir = join(CONTEXT_DIR, sanitizeId(sessionId));
-    const paths = readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)).map(n => join(dir, n));
-    return paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] || null;
-  } catch { return null; }
-}
-
-// One line naming what the previous session in this folder was doing and
-// where to look for what it left behind: a run's Pickup section when one is
-// written, else that session's own checkpoint file, else plain `git status`.
-export function handoffLine(prev, ctx) {
-  const ago = formatAgo(Date.now() - Date.parse(prev.lastSeen));
-  let tail = 'Uncommitted changes, if any, are what it left behind; run `git status` to see them, then carry on from there or say what you want instead.';
-  let runText = '';
-  if (ctx && ctx.run && ctx.run.runMd) {
-    try { runText = readFileSync(ctx.run.runMd, 'utf8'); } catch { runText = ''; }
-  }
-  if (runText && pickupWritten(pickupSection(runText))) {
-    tail = `The Pickup section of ${ctx.run.runMd} has what it left off at; open it, then carry on from there or say what you want instead.`;
-  } else {
-    const cp = latestCheckpointFor(prev.session_id);
-    if (cp) tail = `${cp} has what it left off at; open it, then carry on from there or say what you want instead.`;
-  }
-  return `Your last session in this folder, ${ago} ago, was working on: "${prev.goal}". ${tail}`;
-}
 
 // ---- the brief: the project's own "What this is for" -----------------------
 // "The brief" is that section of the project's instruction file, not a
@@ -515,17 +196,6 @@ export function briefNote(ctx, state, { force = false } = {}) {
   state.briefSentFor = b.file;
   const where = b.reason === 'worktree' ? 'this is a worktree and the file lives in the main checkout' : 'this session was started above the project';
   return `[orchestrate · brief] from ${b.file}. Claude Code does not keep this file in view here (${where}), so its "What this is for" section is copied below, and again after each summary.\n${b.text}`;
-}
-
-export function checkpointExcerpt(session, cap = RESUME_CAP) {
-  try {
-    const dir = join(CONTEXT_DIR, String(session || 'nosession').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120));
-    const paths = readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)).map(n => join(dir, n));
-    const path = paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
-    if (!path) return '';
-    const text = readFileSync(path, 'utf8').trim();
-    return text.length > cap ? boundaryCut(text, cap) : text;
-  } catch { return ''; }
 }
 
 // ---- local context ----------------------------------------------------------
