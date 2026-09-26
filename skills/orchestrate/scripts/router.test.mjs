@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, syntheticPrompt, sectionExcerpt, RESUME_CAP, actionableLine, BRIEF_CAP, unreturned, unreturnedNote } from './router.mjs';
+import { cardBody, syntheticPrompt, sectionExcerpt, RESUME_CAP, actionableLine, BRIEF_CAP } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -352,8 +352,7 @@ test('the after-compaction line states facts, not an instruction', () => {
   // Facts only: nothing in the line tells the lead what to do.
   const line = /\[orchestrate · after compaction\][^\n]*/.exec(second)[0];
   assert.doesNotMatch(line, /\b(should|must|send|call|dispatch|consider)\b/i);
-  assert.match(compactionFact({ dispatches: [] }), /0 helpers sent so far; orch-advisor last sent: never\./);
-  assert.match(compactionFact({ dispatches: [{ agent: 'orch-advisor' }] }), /1 helper sent so far; orch-advisor last sent: the most recent helper\./);
+  // compactionFact's own direct-call tests moved to lib/recover.test.mjs.
 });
 
 test('SessionStart compact with no bound run injects the checkpoint file, capped at 1,200 chars', () => {
@@ -398,34 +397,7 @@ test('checkpointExcerpt cuts at the last newline before the cap, never mid-word'
   assert.equal(excerpt, `${lastFullLine}...`);
 });
 
-test('unreturned excludes a dispatch runningNative still counts as alive, and softens the wording for the rest', () => {
-  const state = {
-    dispatches: [
-      { agent: 'orch-implementer', task: '9-1-0001', at: '2026-09-01T00:00:00Z' },
-      { agent: 'orch-researcher', task: '9-1-0002', at: '2026-09-01T00:05:00Z' },
-    ],
-    returned: [],
-  };
-  // runningNative still sees 9-1-0001 as alive; it has nothing to say about
-  // 9-1-0002 (it may be alive too — runningNative just can't tell from here).
-  const native = [{ provider: 'claude', role: 'orch-implementer', task: '9-1-0001', at: state.dispatches[0].at, agentId: 'a1', parent: null }];
-
-  const list = unreturned(state, { native });
-  assert.equal(list.length, 1, 'the one runningNative still sees alive is excluded');
-  assert.equal(list[0].task, '9-1-0002');
-
-  const note = unreturnedNote(state, { native });
-  assert.match(note, /has not reported back/);
-  // No role names and no task ids — those are for the ledger, not the note.
-  assert.doesNotMatch(note, /orch-researcher|orch-implementer|9-1-0001|9-1-0002/);
-  // Softened wording: not a settled "never returned" verdict.
-  assert.doesNotMatch(note, /never returned/i);
-
-  // With no runningNative cross-check at all, both are still listed (the
-  // check only narrows the list; it is not required for the note to fire).
-  const noteNoNative = unreturnedNote(state);
-  assert.equal((noteNoNative.match(/has not reported back/g) || []).length, 2, 'both are still listed');
-});
+// unreturned/unreturnedNote's own direct-call test moved to lib/recover.test.mjs.
 
 test('a single unambiguous open run binds itself; two do not', () => {
   const home = makeHome(); const repo = makeRepo(true);
