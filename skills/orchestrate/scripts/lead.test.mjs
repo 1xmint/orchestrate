@@ -21,10 +21,12 @@ test('helpers that never returned are found from dispatch and return records', (
   const lost = unreturned(state);
   assert.deepEqual(lost.map(u => u.task), ['9-9-0002', 'find the router']);
   const note = unreturnedNote(state);
-  assert.match(note, /2 helpers dispatched this session, no return seen yet/);
   assert.doesNotMatch(note, /never returned/i);
-  assert.match(note, /orch-implementer 9-9-0002 — progress \/r\/progress\/9-9-0002\.md/);
-  assert.match(note, /Explore find the router — no PROGRESS file named/);
+  // No role names and no task ids in the note the user reads; a dispatch with
+  // no numeric id (Explore's own first line) is the one case with a slug.
+  assert.doesNotMatch(note, /orch-implementer/);
+  assert.match(note, /A helper working on an earlier step has not reported back; its notes are at \/r\/progress\/9-9-0002\.md\./);
+  assert.match(note, /A helper working on find the router has not reported back; no notes file was named\./);
   assert.equal(unreturnedNote({ dispatches: [{ agent: 'orch-reviewer', task: '1' }], returned: [{ agent: 'orch-reviewer', task: '1' }] }), '');
 });
 import { lastContextTokens, selfModel } from './lib/tier.mjs';

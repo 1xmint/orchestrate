@@ -825,7 +825,7 @@ supported path. See `skills/orchestrate/references/hosts.md`.
 ```
 skills/orchestrate/
   SKILL.md              the skill (loads on invocation, stays in context)
-  references/           ladder, routing, evaluation, lanes, hosts, models
+  references/           routing, evaluation, lanes, hosts, models
   scripts/              router, guard, ledger, turn-check, precompact-check, persist-check,
                         context-check, context, codex-worker, gate, profile, run-init,
                         measure, diagnose, map, install-agents, install-project, batch,
