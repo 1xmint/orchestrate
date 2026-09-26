@@ -28,6 +28,7 @@ import { createHash } from 'node:crypto';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
 import { roleMaxTurns } from './lib/workers.mjs';
+import { checkReturn } from './lib/report.mjs';
 import { addSuggestion } from './suggest.mjs';
 export { roleMaxTurns };
 
@@ -183,6 +184,21 @@ export function readCosts(path = COSTS_PATH) {
 export function cappedReturn(turns, cap, parsedStatus) {
   const capped = cap != null && Number(turns) >= cap;
   return { capped, status: capped ? 'PARTIAL' : (parsedStatus || null), claimed: parsedStatus || null };
+}
+
+export const NO_EVIDENCE_NOTE = 'said done, but its return carried no evidence line; treat as unverified.';
+
+// A DONE return with no evidence line is recorded as unverified, not as
+// done: `checkReturn` reads the return itself (lib/report.mjs), so whether
+// it is caught does not depend on what parseReturn already extracted. Never
+// called for a status other than DONE — a PARTIAL or BLOCKED return, whether
+// it started that way or was just downgraded by `cappedReturn` above, is
+// left alone: this only ever narrows DONE, never touches anything else.
+export function evidenceDowngrade(status, text) {
+  if (status !== 'DONE') return { status, note: null };
+  const check = checkReturn(text);
+  if (check.evidence) return { status, note: null };
+  return { status: 'PARTIAL', note: NO_EVIDENCE_NOTE };
 }
 
 // What this helper's PostCompact hook (postcompact-check.mjs) already left
@@ -366,6 +382,8 @@ function main() {
   const usage = sumUsage(input.agent_transcript_path);
   const cap = cappedReturn(usage.turns, roleMaxTurns(agentType), r.status);
   r.status = silent && !cap.capped ? 'PARTIAL' : cap.status;
+  const noEvidence = evidenceDowngrade(r.status, text);
+  r.status = noEvidence.status;
   const dispatch = dispatchFor(input.session_id, r.task);
   const asked = dispatch && dispatch.model !== 'inherit' ? dispatch.model : '';
   const ranModel = usage.model || asked || 'inherit';
@@ -380,9 +398,10 @@ function main() {
   try {
     mkdirSync(dir, { recursive: true });
     const capNote = cap.capped ? ` · stopped at its ${usage.turns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
+    const evidenceNote = noEvidence.note ? ` · ${noEvidence.note}` : '';
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
-    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${compactNote} -->\n\n`;
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${compactNote} -->\n\n`;
     writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
@@ -397,6 +416,7 @@ function main() {
     model: ranModel,
     status: r.status || null,
     ...(cap.capped ? { capped: true, claimed: cap.claimed } : {}),
+    ...(noEvidence.note ? { noEvidence: true } : {}),
     verdict: r.verdict || null,
     evidence: r.evidence,
     file,
@@ -409,7 +429,7 @@ function main() {
     const state = input.session_id && loadSession(input.session_id);
     if (state) {
       state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}) });
       saveSession(state);
     }
   } catch {}

@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendCost, sumCosts, parseReturn, lintRunRow } from './ledger.mjs';
+import { appendCost, sumCosts, parseReturn, lintRunRow, evidenceDowngrade, NO_EVIDENCE_NOTE } from './ledger.mjs';
 
 function tmpFile() {
   const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-'));
@@ -70,4 +70,38 @@ test('a row with a shifted or missing cell is refused, naming the task id', () =
   assert.equal(r.ok, false);
   assert.match(r.reason, /9-9-0002/);
   assert.match(r.reason, /6 columns.*7/);
+});
+
+test('evidenceDowngrade: DONE with an evidence line is left DONE, no note', () => {
+  const text = 'TASK: 9-1-0001\nSTATUS: DONE\nEVIDENCE: node --test lib/x.test.mjs — 4 pass\n';
+  const r = evidenceDowngrade('DONE', text);
+  assert.equal(r.status, 'DONE');
+  assert.equal(r.note, null);
+});
+
+test('evidenceDowngrade: DONE with no evidence line is downgraded to PARTIAL with the note', () => {
+  const text = 'TASK: 9-1-0001\nSTATUS: DONE\nCHANGED: lib/x.mjs\n';
+  const r = evidenceDowngrade('DONE', text);
+  assert.equal(r.status, 'PARTIAL');
+  assert.equal(r.note, NO_EVIDENCE_NOTE);
+  assert.match(r.note, /no evidence line/);
+});
+
+test('evidenceDowngrade never touches a return that is already PARTIAL', () => {
+  const text = 'TASK: 9-1-0001\nSTATUS: PARTIAL\nNOT VERIFIED: the gate\n';
+  const r = evidenceDowngrade('PARTIAL', text);
+  assert.equal(r.status, 'PARTIAL');
+  assert.equal(r.note, null);
+});
+
+test('evidenceDowngrade never touches a return that is already BLOCKED', () => {
+  const r = evidenceDowngrade('BLOCKED', 'TASK: 9-1-0001\nSTATUS: BLOCKED\nQUESTIONS: which file\n');
+  assert.equal(r.status, 'BLOCKED');
+  assert.equal(r.note, null);
+});
+
+test('evidenceDowngrade never upgrades: a null status stays null', () => {
+  const r = evidenceDowngrade(null, 'no fields at all');
+  assert.equal(r.status, null);
+  assert.equal(r.note, null);
 });
