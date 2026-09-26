@@ -231,6 +231,42 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
   assert.equal(state.dispatches[0].model, 'sonnet');
 });
 
+test('guard: a packet marked REVIEW: yes is recorded with the review flag; one without it is not', () => {
+  const home = sandbox();
+  run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'rv1', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\nREVIEW: yes\nPROGRESS: /r/p.md\nmoves money' },
+  }, home);
+  run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'rv1', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0002\nPROGRESS: /r/p.md\nordinary work' },
+  }, home);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'rv1.json'), 'utf8'));
+  assert.equal(state.dispatches[0].review, true);
+  assert.equal(state.dispatches[1].review, undefined);
+});
+
+test('guard: the over-ceiling denial names the ceiling and the cost label', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-repo-'));
+  mkdirSync(join(dir, '.git'), { recursive: true });
+  const runDir = join(dir, '.orchestrator', 'runs', '20260910-cap');
+  mkdirSync(runDir, { recursive: true });
+  const runMd = join(runDir, 'RUN.md');
+  writeFileSync(runMd, '# Run\n\n## Budget\n\nCeiling: $0.01 at list price · sessions: ~1 · set 2026-09-10\n\n## Tasks\n\n| id | phase | role · model | task | acceptance | attempts | result |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 📋 planned | i · sonnet | do it | ev | 0 | — |\n');
+  const sessDir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessDir, { recursive: true });
+  writeFileSync(join(sessDir, 'cap1.json'), JSON.stringify({ v: 1, session_id: 'cap1', run: { root: dir, runId: '20260910-cap', runMd, boundAt: new Date().toISOString(), explicit: true } }));
+
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'cap1', cwd: dir,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\nPROGRESS: /r/p.md\ndo it' },
+  }, home);
+
+  assert.match(out.stdout, /orchestrate budget:.*ceiling/);
+  assert.match(out.stdout, /modelled from list prices; your plan may bill differently/);
+});
+
 test('guard: the packet notice names a missing PROGRESS line on an author-role dispatch, plainly, and not in Plan mode', () => {
   const home = sandbox();
   const noProgress = run('guard-agent.mjs', {
@@ -544,6 +580,43 @@ test('ledger: the return is written under the bound run and indexed', () => {
   assert.equal(index[0].run, repo.runId);
   assert.equal(index[0].status, 'DONE');
   assert.equal(out.status, 0);
+});
+
+test('ledger: a REVIEW: yes task returned DONE with no reviewer return yet is filed PARTIAL with the note; a reviewer return then lets the next DONE through', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'rv-session', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'rv-session.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-implementer', model: 'sonnet', task: '9-9-0001', run: repo.runId, review: true, toolUseId: 'toolu_a' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  const first = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'rv-session', cwd: repo.dir,
+    agent_id: 'impl-1', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.equal(first.status, 0);
+  let index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index[0].status, 'PARTIAL', 'DONE is held back until a reviewer has returned');
+  assert.equal(index[0].reviewGated, true);
+  const savedFile = readFileSync(index[0].file, 'utf8');
+  assert.match(savedFile, /marked for an independent review and none has returned yet/);
+
+  const REVIEWER_RETURN = 'TASK: 9-9-0500\nREVIEW OF: 9-9-0001 on task/9-9-0001 @ abc123, worktree /w\nSTATUS: DONE\nVERDICT: PASS\nEVIDENCE: read the diff, tests pass\n';
+  run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'rv-session', cwd: repo.dir,
+    agent_id: 'rev-1', agent_type: 'orch-reviewer', last_assistant_message: REVIEWER_RETURN,
+  }, home);
+
+  const second = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'rv-session', cwd: repo.dir,
+    agent_id: 'impl-2', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.equal(second.status, 0);
+  index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  const later = index.filter(r => r.agentId === 'impl-2');
+  assert.equal(later.length, 1);
+  assert.equal(later[0].status, 'DONE', 'a reviewer return now on file for this task lets the next DONE through');
 });
 
 test('ledger: a helper stopped at its turn cap with no final message is still recorded', () => {

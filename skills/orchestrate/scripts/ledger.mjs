@@ -59,6 +59,11 @@ export function parseReturn(text) {
     // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what older
     // reviewer instructions produced, and is still read.
     verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
+    // A reviewer's own return names the task it reviewed under "REVIEW OF:"
+    // (packet.md's Reviewer packet RETURN schema), the task id its own first
+    // token. This is how a reviewer return is told from any other return —
+    // never TASK, which on a reviewer return names the reviewer's own task id.
+    reviewOf: field(/^\s*REVIEW OF:\s*(\S+)/im),
   };
 }
 
@@ -199,6 +204,33 @@ export function evidenceDowngrade(status, text) {
   const check = checkReturn(text);
   if (check.evidence) return { status, note: null };
   return { status: 'PARTIAL', note: NO_EVIDENCE_NOTE };
+}
+
+export const NO_REVIEW_NOTE = 'done, but it was marked for an independent review and none has returned yet.';
+
+// A task's packet can ask for independent review (packet.md: REVIEW: yes).
+// A DONE return for such a task is recorded PARTIAL, with a note, until a
+// reviewer return naming this task under "REVIEW OF:" exists in the run's own
+// returns index. Only ever narrows DONE, the same shape as evidenceDowngrade:
+// a PARTIAL or BLOCKED return is left exactly as it was, and this never
+// upgrades a status once downgraded — a later reviewer return does not rewrite
+// an earlier PARTIAL filing, it only lets the *next* DONE return through.
+export function reviewDowngrade(status, reviewFlagged, task, indexRows) {
+  if (status !== 'DONE' || !reviewFlagged || !task) return { status, note: null };
+  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task);
+  if (reviewed) return { status, note: null };
+  return { status: 'PARTIAL', note: NO_REVIEW_NOTE };
+}
+
+// The run's own returns index, read fresh for each SubagentStop so a reviewer
+// return that landed earlier in the same run is seen. Missing or unreadable
+// reads as no prior returns, never as a crash.
+export function readReturnsIndex(dir) {
+  try {
+    const p = join(dir, INDEX_NAME);
+    if (!existsSync(p)) return [];
+    return readFileSync(p, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch { return []; }
 }
 
 // What this helper's PostCompact hook (postcompact-check.mjs) already left
@@ -395,13 +427,22 @@ function main() {
   const file = join(dir, returnFilename(agent, input, text));
   const priced = cost.dollars == null ? 'unpriced (no model named)' : `$${cost.dollars.toFixed(2)} at list price`;
 
+  // A task flagged REVIEW: yes at dispatch (guard-agent.mjs's recordDispatch)
+  // cannot be filed DONE until a reviewer return naming it under "REVIEW OF:"
+  // already exists in this run's own returns index. Read before this return is
+  // indexed, so this return's own reviewOf (if it is itself a reviewer return)
+  // never counts as reviewing itself.
+  const review = reviewDowngrade(r.status, Boolean(dispatch && dispatch.review), r.task, readReturnsIndex(dir));
+  r.status = review.status;
+
   try {
     mkdirSync(dir, { recursive: true });
     const capNote = cap.capped ? ` · stopped at its ${usage.turns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
     const evidenceNote = noEvidence.note ? ` · ${noEvidence.note}` : '';
+    const reviewNote = review.note ? ` · ${review.note}` : '';
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
-    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${compactNote} -->\n\n`;
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${compactNote} -->\n\n`;
     writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
@@ -417,6 +458,8 @@ function main() {
     status: r.status || null,
     ...(cap.capped ? { capped: true, claimed: cap.claimed } : {}),
     ...(noEvidence.note ? { noEvidence: true } : {}),
+    ...(review.note ? { reviewGated: true } : {}),
+    ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}),
     verdict: r.verdict || null,
     evidence: r.evidence,
     file,

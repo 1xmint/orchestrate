@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dollars, family, priceTag, reasonedPrice, PRICES, REASONED, PRICES_AS_OF, checked } from './prices.mjs';
+import { dollars, family, priceTag, reasonedPrice, PRICES, REASONED, PRICES_AS_OF, checked, costLabel } from './prices.mjs';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'prices.mjs'), 'utf8');
 
@@ -81,6 +81,10 @@ test('orch-coordinator has a reasoned row, priced on opus, its only model', () =
   assert.ok(REASONED['orch-coordinator'], 'orch-coordinator is missing from REASONED');
   assert.deepEqual(Object.keys(REASONED['orch-coordinator']), ['opus']);
   assert.equal(reasonedPrice('orch-coordinator', 'opus'), 1.5);
+});
+
+test('costLabel says the figure is modelled from list prices, not a bill', () => {
+  assert.equal(costLabel(), 'modelled from list prices; your plan may bill differently');
 });
 
 test('every reasoned row is ordered by what the model costs', () => {

@@ -25,7 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, AGENT_NAMES } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { helperFiles, nativeAgent, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
-import { priceTag, estimateDollars, family, normalizeRole } from './lib/prices.mjs';
+import { priceTag, estimateDollars, family, normalizeRole, costLabel } from './lib/prices.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { readCosts } from './ledger.mjs';
 
@@ -591,7 +591,7 @@ function main() {
   // stop the compliance evidence says actually works.
   const b = budgetDecision(input, ti);
   if (b) {
-    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate budget: this ${String(ti.subagent_type || 'dispatch')} is about $${b.est} at list price, and run ${b.runId} has already spent about $${b.already}, so it would cross the $${b.ceiling} ceiling. Raise the ceiling in the run's Budget section, or stop — nothing tightens or lifts it on its own.` } });
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate budget: this ${String(ti.subagent_type || 'dispatch')} is about $${b.est} at list price, and run ${b.runId} has already spent about $${b.already}, so it would cross the $${b.ceiling} ceiling (${costLabel()}). Raise the ceiling in the run's Budget section, or stop — nothing tightens or lifts it on its own.` } });
     return;
   }
 
@@ -659,6 +659,10 @@ function recordDispatch(input, ti) {
       // found from disk rather than by resuming the stopped agent.
       progress: (/^\s*PROGRESS:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
       run: runFor(input, ti),
+      // Marks a task whose packet asked for independent review (money, auth,
+      // destructive data, a contract others consume) so ledger.mjs can hold a
+      // DONE return back until a reviewer return for this task exists.
+      ...(/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || '')) ? { review: true } : {}),
       ...(input.agent_id ? { parent: String(input.agent_id) } : {}),
     });
     state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;

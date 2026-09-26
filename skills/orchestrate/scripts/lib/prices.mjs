@@ -29,6 +29,13 @@ export const PRICES_AS_OF = '2026-09-24';
 export const PRICES_SOURCE = 'https://claude.com/pricing';
 export const checked = '2026-09-24';
 
+// One sentence, said once wherever a dollar figure is printed to the model,
+// so it never reads as a bill: every number here comes from per-token list
+// prices, and a subscription plan can charge something else entirely.
+export function costLabel() {
+  return 'modelled from list prices; your plan may bill differently';
+}
+
 export function cacheReadShare(modelId) {
   return /fable-5[-.]1/i.test(String(modelId || '')) ? 0.025 : 0.1;
 }
