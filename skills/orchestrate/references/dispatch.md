@@ -93,3 +93,10 @@ the ledger marks it and you are told once. Check what its evidence shows is
 done, then dispatch only the remaining work as a fresh, smaller packet from its
 PROGRESS file and branch. Do not keep resuming a large helper: every step it
 takes re-reads its whole grown context.
+
+The cap stops the helper mid-call with no report, so work that lives only in
+its working tree is at risk of being left uncommitted. A packet for a code
+change says so up front: commit each piece as its check passes, and stop
+adding at about three quarters of the step cap to make the gate green, commit
+and return. What a helper committed is recovered from its worktree in one
+step; what it left unstaged is recovered by hand.
