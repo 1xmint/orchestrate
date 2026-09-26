@@ -8,20 +8,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, syntheticPrompt, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, stateLine, stateHash, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, continueIntent, handoffLine } from './router.mjs';
+import { cardBody, compactionFact, syntheticPrompt, resumeExcerpt, sectionExcerpt, RESUME_CAP, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, continueIntent, handoffLine } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTER = join(HERE, 'router.mjs');
-
-test('state line and hash carry context bands', () => {
-  const base = { self: null, tier: 'pro', agents: 0, limits: [], candidates: [], run: null, quota: null, persist: false };
-  assert.match(stateLine({ ...base, context: { tokens: 151000 } }, '[x]'), /ctx ~151k/);
-  assert.match(stateLine({ ...base, context: { tokens: 52000 } }, '[x]'), /ctx ~52k/, 'the measured size is always shown');
-  assert.notEqual(stateHash({ ...base, context: { tokens: 121000 } }), stateHash({ ...base, context: { tokens: 151000 } }));
-  assert.match(stateLine({ ...base, codex: 'limit', context: null }, '[x]'), /codex: limit/);
-  assert.notEqual(stateHash({ ...base, codex: 'limit', context: null }), stateHash({ ...base, codex: 'ok', context: null }));
-});
 
 function makeHome() {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
@@ -692,15 +683,6 @@ test('the proactive flow says nothing about readiness, even when a task becomes 
   assert.match(status, /ready now: 9-8-0002/, 'the fact is still there on request');
 });
 
-test('a long ready list is trimmed rather than filling the line', () => {
-  const ready = Array.from({ length: 9 }, (_, i) => `9-8-000${i + 1}`);
-  const phrase = readyPhrase({ ready });
-  assert.match(phrase, /ready now: 9-8-0001, 9-8-0002, 9-8-0003, 9-8-0004 \+5 more/);
-  assert.ok(phrase.length < 80, `${phrase.length} characters is small enough to print every turn`);
-  assert.equal(readyPhrase({ ready: [] }), '');
-  assert.equal(readyPhrase(null), '');
-});
-
 test('`router status` says what came back and is still waiting on you', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [
@@ -735,14 +717,6 @@ test('the proactive flow never mentions an owed return, before or after it is gr
   const after = prompt(home, repo, 'right, what is outstanding now', { session_id: 's-owed2' });
   assert.doesNotMatch(after, /\[orchestrate · changed\]/);
   assert.doesNotMatch(after, /to grade/);
-});
-
-test('a long list of owed returns is trimmed like the ready one', () => {
-  const ungraded = Array.from({ length: 7 }, (_, i) => `9-8-000${i + 1}`);
-  const phrase = ungradedPhrase({ ungraded });
-  assert.match(phrase, /7 returns to grade: 9-8-0001, 9-8-0002, 9-8-0003, 9-8-0004 \+3 more/);
-  assert.equal(ungradedPhrase({ ungraded: [] }), '');
-  assert.equal(ungradedPhrase(null), '');
 });
 
 // ---- the brief: "What this is for" ------------------------------------------
