@@ -1,6 +1,6 @@
 ---
 name: orch-browser
-description: "Reach for this when only a real browser settles it: a flow that must be driven, a page that renders differently than the source suggests, a bug nobody can reproduce from the code. Returns what it saw, with screenshots."
+description: "Reach for this when only a real browser settles it: a flow that must be driven, a page rendering differently than the source, a bug nobody can reproduce from code. Not for anything a code read answers."
 model: sonnet
 effort: low
 disallowedTools: Edit, Write, NotebookEdit, Agent, SendMessage, Artifact, Bash, WebFetch, WebSearch

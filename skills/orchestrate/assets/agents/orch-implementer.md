@@ -1,6 +1,6 @@
 ---
 name: orch-implementer
-description: "Reach for this when a change is decided and bounded — files known, done-when checkable — and it is more than about eight tool calls of your own. Works in a worktree on sonnet and returns a diff summary with evidence, not a narrative."
+description: "Reach for this when a change is decided and bounded — files known, done-when checkable — and more than about eight tool calls. Works in a worktree, returns a diff summary. Not for a smaller change — just make it."
 model: sonnet
 effort: medium
 isolation: worktree

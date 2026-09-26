@@ -1,6 +1,6 @@
 ---
 name: orch-debugger
-description: "Reach for this when a failure survived one honest attempt and you are now guessing at causes. It reproduces, narrows, and names the root cause with evidence before any fix is proposed."
+description: "Reach for this when a failure survived one honest attempt. It reproduces, narrows, and names the root cause with evidence before any fix. Not for a first attempt — try that yourself."
 model: opus
 effort: high
 isolation: worktree
