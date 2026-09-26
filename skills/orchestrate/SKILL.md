@@ -259,7 +259,7 @@ Then recommend **compact** when the same task continues, or a **fresh
 conversation** when the task changes or a finished phase resumes from saved
 files; after two compactions in one session the notice says fresh. The user
 makes the switch. Talk about size only from the latest measured number (the
-state line and the short size lines carry it), never from memory or a summary. A notice to investigate means the context was
+short size lines carry it, and `router status` prints it), never from memory or a summary. A notice to investigate means the context was
 still large right after compaction: look at restored instructions, plugin and
 tool listings and carried tool output rather than recommending compaction again.
 A size shown as unknown is unknown, not small.
