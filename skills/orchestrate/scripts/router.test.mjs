@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, syntheticPrompt, sectionExcerpt, RESUME_CAP, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote } from './router.mjs';
+import { cardBody, syntheticPrompt, sectionExcerpt, RESUME_CAP, actionableLine, BRIEF_CAP } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -352,8 +352,7 @@ test('the after-compaction line states facts, not an instruction', () => {
   // Facts only: nothing in the line tells the lead what to do.
   const line = /\[orchestrate · after compaction\][^\n]*/.exec(second)[0];
   assert.doesNotMatch(line, /\b(should|must|send|call|dispatch|consider)\b/i);
-  assert.match(compactionFact({ dispatches: [] }), /0 helpers sent so far; orch-advisor last sent: never\./);
-  assert.match(compactionFact({ dispatches: [{ agent: 'orch-advisor' }] }), /1 helper sent so far; orch-advisor last sent: the most recent helper\./);
+  // compactionFact's own direct-call tests moved to lib/recover.test.mjs.
 });
 
 test('SessionStart compact with no bound run injects the checkpoint file, capped at 1,200 chars', () => {
@@ -398,34 +397,7 @@ test('checkpointExcerpt cuts at the last newline before the cap, never mid-word'
   assert.equal(excerpt, `${lastFullLine}...`);
 });
 
-test('unreturned excludes a dispatch runningNative still counts as alive, and softens the wording for the rest', () => {
-  const state = {
-    dispatches: [
-      { agent: 'orch-implementer', task: '9-1-0001', at: '2026-09-01T00:00:00Z' },
-      { agent: 'orch-researcher', task: '9-1-0002', at: '2026-09-01T00:05:00Z' },
-    ],
-    returned: [],
-  };
-  // runningNative still sees 9-1-0001 as alive; it has nothing to say about
-  // 9-1-0002 (it may be alive too — runningNative just can't tell from here).
-  const native = [{ provider: 'claude', role: 'orch-implementer', task: '9-1-0001', at: state.dispatches[0].at, agentId: 'a1', parent: null }];
-
-  const list = unreturned(state, { native });
-  assert.equal(list.length, 1, 'the one runningNative still sees alive is excluded');
-  assert.equal(list[0].task, '9-1-0002');
-
-  const note = unreturnedNote(state, { native });
-  assert.match(note, /has not reported back/);
-  // No role names and no task ids — those are for the ledger, not the note.
-  assert.doesNotMatch(note, /orch-researcher|orch-implementer|9-1-0001|9-1-0002/);
-  // Softened wording: not a settled "never returned" verdict.
-  assert.doesNotMatch(note, /never returned/i);
-
-  // With no runningNative cross-check at all, both are still listed (the
-  // check only narrows the list; it is not required for the note to fire).
-  const noteNoNative = unreturnedNote(state);
-  assert.equal((noteNoNative.match(/has not reported back/g) || []).length, 2, 'both are still listed');
-});
+// unreturned/unreturnedNote's own direct-call test moved to lib/recover.test.mjs.
 
 test('a single unambiguous open run binds itself; two do not', () => {
   const home = makeHome(); const repo = makeRepo(true);
@@ -664,17 +636,6 @@ test('the proactive flow never mentions an owed return, before or after it is gr
 
 // ---- the brief: "What this is for" ------------------------------------------
 
-function makeBriefRepo({ file = 'CLAUDE.md', body = '## What this is for\n\nMakes toast, for people in a hurry.\n\nDeciding documents (these win when the code and the intent disagree):\n- docs/roadmap.md — where we are\n' } = {}) {
-  const repo = mkdtempSync(join(tmpdir(), 'orch-brief-repo-'));
-  mkdirSync(join(repo, '.git'), { recursive: true });
-  if (file) {
-    const p = join(repo, file);
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, body);
-  }
-  return repo;
-}
-
 test('sectionExcerpt is capped and section-ordered, and the brief reader reuses it', () => {
   const md = `## What this is for\n\n${'x'.repeat(BRIEF_CAP + 200)}\n`;
   const ex = sectionExcerpt(md, [{ pattern: /(?:^|\n)##\s+What this is for\b[ \t]*\n([\s\S]*?)(?:\n##\s|\s*$)/i }], BRIEF_CAP, { intro: false });
@@ -685,51 +646,8 @@ test('sectionExcerpt is capped and section-ordered, and the brief reader reuses 
   assert.equal(goalFirst.indexOf('Goal:'), 0);
 });
 
-test('a missing brief section prints one fact line, once', () => {
-  const repo = makeBriefRepo({ file: 'CLAUDE.md', body: '# Just some notes\n\nNo section here.\n' });
-  const ctx = { repoRoot: repo, cwd: repo, run: null };
-  const state = {};
-  const first = briefNote(ctx, state);
-  assert.match(first, /\[orchestrate · brief\] no "What this is for" section between/);
-  assert.match(first, /Template: .*assets[\\/]BRIEF\.md/);
-  assert.equal(briefNote(ctx, state), '', 'said once per session');
-});
-
-test('a brief the host loads prints nothing', () => {
-  const repo = makeBriefRepo();
-  const ctx = { repoRoot: repo, cwd: repo, run: null };
-  const state = {};
-  assert.equal(briefState(ctx, state).kind, 'kept');
-  assert.equal(briefNote(ctx, state), '');
-});
-
-test('a brief the host does not keep in view is printed once per epoch and again after a compaction', () => {
-  const repo = makeBriefRepo();
-  // No repoRoot: the session was started above the project, and the working
-  // project is known only from touched paths (context-check.mjs's state.work).
-  const ctx = { repoRoot: null, cwd: null, run: null };
-  const state = { work: { root: repo, dir: repo, counts: {} } };
-  const b = briefState(ctx, state);
-  assert.equal(b.kind, 'other');
-  const first = briefNote(ctx, state);
-  assert.match(first, /\[orchestrate · brief\] from .*CLAUDE\.md/);
-  assert.match(first, /Makes toast/);
-  assert.equal(briefNote(ctx, state), '', 'once per epoch');
-  // A compaction is a new epoch: the router forces it, whatever was said before.
-  const again = briefNote(ctx, state, { force: true });
-  assert.match(again, /Makes toast/);
-});
-
-test('the brief section is found in AGENTS.md', () => {
-  const repo = makeBriefRepo({ file: 'AGENTS.md', body: '## What this is for\n\nRuns the payroll for one small shop.\n' });
-  const ctx = { repoRoot: repo, cwd: repo, run: null };
-  const state = {};
-  const b = briefState(ctx, state);
-  assert.match(b.file, /AGENTS\.md$/);
-  assert.match(b.text, /Runs the payroll/);
-  // A bare AGENTS.md nobody pulls in with @AGENTS.md is not kept in view.
-  assert.equal(b.kind, 'other');
-});
+// briefState/briefNote's own tests (missing section, host-loaded, once-per-
+// epoch, AGENTS.md) moved to lib/brief.test.mjs with the functions.
 
 // ---- fresh-session handoff ---------------------------------------------------
 

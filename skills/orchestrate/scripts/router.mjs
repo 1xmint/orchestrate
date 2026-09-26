@@ -28,19 +28,23 @@ import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
-  DIR, readJson, writeJsonAtomic, staleRunsUnder, FAMILY_ORDER, AGENT_NAMES,
+  DIR, readJson, writeJsonAtomic, FAMILY_ORDER, AGENT_NAMES,
   SESSIONS_DIR,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
-import { cappedNote, runningNative, helperFiles } from './lib/workers.mjs';
+import { cappedNote } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
-import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
 import { CARD, CARD_CAP, cardBody, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
+import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
+import {
+  stillRunningNative, unreturned, unreturnedNote, STALE_SEEN_PATH, staleNote, compactionFact,
+} from './lib/recover.mjs';
+import { PERSIST_INTENT, syntheticPrompt, persistIntent, GOAL_CAP, persistLine } from './lib/persist-words.mjs';
 import {
   stateLine, statusReply, actionableLine, contextBand, contextPhrase, quotaPhrase, quotaBand,
   READY_SHOWN, readyPhrase, ungradedPhrase, budgetPhrase, progressPhrase, edgesPhrase, runPhrase,
@@ -58,145 +62,12 @@ export {
   stateHash, codexState,
 };
 export { RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt, handoffLine, continueIntent, CONTINUE_WORD };
+export { BRIEF_CAP, briefState, briefNote };
+export { cappedNote };
+export { unreturned, unreturnedNote, STALE_SEEN_PATH, staleNote, compactionFact };
+export { PERSIST_INTENT, syntheticPrompt, persistIntent, GOAL_CAP, persistLine };
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-// ---- the brief: the project's own "What this is for" -----------------------
-// "The brief" is that section of the project's instruction file, not a
-// separate file this plugin keeps. BRIEF_CAP is the original design's number,
-// kept because the section is meant to read as one paragraph plus two short
-// lists, not a whole document.
-export const BRIEF_CAP = 900;
-
-// No /m: with it, `$` matches at every line break, not just end-of-string, so
-// the lazy body group could stop on the section's very first blank line.
-const BRIEF_SECTION_RE = /(?:^|\n)##\s+What this is for\b[ \t]*\n([\s\S]*?)(?:\n##\s|\s*$)/i;
-// Checked in this order in every folder: the files Claude Code is sure to keep
-// loaded while working in that folder, then the two shapes of `AGENTS.md`.
-const BRIEF_KEPT_FILES = ['CLAUDE.md', join('.claude', 'CLAUDE.md'), 'CLAUDE.local.md'];
-const BRIEF_AGENTS_FILES = ['AGENTS.md', join('.claude', 'AGENTS.md')];
-
-function readBriefSection(filePath) {
-  let text = '';
-  try { text = readFileSync(filePath, 'utf8'); } catch { return null; }
-  const body = sectionExcerpt(text, [{ pattern: BRIEF_SECTION_RE }], BRIEF_CAP, { intro: false });
-  return body || null;
-}
-
-// A bare `AGENTS.md` counts as "kept in view" only when one of the files
-// Claude Code always loads in that folder pulls it in with a first line of
-// `@AGENTS.md` — an `@` import loads the whole file, so that line is enough.
-function agentsPulledIn(folder) {
-  for (const f of BRIEF_KEPT_FILES) {
-    try {
-      if (/^@AGENTS\.md\s*$/m.test(readFileSync(join(folder, f), 'utf8'))) return true;
-    } catch {}
-  }
-  return false;
-}
-
-const normSlashes = p => String(p || '').replace(/\\/g, '/');
-
-function isAncestorOrSelf(folder, of) {
-  if (!folder || !of) return false;
-  const a = normSlashes(resolve(folder)).toLowerCase();
-  const b = normSlashes(resolve(of)).toLowerCase();
-  return b === a || b.startsWith(a.endsWith('/') ? a : `${a}/`);
-}
-
-// Nearest folder first, the way Claude Code resolves nested instruction files.
-function folderChain(dir, root) {
-  const chain = [];
-  let d = resolve(dir || root);
-  const r = resolve(root);
-  for (let i = 0; i < 40; i++) {
-    chain.push(d);
-    if (normSlashes(d).toLowerCase() === normSlashes(r).toLowerCase()) break;
-    const parent = dirname(d);
-    if (parent === d) break;
-    d = parent;
-  }
-  return chain;
-}
-
-// `<root>/.git` is a file, not a folder, in a worktree; it names the main
-// checkout's own `.git` folder two levels up from `.git/worktrees/<name>`. No
-// `git` process — this is one small text file.
-function mainCheckoutFromGitFile(gitFile) {
-  let txt = '';
-  try { txt = readFileSync(gitFile, 'utf8'); } catch { return null; }
-  const m = /^gitdir:\s*(.+?)\s*$/m.exec(txt);
-  if (!m) return null;
-  let gitdir = normSlashes(m[1]);
-  if (!/^[a-zA-Z]:\//.test(gitdir) && !gitdir.startsWith('/')) gitdir = normSlashes(resolve(dirname(gitFile), gitdir));
-  const idx = gitdir.toLowerCase().indexOf('/.git/worktrees/');
-  return idx < 0 ? null : gitdir.slice(0, idx);
-}
-
-// Walks `dir` up to `root`, nearest folder first, and returns the first
-// section found plus whether it sits somewhere Claude Code is sure to keep
-// loaded (`launchFolder` is the session's own cwd; only files at or above it
-// are ever in that set). A worktree's main-checkout `CLAUDE.local.md` is
-// checked last and is never "kept in view" — it lives in a different checkout.
-function findBriefSection(dir, root, launchFolder) {
-  for (const folder of folderChain(dir, root)) {
-    const atOrAbove = launchFolder ? isAncestorOrSelf(folder, launchFolder) : false;
-    for (const f of BRIEF_KEPT_FILES) {
-      const body = readBriefSection(join(folder, f));
-      if (body) return { file: join(folder, f), text: body, keptInView: atOrAbove, reason: 'above' };
-    }
-    for (const f of BRIEF_AGENTS_FILES) {
-      const body = readBriefSection(join(folder, f));
-      if (body) return { file: join(folder, f), text: body, keptInView: atOrAbove && agentsPulledIn(folder), reason: 'above' };
-    }
-  }
-  try {
-    const gitFile = join(root, '.git');
-    if (existsSync(gitFile) && statSync(gitFile).isFile()) {
-      const main = mainCheckoutFromGitFile(gitFile);
-      if (main) {
-        const body = readBriefSection(join(main, 'CLAUDE.local.md'));
-        if (body) return { file: join(main, 'CLAUDE.local.md'), text: body, keptInView: false, reason: 'worktree' };
-      }
-    }
-  } catch {}
-  return null;
-}
-
-// The project this session is in, its brief section if there is one, and
-// whether Claude Code is already showing it. `root` falls back from the
-// launch folder's own repo, to a bound run's repo, to the folder
-// context-check.mjs has learned from touched paths (`state.work`) — the only
-// way an above-project session ever learns where it is working.
-export function briefState(ctx, state) {
-  const root = ctx.repoRoot || (ctx.run && ctx.run.root) || (state.work && state.work.root) || null;
-  if (!root) return { kind: 'none' };
-  const dir = (state.work && state.work.dir) || root;
-  const launchFolder = ctx.repoRoot ? (ctx.cwd || ctx.repoRoot) : null;
-  const found = findBriefSection(dir, root, launchFolder);
-  if (!found) return { kind: 'missing', root, dir };
-  return { kind: found.keptInView ? 'kept' : 'other', root, dir, file: found.file, text: found.text, reason: found.reason };
-}
-
-// Prints per the outcome table: nothing when Claude Code already shows the
-// section; the "missing" line once per session; the section's own text, once
-// per epoch (the file that earned it changing counts as a new epoch too), on
-// the first prompt after the root is known and again — forced — right after a
-// compaction, since a summary drops everything a hook said before it.
-export function briefNote(ctx, state, { force = false } = {}) {
-  const b = briefState(ctx, state);
-  if (b.kind === 'none') return '';
-  if (b.kind === 'missing') {
-    if (state.briefMissingShown) return '';
-    state.briefMissingShown = true;
-    return `[orchestrate · brief] no "What this is for" section between ${b.dir} and ${b.root} (checked CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md, AGENTS.md, .claude/AGENTS.md in each). Template: ${join(SKILL_DIR, 'assets', 'BRIEF.md')}`;
-  }
-  if (b.kind === 'kept') { state.briefSentFor = null; return ''; }
-  if (!force && state.briefSentFor === b.file) return '';
-  state.briefSentFor = b.file;
-  const where = b.reason === 'worktree' ? 'this is a worktree and the file lives in the main checkout' : 'this session was started above the project';
-  return `[orchestrate · brief] from ${b.file}. Claude Code does not keep this file in view here (${where}), so its "What this is for" section is copied below, and again after each summary.\n${b.text}`;
-}
 
 // ---- local context ----------------------------------------------------------
 // Only the host's own limit messages count: they arrive as assistant records
@@ -289,44 +160,6 @@ function gatherContext(input, state) {
     context: storedContext(input.session_id || null),
     codex: codexState(),
   };
-}
-
-// ---- persistence intent -----------------------------------------------------
-// The one place this file still reads wording, kept deliberately narrow: an
-// explicit ask to keep going toward a goal, never the shape of the work. A
-// false arm is cheap, because persist-check.mjs stops on the first step that
-// does no work. A question never arms it, and "persist off" turns it off for
-// the session.
-export const PERSIST_INTENT = /\b(keep (going|coding|working|building|at it)|don'?t stop|until (it'?s |it is |they'?re |the [\w-]+( [\w-]+)? (is|are) |everything is |all (of it |of them )?(is |are )?)?(done|finished|complete|working|green|passing|shipped|live)\b|(execute|implement|carry out|work through|finish) (the|this|that|my) (whole |full |entire |rest of the )?(plan|roadmap|spec|checklist|task list|todo list|backlog)|finish (it|everything|all of it|the rest)\b|build (out )?the (whole|entire|full) )/i;
-
-// A prompt the host or another Claude session wrote, not the user typing:
-// a background task's completion notice, a helper's hand-back, or a message
-// relayed from another session. The text is the only signal the hook payload
-// carries for this. Checked against the first non-blank line, because a
-// hand-back's own marker line ("[Subagent hand-back]") sometimes follows an
-// opening `<agent-message ...>` tag rather than starting the prompt.
-// Seen live: a finished helper's hand-back became the persist goal.
-const SYNTHETIC_OPEN = /^\s*(\[SYSTEM NOTIFICATION - NOT USER INPUT\]|<task-notification>|<agent-message|\[Subagent hand-back\]|Another Claude session sent a message|<ci-monitor-event>)/i;
-
-export function syntheticPrompt(text) {
-  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
-  const first = lines[0] || '';
-  const second = lines[1] || '';
-  return SYNTHETIC_OPEN.test(first) || /^\[Subagent hand-back\]/i.test(second);
-}
-
-export function persistIntent(text) {
-  const t = String(text || '').trim();
-  if (!t || /\?\s*$/.test(t)) return false;
-  return PERSIST_INTENT.test(t);
-}
-
-export const GOAL_CAP = 600;
-
-export function persistLine(persist) {
-  if (!persist || !persist.armed) return '';
-  const g = String(persist.goal || '').replace(/\s+/g, ' ').trim();
-  return `auto-continue is on toward: "${g.length > GOAL_CAP ? `${g.slice(0, GOAL_CAP - 3)}...` : g}". A Stop is refused while each step does real work; it ends when you say the goal is met, ask the user something, a dispatch is denied, the same error repeats, a step does nothing, or after 25 steps. Waiting on CI or an agent: Monitor it and keep doing independent work. "persist off" turns it off.`;
 }
 
 function transcriptSize(p) {
@@ -560,83 +393,6 @@ function handlePrompt(input) {
   emit('UserPromptSubmit', out.join('\n'));
 }
 
-// Dispatches with no matching return. Matched in order, by role and, when both
-// sides carry one, by task id. Said only at the moments work may have died —
-// a resume, a compaction, a usage limit — because a helper still running looks
-// exactly the same from here. `native` (lib/workers.mjs's `runningNative`, when
-// the caller has one) excludes anything it still counts as alive: a helper
-// mid-task reads identically to one that died, so without this every one of
-// them would be reported as gone. It only narrows the list, never closes it —
-// `runningNative` itself can't see a helper stopped by a limit versus one still
-// working, so what remains is "not seen back yet", not "never coming back".
-// The helpers lib/workers.mjs's own concurrency check still counts as alive,
-// for this session's transcript — the same read guard-agent.mjs uses to admit
-// a new dispatch, reused here so "never returned" only ever means what it says.
-function stillRunningNative(input, state) {
-  try {
-    return runningNative(Array.isArray(state.dispatches) ? state.dispatches : [], {
-      returned: Array.isArray(state.returned) ? state.returned : [],
-      files: helperFiles(input && input.transcript_path),
-    });
-  } catch { return []; }
-}
-
-export function unreturned(state, { native = [] } = {}) {
-  const returns = (state && Array.isArray(state.returned) ? state.returned : []).map(r => ({ ...r, used: false }));
-  const stillAlive = (native || []).map(w => ({ role: normalizeRole(w.role), task: w.task || null, used: false }));
-  const out = [];
-  for (const d of (state && Array.isArray(state.dispatches) ? state.dispatches : [])) {
-    const role = normalizeRole(d.agent);
-    const hit = returns.find(r => !r.used && r.agent === role && (!d.task || !r.task || r.task === d.task));
-    if (hit) { hit.used = true; continue; }
-    const alive = stillAlive.find(w => !w.used && w.role === role && (!d.task || !w.task || w.task === d.task));
-    if (alive) { alive.used = true; continue; }
-    // `d.task` is a numeric packet id when one was named — never shown to the
-    // user. `d.key` is only ever that id's fallback: the dispatch's own first
-    // line of description, used as the slug precisely when there is no id.
-    out.push({ role, task: d.task || d.key || null, slug: d.task ? null : (d.key || null), progress: d.progress || null, at: d.at });
-  }
-  return out;
-}
-
-// One plain sentence per helper with no return seen yet, newest first, at most
-// three. No role names and no task ids — those are for the ledger, not the
-// user reading this over the model's shoulder; what to say is the task's own
-// slug when one is on record, else "an earlier step". The tail that follows
-// still says the list only narrows, never closes.
-export function unreturnedNote(state, { native = [], max = 3 } = {}) {
-  const list = unreturned(state, { native });
-  if (!list.length) return '';
-  const shown = list.slice(-max).reverse();
-  const sentences = shown.map(u => {
-    const what = u.slug || 'an earlier step';
-    const notes = u.progress ? `its notes are at ${u.progress}` : 'no notes file was named';
-    return `A helper working on ${what} has not reported back; ${notes}.`;
-  });
-  return `[orchestrate · recover] ${sentences.join(' ')} The still-running check only narrows this list, not clears it — one of these may yet be working, not stopped; check before treating any as dead. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its notes and its branch; resuming the stopped agent re-reads its whole context at full price.`;
-}
-
-// Helpers that stopped at their turn cap (lib/workers.mjs), said once each.
-export { cappedNote };
-
-// Plans set aside as stale, said once per plan on this machine, so a user who
-// wanted one back knows the one command, and nobody is told twice.
-export const STALE_SEEN_PATH = join(DIR, 'stale-announced.json');
-
-export function staleNote(repoRoot, path = STALE_SEEN_PATH, now = Date.now()) {
-  if (!repoRoot) return '';
-  try {
-    const seen = readJson(path) || {};
-    const fresh = staleRunsUnder(repoRoot).filter(r => !seen[r.runMd]);
-    if (!fresh.length) return '';
-    for (const r of fresh) seen[r.runMd] = now;
-    writeJsonAtomic(path, seen);
-    const days = r => Math.max(2, Math.round((now - r.lastActivity) / 86400000));
-    const list = fresh.map(r => `${r.runId} (untouched ${days(r)} days, ${r.done}/${r.rows} done)`).join(', ');
-    return `[orchestrate · plans] set aside ${fresh.length === 1 ? 'a plan' : `${fresh.length} plans`} nobody has touched in two days or more: ${list}. They are not bound, reported or filed into. If the user wants one back: node "${join(SKILL_DIR, 'scripts', 'run-init.mjs')}" --reopen <id>.`;
-  } catch { return ''; }
-}
-
 export const LISTING_REPORT_PATH = join(DIR, 'listing-report.json');
 export const LISTING_REPORT_MIN_TOKENS = 4000;
 export const PROFILE_PATH = join(DIR, 'profile.json');
@@ -667,18 +423,6 @@ export function pluginFitReport(transcriptPath, { path = LISTING_REPORT_PATH, pr
       profileScript: join(SKILL_DIR, 'scripts', 'profile.mjs'),
     });
   } catch { return ''; }
-}
-
-// Facts the lead lost with the summary and cannot see from here: how many
-// summaries this session has had, how many helpers were sent, and when the
-// advisor last was. No instruction; the card that follows carries those.
-export function compactionFact(state) {
-  const sent = Array.isArray(state && state.dispatches) ? state.dispatches : [];
-  let last = -1;
-  sent.forEach((d, i) => { if (normalizeRole(d && d.agent) === 'orch-advisor') last = i; });
-  const since = sent.length - 1 - last;
-  const advisor = last < 0 ? 'never' : since === 0 ? 'the most recent helper' : `${since} helper${since === 1 ? '' : 's'} ago`;
-  return `[orchestrate · after compaction] The conversation was summarised. The card below was in view before the summary and is not in it. Compaction ${(state && state.compactions) || 1} of this session. ${sent.length} helper${sent.length === 1 ? '' : 's'} sent so far; orch-advisor last sent: ${advisor}.`;
 }
 
 // Resume and compaction are the two moments the goal is actually at risk, so
