@@ -29,13 +29,13 @@ import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, FAMILY_ORDER, AGENT_NAMES,
-  SESSIONS_DIR,
+  SESSIONS_DIR, PROFILE_PATH,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
-import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
-import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
+import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport } from './lib/listing.mjs';
+import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR, limitsFromTail, scanLimits } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
@@ -66,41 +66,11 @@ export { BRIEF_CAP, briefState, briefNote };
 export { cappedNote };
 export { unreturned, unreturnedNote, STALE_SEEN_PATH, staleNote, compactionFact };
 export { PERSIST_INTENT, syntheticPrompt, persistIntent, GOAL_CAP, persistLine };
+export { limitsFromTail, LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, PROFILE_PATH, pluginFitReport };
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---- local context ----------------------------------------------------------
-// Only the host's own limit messages count: they arrive as assistant records
-// with the model "<synthetic>". Matching the phrase anywhere in the tail
-// counted a research report that quoted it, and told the lead the user had hit
-// two limits they had not. "Today" means today: the set resets with the date.
-export function limitsFromTail(tail) {
-  const found = new Set();
-  for (const l of String(tail || '').split('\n')) {
-    if (!l.includes('<synthetic>') && !l.includes('isApiErrorMessage')) continue;
-    let o; try { o = JSON.parse(l); } catch { continue; }
-    const m = o && o.type === 'assistant' && o.message;
-    if (!m || !(m.model === '<synthetic>' || o.isApiErrorMessage)) continue;
-    const text = (Array.isArray(m.content) ? m.content : []).map(b => (b && b.text) || '').join(' ');
-    for (const hit of text.matchAll(/hit your (Opus|Sonnet|Haiku|Fable) limit/gi)) found.add(hit[1].toLowerCase());
-    if (/hit your (session|weekly) limit/i.test(text)) found.add('session');
-  }
-  return found;
-}
-
-function scanLimits(transcriptPath, state) {
-  try {
-    const day = new Date().toISOString().slice(0, 10);
-    if (state.limitsDay !== day || state.limitsV !== 2) { state.limits = []; state.limitsDay = day; state.limitsV = 2; state.limitsScanMtime = null; }
-    if (!transcriptPath || !existsSync(transcriptPath)) return state.limits;
-    const mt = statSync(transcriptPath).mtimeMs;
-    if (state.limitsScanMtime === mt) return state.limits;
-    const found = new Set([...state.limits, ...limitsFromTail(readTail(transcriptPath, 65536))]);
-    state.limitsScanMtime = mt;
-    return [...found];
-  } catch { return state.limits || []; }
-}
-
 // The lead's own cost per step comes from the shared reader (lib/context.mjs),
 // said only when its advice changes. A compaction starts a new epoch there, so
 // advice given before it is never repeated against the compacted conversation.
@@ -391,38 +361,6 @@ function handlePrompt(input) {
   saveSession(state);
   maybePrune();
   emit('UserPromptSubmit', out.join('\n'));
-}
-
-export const LISTING_REPORT_PATH = join(DIR, 'listing-report.json');
-export const LISTING_REPORT_MIN_TOKENS = 4000;
-export const PROFILE_PATH = join(DIR, 'profile.json');
-
-// Machine-wide, not per session: the plugins are the same in every session. The
-// full check is said the first time the listings are seen, and after that only
-// when plugins are added — a reminder of a choice the user already made is
-// noise, and a plugin they just installed is the moment its fit matters. A small
-// setup gets no full check. The stamp is written only once the listings were
-// actually read, so a session whose listings are not in the transcript yet tries
-// again on its next prompt.
-export function pluginFitReport(transcriptPath, { path = LISTING_REPORT_PATH, profilePath = PROFILE_PATH, now = Date.now() } = {}) {
-  try {
-    if (!transcriptPath) return '';
-    const l = parseListing(readHead(transcriptPath));
-    if (!l.found) return '';
-    const stamp = readJson(path);
-    const known = stamp && Array.isArray(stamp.plugins) ? stamp.plugins : null;
-    const names = pluginNames(l);
-    if (known && names.length === known.length && names.every(p => known.includes(p))) return '';
-    writeJsonAtomic(path, { at: now, plugins: names });
-    if (!known && tokens(l.skillChars + l.toolChars + l.serverChars) < LISTING_REPORT_MIN_TOKENS) return '';
-    const profile = readJson(profilePath) || {};
-    return pluginFitLine(l, {
-      known,
-      paidMode: profile.paidServices || 'ask',
-      paidAllowed: Array.isArray(profile.paidAllowed) ? profile.paidAllowed : [],
-      profileScript: join(SKILL_DIR, 'scripts', 'profile.mjs'),
-    });
-  } catch { return ''; }
 }
 
 // Resume and compaction are the two moments the goal is actually at risk, so

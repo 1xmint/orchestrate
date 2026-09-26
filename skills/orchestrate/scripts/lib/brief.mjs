@@ -139,7 +139,7 @@ export function briefNote(ctx, state, { force = false } = {}) {
   if (b.kind === 'missing') {
     if (state.briefMissingShown) return '';
     state.briefMissingShown = true;
-    return `[orchestrate · brief] no "What this is for" section between ${b.dir} and ${b.root} (checked CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md, AGENTS.md, .claude/AGENTS.md in each). Template: ${join(SKILL_DIR, 'assets', 'BRIEF.md')}`;
+    return `[orchestrate · brief] no "What this is for" section ${b.dir === b.root ? `in ${b.dir}` : `between ${b.dir} and ${b.root}`} (checked CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md, AGENTS.md, .claude/AGENTS.md in each). Template: ${join(SKILL_DIR, 'assets', 'BRIEF.md')}`;
   }
   if (b.kind === 'kept') { state.briefSentFor = null; return ''; }
   if (!force && state.briefSentFor === b.file) return '';

@@ -29,7 +29,8 @@ test('a missing brief section prints one fact line, once', () => {
   const ctx = { repoRoot: repo, cwd: repo, run: null };
   const state = {};
   const first = briefNote(ctx, state);
-  assert.match(first, /\[orchestrate · brief\] no "What this is for" section between/);
+  assert.match(first, /\[orchestrate · brief\] no "What this is for" section in /, 'the folder and the top folder are the same, so it is named once');
+  assert.doesNotMatch(first, /between .* and /);
   assert.match(first, /Template: .*assets[\\/]BRIEF\.md/);
   assert.equal(briefNote(ctx, state), '', 'said once per session');
 });
