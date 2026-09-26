@@ -21,7 +21,7 @@
 //   node router.mjs --cost <transcript.jsonl>     what the router cost that session
 //   node router.mjs --prune                       delete session state older than 7 days
 
-import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,9 +29,9 @@ import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, staleRunsUnder, FAMILY_ORDER, AGENT_NAMES,
-  SESSIONS_DIR, sanitizeId,
+  SESSIONS_DIR,
 } from './lib/tier.mjs';
-import { sampleContext, storedContext, CONTEXT_DIR, thresholds } from './lib/context.mjs';
+import { sampleContext, storedContext } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote, runningNative, helperFiles } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
@@ -39,14 +39,17 @@ import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { findPreviousSession, formatAgo } from './lib/handoff.mjs';
-import { pickupSection, pickupWritten } from './turn-check.mjs';
+import { findPreviousSession } from './lib/handoff.mjs';
 import { CARD, CARD_CAP, cardBody, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import {
   stateLine, statusReply, actionableLine, contextBand, contextPhrase, quotaPhrase, quotaBand,
   READY_SHOWN, readyPhrase, ungradedPhrase, budgetPhrase, progressPhrase, edgesPhrase, runPhrase,
   stateHash, codexState,
 } from './lib/state-line.mjs';
+import {
+  RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt,
+  handoffLine, continueIntent, CONTINUE_WORD,
+} from './lib/resume.mjs';
 
 export { CARD, CARD_CAP, cardBody, compactNote };
 export {
@@ -54,124 +57,9 @@ export {
   READY_SHOWN, readyPhrase, ungradedPhrase, budgetPhrase, progressPhrase, edgesPhrase, runPhrase,
   stateHash, codexState,
 };
+export { RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt, handoffLine, continueIntent, CONTINUE_WORD };
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-
-// A bounded excerpt of what the run is for, for a session that has lost the
-// thread: resumed, compacted, or picking up someone else's ledger. Outcome,
-// constraints, current approach and the Pickup line — never the task history,
-// which is long, mostly finished, and already on disk.
-export const RESUME_CAP = 1200;
-
-// Cuts `text` to at most `cap` characters (plus the trailing `...`), ending at
-// the last newline or sentence-ending `.`/`!`/`?` at or before the cut point —
-// never past it — so a resumed or compacted session never picks the excerpt
-// back up mid-word. Falls back to the raw character cut only when no such
-// boundary exists anywhere in the kept window.
-function boundaryCut(text, cap) {
-  const budget = cap - 3;
-  const window = text.slice(0, budget);
-  let cut = window.lastIndexOf('\n');
-  const sentenceEnd = /[.!?](?=\s|$)/g;
-  let m;
-  while ((m = sentenceEnd.exec(window))) cut = Math.max(cut, m.index + 1);
-  const body = cut < 0 ? window : window.slice(0, cut);
-  return `${body.replace(/\s+$/, '')}...`;
-}
-
-// One reader for "a section of this markdown file, capped". `sections` is a
-// list of either a heading name (`"## <name>"`, the run-ledger shape) or
-// `{ pattern }`, a regex whose capture group 1 is the section body, for a
-// heading whose wording is not fixed (the brief's "## What this is for").
-// `intro` (default true) prefixes a named section's body with `name: `, the
-// way the run excerpt reads; the brief excerpt wants the body alone.
-export function sectionExcerpt(md, sections, cap = RESUME_CAP, { intro = true } = {}) {
-  const text = String(md || '');
-  const section = spec => {
-    const name = typeof spec === 'string' ? spec : spec.name;
-    const re = (spec && spec.pattern) || new RegExp(`## ${name}\\s*\\n([\\s\\S]*?)(?:\\n## |\\s*$)`);
-    const m = re.exec(text);
-    if (!m) return '';
-    const body = m[1].split('\n').filter(l => l.trim() && !/^<.*>$/.test(l.trim())).join('\n').trim();
-    if (!body) return '';
-    return intro && name ? `${name}: ${body}` : body;
-  };
-  const parts = sections.map(section).filter(Boolean);
-  let out = parts.join('\n');
-  if (out.length > cap) out = boundaryCut(out, cap);
-  return out;
-}
-
-export function resumeExcerpt(runMd, cap = RESUME_CAP) {
-  let text = '';
-  try { text = readFileSync(runMd, 'utf8'); } catch { return ''; }
-  return sectionExcerpt(text, ['Goal', 'Done when', 'Constraints and non-goals', 'Approach', 'Decisions', 'Pickup'], cap);
-}
-
-// A brand-new session that opens with one of these (the whole trimmed prompt,
-// nothing else) means "tell me what I was doing", not "start counting steps
-// toward a goal" — though it may still do that too (persistIntent matches
-// "keep going" on its own).
-export const CONTINUE_WORD = /^(continue|keep going|resume|pick up where we left off|where were we|what'?s next|carry on)$/i;
-
-// A short lead phrase that opens a "pick up where we left off" prompt, not
-// necessarily the whole prompt (CONTINUE_WORD is the exact-match case; this is
-// the looser "starts with" case for a prompt that says a little more).
-const CONTINUE_LEAD = /^(continue|keep going|carry on|resume|go on|pick up( where we left off)?|where were we|what'?s next|status|what were we doing)\b/i;
-
-// A "?"-only prompt that asks where things stand without any of the lead
-// words above ("where are we?", "what's left?").
-const STATUS_QUESTION = /^(where are we|where('?s| is) (this|it|that)|what'?s (left|the status)|how far did we get|what'?s going on|how'?s it going)\s*\??$/i;
-
-// A build verb followed by another word means the prompt names a new goal,
-// even when it opens with a continue-word ("continue and add a login page").
-// This is the one signal that overrides an otherwise-matching lead phrase.
-const NEW_GOAL_VERB = /\b(build|add|make|fix|create|write|implement|change|remove|update|refactor)\b\s+\S/i;
-
-// True for a prompt that means "tell me what I was doing / keep doing it",
-// false the moment it also names a new goal. CONTINUE_WORD is the strict
-// exact-match subset of this; everything else here is looser on purpose,
-// because a fresh session's first words are rarely typed exactly.
-export function continueIntent(text) {
-  const raw = String(text || '').trim();
-  if (!raw) return false;
-  const stripped = raw.replace(/[.!?]+$/, '').trim();
-  if (CONTINUE_WORD.test(stripped)) return true;
-  if (STATUS_QUESTION.test(raw)) return true;
-  if (!CONTINUE_LEAD.test(stripped)) return false;
-  if (NEW_GOAL_VERB.test(stripped)) return false;
-  const words = stripped.split(/\s+/).filter(Boolean);
-  return words.length < 12;
-}
-
-// The newest checkpoint file this previous session wrote, if any — same
-// layout precompact-check.mjs and lib/context.mjs read from.
-function latestCheckpointFor(sessionId) {
-  try {
-    const dir = join(CONTEXT_DIR, sanitizeId(sessionId));
-    const paths = readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)).map(n => join(dir, n));
-    return paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] || null;
-  } catch { return null; }
-}
-
-// One line naming what the previous session in this folder was doing and
-// where to look for what it left behind: a run's Pickup section when one is
-// written, else that session's own checkpoint file, else plain `git status`.
-export function handoffLine(prev, ctx) {
-  const ago = formatAgo(Date.now() - Date.parse(prev.lastSeen));
-  let tail = 'Uncommitted changes, if any, are what it left behind; run `git status` to see them, then carry on from there or say what you want instead.';
-  let runText = '';
-  if (ctx && ctx.run && ctx.run.runMd) {
-    try { runText = readFileSync(ctx.run.runMd, 'utf8'); } catch { runText = ''; }
-  }
-  if (runText && pickupWritten(pickupSection(runText))) {
-    tail = `The Pickup section of ${ctx.run.runMd} has what it left off at; open it, then carry on from there or say what you want instead.`;
-  } else {
-    const cp = latestCheckpointFor(prev.session_id);
-    if (cp) tail = `${cp} has what it left off at; open it, then carry on from there or say what you want instead.`;
-  }
-  return `Your last session in this folder, ${ago} ago, was working on: "${prev.goal}". ${tail}`;
-}
 
 // ---- the brief: the project's own "What this is for" -----------------------
 // "The brief" is that section of the project's instruction file, not a
@@ -308,17 +196,6 @@ export function briefNote(ctx, state, { force = false } = {}) {
   state.briefSentFor = b.file;
   const where = b.reason === 'worktree' ? 'this is a worktree and the file lives in the main checkout' : 'this session was started above the project';
   return `[orchestrate · brief] from ${b.file}. Claude Code does not keep this file in view here (${where}), so its "What this is for" section is copied below, and again after each summary.\n${b.text}`;
-}
-
-export function checkpointExcerpt(session, cap = RESUME_CAP) {
-  try {
-    const dir = join(CONTEXT_DIR, String(session || 'nosession').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120));
-    const paths = readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)).map(n => join(dir, n));
-    const path = paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
-    if (!path) return '';
-    const text = readFileSync(path, 'utf8').trim();
-    return text.length > cap ? boundaryCut(text, cap) : text;
-  } catch { return ''; }
 }
 
 // ---- local context ----------------------------------------------------------

@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, syntheticPrompt, resumeExcerpt, sectionExcerpt, RESUME_CAP, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, continueIntent, handoffLine } from './router.mjs';
+import { cardBody, compactionFact, syntheticPrompt, sectionExcerpt, RESUME_CAP, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -373,63 +373,6 @@ test('SessionStart compact with no bound run injects the checkpoint file, capped
   assert.equal(excerpt, `${long.slice(0, 1197)}...`);
 });
 
-test('the resume excerpt is bounded', () => {
-  const repo = makeRepo(true);
-  const runMd = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md');
-  const long = readFileSync(runMd, 'utf8').replace('Finish the tidy command so notes stop piling up.', 'x '.repeat(5000));
-  writeFileSync(runMd, long);
-  const ex = resumeExcerpt(runMd);
-  assert.ok(ex.length <= RESUME_CAP, `${ex.length} <= ${RESUME_CAP}`);
-  assert.match(ex, /\.\.\.$/);
-});
-
-test('a bullet crossing the cap is cut at the line boundary before it, never mid-word (bug: was a raw character cut)', () => {
-  const repo = makeRepo(true);
-  const runMd = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md');
-  // A "not doing" bullet long enough that RESUME_CAP lands inside one of its
-  // words, the shape observed live: the run card came back truncated at
-  // "not doing: rewriting SKILL.md body wholesale in wave..." mid-word.
-  const bullet = `- not doing: rewriting SKILL.md body wholesale in wave two, since that would blow the token budget for this one task and leave nothing for the ${'x'.repeat(2000)} rest`;
-  const runMdText = readFileSync(runMd, 'utf8').replace(
-    '- constraint: the never-delete rule holds',
-    `- constraint: the never-delete rule holds\n${bullet}`,
-  );
-  writeFileSync(runMd, runMdText);
-
-  // Reproduce first: the old raw cut landed inside a run of "x"s (mid-word).
-  const rawCut = runMdText
-    .split('## Constraints and non-goals\n\n')[1].split('\n\n## Approach')[0]
-    .split('\n').filter(l => l.trim()).join('\n');
-  const budget = RESUME_CAP - 3;
-  // Sanity: the raw slice used to land inside a word (a run of "x"s), which is
-  // exactly the bug — confirms this fixture reproduces it before the fix is
-  // trusted to have changed anything.
-  assert.match(rawCut.slice(budget - 5, budget + 5), /xxxxxxxxxx/, 'fixture must actually cross mid-word under a raw cut');
-
-  const ex = resumeExcerpt(runMd);
-  assert.ok(ex.length <= RESUME_CAP, `${ex.length} <= ${RESUME_CAP}`);
-  assert.match(ex, /\.\.\.$/);
-  // The excerpt must end at a full line (the bullet before the giant one), not
-  // mid-word inside the run of "x"s.
-  assert.doesNotMatch(ex, /x{2,}\.\.\.$/);
-  assert.match(ex, /rule holds\.\.\.$/, `expected the cut to fall back to the previous bullet's line boundary, got: ${JSON.stringify(ex.slice(-60))}`);
-});
-
-test('sectionExcerpt cuts at a sentence boundary, never mid-word', () => {
-  const body = 'The approach keeps changes small. Not doing: rewriting SKILL.md body wholesale in wave two, since that would blow the budget for this task entirely.';
-  const md = `## Approach\n\n${body}\n`;
-  const wordStart = body.indexOf('wholesale');
-  const cap = wordStart + 5 + 3; // lands mid-word under the old raw cut ("whol|esale")
-  const rawCut = body.slice(0, cap - 3);
-  assert.match(rawCut, /whole$/, 'fixture must cross mid-word under a raw cut');
-
-  const ex = sectionExcerpt(md, ['Approach'], cap);
-  assert.ok(ex.length <= cap, `${ex.length} <= ${cap}`);
-  assert.match(ex, /\.\.\.$/);
-  // Falls back to the last sentence boundary before the cap: "...small."
-  assert.equal(ex, 'Approach: The approach keeps changes small....');
-});
-
 test('checkpointExcerpt cuts at the last newline before the cap, never mid-word', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const sessionId = 's-checkpoint2';
@@ -790,48 +733,6 @@ test('the brief section is found in AGENTS.md', () => {
 
 // ---- fresh-session handoff ---------------------------------------------------
 
-test('CONTINUE_WORD matches only the whole trimmed prompt', () => {
-  for (const w of ['continue', 'keep going', 'resume', 'pick up where we left off', 'where were we', "what's next", 'whats next', 'carry on', 'CONTINUE', ' Resume ']) {
-    assert.ok(CONTINUE_WORD.test(w.trim()), w);
-  }
-  assert.equal(CONTINUE_WORD.test('continue adding tests'), false);
-  assert.equal(CONTINUE_WORD.test('should I continue'), false);
-});
-
-test('continueIntent: "carry on" without naming a new goal, with or without punctuation', () => {
-  const trueCases = [
-    'continue',
-    'where were we?',
-    'continue.',
-    "what's next?",
-    'go on',
-    'pick up',
-    'status',
-    'what were we doing',
-    'where are we?',
-    "what's left?",
-    'how far did we get?',
-    'continue with the migration',
-  ];
-  for (const t of trueCases) assert.equal(continueIntent(t), true, t);
-});
-
-test('continueIntent: false the moment the prompt names a new goal', () => {
-  const falseCases = [
-    'continue and add a login page',
-    'fix the tests',
-    'build a new dashboard',
-    'add a --json flag',
-    'make it faster',
-    'create a report',
-    'write tests for this',
-    'implement the login flow',
-    'change the config',
-    'remove old code',
-  ];
-  for (const t of falseCases) assert.equal(continueIntent(t), false, t);
-});
-
 test('the first substantive prompt stores it as the session goal, capped and collapsed', () => {
   const home = makeHome(); const repo = makeRepo(false);
   assert.equal(prompt(home, repo, 'ok'), '' , 'too short to be substantive');
@@ -893,16 +794,3 @@ test('a second "continue" in the same session does not repeat the handoff line',
   assert.doesNotMatch(second, /Your last session in this folder/);
 });
 
-test('handoffLine names a written Pickup section over plain git status', () => {
-  const runMd = join(mkdtempSync(join(tmpdir(), 'orch-run-')), 'RUN.md');
-  writeFileSync(runMd, '## Pickup\n\nPickup prompt: dispatch the next task\nPickup confidence: high\n');
-  const ctx = { run: { runMd } };
-  const line = handoffLine({ goal: 'ship the login page', lastSeen: new Date(Date.now() - 60000).toISOString() }, ctx);
-  assert.match(line, /Pickup section of/);
-  assert.doesNotMatch(line, /git status/);
-});
-
-test('handoffLine falls back to git status when there is no run or checkpoint', () => {
-  const line = handoffLine({ goal: 'ship the login page', session_id: 'no-such-session', lastSeen: new Date(Date.now() - 60000).toISOString() }, { run: null });
-  assert.match(line, /run `git status`/);
-});
