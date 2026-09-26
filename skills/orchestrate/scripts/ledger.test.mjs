@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendCost, sumCosts, parseReturn, lintRunRow, evidenceDowngrade, NO_EVIDENCE_NOTE } from './ledger.mjs';
+import { appendCost, sumCosts, parseReturn, lintRunRow, evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE } from './ledger.mjs';
 
 function tmpFile() {
   const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-'));
@@ -104,4 +104,45 @@ test('evidenceDowngrade never upgrades: a null status stays null', () => {
   const r = evidenceDowngrade(null, 'no fields at all');
   assert.equal(r.status, null);
   assert.equal(r.note, null);
+});
+
+test('parseReturn reads REVIEW OF: as the reviewed task id, its first token', () => {
+  const r = parseReturn('TASK: 9-1-0099\nREVIEW OF: 9-1-0034 on agent/x @ abc123, worktree /r/w\nSTATUS: DONE\nVERDICT: PASS\n');
+  assert.equal(r.reviewOf, '9-1-0034');
+  assert.equal(r.task, '9-1-0099');
+});
+
+test('parseReturn: no REVIEW OF line reads as null', () => {
+  assert.equal(parseReturn('TASK: 9-1-0001\nSTATUS: DONE\n').reviewOf, null);
+});
+
+test('reviewDowngrade: a REVIEW: yes task marked DONE with no reviewer return yet is downgraded to PARTIAL with the note', () => {
+  const r = reviewDowngrade('DONE', true, '9-1-0034', []);
+  assert.equal(r.status, 'PARTIAL');
+  assert.equal(r.note, NO_REVIEW_NOTE);
+});
+
+test('reviewDowngrade: a REVIEW: yes task marked DONE with a matching reviewer return already in the index stays DONE', () => {
+  const rows = [{ reviewOf: '9-1-0034', status: 'DONE', verdict: 'PASS' }];
+  const r = reviewDowngrade('DONE', true, '9-1-0034', rows);
+  assert.equal(r.status, 'DONE');
+  assert.equal(r.note, null);
+});
+
+test('reviewDowngrade: a reviewer return for a different task id does not satisfy the gate', () => {
+  const rows = [{ reviewOf: '9-1-0099' }];
+  const r = reviewDowngrade('DONE', true, '9-1-0034', rows);
+  assert.equal(r.status, 'PARTIAL');
+});
+
+test('reviewDowngrade: no REVIEW flag leaves DONE unchanged, reviewer return or not', () => {
+  assert.equal(reviewDowngrade('DONE', false, '9-1-0034', []).status, 'DONE');
+  assert.equal(reviewDowngrade('DONE', false, '9-1-0034', []).note, null);
+});
+
+test('reviewDowngrade never touches PARTIAL or BLOCKED, and never upgrades', () => {
+  assert.equal(reviewDowngrade('PARTIAL', true, '9-1-0034', []).status, 'PARTIAL');
+  assert.equal(reviewDowngrade('PARTIAL', true, '9-1-0034', []).note, null);
+  assert.equal(reviewDowngrade('BLOCKED', true, '9-1-0034', []).status, 'BLOCKED');
+  assert.equal(reviewDowngrade(null, true, '9-1-0034', []).status, null);
 });
