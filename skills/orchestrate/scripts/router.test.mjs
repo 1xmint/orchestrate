@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, CARD, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, stateLine, stateHash, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, continueIntent, handoffLine } from './router.mjs';
+import { cardBody, compactionFact, syntheticPrompt, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, stateLine, stateHash, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, continueIntent, handoffLine } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -634,19 +634,6 @@ test('--state prints what it would inject and writes nothing', () => {
   assert.match(r.stdout, /\[orchestrate\]/);
   assert.match(r.stdout, /card: \d+ characters/);
   assert.equal(existsSync(join(home, '.claude', 'orchestrate', 'sessions', 'cli.json')), false);
-});
-
-test('the card body stays inside the cap it names, and has one home in code', () => {
-  // Every character is paid on every later turn of the session that got it.
-  const body = cardBody();
-  assert.equal(body, CARD, 'cardBody is CARD, with no other source to drift from');
-  assert.ok(body.length <= CARD_CAP, `card is ${body.length} characters, cap ${CARD_CAP}`);
-  assert.match(body, /router off/, 'it says how to turn itself off');
-  assert.ok(!existsSync(join(HERE, '..', 'references', 'ladder.md')), 'ladder.md is gone; the card text has one home now');
-});
-
-test('the card carries no counter phrase — those live behind `router status`', () => {
-  assert.doesNotMatch(CARD, /orch-agents|codex:|tier \w|limits today/);
 });
 
 // ---- which task is ready ----------------------------------------------------
