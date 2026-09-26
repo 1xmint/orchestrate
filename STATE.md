@@ -16,6 +16,11 @@ long-term development, so `AGENTS.md` changed on 2026-09-24:
   scenarios, each under a written spend cap. Tests still need no quota; evals
   are the separate, budgeted layer. `claude plugin eval --help` works on
   Claude Code 2.1.274 (STATE.md v0.14-era note that it refused is stale).
+  The eval runs themselves need a sandbox backend: on Windows without WSL
+  every graded run exits "A shell tool (Bash or PowerShell) was granted but
+  this machine cannot confine it (no sandbox backend on this platform)" at
+  $0. Run the evals on Linux, macOS or WSL; until then the live runs in
+  `docs/audits/2026-09-24-live-runs-r3.md` are the measured substitute.
 - New always-true lines: doc numbers are generated or pinned by a drift test,
   one version string in `plugin.json`; every hook registered once in
   `hooks/hooks.json` and silent inside helpers; limits held by hooks or
