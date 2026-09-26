@@ -46,7 +46,7 @@ test('growth attributes the main session tool payloads, hooks, context and price
   assert.deepEqual(r.contexts, [{ response: 10, tokens: 330 }]);
   assert.deepEqual({ input: r.input, output: r.output, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }, { input: 550, output: 55, cacheRead: 1100, cacheWrite: 165 });
   assert.equal(r.priceModel, 'opus');
-  assert.equal(r.price, 0.00570625);
+  assert.equal(r.price, 0.004565);
   assert.match(growthReport(r), /context every 10th response: #10 330/);
 });
 
@@ -197,7 +197,7 @@ test('the dollar report prices the session, and refuses to price an unnamed mode
     JSON.stringify({ type: 'assistant', message: { model: 'claude-opus-5', usage: { input_tokens: 1000000, output_tokens: 0 } } }),
   ].join('\n'));
   const priced = dollarReport(r, 'max5', null);
-  assert.match(priced, /at list price: \$5\.00 on opus/);
+  assert.match(priced, /at list price: \$4\.00 on opus/);
   assert.match(priced, /a plan is not billed this way/);
   // No share of a week, on any plan: the weekly figure it divided by came from
   // one observation, and a percentage built on that reads like a measurement.

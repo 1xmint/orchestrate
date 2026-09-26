@@ -123,14 +123,14 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate')) {
     const path = checkpointPath(contextReading && contextReading.session, contextReading);
     const n = contextReading && contextReading.tokens != null ? `~${Math.round(contextReading.tokens / 1000)}k` : 'high';
-    return stop(`context is ${n}: write the checkpoint at ${path}, then ${switchAdvice(contextReading, contextAdvice)}`);
+    return stop(`the conversation is getting long (${n} tokens tracked): save a checkpoint first, then ${switchAdvice(contextReading, contextAdvice)} Save the checkpoint to ${path}.`);
   }
   if (quota && quota.fiveHour && quota.fiveHour.pct >= PERSIST_STOP_FIVE_HOUR) return stop(`the 5-hour usage window is at ${Math.round(quota.fiveHour.pct)}% (resets ${resetClock(quota.fiveHour.resetsAt)})`);
   if (scan.denied) return stop('a dispatch was denied (budget, credential or usage limit)');
   if (repeat) return stop(`the same error came back twice: ${repeat}`);
   if (scan.asked) return stop('the last message asks the user something');
   if (scan.goalMet) return stop('the last message says the goal is met');
-  if (steps > PERSIST_STEP_CAP) return stop(`${PERSIST_STEP_CAP} auto-continued steps`);
+  if (steps > PERSIST_STEP_CAP) return stop(`reached the limit of ${PERSIST_STEP_CAP} auto-continued steps in a row`);
   if (!scan.progressed) return stop('the last step did no visible work (no edit, command or dispatch)');
 
   const parts = [];
@@ -149,7 +149,22 @@ function emitBlock(reason) {
   process.stdout.write(JSON.stringify({ decision: 'block', reason }));
 }
 
+// Shown to the user, never blocks: the loop is over, and why, in one line.
+export function endMessage(why) {
+  return `Auto-continue stopped: ${why}. Say "keep going" to start it again.`;
+}
+
+function emitSystemMessage(message) {
+  process.stdout.write(JSON.stringify({ systemMessage: message }));
+}
+
 export function check(input) {
+  // A subagent's own Stop is not the lead's auto-continue loop — `agent_id`
+  // on the payload (hooks doc, "common input fields") marks a call that fires
+  // inside a subagent. Refusing a helper's own Stop with the lead's goal text
+  // would be both wrong (the helper does not own that loop) and pure noise
+  // read back into a context that did not ask for it.
+  if (input && input.agent_id) return null;
   const state = loadSession(input.session_id);
   const p = state && state.persist;
 
@@ -170,7 +185,7 @@ export function check(input) {
     if (ctx.reading.tokens >= at && !checkpoint && rec.contextBlockedFor !== epoch) {
       store[key] = { ...rec, contextBlockedFor: epoch, checkedAt: new Date().toISOString() };
       try { writeJsonAtomic(path, store); } catch {}
-      return { rec: store[key], kind: 'continue', why: `orchestrate: context is ~${Math.round(ctx.reading.tokens / 1000)}k: write the checkpoint at ${checkpointPath(input.session_id || null, ctx.reading)}, then ${switchAdvice(ctx.reading, ctx.advice)}` };
+      return { rec: store[key], kind: 'continue', why: `orchestrate: context is ~${Math.round(ctx.reading.tokens / 1000)}k: write a checkpoint first, then ${switchAdvice(ctx.reading, ctx.advice)} Save the checkpoint to ${checkpointPath(input.session_id || null, ctx.reading)}.` };
     }
     return null;
   }
@@ -212,6 +227,7 @@ function main() {
   // step cap and the no-work stop are what end it.
   const dec = check(input);
   if (dec && dec.kind === 'continue') emitBlock(dec.why);
+  else if (dec && dec.kind === 'stop' && dec.why) emitSystemMessage(endMessage(dec.why));
 }
 
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {

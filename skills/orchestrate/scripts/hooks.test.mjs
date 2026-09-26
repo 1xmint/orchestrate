@@ -293,7 +293,9 @@ test('guard: a dispatch that names no model is recorded as inherited and not pri
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's9', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0001\nPROGRESS: /r/progress/1.md\ndo it' },
   }, home);
-  assert.equal(out.stdout.trim(), '', 'no model named means no figure to give, and the packet already names its progress file');
+  // No model named means no price figure to give; the packet already names its
+  // progress file, so the only context line left is the worktree fallback for it.
+  assert.match(out.json.hookSpecificOutput.additionalContext, /write the same relative path inside your own worktree/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit');
 });
@@ -844,6 +846,18 @@ test('precompact: a bound run with a stale Pickup blocks compaction once, and na
   // exists to prevent.
   const second = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1', cwd: repo.dir, trigger: 'auto' }, home);
   assert.equal(second.stdout.trim(), '', 'it blocks once, not in a loop, and lets compaction proceed');
+});
+
+test('precompact: agent_id present (a subagent compacting its own transcript) is never blocked, even with a stale Pickup', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'spc1b', repo);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const state = JSON.parse(readFileSync(join(sessions, 'spc1b.json'), 'utf8'));
+  state.lastDispatchAt = new Date().toISOString();
+  writeFileSync(join(sessions, 'spc1b.json'), JSON.stringify(state));
+  const out = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1b', cwd: repo.dir, trigger: 'auto', agent_id: 'agent-1' }, home);
+  assert.equal(out.stdout.trim(), '', "a subagent is not the lead's Pickup line to demand");
 });
 
 test('precompact: a written Pickup, or no dispatch yet, never blocks', () => {

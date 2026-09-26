@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, AUTHOR_ROLES, claimOrDeny, codexFact } from './guard-agent.mjs';
+import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, progressWorktreeNote, AUTHOR_ROLES, claimOrDeny, codexFact } from './guard-agent.mjs';
 import { normalizeRole, estimateDollars } from './lib/prices.mjs';
 import { snapshotFrom, readQuota } from './lib/quota.mjs';
 import { recordCodexOk, markExhausted, CODEX_OK_FRESH_MS } from './lib/workers.mjs';
@@ -69,6 +69,44 @@ test('progressFact: a plain fact for an author-role packet with no PROGRESS line
   assert.equal(progressFact('orch-reviewer', 'TASK: 1\nfind it', false), '', 'a reviewer returns a verdict, not partial work');
   assert.equal(progressFact('orch-coordinator', 'TASK: 1\nfind it', false), '', 'the coordinator packet is the lead\'s business');
   assert.equal(progressFact('Explore', 'x', false), '', 'a built-in sweeper is not an author role');
+});
+
+test('progressFact: a prompt that only points at a packet file is checked against that file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-packet-'));
+  const withLine = join(dir, 'with-progress.md');
+  const withoutLine = join(dir, 'without-progress.md');
+  writeFileSync(withLine, 'TASK: 1\nPROGRESS: /r/p.md\nfind it\n');
+  writeFileSync(withoutLine, 'TASK: 1\nfind it\n');
+
+  assert.equal(
+    progressFact('orch-implementer', `Your packet is in ${withLine}, lines 1-3 (see above)`, false),
+    '',
+    'the PROGRESS line lives in the file the prompt points at, not in the prompt itself',
+  );
+  assert.equal(
+    progressFact('orch-implementer', `packet: ${withoutLine}\nfind it`, false),
+    'no PROGRESS line: a capped return will have nothing to resume from',
+    'the named file has no PROGRESS line either, so this still warns',
+  );
+});
+
+test('progressWorktreeNote: a dispatch with a PROGRESS line gets the worktree fallback sentence, absent when there is no line or in plan mode', () => {
+  const note = 'if writing the progress file is refused, write the same relative path inside your own worktree instead, and say so in your return';
+  assert.equal(progressWorktreeNote('orch-implementer', 'TASK: 1\nPROGRESS: /r/p.md\nfind it', false), note);
+  assert.equal(progressWorktreeNote('orch-implementer', 'TASK: 1\nfind it', false), '', 'no PROGRESS line, so no fallback to name');
+  assert.equal(progressWorktreeNote('orch-implementer', 'TASK: 1\nPROGRESS: /r/p.md\nfind it', true), '', 'plan mode has no PROGRESS line to begin with');
+  assert.equal(progressWorktreeNote('orch-reviewer', 'TASK: 1\nPROGRESS: /r/p.md\nfind it', false), '', 'a reviewer never writes one');
+  assert.doesNotMatch(note, /\borch-|implementer\b/, 'plain words, no role names');
+});
+
+test('progressFact: an inline PROGRESS line never opens a file', () => {
+  const missing = join(tmpdir(), 'orch-packet-does-not-exist', 'nope.md');
+  const readFile = () => { throw new Error('file read path was taken'); };
+  assert.equal(
+    progressFact('orch-implementer', `packet: ${missing}\nPROGRESS: /r/p.md\nfind it`, false, readFile),
+    '',
+    'the inline line already answers it; the file-read path must not run',
+  );
 });
 
 test('role names are one name whatever the install path calls them', () => {
@@ -154,6 +192,7 @@ test('grantCheck: bind on first use, allow on the bound id, deny naming both ids
   assert.match(other.reason, /1-1-0002/);
   assert.equal(grantCheck(null, 'fable', 'TASK: 1-1-0001\nx', null), null, 'no record, no grant');
   assert.equal(grantCheck(grant, 'opus', 'TASK: 1-1-0001\nx', null), null, 'wrong family, no grant');
+  assert.doesNotMatch(other.reason, /Josh/, 'no person\'s name hard-coded into the denial text');
 });
 
 test('claimOrDeny: a different id winning the race is denied by name, on both sides', () => {
@@ -164,6 +203,7 @@ test('claimOrDeny: a different id winning the race is denied by name, on both si
   assert.equal(raced.prefix, 'model');
   assert.match(raced.reason, /1-1-0001/, 'names the task that actually won');
   assert.match(raced.reason, /1-1-0002/, 'names the task that was refused');
+  assert.doesNotMatch(raced.reason, /Josh/, 'no person\'s name hard-coded into the denial text');
 
   // The winner's own claim call comes back with its own id: allowed, nothing
   // to deny.

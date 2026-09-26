@@ -143,17 +143,32 @@ export function routerSettings() {
 // second set that then shadowed the plugin's. Look in both places.
 export function pluginAgentDir() {
   const base = join(HOME, '.claude', 'plugins', 'cache');
+  // An update leaves the old version's cache directory in place alongside the
+  // new one (nothing prunes it), so more than one version can have an agents
+  // folder at once. Picking whichever `readdirSync` lists first read a stale
+  // pre-update directory missing agents added since, and reported them
+  // "missing" on an install that was actually complete. Score every version
+  // found and keep the one with the most agent files present, newest
+  // directory first on a tie, so a stale partial copy never outranks a
+  // complete one.
+  let best = null;
   try {
     for (const market of readdirSync(base)) {
       for (const plugin of readdirSync(join(base, market))) {
         for (const version of readdirSync(join(base, market, plugin))) {
           const d = join(base, market, plugin, version, 'skills', 'orchestrate', 'assets', 'agents');
-          if (existsSync(join(d, `${AGENT_NAMES[0]}.md`))) return d;
+          if (!existsSync(join(d, `${AGENT_NAMES[0]}.md`))) continue;
+          const count = AGENT_NAMES.filter(n => existsSync(join(d, `${n}.md`))).length;
+          let mtime = 0;
+          try { mtime = statSync(d).mtimeMs; } catch {}
+          if (!best || count > best.count || (count === best.count && mtime > best.mtime)) {
+            best = { dir: d, count, mtime };
+          }
         }
       }
     }
   } catch {}
-  return null;
+  return best ? best.dir : null;
 }
 
 export function agentsInstalled() {
@@ -186,6 +201,23 @@ export function findRepoRoot(start) {
     d = parent;
   }
   return null;
+}
+
+// True when `cwd` and `root` sit on the same branch of the folder tree — one
+// contains the other, either way round, or they are the same folder.
+// Case-insensitive and slash-normalised so a Windows drive letter or backslash
+// path still matches. This is what keeps the machine-wide "last run opened"
+// pointer from naming a run in a project the current session has nothing to
+// do with, while still finding it for the ordinary case of a session started
+// in the folder that contains the repo (cwd above root) or inside it (cwd
+// below root).
+export function isUnderRoot(cwd, root) {
+  if (!cwd || !root) return false;
+  const norm = p => resolve(String(p)).replace(/\\/g, '/').toLowerCase();
+  const a = norm(root);
+  const b = norm(cwd);
+  if (a === b) return true;
+  return b.startsWith(`${a}/`) || a.startsWith(`${b}/`);
 }
 
 // A Pickup value the orchestrator never replaced. Two shapes count as unwritten:
@@ -258,6 +290,11 @@ export function readyTasks(rows, header) {
   const cols = String(header || '').split('|').map(s => s.trim().toLowerCase());
   const blocksAt = cols.indexOf('blocks on');
   if (blocksAt < 0) return [];
+  // A row whose "role · model" cell names a human, not an agent — "owner" is
+  // the only such row the template writes — is never something a lead starts
+  // by dispatching. Without this, a plan with an owner row still 📋 planned
+  // told the lead it was ready to hand off, which it never was.
+  const roleAt = cols.indexOf('role · model');
 
   const phaseOf = new Map();
   for (const r of rows) {
@@ -276,6 +313,7 @@ export function readyTasks(rows, header) {
   const out = [];
   for (const r of rows) {
     if (!/📋/.test(cellAt(r, 2))) continue;
+    if (roleAt >= 0 && /^owner\b/i.test(cellAt(r, roleAt))) continue;
     const blockers = cellAt(r, blocksAt).split(/[,\s]+/).filter(s => s && !/^[—-]$/.test(s));
     if (blockers.every(landed)) out.push(cellAt(r, 1));
   }
@@ -509,7 +547,11 @@ export function resolveRun(sessionId, cwd, { forWrite = false } = {}) {
 
   if (!forWrite) {
     const p = activeRunPointer();
-    if (p) return { run: null, candidates: [p], how: 'no repo above the working directory; this is the last run opened on this machine, and it is not bound to this session' };
+    // The pointer is a hint for a session with no repo above it, not authority
+    // to name a run in a folder it has nothing to do with. A session started
+    // above one project must not see another project's run because that one
+    // happened to be the last one opened on the machine.
+    if (p && isUnderRoot(cwd, p.root)) return { run: null, candidates: [p], how: 'no repo above the working directory; this is the last run opened on this machine, and it is not bound to this session' };
   }
   return { run: null, candidates: [], how: 'no repo above the working directory' };
 }

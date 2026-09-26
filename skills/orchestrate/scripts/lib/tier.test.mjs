@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { isWritten, latestRun, readyTasks, ungradedReturns, returnedTasks, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot, AGENT_NAMES, seenRecently, recordSeen, trimLog } from './tier.mjs';
+import { isWritten, latestRun, readyTasks, ungradedReturns, returnedTasks, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, findRepoRoot, AGENT_NAMES, seenRecently, recordSeen, trimLog, isUnderRoot } from './tier.mjs';
 
 const TIER = new URL('./tier.mjs', import.meta.url).href;
 
@@ -136,7 +136,17 @@ test('the manager\'s own model comes from the last assistant record in the tail'
     JSON.stringify({ type: 'assistant', effort: 'high', entrypoint: 'claude-desktop', message: { model: 'claude-opus-5' } }),
     JSON.stringify({ type: 'queue-operation', operation: 'enqueue' }),
   ].join('\n') + '\n');
-  assert.deepEqual(selfModel(p), { model: 'opus', effort: 'high', entrypoint: 'claude-desktop' }, 'the newest record wins, host and all');
+  // The session's own CLAUDE_EFFORT beats the transcript; pin it so the result
+  // does not depend on who runs the tests.
+  const savedEffort = process.env.CLAUDE_EFFORT;
+  try {
+    delete process.env.CLAUDE_EFFORT;
+    assert.deepEqual(selfModel(p), { model: 'opus', effort: 'high', entrypoint: 'claude-desktop' }, 'the newest record wins, host and all');
+    process.env.CLAUDE_EFFORT = 'medium';
+    assert.equal(selfModel(p).effort, 'medium', 'the environment wins over the transcript');
+  } finally {
+    if (savedEffort === undefined) delete process.env.CLAUDE_EFFORT; else process.env.CLAUDE_EFFORT = savedEffort;
+  }
   assert.equal(selfModel(join(dir, 'absent.jsonl')), null);
   assert.equal(selfModel(''), null);
 
@@ -157,6 +167,15 @@ test('the family ladder decides who is stronger, and a limit steps a family down
   assert.equal(applyLimits('opus', ['opus']), 'sonnet');
   assert.equal(applyLimits('opus', []), 'opus');
   assert.equal(applyLimits('haiku', ['haiku']), 'haiku', 'the bottom of the ladder has nowhere to go');
+});
+
+test('isUnderRoot: same branch of the tree either way round, never an unrelated path', () => {
+  assert.equal(isUnderRoot('/a', '/a'), true, 'the same folder');
+  assert.equal(isUnderRoot('/a/sub', '/a'), true, 'cwd below root');
+  assert.equal(isUnderRoot('/a', '/a/sub'), true, 'cwd above root');
+  assert.equal(isUnderRoot('/b', '/a'), false, 'unrelated paths');
+  assert.equal(isUnderRoot('/a-other', '/a'), false, 'a name prefix is not containment');
+  assert.equal(isUnderRoot(null, '/a'), false);
 });
 
 test('dates are local, and ids are safe to use as filenames', () => {
@@ -182,8 +201,8 @@ test('a session whose cwd is above the repo still finds the open run', () => {
     '## Pickup', '', 'Pickup prompt: carry on at step two', '',
   ].join('\n'));
 
-  // This is the layout Josh actually works in: the session starts in the folder
-  // that contains his repos, so findRepoRoot(cwd) is null and every hook that
+  // This is a common layout: the session starts in the folder
+  // that contains several repos, so findRepoRoot(cwd) is null and every hook that
   // asked cwd found nothing.
   assert.equal(findRepoRoot(parent), null);
 
@@ -309,6 +328,67 @@ name: ${n}
   const viaFiles = ask(home);
   assert.equal(viaFiles.installed, names.length);
   assert.equal(viaFiles.source, 'files');
+});
+
+// observations.md: the card said "orch-agents 6/8 (missing orch-coordinator,
+// orch-advisor)" while a plugin install of all 8 was in use. Names the exact
+// two missing so a stale read is caught, not just a wrong total.
+test('a plugin install missing two named agents reports exactly those two, not a stale count', () => {
+  const names = AGENT_NAMES;
+  const ask = home => JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e',
+    `const { agentsInstalled } = await import(${JSON.stringify(TIER)}); console.log(JSON.stringify(agentsInstalled()));`,
+  ], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } }).stdout.trim());
+
+  const home = mkdtempSync(join(tmpdir(), 'orch-agentcount-missing-'));
+  const pdir = join(home, '.claude', 'plugins', 'cache', 'orchestrate', 'orchestrate', '0.16.1', 'skills', 'orchestrate', 'assets', 'agents');
+  mkdirSync(pdir, { recursive: true });
+  const missingOnDisk = ['orch-coordinator', 'orch-advisor'];
+  for (const n of names) {
+    if (missingOnDisk.includes(n)) continue;
+    writeFileSync(join(pdir, `${n}.md`), `---
+name: ${n}
+---
+`);
+  }
+  const out = ask(home);
+  assert.equal(out.installed, names.length - missingOnDisk.length);
+  assert.deepEqual([...out.missing].sort(), [...missingOnDisk].sort());
+  assert.equal(out.source, 'plugin');
+});
+
+// An update leaves the plugin cache holding both the old and the new version's
+// agent folders (nothing prunes the old one). Reading whichever the
+// filesystem listed first could land on the stale pre-update folder and
+// report agents from the current, complete install as "missing" — this is the
+// live bug: "orch-agents 6/8 (missing orch-coordinator, orch-advisor)" while
+// both were dispatching fine, because they were added to the plugin after the
+// stale cached version.
+test('a stale version still in the plugin cache never shadows a complete newer install', () => {
+  const names = AGENT_NAMES;
+  const home = mkdtempSync(join(tmpdir(), 'orch-agentcount-stalecache-'));
+  const oldDir = join(home, '.claude', 'plugins', 'cache', 'orchestrate', 'orchestrate', '0.15.0', 'skills', 'orchestrate', 'assets', 'agents');
+  const newDir = join(home, '.claude', 'plugins', 'cache', 'orchestrate', 'orchestrate', '0.16.1', 'skills', 'orchestrate', 'assets', 'agents');
+  mkdirSync(oldDir, { recursive: true });
+  mkdirSync(newDir, { recursive: true });
+  // Old cached version predates orch-coordinator and orch-advisor.
+  for (const n of names.filter(n => n !== 'orch-coordinator' && n !== 'orch-advisor')) {
+    writeFileSync(join(oldDir, `${n}.md`), `---
+name: ${n}
+---
+`);
+  }
+  for (const n of names) {
+    writeFileSync(join(newDir, `${n}.md`), `---
+name: ${n}
+---
+`);
+  }
+  const out = JSON.parse(spawnSync(process.execPath, ['--input-type=module', '-e',
+    `const { agentsInstalled } = await import(${JSON.stringify(TIER)}); console.log(JSON.stringify(agentsInstalled()));`,
+  ], { encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home } }).stdout.trim());
+  assert.equal(out.installed, names.length, 'the complete newer version is the one counted');
+  assert.deepEqual(out.missing, []);
+  assert.equal(out.source, 'plugin');
 });
 
 
@@ -500,6 +580,14 @@ test('a pipe in the task text cannot shift the columns that matter', () => {
   // rubric of "exit 0 | 41 passed" moves the phase.
   const rows = [row('9-9-0001', '📋 planned', '—', 'run `rg foo | head` and check exit 0 | 41 passed')];
   assert.deepEqual(readyTasks(rows, HEADER), ['9-9-0001']);
+});
+
+test('a row whose role is "owner" (a human, not an agent) never shows up as ready', () => {
+  const rows = [
+    row('9-9-0001', '📋 planned'),
+    '| 9-9-0002 | 📋 planned | — | src/9-9-0002.ts | owner | sign off on the design | n/a | 0 | — |',
+  ];
+  assert.deepEqual(readyTasks(rows, HEADER), ['9-9-0001'], 'the owner row is excluded, the agent row is not');
 });
 
 test('a ledger written before the columns existed reports nothing rather than guessing', () => {

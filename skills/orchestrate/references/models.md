@@ -1,6 +1,6 @@
 # Models: what each one is for, and what it costs to run
 
-Rates from platform.claude.com pricing, checked 2026-09-13. They move; re-check
+Rates from platform.claude.com pricing, checked 2026-09-24. They move; re-check
 before a run that will spend heavily. On a subscription you are not paying these
 dollars, you are spending a share of a 5-hour and a weekly window, and Opus draws
 on it meaningfully faster than Sonnet (support.claude.com, "models, usage and
@@ -11,7 +11,7 @@ limits"). Read the ratios.
 | Model | Window | In / Out per 1M | Cache read | Effort | Pick it for |
 |---|---|---|---|---|---|
 | Fable 5.1 | 1M | $10 / $50 | $0.25 | low–max | work that is hard to check and expensive to get wrong |
-| Opus 5 | 1M | $5 / $25 | $0.50 | low–max | judgment: planning, grading, deciding, diagnosing |
+| Opus 5.5 | 1M | $4 / $20 | $0.40 | low–max | judgment: planning, grading, deciding, diagnosing |
 | Sonnet 5 | 1M | $2 / $10 | $0.20 | low–max | bounded work with a strong oracle |
 | Haiku 4.5 | **200K** | $1 / $5 | $0.10 | **none** | reading, sweeping, extracting |
 
@@ -56,9 +56,9 @@ and lower effort gives fewer, more consolidated tool calls.
 - `max` shows diminishing returns and can over-think.
 (platform.claude.com, optimizing-for-cost-and-intelligence and effort, 2026-09-13)
 
-The seven `orch-*` roles pin their own: implementer and researcher `medium`,
-browser `low`, and planner, reviewer, debugger and coordinator `high`. Claude
-has no per-call effort lever; the model is the per-call lever.
+The eight `orch-*` roles pin their own: implementer and researcher `medium`,
+browser `low`, and planner, reviewer, debugger, coordinator and advisor `high`.
+Claude has no per-call effort lever; the model is the per-call lever.
 
 ## The Codex side
 
@@ -148,7 +148,7 @@ rebuilds the whole prompt cache (Fable 5.1 keeps it across an effort change).
 
 | Plan | Model | Effort |
 |---|---|---|
-| Pro $20 | Sonnet | high, or Opus at medium |
+| Pro $20 | Opus | high |
 | Max 5x $100 | Opus | high |
 | Max 20x $200 | Opus | high |
 
@@ -173,6 +173,7 @@ this reasoned table:
 | `orch-advisor` | $3 | $1.50 | $0.50 | — |
 | `orch-implementer` | — | $4 | $1.50 | — |
 | `orch-browser` | — | $3 | $1 | — |
+| `orch-coordinator` | — | $1.50 | — | — |
 | `Explore` | — | — | $0.50 | $0.10 |
 
 No "% of your week": no weekly dollar figure has been measured. Live usage comes

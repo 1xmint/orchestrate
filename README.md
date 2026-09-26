@@ -38,11 +38,11 @@ claude plugin install orchestrate@orchestrate --scope user
 ```
 
 Either way it brings the skill, the eight role agents, the output style and the
-three global hooks in one step.
+ten global hooks in one step.
 
-The agents are planner, implementer, researcher, browser, reviewer, debugger
-and coordinator. The coordinator runs a wave of three or more independent
-tasks; it is not used for one task.
+The agents are planner, implementer, researcher, browser, reviewer, debugger,
+coordinator and advisor. The coordinator runs a wave of three or more
+independent tasks; it is not used for one task.
 
 **A fresh install is not always live in the session you ran it from.** From
 inside Claude Code, the install summary tells you which case you are in: either
@@ -73,10 +73,14 @@ provides them, since a second copy lists each role twice), and registers the hoo
 minute or so; a new session sees them at once. Type `/orchestrate <your
 goal>`, or just describe a multi-part goal; the skill triggers on its own.
 
-Orchestrate sets auto-compact to 200k once on the first prompt (or a manual
-install), unless you already set it. Opt out before then with
-`profile.mjs --policy context.autocompactDefault=off`; use
-`profile.mjs --autocompact off` to remove it and keep it off. Also set
+Orchestrate offers auto-compact at 200k once, on the first prompt, unless you
+already set it: type `autocompact on` to accept, or ignore the tip and
+nothing changes. Nothing is written until you type that. Opt the tip out
+before it appears with `profile.mjs --policy context.autocompactDefault=off`;
+once set, `autocompact off` (or `profile.mjs --autocompact off`) removes it
+and keeps it off. The one place it is set without the tip is the manual
+`node scripts/install.mjs`, an action you take yourself; pass
+`--no-autocompact` there to skip it. Also set
 `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH=2` in the settings `env`. The first keeps
 the manager's context bounded. The second is a host backstop for coordinator
 nesting; the plugin guard still enforces the real limit.
@@ -132,7 +136,7 @@ independent review. A cosmetic change to a public page does not.
 While a run is open, the first message of each session carries one line of state:
 
 ```
-[orchestrate] you: opus @ high effort · tier max5 · orch-agents 7/7 · run: 20260909-tidy (bound to this session) · 1 return to grade: 9-9-0001 · ready now: 9-9-0003 · limits today: none
+[orchestrate] you: opus @ high effort · tier max5 · orch-agents 8/8 · run: 20260909-tidy (bound to this session) · 1 return to grade: 9-9-0001 · ready now: 9-9-0003 · limits today: none
 ```
 
 Read it left to right. What you are running on, which plan, whether the eight role
@@ -199,22 +203,24 @@ install. You should not need to type them.
 |---|---|---|
 | `router.mjs` | every prompt, and on resume or compact | once a session, the local state the model cannot see: plan tier, your own model, the run this session is bound to, agents installed, a family limit hit today, plus a short card on how work gets shaped. While a run is open it also names the returns still waiting to be graded and the tasks whose blockers have all landed, so a session stops waiting on one agent when there is work it could start. On resume it brings back the run's goal, constraints and next step. After that, silence unless one of those facts changes. Turn it off for a session by typing `router off` |
 | `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It refuses, with the exact retry: nesting except a bounded child of `orch-coordinator`; built-in `general-purpose` (no turn cap) while the capped role agents are installed; more than two workers while the coordinator holds its third slot, or a second browser task; in Plan mode, any helper that could write, a worktree or a progress file; a Claude helper aimed at a worktree a live Codex worker holds; a coding, research or browser helper above Sonnet before a cheaper attempt at the same task; a search helper with no cheap model named; a copy of a conversation already past ~100k measured tokens; Fable on a plan where it costs credits; and any new helper once the 5-hour window is at 80% or the week at 90% |
+| `guard-bash.mjs` | before every shell command, in Bash or PowerShell | pauses on a command that deletes, force-pushes, rewinds history or publishes, and asks you before it runs. A background helper cannot ask, so it gets a refusal telling it to report back instead. Folders a build recreates (build, dist, node_modules and the like) pass in silence, and so does an exact command you list in `.orchestrator/allow-bash.json` |
 | `context-check.mjs` | after each tool call | reads only what the conversation added since last time and says something only when the advice changes: prepare a checkpoint, recommend compacting or a fresh conversation at the next safe point, or look for what stayed large after a compaction. It also notices when the app enters or leaves Plan mode, and when a helper stopped at its turn cap. Inside a helper it records that helper's size and speaks only at its size budget: write the progress file at ~80k, return PARTIAL at ~120k (a coordinator 150k and 200k) |
 | `persist-check.mjs` | when a turn ends | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refusal, the same error twice, 25 steps, or 90% of the 5-hour window. The context reader's advice rides along when it changes |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run this session is bound to, prices it, and records which run and task it belongs to in `returns/returns.jsonl`. It does not touch the task rows: two returns landing together each rewrote the whole file, and the second erased the first |
 | `turn-check.mjs` | when a turn ends | one rule, and only for a run this session is bound to: it asks once for the Pickup line when that line has not moved since the last dispatch, so a session that dies is still resumable |
 | `precompact-check.mjs` | just before the conversation is compacted | the same Pickup rule as `turn-check.mjs`, fired one moment earlier: a long session can auto-compact mid-turn, and a stale Pickup line does not just age, it is gone. Asks once per unwritten line, then lets compaction proceed either way so it can never block the very thing that frees up context |
+| `postcompact-check.mjs` | just after a helper's own conversation is compacted | saves the summary the helper was left with under the run it belongs to, so when its return lands the ledger can say that it lost its earlier context along the way. Does nothing for your own session |
 
 The router, the guard and the ledger are global, registered once from the
 plugin's own `hooks/hooks.json` so they run whether or not the skill is
-currently in play — **for a plugin install.** `guard-agent.mjs` and
-`ledger.mjs` are also named in `SKILL.md`'s frontmatter, which means a plugin
-install registers each of those two twice — see "A hook registered in two
-places runs twice" in `references/hosts.md` for why that is safe: both are
-keyed to be idempotent. **A script install (`--with-hook`) additionally
-registers the turn check in `settings.json`** with the interpreter's absolute
-path pinned in, the same way it pins the other two; only there does it not
-depend on `node` being on the launching app's PATH.
+currently in play — **for a plugin install.** `SKILL.md`'s frontmatter carries
+no hooks of its own, so `hooks/hooks.json` is the one place any hook is
+registered — see "A hook registered in two places runs twice" in
+`references/hosts.md` for why that would matter if it ever changed. **A
+script install (`--with-hook`) additionally registers the turn check in
+`settings.json`** with the interpreter's absolute path pinned in, the same
+way it pins the other two; only there does it not depend on `node` being on
+the launching app's PATH.
 
 ### If it has your plan wrong
 
@@ -470,7 +476,7 @@ whatever you chose.
 
 | Your plan | Model | Effort |
 |---|---|---|
-| Pro, $20 | Sonnet | high |
+| Pro, $20 | Opus | high |
 | Max 5x, $100 | Opus | high |
 | Max 20x, $200 | Opus | high |
 
@@ -535,8 +541,10 @@ for hosts that have no output styles at all.
 Every dispatch that names a model arrives with a price on it, in list-price
 dollars — the same unit `/usage` computes its Session figure in. **List price is
 not what a subscription is billed.** A dispatch that names no model gets no
-price, because nothing knows what it will run on. There is no running counter,
-because a counter reads as an allowance and invites spending up to it.
+price, because nothing knows what it will run on. A running counter shows only
+when a run has a budget ceiling, as spend against that ceiling; there is no
+open-ended counter, because one with no ceiling reads as an allowance and
+invites spending up to it.
 
 A price carries no "% of your week". The only weekly figure to divide by came
 from **one observation** on 2026-09-09, and a percentage computed from that
@@ -581,8 +589,9 @@ rm -rf ~/.claude/skills/orchestrate ~/.agents/skills/orchestrate ~/.claude/agent
 ```
 
 Then open `~/.claude/settings.json` and delete the hook entries naming
-`router.mjs`, `guard-agent.mjs`, `ledger.mjs`, `turn-check.mjs`,
-`precompact-check.mjs`, `persist-check.mjs` or `context-check.mjs`. Your own
+`router.mjs`, `guard-agent.mjs`, `guard-bash.mjs`, `ledger.mjs`,
+`turn-check.mjs`, `precompact-check.mjs`, `postcompact-check.mjs`,
+`persist-check.mjs` or `context-check.mjs`. Your own
 hooks sit in the same arrays, so read before you cut; a backup from before the
 first install is in `~/.claude/orchestrate/`.
 
@@ -652,7 +661,7 @@ Nothing here dispatches an agent.
 2. The second prompt shows nothing. Silence is the default, and the only thing
    that breaks it is one of those facts changing.
 3. `~/.claude/orchestrate/sessions/` has a file named for the session id.
-4. `/orchestrate` shows an `orchestrate: tier … · agents 7/7` line at the top
+4. `/orchestrate` shows an `orchestrate: tier … · agents 8/8` line at the top
    of the skill, with no Bash turn before it. That is the injected profile.
 5. `~/.claude/settings.json` still has whatever hooks you had before, and
    `~/.claude/orchestrate/` holds a `settings.backup.*.json`.
@@ -660,6 +669,11 @@ Nothing here dispatches an agent.
 Then, after `/compact` or resuming, it prints the run's goal, what done looks
 like, the constraints, the decisions already made and the Pickup line. That
 block is what a session needs back; the task history stays on disk.
+
+Even a short session that never opened a run leaves something behind: type
+"continue" (or "resume", "keep going", "where were we") as the first prompt
+of a brand-new session in the same folder, and it names what the last session
+there was working on and where to find what it left off.
 
 ## Measure a real run
 
@@ -810,7 +824,7 @@ supported path. See `skills/orchestrate/references/hosts.md`.
 
 ```
 skills/orchestrate/
-  SKILL.md              the skill (433 body lines; stays in context)
+  SKILL.md              the skill (loads on invocation, stays in context)
   references/           ladder, routing, evaluation, lanes, hosts, models
   scripts/              router, guard, ledger, turn-check, precompact-check, persist-check,
                         context-check, context, codex-worker, gate, profile, run-init,

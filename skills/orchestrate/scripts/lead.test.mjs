@@ -21,7 +21,8 @@ test('helpers that never returned are found from dispatch and return records', (
   const lost = unreturned(state);
   assert.deepEqual(lost.map(u => u.task), ['9-9-0002', 'find the router']);
   const note = unreturnedNote(state);
-  assert.match(note, /2 helpers dispatched this session never returned/);
+  assert.match(note, /2 helpers dispatched this session, no return seen yet/);
+  assert.doesNotMatch(note, /never returned/i);
   assert.match(note, /orch-implementer 9-9-0002 — progress \/r\/progress\/9-9-0002\.md/);
   assert.match(note, /Explore find the router — no PROGRESS file named/);
   assert.equal(unreturnedNote({ dispatches: [{ agent: 'orch-reviewer', task: '1' }], returned: [{ agent: 'orch-reviewer', task: '1' }] }), '');

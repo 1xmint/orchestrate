@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP } from './router.mjs';
+import { cardBody, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, handoffLine } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -36,16 +36,61 @@ function makeHome() {
   return home;
 }
 
-test('the first router prompt applies auto-compact once and carries its notice', () => {
+test('the first substantive router prompt offers auto-compact once, after the state line, and writes nothing', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
   unlinkSync(marker);
-  const first = prompt(home, repo, 'short prompt');
-  assert.match(first, /set auto-compact to 200k/);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(first, /Tip: this plugin works best with Claude Code's auto-compact set to 200k tokens\. Type `autocompact on`/);
+  assert.equal(existsSync(join(home, '.claude', 'settings.json')), false, 'the offer alone never writes settings.json');
+  const stateIdx = first.indexOf('[orchestrate]');
+  const tipIdx = first.indexOf('Tip: this plugin works best');
+  assert.ok(stateIdx >= 0 && tipIdx > stateIdx, 'the tip comes after the state line, not before it');
+  assert.equal(prompt(home, repo, 'another substantive prompt goes here too'), '', 'the marker makes later prompts cheap and silent, offer or not');
+});
+
+test('a non-substantive first prompt does not spend the one-time offer', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  assert.equal(prompt(home, repo, 'ok'), '', 'too short to be substantive, so no tip and no marker spent');
+  assert.equal(existsSync(marker), false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(first, /Tip: this plugin works best/, 'the tip still arrives on the first substantive prompt');
+});
+
+test('a HOME whose settings.json already sets auto-compact gets no tip and no write', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '12345' } }));
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.doesNotMatch(first, /Tip: this plugin/);
+  assert.equal(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '12345', 'untouched');
+});
+
+test('"autocompact on" writes the key, replies with the compact note, and sends no card or persist arming', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'autocompact on', { session_id: 's-auto-on' });
+  assert.match(first, /auto-compact setting was changed to 200k/);
+  assert.doesNotMatch(first, /\[orchestrate\]/, 'no card');
+  assert.doesNotMatch(first, /\[orchestrate · persist\]/, 'no auto-continue armed');
   const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
   assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
-  assert.match(first, /backup at/);
-  assert.equal(prompt(home, repo, 'another short prompt'), '', 'the marker makes later prompts cheap and silent');
+  assert.doesNotMatch(first, /~[\\/]\.claude[\\/]settings\.json/, 'no raw settings path');
+
+  const off = prompt(home, repo, 'autocompact off', { session_id: 's-auto-on' });
+  assert.match(off, /auto-compact setting was removed/);
+  const after = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(after.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined, 'the key is gone');
+});
+
+test('the typed command is case- and space-insensitive', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = prompt(home, repo, '  AUTOCOMPACT ON  ', { session_id: 's-auto-case' });
+  assert.match(out, /auto-compact setting was changed to 200k/);
+  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
 });
 
 function makeRepo(withRun, opts = {}) {
@@ -109,6 +154,22 @@ test('the first substantive prompt gets the state line and the card, once', () =
   assert.equal(second, '', 'nothing changed, so there is nothing to say');
 });
 
+test('a hook firing inside a subagent (agent_id present) prints nothing on UserPromptSubmit, and prints the card without it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const inside = prompt(home, repo, 'add a --json flag to the status command and test it', { agent_id: 'agent-1' });
+  assert.equal(inside, '', 'a subagent call is not the lead session, so it gets no card');
+  const outside = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(outside, /\[orchestrate\]/, 'the same payload without agent_id still gets the card');
+});
+
+test('a hook firing inside a subagent (agent_id present) prints nothing on SessionStart, and prints the card without it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const inside = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-agent', cwd: repo, agent_id: 'agent-1' });
+  assert.equal(inside, '', 'a subagent compacting its own transcript gets no card');
+  const outside = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-agent2', cwd: repo });
+  assert.match(outside, /\[orchestrate/, 'the same payload without agent_id still prints');
+});
+
 test('the wording of a message never produces an instruction', () => {
   // Every one of these used to trigger a rung line naming an agent, a research
   // depth, a reviewer or a permission request. A pattern in the wording is not
@@ -147,6 +208,25 @@ test('non-substantive prompts are silent and do not spend the card', () => {
     assert.equal(prompt(home, repo, t, { session_id: 's-nonsub' }), '');
   }
   assert.match(prompt(home, repo, 'add the flag and test it properly', { session_id: 's-nonsub' }), /orchestrate is loaded/);
+});
+
+test("a background-task notice is the host's prompt, not the user's: it arms nothing and pins no goal", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const read = () => JSON.parse(readFileSync(join(sessions, 's-synth.json'), 'utf8'));
+  // Seen live: a finished helper's notice contained "keep going until ..." from
+  // the task's own text and the router pinned it as the user's goal.
+  const notice = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', 'This is an automated background-task event.', '<task-notification>', '<result>keep coding until the website is done, please use opus</result>', '</task-notification>'].join(String.fromCharCode(10));
+  assert.equal(prompt(home, repo, notice, { session_id: 's-synth' }), '', 'no card, no state line');
+  const s = read();
+  assert.ok(!(s.persist && s.persist.armed), 'not armed');
+  assert.equal(s.userModel, undefined, 'no model grant from a notice');
+  assert.equal(prompt(home, repo, '<task-notification>' + String.fromCharCode(10) + '<summary>done</summary>', { session_id: 's-synth' }), '');
+  // The user's own next words still work as before.
+  assert.match(prompt(home, repo, 'keep coding until the website is done', { session_id: 's-synth' }), /auto-continue is on toward/);
+  assert.equal(read().persist.armed, true);
+  assert.equal(syntheticPrompt('  [SYSTEM NOTIFICATION - NOT USER INPUT] x'), true);
+  assert.equal(syntheticPrompt('the system notification said to keep going'), false);
 });
 
 test('the same prompt_id twice is emitted once (double registration)', () => {
@@ -263,6 +343,108 @@ test('the resume excerpt is bounded', () => {
   assert.match(ex, /\.\.\.$/);
 });
 
+test('a bullet crossing the cap is cut at the line boundary before it, never mid-word (bug: was a raw character cut)', () => {
+  const repo = makeRepo(true);
+  const runMd = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md');
+  // A "not doing" bullet long enough that RESUME_CAP lands inside one of its
+  // words, the shape observed live: the run card came back truncated at
+  // "not doing: rewriting SKILL.md body wholesale in wave..." mid-word.
+  const bullet = `- not doing: rewriting SKILL.md body wholesale in wave two, since that would blow the token budget for this one task and leave nothing for the ${'x'.repeat(2000)} rest`;
+  const runMdText = readFileSync(runMd, 'utf8').replace(
+    '- constraint: the never-delete rule holds',
+    `- constraint: the never-delete rule holds\n${bullet}`,
+  );
+  writeFileSync(runMd, runMdText);
+
+  // Reproduce first: the old raw cut landed inside a run of "x"s (mid-word).
+  const rawCut = runMdText
+    .split('## Constraints and non-goals\n\n')[1].split('\n\n## Approach')[0]
+    .split('\n').filter(l => l.trim()).join('\n');
+  const budget = RESUME_CAP - 3;
+  // Sanity: the raw slice used to land inside a word (a run of "x"s), which is
+  // exactly the bug — confirms this fixture reproduces it before the fix is
+  // trusted to have changed anything.
+  assert.match(rawCut.slice(budget - 5, budget + 5), /xxxxxxxxxx/, 'fixture must actually cross mid-word under a raw cut');
+
+  const ex = resumeExcerpt(runMd);
+  assert.ok(ex.length <= RESUME_CAP, `${ex.length} <= ${RESUME_CAP}`);
+  assert.match(ex, /\.\.\.$/);
+  // The excerpt must end at a full line (the bullet before the giant one), not
+  // mid-word inside the run of "x"s.
+  assert.doesNotMatch(ex, /x{2,}\.\.\.$/);
+  assert.match(ex, /rule holds\.\.\.$/, `expected the cut to fall back to the previous bullet's line boundary, got: ${JSON.stringify(ex.slice(-60))}`);
+});
+
+test('sectionExcerpt cuts at a sentence boundary, never mid-word', () => {
+  const body = 'The approach keeps changes small. Not doing: rewriting SKILL.md body wholesale in wave two, since that would blow the budget for this task entirely.';
+  const md = `## Approach\n\n${body}\n`;
+  const wordStart = body.indexOf('wholesale');
+  const cap = wordStart + 5 + 3; // lands mid-word under the old raw cut ("whol|esale")
+  const rawCut = body.slice(0, cap - 3);
+  assert.match(rawCut, /whole$/, 'fixture must cross mid-word under a raw cut');
+
+  const ex = sectionExcerpt(md, ['Approach'], cap);
+  assert.ok(ex.length <= cap, `${ex.length} <= ${cap}`);
+  assert.match(ex, /\.\.\.$/);
+  // Falls back to the last sentence boundary before the cap: "...small."
+  assert.equal(ex, 'Approach: The approach keeps changes small....');
+});
+
+test('checkpointExcerpt cuts at the last newline before the cap, never mid-word', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessionId = 's-checkpoint2';
+  const dir = join(home, '.claude', 'orchestrate', 'context', sessionId);
+  mkdirSync(dir, { recursive: true });
+  // Short lines so a newline boundary sits well before the raw cut point.
+  const lines = [];
+  for (let i = 0; i < 60; i++) lines.push(`line ${i}: some notes about the work done so far, nothing longer`);
+  const long = lines.join('\n');
+  writeFileSync(join(dir, 'checkpoint-e1.md'), long);
+
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo });
+  const m = /\[orchestrate · compacted\] checkpoint\n([\s\S]*)/.exec(out);
+  assert.ok(m, `expected a checkpoint block: ${out}`);
+  const excerpt = m[1];
+  assert.ok(excerpt.length <= 1200, `${excerpt.length} <= 1200`);
+  assert.match(excerpt, /\.\.\.$/);
+  // Raw cut at 1197 chars would land inside a line; confirm the fixture
+  // reproduces that before checking the fix.
+  assert.doesNotMatch(long.slice(1194, 1200), /\n/, 'fixture must cross mid-line under a raw cut');
+  // The fix cuts back to the end of the last whole line before the cap.
+  const lastFullLine = long.slice(0, 1197).split('\n').slice(0, -1).join('\n');
+  assert.equal(excerpt, `${lastFullLine}...`);
+});
+
+test('unreturned excludes a dispatch runningNative still counts as alive, and softens the wording for the rest', () => {
+  const state = {
+    dispatches: [
+      { agent: 'orch-implementer', task: '9-1-0001', at: '2026-09-01T00:00:00Z' },
+      { agent: 'orch-researcher', task: '9-1-0002', at: '2026-09-01T00:05:00Z' },
+    ],
+    returned: [],
+  };
+  // runningNative still sees 9-1-0001 as alive; it has nothing to say about
+  // 9-1-0002 (it may be alive too — runningNative just can't tell from here).
+  const native = [{ provider: 'claude', role: 'orch-implementer', task: '9-1-0001', at: state.dispatches[0].at, agentId: 'a1', parent: null }];
+
+  const list = unreturned(state, { native });
+  assert.equal(list.length, 1, 'the one runningNative still sees alive is excluded');
+  assert.equal(list[0].task, '9-1-0002');
+
+  const note = unreturnedNote(state, { native });
+  assert.match(note, /9-1-0002/);
+  assert.doesNotMatch(note, /9-1-0001/, 'the still-alive dispatch is not listed');
+  // Softened wording: not a settled "never returned" verdict.
+  assert.doesNotMatch(note, /never returned/i);
+  assert.match(note, /no return seen/i);
+
+  // With no runningNative cross-check at all, both are still listed (the
+  // check only narrows the list; it is not required for the note to fire).
+  const noteNoNative = unreturnedNote(state);
+  assert.match(noteNoNative, /9-1-0001/);
+  assert.match(noteNoNative, /9-1-0002/);
+});
+
 test('a single unambiguous open run binds itself; two do not', () => {
   const home = makeHome(); const repo = makeRepo(true);
   prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-bind' });
@@ -278,18 +460,49 @@ test('a single unambiguous open run binds itself; two do not', () => {
   assert.equal(s2.run, undefined, 'ambiguous means unbound, not a guess');
 });
 
-test('a session outside any repo is offered the run, never bound to it', () => {
-  const home = makeHome(); const repo = makeRepo(true);
+test('a session above its own repo, with nothing else in play, is offered the run as a candidate, never bound to it', () => {
+  // The pointer root itself carries no .git, so findRepoRoot never finds it —
+  // this is the "session started above the project" shape the pointer exists
+  // for, not an ordinary repo session (which resolves its own open runs and
+  // never reads the pointer at all).
+  const home = makeHome();
+  const pointerRoot = mkdtempSync(join(tmpdir(), 'orch-pointer-root-'));
+  const runDir = join(pointerRoot, '.orchestrator', 'runs', '20260908-tidy-finish');
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'RUN.md'), '# Run\n\n## Tasks\n\n| id | p | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n');
   writeFileSync(join(home, '.claude', 'orchestrate', 'active-run.json'), JSON.stringify({
-    v: 1, root: repo, runMd: join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md'), at: new Date().toISOString(),
+    v: 1, root: pointerRoot, runMd: join(runDir, 'RUN.md'), at: new Date().toISOString(),
   }));
-  const outside = mkdtempSync(join(tmpdir(), 'orch-outside-'));
-  const out = prompt(home, outside, 'pick up where we left off on the tidy work', { session_id: 's-outside' });
-  // The run's picture is shown so a session above its repo can still see what is
-  // ready, but it is labelled a candidate and the session is not bound: display
-  // is read-only, and a hook that writes still needs the binding.
-  assert.match(out, /candidate, not bound/);
-  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-outside.json'), 'utf8'));
+
+  // cwd under the pointer's own root: the run's picture is shown so a session
+  // above its repo can still see what is ready, but it is labelled a
+  // candidate and the session is not bound: display is read-only, and a hook
+  // that writes still needs the binding.
+  const sub = join(pointerRoot, 'sub');
+  mkdirSync(sub, { recursive: true });
+  const under = prompt(home, sub, 'pick up where we left off on the tidy work', { session_id: 's-under' });
+  assert.match(under, /candidate, not bound/);
+  const stateUnder = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-under.json'), 'utf8'));
+  assert.equal(stateUnder.run, undefined);
+});
+
+test('active-run.json names a project the session has nothing to do with: no run phrase at all', () => {
+  // The bug this guards: a session in one project must not be told about a
+  // run from another project just because that one happened to be the last
+  // run opened on the machine.
+  const home = makeHome();
+  const pointerRoot = mkdtempSync(join(tmpdir(), 'orch-pointer-root-'));
+  const runDir = join(pointerRoot, '.orchestrator', 'runs', '20260908-tidy-finish');
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'RUN.md'), '# Run\n\n## Tasks\n\n| id | p | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n');
+  writeFileSync(join(home, '.claude', 'orchestrate', 'active-run.json'), JSON.stringify({
+    v: 1, root: pointerRoot, runMd: join(runDir, 'RUN.md'), at: new Date().toISOString(),
+  }));
+  const unrelated = mkdtempSync(join(tmpdir(), 'orch-unrelated-'));
+  const out = prompt(home, unrelated, 'pick up where we left off on the tidy work', { session_id: 's-unrelated' });
+  assert.match(out, /run: none/);
+  assert.doesNotMatch(out, /candidate/);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-unrelated.json'), 'utf8'));
   assert.equal(state.run, undefined);
 });
 
@@ -311,7 +524,7 @@ test('naming a family records the earliest one in the prompt, not the ladder\'s 
   // FAMILY_ORDER is ['fable', 'opus', 'sonnet', 'haiku'], so .find used to
   // check fable before opus regardless of where each word actually sits in
   // the sentence — "use opus, not fable" recorded fable even though opus is
-  // what Josh asked for and fable is what he ruled out.
+  // what the user asked for and fable is what they ruled out.
   prompt(home, repo, 'use opus, not fable, for this one', { session_id: 's-order' });
   const s1 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-order.json'), 'utf8'));
   assert.equal(s1.userModel.family, 'opus', 'the earliest-named family wins, not the ladder position');
@@ -569,4 +782,81 @@ test('the brief section is found in AGENTS.md', () => {
   assert.match(b.text, /Runs the payroll/);
   // A bare AGENTS.md nobody pulls in with @AGENTS.md is not kept in view.
   assert.equal(b.kind, 'other');
+});
+
+// ---- fresh-session handoff ---------------------------------------------------
+
+test('CONTINUE_WORD matches only the whole trimmed prompt', () => {
+  for (const w of ['continue', 'keep going', 'resume', 'pick up where we left off', 'where were we', "what's next", 'whats next', 'carry on', 'CONTINUE', ' Resume ']) {
+    assert.ok(CONTINUE_WORD.test(w.trim()), w);
+  }
+  assert.equal(CONTINUE_WORD.test('continue adding tests'), false);
+  assert.equal(CONTINUE_WORD.test('should I continue'), false);
+});
+
+test('the first substantive prompt stores it as the session goal, capped and collapsed', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  assert.equal(prompt(home, repo, 'ok'), '' , 'too short to be substantive');
+  prompt(home, repo, '  add   a --json   flag\nto the status command  ', { session_id: 'sess-goal' });
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sess-goal.json'), 'utf8'));
+  assert.equal(state.goal, 'add a --json flag to the status command');
+  const before = state.goal;
+  prompt(home, repo, 'a second substantive prompt in the same session', { session_id: 'sess-goal', prompt_id: 'p2' });
+  const state2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sess-goal.json'), 'utf8'));
+  assert.equal(state2.goal, before, 'the goal is set once, from the first substantive prompt only');
+});
+
+function seedSession(home, id, rec) {
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${id}.json`), JSON.stringify({ v: 1, session_id: id, prompts: 1, cardSent: true, ...rec }));
+}
+
+test('a fresh session that says "continue" in the same folder gets the previous goal', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 30 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.match(out, /Your last session in this folder, 30 minutes ago, was working on: "add a --json flag to the status command"\./);
+  assert.match(out, /run `git status`/, 'no run and no checkpoint here, so the plain git-status clause');
+});
+
+test('a different cwd gets no handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false); const other = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 5 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: other, goal: 'work on the other project', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.doesNotMatch(out, /Your last session in this folder/);
+});
+
+test('a previous session older than 7 days gets no handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 8 * 86400000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'stale work', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.doesNotMatch(out, /Your last session in this folder/);
+});
+
+test('a second "continue" in the same session does not repeat the handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 5 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  const first = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.match(first, /Your last session in this folder/);
+  const second = prompt(home, repo, 'continue', { session_id: 'sess-new', prompt_id: 'p2' });
+  assert.doesNotMatch(second, /Your last session in this folder/);
+});
+
+test('handoffLine names a written Pickup section over plain git status', () => {
+  const runMd = join(mkdtempSync(join(tmpdir(), 'orch-run-')), 'RUN.md');
+  writeFileSync(runMd, '## Pickup\n\nPickup prompt: dispatch the next task\nPickup confidence: high\n');
+  const ctx = { run: { runMd } };
+  const line = handoffLine({ goal: 'ship the login page', lastSeen: new Date(Date.now() - 60000).toISOString() }, ctx);
+  assert.match(line, /Pickup section of/);
+  assert.doesNotMatch(line, /git status/);
+});
+
+test('handoffLine falls back to git status when there is no run or checkpoint', () => {
+  const line = handoffLine({ goal: 'ship the login page', session_id: 'no-such-session', lastSeen: new Date(Date.now() - 60000).toISOString() }, { run: null });
+  assert.match(line, /run `git status`/);
 });

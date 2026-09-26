@@ -6,8 +6,8 @@ import { join } from 'node:path';
 import { applyTemplate, hasPlaceholder, templateTree } from './template.mjs';
 
 test('a Windows path is substituted with forward slashes', () => {
-  const out = applyTemplate('hooks: node "{{SKILL_DIR}}/scripts/return-check.mjs"', { SKILL_DIR: 'C:\\Users\\Josh\\.claude\\skills\\orchestrate' });
-  assert.equal(out, 'hooks: node "C:/Users/Josh/.claude/skills/orchestrate/scripts/return-check.mjs"');
+  const out = applyTemplate('hooks: node "{{SKILL_DIR}}/scripts/return-check.mjs"', { SKILL_DIR: 'C:\\Users\\someone\\.claude\\skills\\orchestrate' });
+  assert.equal(out, 'hooks: node "C:/Users/someone/.claude/skills/orchestrate/scripts/return-check.mjs"');
   assert.doesNotMatch(out, /\\/);
 });
 

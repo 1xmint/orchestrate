@@ -14,7 +14,9 @@ const SKILL = readFileSync(join(ROOT, 'skills', 'orchestrate', 'SKILL.md'), 'utf
 const AGENT = readFileSync(join(ROOT, 'skills', 'orchestrate', 'assets', 'agents', 'orch-reviewer.md'), 'utf8');
 
 test('the Claude Code source keeps what makes the rules mechanical', () => {
-  assert.match(SKILL, /^hooks:$/m);
+  // Hooks live in hooks/hooks.json only (hooks-registered-once.test.mjs); the
+  // skill frontmatter must not register a second copy.
+  assert.doesNotMatch(SKILL, /^hooks:$/m);
   assert.match(SKILL, /^when_to_use:/m);
   assert.match(SKILL, /^!`node "\$\{CLAUDE_SKILL_DIR\}\/scripts\/profile\.mjs" --brief 2>\/dev\/null \|\| true`$/m);
   assert.match(SKILL, /version: "\d+\.\d+\.\d+"/);
@@ -106,14 +108,12 @@ test('both builds carry the revised policy, and neither names a hook that is gon
 
 test('the hook paths the plugin registers all point at scripts that exist', () => {
   const fm = /^---\n([\s\S]*?)\n---\n/.exec(SKILL)[1];
-  const named = [...fm.matchAll(/scripts\/([A-Za-z0-9_-]+\.mjs)/g)].map(m => m[1]);
-  assert.ok(named.length >= 3, 'the skill registers its hooks');
-  for (const n of named) {
-    assert.ok(existsSync(join(ROOT, 'skills', 'orchestrate', 'scripts', n)), `${n} exists`);
-  }
+  assert.equal([...fm.matchAll(/scripts\/([A-Za-z0-9_-]+\.mjs)/g)].length, 0, 'the skill frontmatter registers no hook of its own');
   const hooks = readFileSync(join(ROOT, 'hooks', 'hooks.json'), 'utf8');
   JSON.parse(hooks);
-  for (const m of hooks.matchAll(/scripts\/([A-Za-z0-9_-]+\.mjs)/g)) {
+  const named = [...hooks.matchAll(/scripts\/([A-Za-z0-9_-]+\.mjs)/g)];
+  assert.ok(named.length >= 3, 'the plugin registers its hooks');
+  for (const m of named) {
     assert.ok(existsSync(join(ROOT, 'skills', 'orchestrate', 'scripts', m[1])), `hooks.json names ${m[1]}, which exists`);
   }
 });

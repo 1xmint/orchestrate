@@ -37,7 +37,12 @@ export { roleMaxTurns };
 export function parseReturn(text) {
   const t = String(text || '');
   const field = re => { const m = re.exec(t); return m ? m[1].trim() : null; };
-  const status = (field(/^\s*STATUS:\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
+  // Lenient on the separator too: "STATUS:", "STATUS -", "status —" and plain
+  // case variation all named the field; a return that used a dash instead of
+  // a colon still said what it said. `exec` on a pattern without `g` returns
+  // the first match in the string, so the first STATUS-shaped line anywhere
+  // in the return is the one read, wherever it falls.
+  const status = (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
   const lines = t.trim() ? t.trim().split('\n').length : 0;
   return {
     task: field(/^\s*TASK:\s*(\S+)/im),
@@ -134,16 +139,36 @@ export function latestPerAgent(rows) {
 // content, so whichever wrote second silently discarded the first's cost
 // line — the read-all/write-all shape the index beside it (`appendIndex`)
 // already avoided. `appendFileSync` is one line, not a read-modify-write, so
-// a concurrent writer can only ever add its own line. Trimming to `COSTS_MAX`
-// is still a read-modify-write, so it runs rarely rather than on every call:
-// losing that race only delays a trim, never a cost line.
+// a concurrent writer can only ever add its own line.
+//
+// Trimming to `COSTS_MAX` used to run on a random 2% of calls, which left the
+// cap itself probabilistic: a session could log hundreds of rows past 500
+// before the coin landed. The cap is a promise about the file's size, so it
+// is kept every time — trimming after every append rather than gambling on
+// it. A concurrent writer can still land a line between this trim's read and
+// its write, but the next append's trim cleans that up; the file never grows
+// unbounded, it just occasionally sits a line or two over `COSTS_MAX` for a
+// moment.
 export function appendCost(row, path = COSTS_PATH) {
   try {
     mkdirSync(DIR, { recursive: true });
     appendFileSync(path, JSON.stringify(row) + '\n');
-    if (Math.random() < 0.02) trimLog(path, COSTS_MAX);
+    trimLog(path, COSTS_MAX);
   } catch {}
   return row;
+}
+
+// A sum over cost rows that never treats "no known model" as "$0": a row
+// without a price is skipped rather than counted as free, and the caller is
+// told how many rows contributed nothing, so a low total is never mistaken
+// for a cheap run when it is really an unpriced one.
+export function sumCosts(rows) {
+  let total = 0, skipped = 0;
+  for (const r of rows || []) {
+    if (r && typeof r.dollars === 'number' && Number.isFinite(r.dollars)) total += r.dollars;
+    else skipped++;
+  }
+  return { total: Number(total.toFixed(4)), skipped };
 }
 
 export function readCosts(path = COSTS_PATH) {
@@ -239,6 +264,32 @@ export function orphanDir(sessionId) {
   return join(DIR, 'returns', sanitizeId(sessionId || 'nosession'));
 }
 
+// A markdown table row split into its cells, the header and border rows
+// dropped by whoever calls this (there is nothing here that tells a header
+// from a data row). Leading/trailing pipes are optional and do not count as
+// cells.
+function tableCells(line) {
+  const t = String(line || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+  return t.split('|').map(c => c.trim());
+}
+
+// A RUN.md task row is refused, not silently written, when it does not have
+// one cell per header column. Two returns racing to append a row have been
+// seen to land a cell short or a cell shifted — evidence in the wrong column
+// reads as a different fact entirely, and nobody notices until the count is
+// wrong too. Returns the row unchanged when it is well-formed, or a reason
+// naming the task id (from the row's own first cell, since a malformed row is
+// exactly the case where nothing else has parsed the id yet) when it is not.
+export function lintRunRow(headerLine, rowLine) {
+  const header = tableCells(headerLine);
+  const row = tableCells(rowLine);
+  if (row.length !== header.length) {
+    const id = row[0] || 'unknown task';
+    return { ok: false, reason: `row for ${id} has ${row.length} column${row.length === 1 ? '' : 's'}, the table header has ${header.length}: refused, not written` };
+  }
+  return { ok: true, cells: row };
+}
+
 export const INDEX_NAME = 'returns.jsonl';
 
 // The association, appended as one line. Append-only, so two hooks finishing at
@@ -276,7 +327,7 @@ function alreadyHandled(input, agent, text) {
     const now = Date.now();
     const seen = seenRecently(SEEN_RETURNS_PATH, sig, now, DEDUPE_MS);
     recordSeen(SEEN_RETURNS_PATH, sig, now);
-    if (Math.random() < 0.02) trimLog(SEEN_RETURNS_PATH, SEEN_RETURNS_MAX);
+    trimLog(SEEN_RETURNS_PATH, SEEN_RETURNS_MAX);
     return seen;
   } catch {}
   return false;

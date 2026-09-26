@@ -86,22 +86,17 @@ if (defIdx >= 0) {
 const autoIdx = args.findIndex(a => a === '--autocompact');
 if (autoIdx >= 0) {
   const raw = String(args[autoIdx + 1] || '');
-  const { setEnv, readSettings, backupSettings, writeSettings, parseAutocompact, autocompactMarkerPath } = await import('./lib/settings.mjs');
+  const { parseAutocompact, applyAutocompact, removeAutocompact } = await import('./lib/settings.mjs');
   const tokens = parseAutocompact(raw, { allowOff: true });
   if (tokens == null) { console.error('usage: --autocompact <tokens|Nk|off> [--dry-run]'); process.exit(2); }
   const settingsPath = join(HOME, '.claude', 'settings.json');
   const markerDir = join(HOME, '.claude', 'orchestrate');
   const edit = tokens === 'off' ? 'remove settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW' : `settings.json env.CLAUDE_CODE_AUTO_COMPACT_WINDOW=${tokens}`;
   if (args.includes('--dry-run')) { console.log(tokens === 'off' ? `would ${edit}` : `would write ${edit}`); process.exit(0); }
-  const s = readSettings(settingsPath);
-  const backup = backupSettings(settingsPath, markerDir);
-  if (tokens === 'off') {
-    if (s.env && typeof s.env === 'object') delete s.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
-    mkdirSync(markerDir, { recursive: true });
-    writeFileSync(autocompactMarkerPath(markerDir), JSON.stringify({ at: new Date().toISOString(), value: 'off', settingsPath, backup }, null, 2) + '\n');
-  } else setEnv(s, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: tokens });
-  writeSettings(settingsPath, s);
-  console.log(`saved ${edit} (${settingsPath}${backup ? `; backup ${backup}` : ''})`);
+  const result = tokens === 'off'
+    ? removeAutocompact({ settingsPath, markerDir })
+    : applyAutocompact({ settingsPath, markerDir, tokens });
+  console.log(`saved ${edit} (${settingsPath}${result.backup ? `; backup ${result.backup}` : ''})`);
   process.exit(0);
 }
 

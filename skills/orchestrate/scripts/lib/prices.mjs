@@ -13,17 +13,21 @@
 
 import { shortModel } from './tier.mjs';
 
-// Per million tokens (platform.claude.com pricing, checked 2026-09-13). A
+// Per million tokens (https://claude.com/pricing, checked 2026-09-24). A
 // 5-minute cache write is 125% of input. Cache read is 10% of input, except
 // Fable 5.1 at 2.5%. How a 1-hour cache write lands on plan usage is
 // undocumented, so it is priced as a 5-minute one and the number is a floor.
+// `opus` here is the current `opus` alias, Opus 5.5 ($4/$20) — not the legacy
+// Opus 5 ($5/$25).
 export const PRICES = {
   fable: { in: 10, out: 50 },
-  opus: { in: 5, out: 25 },
+  opus: { in: 4, out: 20 },
   sonnet: { in: 2, out: 10 },
   haiku: { in: 1, out: 5 },
 };
-export const PRICES_AS_OF = '2026-09-13';
+export const PRICES_AS_OF = '2026-09-24';
+export const PRICES_SOURCE = 'https://claude.com/pricing';
+export const checked = '2026-09-24';
 
 export function cacheReadShare(modelId) {
   return /fable-5[-.]1/i.test(String(modelId || '')) ? 0.025 : 0.1;
@@ -67,6 +71,9 @@ export const REASONED = {
   'orch-browser': { opus: 3, sonnet: 1 },
   // About half a reviewer run: twelve read-only steps and a twenty-line return.
   'orch-advisor': { fable: 3, opus: 1.5, sonnet: 0.5 },
+  // Fixed to opus in its own frontmatter, no cheaper model to fall back to.
+  // models.md: "about 40 steps near 60k on Opus, roughly $1-2 list price per wave".
+  'orch-coordinator': { opus: 1.5 },
   Explore: { haiku: 0.1, sonnet: 0.5 },
 };
 export const REASONED_AS_OF = '2026-09-09';

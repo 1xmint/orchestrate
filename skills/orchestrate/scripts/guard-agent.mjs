@@ -117,7 +117,7 @@ export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!id) return null;
   if (!boundId) return { allow: true, bind: id };
   if (boundId === id) return { allow: true, bind: null };
-  return { deny: true, reason: `Josh named ${f} for task ${boundId}; this is task ${id} — ask him or start on Sonnet.` };
+  return { deny: true, reason: `the user named ${f} for task ${boundId}; this is task ${id} — ask them or start on Sonnet.` };
 }
 
 // Where a grant's claim lives: one file per session+moment-the-user-named-it,
@@ -177,7 +177,7 @@ export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
   const won = claim(session, grantToClaim.at, grantToClaim.grantBind);
   if (won === grantToClaim.grantBind) return null;
   if (won && won !== GRANT_PENDING) {
-    return { prefix: 'model', reason: `Josh named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask him or start on Sonnet.` };
+    return { prefix: 'model', reason: `the user named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask them or start on Sonnet.` };
   }
   return { prefix: 'model', reason: `the ${grantToClaim.family} grant could not be claimed; resend with model: "sonnet".` };
 }
@@ -261,12 +261,13 @@ const nestedReason = 'this nested dispatch cannot be attributed to a recorded co
 export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, native = [], external = [], dispatches = [], files = new Map() } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const prompt = String(ti.prompt || '');
+  const nestedParent = input && input.agent_id ? nativeAgent(dispatches, files, input.agent_id) : null;
 
   if (input && input.agent_id && policy.workers.nested !== 'allow') {
     if (policy.workers.nested === 'deny') {
       return { prefix: 'workers', reason: 'nested dispatches are disabled by policy.workers.nested=deny' };
     }
-    const parent = nativeAgent(dispatches, files, input.agent_id);
+    const parent = nestedParent;
     if (!parent || parent.depth == null) return { prefix: 'workers', reason: nestedReason };
     if (parent.role !== 'orch-coordinator') return { prefix: 'workers', reason: `only orch-coordinator may dispatch workers; recorded parent ${parent.agentId} is ${parent.role}` };
     if (!COORDINATOR_CHILD_ROLES.has(role)) return { prefix: 'workers', reason: `orch-coordinator may dispatch only orch-implementer, orch-researcher, orch-reviewer, or Explore; ${role} is not allowed` };
@@ -289,7 +290,8 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
   const locked = lockedWorktreeIn(prompt, external);
   if (locked) return { prefix: 'workers', reason: `a Codex worker (${locked.task || 'task'}, pid ${locked.pid}) is still running in ${locked.worktree}. Two providers never work in one worktree at once: wait for it to exit, then send only the unfinished part.` };
 
-  const busy = concurrencyDecision(role, { native, external, policy });
+  const coordinatorParentId = nestedParent && nestedParent.role === 'orch-coordinator' ? nestedParent.agentId : null;
+  const busy = concurrencyDecision(role, { native, external, policy, coordinatorParentId });
   if (busy) return { prefix: 'workers', reason: busy };
   return null;
 }
@@ -376,15 +378,58 @@ export function tagFor(ti) {
 // (its own packet is the lead's business, not a worker's).
 export const AUTHOR_ROLES = new Set(['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-debugger']);
 
+// A short prompt that only points at a packet file ("Your packet is in
+// <path>, lines ..." or "packet: <path>") carries no PROGRESS line itself
+// even when the file it names does. Cheapest match first: a bare path token
+// that follows the word "packet" up to its extension.
+const PACKET_PATH_RE = /\bpacket\b[^\n,]{0,40}?([^\s,]+\.[A-Za-z0-9]+)(?=[,\s]|$)/i;
+
+function packetPathFrom(prompt) {
+  const m = PACKET_PATH_RE.exec(String(prompt || ''));
+  return m ? m[1] : null;
+}
+
 // A fact, not a denial: Plan mode already forbids a PROGRESS line (its own
 // rule above), so this says nothing there. Elsewhere, an author-role packet
 // with no PROGRESS line is named as what it is before the dispatch happens,
 // since M4's two worst-shaped helpers had none and nothing told the lead.
-export function progressFact(role, prompt, planMode) {
+//
+// The prompt text is checked first and is the only check for the common case
+// (a PROGRESS line inline): no file is ever opened then. Only when that check
+// fails and the prompt names a packet file is that file opened and checked
+// too, so a dispatch pointing at a packet on disk is not warned about a line
+// that is right there, just not in the short prompt the guard first saw.
+export function progressFact(role, prompt, planMode, readFile = readFileSync) {
   if (planMode) return '';
   if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
-  if (/^\s*PROGRESS:\s*\S+/m.test(String(prompt || ''))) return '';
+  const text = String(prompt || '');
+  if (/^\s*PROGRESS:\s*\S+/m.test(text)) return '';
+  const packetPath = packetPathFrom(text);
+  if (packetPath) {
+    try {
+      if (/^\s*PROGRESS:\s*\S+/m.test(String(readFile(packetPath, 'utf8')))) return '';
+    } catch {}
+  }
   return 'no PROGRESS line: a capped return will have nothing to resume from';
+}
+
+// The opposite fact from progressFact: a packet that does name a PROGRESS
+// path, for a helper that may be working in its own worktree and so cannot
+// write under the main checkout the path is written relative to. Said once,
+// plainly, so a refused write is not a dead end.
+export function progressWorktreeNote(role, prompt, planMode, readFile = readFileSync) {
+  if (planMode) return '';
+  if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
+  const text = String(prompt || '');
+  let has = /^\s*PROGRESS:\s*\S+/m.test(text);
+  if (!has) {
+    const packetPath = packetPathFrom(text);
+    if (packetPath) {
+      try { has = /^\s*PROGRESS:\s*\S+/m.test(String(readFile(packetPath, 'utf8'))); } catch {}
+    }
+  }
+  if (!has) return '';
+  return 'if writing the progress file is refused, write the same relative path inside your own worktree instead, and say so in your return';
 }
 
 // A fact, not an order, said only on an orch-implementer dispatch: Codex was
@@ -575,6 +620,8 @@ function main() {
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = progressFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
+  const pw = progressWorktreeNote(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
+  if (pw) tag = `${tag ? `${tag}; ` : ''}${pw}`;
   const cf = codexFact(ti.subagent_type);
   if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });

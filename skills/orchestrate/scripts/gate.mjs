@@ -155,7 +155,7 @@ export function block(g) {
   if (g.gate.length) for (const c of g.gate) lines.push(`  ${c.kind}: ${c.cmd}   (${c.source})`);
   else lines.push('  none detected: ask the user for the command that proves a change is good');
   lines.push(`  repo standards: ${g.standards.length ? g.standards.join(', ') : 'none in the repo root'}`);
-  if (g.agentsNotLoaded) lines.push('  AGENTS.md is NOT loaded by Claude Code (it reads CLAUDE.md only): paste its never-do rules into every packet, or add "@AGENTS.md" to CLAUDE.md');
+  if (g.agentsNotLoaded) lines.push('  AGENTS.md is loaded by Claude Code 2.1.277+ only while the project has no CLAUDE.md; older Claude Code, and any helper that is not Claude Code, may not read it: paste its never-do rules into every packet too, or add a one-line CLAUDE.md holding "@AGENTS.md"');
   return lines.join('\n');
 }
 

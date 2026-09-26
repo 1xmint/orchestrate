@@ -214,10 +214,44 @@ test('two workers across providers; browser work serial', () => {
   assert.match(busy, /limit is 2 across Claude and Codex/);
   assert.match(concurrencyDecision('orch-browser', { native: [{ provider: 'claude', role: 'orch-browser', task: 'b' }], policy }), /browser work is serial/);
   assert.equal(concurrencyDecision('x', { native: two, policy: loadPolicy({ policy: { workers: { maxConcurrent: 3 } } }) }), null);
-  const coordinator = [{ provider: 'claude', role: 'orch-coordinator', task: 'wave' }];
-  assert.equal(concurrencyDecision('orch-implementer', { native: [...coordinator, one[0]], policy }), null, 'a live coordinator raises the default slot count to three');
-  assert.match(concurrencyDecision('orch-reviewer', { native: [...coordinator, ...two], policy }), /limit is 3/);
   assert.match(workflowDecision({}, ti('orchestrate:orch-researcher'), { policy, installed: 6, native: two }).reason, /already running/);
+});
+
+test('a live coordinator reserves its own two child slots on top of the session pool, not inside it', () => {
+  // Two lead direct dispatches already fill workers.maxConcurrent=2, plus one
+  // live coordinator (also a direct dispatch, occupying its own ordinary slot).
+  const direct = [
+    { provider: 'claude', role: 'orch-implementer', task: 'd1' },
+    { provider: 'claude', role: 'orch-researcher', task: 'd2' },
+  ];
+  const coordinator = { provider: 'claude', role: 'orch-coordinator', task: 'wave', agentId: 'coord-1' };
+  const native = [...direct, coordinator];
+  // The coordinator's own children draw on its private pool, never the
+  // session-wide one the two direct dispatches already filled.
+  assert.equal(concurrencyDecision('orch-implementer', { native, policy, coordinatorParentId: 'coord-1' }), null, 'first child');
+  const withOneChild = [...native, { provider: 'claude', role: 'orch-implementer', task: 'c1', parent: 'coord-1' }];
+  assert.equal(concurrencyDecision('orch-researcher', { native: withOneChild, policy, coordinatorParentId: 'coord-1' }), null, 'second child');
+  const withTwoChildren = [...withOneChild, { provider: 'claude', role: 'orch-researcher', task: 'c2', parent: 'coord-1' }];
+  const thirdChild = concurrencyDecision('orch-reviewer', { native: withTwoChildren, policy, coordinatorParentId: 'coord-1' });
+  assert.match(thirdChild, /already has 2 of its own children running/);
+  // Meanwhile the session-wide pool still means what it says for a third
+  // *direct* dispatch (not a coordinator's child): it is refused even though
+  // the coordinator's children have their own separate slots.
+  assert.match(concurrencyDecision('orch-implementer', { native: withTwoChildren, external: [], policy }), /limit is 2 across Claude and Codex/);
+});
+
+test('two coordinators live at once each keep their own two child slots', () => {
+  const coordA = { provider: 'claude', role: 'orch-coordinator', task: 'wave-a', agentId: 'coord-a' };
+  const coordB = { provider: 'claude', role: 'orch-coordinator', task: 'wave-b', agentId: 'coord-b' };
+  const native = [
+    coordA, coordB,
+    { provider: 'claude', role: 'orch-implementer', task: 'a1', parent: 'coord-a' },
+    { provider: 'claude', role: 'orch-implementer', task: 'b1', parent: 'coord-b' },
+  ];
+  // Each coordinator already has one child; its second slot is still free,
+  // regardless of what the other coordinator's children are doing.
+  assert.equal(concurrencyDecision('orch-researcher', { native, policy, coordinatorParentId: 'coord-a' }), null);
+  assert.equal(concurrencyDecision('orch-researcher', { native, policy, coordinatorParentId: 'coord-b' }), null);
 });
 
 test('running helpers: dispatched and not returned and still alive', () => {

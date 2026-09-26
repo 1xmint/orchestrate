@@ -29,15 +29,18 @@ import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
   loadSession, saveSession, sessionPath, pruneSessions, readTail, selfModel,
   DIR, readJson, writeJsonAtomic, staleRunsUnder, FAMILY_ORDER, AGENT_NAMES,
+  SESSIONS_DIR, sanitizeId,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext, CONTEXT_DIR, thresholds } from './lib/context.mjs';
 import { modeNote } from './lib/modes.mjs';
-import { cappedNote } from './lib/workers.mjs';
+import { cappedNote, runningNative, helperFiles } from './lib/workers.mjs';
 import { readHead, parseListing, pluginNames, pluginFitLine, tokens } from './lib/listing.mjs';
 import { normalizeRole } from './lib/prices.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './lib/quota.mjs';
-import { applyAutocompactDefault } from './lib/settings.mjs';
+import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
+import { findPreviousSession, formatAgo } from './lib/handoff.mjs';
+import { pickupSection, pickupWritten } from './turn-check.mjs';
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const CODEX_STATUS_CACHE = join(DIR, 'workers', 'codex-status.json');
@@ -63,10 +66,10 @@ export function codexState(now = Date.now()) {
 // the file cannot be read; it used to be a shorter, separately-maintained
 // summary that silently fell two paragraphs behind the real card.
 export const FALLBACK_CARD = [
-  "orchestrate is loaded. The user owns what the product should do; you own how it is built: decide, say why, take the next step. Before you propose building anything, check it against what this project is for — the brief (\"What this is for\" in the project's CLAUDE.md or AGENTS.md, and the documents it names) and the goal, not the file you just read. Where they disagree, the brief wins until the user changes it.",
-  "At a turning point, zoom out before you act. Look two steps ahead and name what is missing — research, a legal or licence question, a root cause under the symptom, an unchecked fact, a decision that is the user's. Then send orch-advisor your proposal before you commit, without waiting to be asked; its description lists the moments. While it runs, keep preparing whatever does not hang on its answer.",
+  "orchestrate is loaded. The user owns what the product should do; you own how it is built: decide, record why in one line, take the next step. Before you propose building anything, check it against what this project is for — the brief (\"What this is for\" in the project's CLAUDE.md or AGENTS.md, and the documents it names) and the goal, not the file you just read. Where they disagree, the brief wins until the user changes it.",
+  "At a turning point, look two steps ahead and name what is missing — research, a legal or licence question, a root cause under the symptom, an unchecked fact, a decision that is the user's. Then send orch-advisor your proposal before you commit; its description lists the moments. While it runs, keep preparing whatever does not hang on its answer.",
   "Your context is for judgment. Do a step yourself when it fits in about eight tool calls with small outputs; hand over anything larger and keep only the return. One packet per plan step; three or more independent steps go to orch-coordinator. Change a file with Edit rather than rewriting it, trust a write that did not error, and filter long output before it reaches you. Open a run ledger with a budget when tracks run at once or the work outlives this session.",
-  "Engineering forks are yours: choose, record why in one line, move. Answer a settled question from the record and say where; a question about the world from the source that settles it; a judgment call with a recommendation and what would change it. Before adding a dependency, an abstraction or another worker, name the problem it solves now.",
+  "Answer a settled question from the record and say where; a question about the world from the source that settles it; a judgment call with a recommendation and what would change it. Before adding a dependency, an abstraction or another worker, name the problem it solves now.",
   "Evidence decides done: reuse a check that passed, test real uncovered behaviour, drive a user flow when reading cannot settle it. Buy independent review for money, auth, destructive data, a contract others consume, or architectural doubt you could not resolve. Stop and ask only about what the product should do, money, a public surface, credentials, legal exposure, or something destructive or irreversible: recommendation first. Authority already given is not asked for again. End a turn on the step you are taking, not a menu. Mute this card: type \"router off\".",
 ].join('\n');
 
@@ -82,6 +85,34 @@ export function cardBody() {
     if (m && m[1].trim()) return m[1].trim();
   } catch {}
   return FALLBACK_CARD;
+}
+
+// One line in plain words for the write `autocompact on` (or `autocompact
+// <N>k`) makes: what changed, that it starts next session, and how to undo
+// it. No raw settings path — the user does not need one to act on this.
+export function compactNote(compact) {
+  const amount = compact.value % 1000 ? compact.value : `${compact.value / 1000}k`;
+  const backupClause = compact.backup
+    ? 'A copy of your old settings was saved in the orchestrate settings folder first.'
+    : 'No earlier settings file existed, so there was nothing to back up.';
+  return `Claude Code's auto-compact setting was changed to ${amount} tokens; it takes effect from your next session. ${backupClause} To undo it, type \`autocompact off\`.`;
+}
+
+// The one-time tip: offered once, plain words, never a write on its own. Said
+// after the state line so it reads as a footnote, not a demand.
+function autocompactTip(value) {
+  const amount = value % 1000 ? value : `${value / 1000}k`;
+  return `Tip: this plugin works best with Claude Code's auto-compact set to ${amount} tokens. Type \`autocompact on\` to set it (it starts from your next session and \`autocompact off\` undoes it), or ignore this and nothing changes.`;
+}
+
+// What `autocompact off` reports: the key is gone (or was already gone) and
+// whether a backup of the file exists.
+function autocompactOffNote(result) {
+  if (!result.removed) return "Claude Code's auto-compact setting was already off; nothing to undo.";
+  const backupClause = result.backup
+    ? 'A copy of your old settings was saved in the orchestrate settings folder first.'
+    : 'No earlier settings file existed, so there was nothing to back up.';
+  return `Claude Code's auto-compact setting was removed; it takes effect from your next session. ${backupClause}`;
 }
 
 // ---- state ------------------------------------------------------------------
@@ -224,6 +255,22 @@ export function stateHash(ctx) {
 // which is long, mostly finished, and already on disk.
 export const RESUME_CAP = 1200;
 
+// Cuts `text` to at most `cap` characters (plus the trailing `...`), ending at
+// the last newline or sentence-ending `.`/`!`/`?` at or before the cut point —
+// never past it — so a resumed or compacted session never picks the excerpt
+// back up mid-word. Falls back to the raw character cut only when no such
+// boundary exists anywhere in the kept window.
+function boundaryCut(text, cap) {
+  const budget = cap - 3;
+  const window = text.slice(0, budget);
+  let cut = window.lastIndexOf('\n');
+  const sentenceEnd = /[.!?](?=\s|$)/g;
+  let m;
+  while ((m = sentenceEnd.exec(window))) cut = Math.max(cut, m.index + 1);
+  const body = cut < 0 ? window : window.slice(0, cut);
+  return `${body.replace(/\s+$/, '')}...`;
+}
+
 // One reader for "a section of this markdown file, capped". `sections` is a
 // list of either a heading name (`"## <name>"`, the run-ledger shape) or
 // `{ pattern }`, a regex whose capture group 1 is the section body, for a
@@ -243,7 +290,7 @@ export function sectionExcerpt(md, sections, cap = RESUME_CAP, { intro = true } 
   };
   const parts = sections.map(section).filter(Boolean);
   let out = parts.join('\n');
-  if (out.length > cap) out = `${out.slice(0, cap - 3)}...`;
+  if (out.length > cap) out = boundaryCut(out, cap);
   return out;
 }
 
@@ -251,6 +298,41 @@ export function resumeExcerpt(runMd, cap = RESUME_CAP) {
   let text = '';
   try { text = readFileSync(runMd, 'utf8'); } catch { return ''; }
   return sectionExcerpt(text, ['Goal', 'Done when', 'Constraints and non-goals', 'Approach', 'Decisions', 'Pickup'], cap);
+}
+
+// A brand-new session that opens with one of these (the whole trimmed prompt,
+// nothing else) means "tell me what I was doing", not "start counting steps
+// toward a goal" — though it may still do that too (persistIntent matches
+// "keep going" on its own).
+export const CONTINUE_WORD = /^(continue|keep going|resume|pick up where we left off|where were we|what'?s next|carry on)$/i;
+
+// The newest checkpoint file this previous session wrote, if any — same
+// layout precompact-check.mjs and lib/context.mjs read from.
+function latestCheckpointFor(sessionId) {
+  try {
+    const dir = join(CONTEXT_DIR, sanitizeId(sessionId));
+    const paths = readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)).map(n => join(dir, n));
+    return paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0] || null;
+  } catch { return null; }
+}
+
+// One line naming what the previous session in this folder was doing and
+// where to look for what it left behind: a run's Pickup section when one is
+// written, else that session's own checkpoint file, else plain `git status`.
+export function handoffLine(prev, ctx) {
+  const ago = formatAgo(Date.now() - Date.parse(prev.lastSeen));
+  let tail = 'Uncommitted changes, if any, are what it left behind; run `git status` to see them, then carry on from there or say what you want instead.';
+  let runText = '';
+  if (ctx && ctx.run && ctx.run.runMd) {
+    try { runText = readFileSync(ctx.run.runMd, 'utf8'); } catch { runText = ''; }
+  }
+  if (runText && pickupWritten(pickupSection(runText))) {
+    tail = `The Pickup section of ${ctx.run.runMd} has what it left off at; open it, then carry on from there or say what you want instead.`;
+  } else {
+    const cp = latestCheckpointFor(prev.session_id);
+    if (cp) tail = `${cp} has what it left off at; open it, then carry on from there or say what you want instead.`;
+  }
+  return `Your last session in this folder, ${ago} ago, was working on: "${prev.goal}". ${tail}`;
 }
 
 // ---- the brief: the project's own "What this is for" -----------------------
@@ -397,7 +479,7 @@ export function checkpointExcerpt(session, cap = RESUME_CAP) {
     const path = paths.sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
     if (!path) return '';
     const text = readFileSync(path, 'utf8').trim();
-    return text.length > cap ? `${text.slice(0, cap - 3)}...` : text;
+    return text.length > cap ? boundaryCut(text, cap) : text;
   } catch { return ''; }
 }
 
@@ -502,6 +584,12 @@ function gatherContext(input, state) {
 // the session.
 export const PERSIST_INTENT = /\b(keep (going|coding|working|building|at it)|don'?t stop|until (it'?s |it is |they'?re |the [\w-]+( [\w-]+)? (is|are) |everything is |all (of it |of them )?(is |are )?)?(done|finished|complete|working|green|passing|shipped|live)\b|(execute|implement|carry out|work through|finish) (the|this|that|my) (whole |full |entire |rest of the )?(plan|roadmap|spec|checklist|task list|todo list|backlog)|finish (it|everything|all of it|the rest)\b|build (out )?the (whole|entire|full) )/i;
 
+// A prompt the host wrote, not the user: a background task's completion
+// notice. The text is the only signal the hook payload carries for this.
+export function syntheticPrompt(text) {
+  return /^\s*(\[SYSTEM NOTIFICATION - NOT USER INPUT\]|<task-notification>)/i.test(String(text || ''));
+}
+
 export function persistIntent(text) {
   const t = String(text || '').trim();
   if (!t || /\?\s*$/.test(t)) return false;
@@ -544,6 +632,11 @@ function promptText(input) {
 // changes. A message whose wording differs from the last one is not a change of
 // state, and the old router treated it as one.
 function handlePrompt(input) {
+  // A hook fires inside a subagent's own call too, with `agent_id` set on the
+  // stdin payload (hooks doc, "common input fields"). Nothing here is about
+  // that subagent's own work — the plan tier, the run ledger, the card — so
+  // printing it there was pure noise a helper paid to read about itself.
+  if (input && input.agent_id) return;
   if (!routerSettings().enabled) return;
   const text = promptText(input);
   if (text == null) return;
@@ -557,7 +650,18 @@ function handlePrompt(input) {
 
   const trimmed = text.trim();
 
-  // The one party that sees Josh's own words, not a role agent's packet. A
+  // The host also submits its own notices through this hook: a background
+  // task finishing arrives as a prompt that opens "[SYSTEM NOTIFICATION - NOT
+  // USER INPUT]" or "<task-notification>". Nothing in it is the user's words,
+  // so it must not arm a loop, pin a goal, grant a model or spend the card.
+  // Seen live: a finished helper's notice became the persist goal.
+  if (syntheticPrompt(trimmed)) { saveSession(state); return; }
+
+  // A fresh session reading this record later (findPreviousSession) needs to
+  // know this one is still recent, on every real prompt, not only the first.
+  state.lastSeen = new Date().toISOString();
+
+  // The one party that sees the user's own words, not a role agent's packet. A
   // family named here unlocks an executor above Sonnet for guard-agent.mjs —
   // for the one task id that first spends it, recorded there, not here. One
   // regex per prompt, nothing added to context.
@@ -585,6 +689,27 @@ function handlePrompt(input) {
     return;
   }
 
+  // The typed answer to the one-time tip (or a change of mind later): never
+  // sends the card, never arms auto-continue. Matched on the whole prompt so
+  // it never fires mid-sentence.
+  const autoCmd = /^autocompact (on|off|\d+k?)$/i.exec(trimmed);
+  if (autoCmd) {
+    const settingsPath = join(dirname(DIR), 'settings.json');
+    const word = autoCmd[1].toLowerCase();
+    if (word === 'off') {
+      emit('UserPromptSubmit', autocompactOffNote(removeAutocompact({ settingsPath, markerDir: DIR })));
+    } else {
+      // 'on' with the tip switched off in the policy still means 200k: the
+      // user asked for it by name, so the opt-out of the tip does not apply.
+      const policyValue = loadPolicy().context.autocompactDefault;
+      const value = word === 'on' ? (parseAutocompact(policyValue) || 200000) : parseAutocompact(word);
+      const applied = applyAutocompact({ settingsPath, markerDir: DIR, tokens: value });
+      emit('UserPromptSubmit', compactNote(applied));
+    }
+    saveSession(state);
+    return;
+  }
+
   // Armed before the mute check: "router off" silences the card, not a loop
   // the user asked for by name.
   let armedNow = false;
@@ -600,19 +725,26 @@ function handlePrompt(input) {
   // A slash command, a paste or a two-word reply is not the start of a session's
   // work, and the card is worth its tokens only on something substantive.
   const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed) && trimmed.split(/\s+/).length >= 4;
+
+  // What this session is for, recorded once so a later session in the same
+  // folder can answer "continue what?" for itself.
+  if (substantive && !state.goal) state.goal = trimmed.replace(/\s+/g, ' ').trim().slice(0, 300);
+
   const ctx = gatherContext(input, state);
   const out = [];
-  // Plugin settings cannot carry env vars.  Do this once, before the normal
-  // card logic; after the marker exists this only stats one tiny file.
-  const compact = applyAutocompactDefault({
+  // Plugin settings cannot carry env vars, and this plugin never writes to
+  // them without being asked. Offered once, on the first substantive prompt
+  // only — a non-substantive prompt (a slash command, "ok") must not spend
+  // the one-time marker before the user ever sees the tip.
+  const offer = substantive ? autocompactOffer({
     settingsPath: join(dirname(DIR), 'settings.json'), markerDir: DIR, policy: loadPolicy(),
-  });
-  if (compact.applied) out.push(`orchestrate set auto-compact to ${compact.value % 1000 ? compact.value : `${compact.value / 1000}k`} in ~/.claude/settings.json (it applies from the next session; backup at ${compact.backup || 'none'}). To undo: \`profile.mjs --autocompact off\`.`);
+  }) : { offer: false };
   // The mode the host reports, on every prompt: a switch into or out of Plan
   // mode is said once, whatever the prompt looks like.
   const mode = modeNote(state, input);
   if (mode) out.push(mode);
 
+  const freshSession = !state.cardSent;
   if (!state.cardSent && substantive) {
     out.push(stateLine(ctx, '[orchestrate]'));
     out.push(cardBody());
@@ -627,6 +759,19 @@ function handlePrompt(input) {
     if (state.lastStateHash && hash !== state.lastStateHash) out.push(stateLine(ctx, '[orchestrate · changed]'));
     state.lastStateHash = hash;
   }
+
+  // A brand-new session's first prompt naming no goal of its own — "continue"
+  // is one word and never trips the substantive gate above, so this checks
+  // for it on its own. Said once per session, whether or not the card fired.
+  if (freshSession && !state.handoffShown && CONTINUE_WORD.test(trimmed)) {
+    const prev = findPreviousSession({ sessionsDir: SESSIONS_DIR, cwd: input.cwd, exceptId: input.session_id, now: Date.now() });
+    if (prev) out.push(handoffLine(prev, ctx));
+    state.handoffShown = true;
+  }
+
+  // Said once, after the state line rather than before it: a question, not a
+  // notice — nothing is written until the user types the command back.
+  if (offer.offer) out.push(autocompactTip(offer.value));
 
   if (substantive) {
     const brief = briefNote(ctx, state);
@@ -659,7 +804,7 @@ function handlePrompt(input) {
     // A usage limit just landed: the moment helpers may have died mid-task.
     const limitKey = ctx.limits.join(',');
     if (limitKey && state.recoverShownFor !== limitKey) {
-      const lost = unreturnedNote(state);
+      const lost = unreturnedNote(state, { native: stillRunningNative(input, state) });
       if (lost) out.push(lost);
       state.recoverShownFor = limitKey;
     }
@@ -681,24 +826,44 @@ function handlePrompt(input) {
 // Dispatches with no matching return. Matched in order, by role and, when both
 // sides carry one, by task id. Said only at the moments work may have died —
 // a resume, a compaction, a usage limit — because a helper still running looks
-// exactly the same from here.
-export function unreturned(state) {
+// exactly the same from here. `native` (lib/workers.mjs's `runningNative`, when
+// the caller has one) excludes anything it still counts as alive: a helper
+// mid-task reads identically to one that died, so without this every one of
+// them would be reported as gone. It only narrows the list, never closes it —
+// `runningNative` itself can't see a helper stopped by a limit versus one still
+// working, so what remains is "not seen back yet", not "never coming back".
+// The helpers lib/workers.mjs's own concurrency check still counts as alive,
+// for this session's transcript — the same read guard-agent.mjs uses to admit
+// a new dispatch, reused here so "never returned" only ever means what it says.
+function stillRunningNative(input, state) {
+  try {
+    return runningNative(Array.isArray(state.dispatches) ? state.dispatches : [], {
+      returned: Array.isArray(state.returned) ? state.returned : [],
+      files: helperFiles(input && input.transcript_path),
+    });
+  } catch { return []; }
+}
+
+export function unreturned(state, { native = [] } = {}) {
   const returns = (state && Array.isArray(state.returned) ? state.returned : []).map(r => ({ ...r, used: false }));
+  const stillAlive = (native || []).map(w => ({ role: normalizeRole(w.role), task: w.task || null, used: false }));
   const out = [];
   for (const d of (state && Array.isArray(state.dispatches) ? state.dispatches : [])) {
     const role = normalizeRole(d.agent);
     const hit = returns.find(r => !r.used && r.agent === role && (!d.task || !r.task || r.task === d.task));
-    if (hit) hit.used = true;
-    else out.push({ role, task: d.task || d.key || null, progress: d.progress || null, at: d.at });
+    if (hit) { hit.used = true; continue; }
+    const alive = stillAlive.find(w => !w.used && w.role === role && (!d.task || !w.task || w.task === d.task));
+    if (alive) { alive.used = true; continue; }
+    out.push({ role, task: d.task || d.key || null, progress: d.progress || null, at: d.at });
   }
   return out;
 }
 
-export function unreturnedNote(state, max = 5) {
-  const list = unreturned(state);
+export function unreturnedNote(state, { native = [], max = 5 } = {}) {
+  const list = unreturned(state, { native });
   if (!list.length) return '';
   const shown = list.slice(-max).map(u => `${u.role}${u.task ? ` ${u.task}` : ''}${u.progress ? ` — progress ${u.progress}` : ' — no PROGRESS file named'}`).join('; ');
-  return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session never returned: ${shown}. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
+  return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session, no return seen yet: ${shown}. The still-running check only narrows this list, not clears it — one of these may yet be working, not stopped; check before treating any as dead. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
 }
 
 // Helpers that stopped at their turn cap (lib/workers.mjs), said once each.
@@ -769,6 +934,9 @@ export function compactionFact(state) {
 // Resume and compaction are the two moments the goal is actually at risk, so
 // this is where the excerpt earns its tokens.
 function handleSessionStart(input) {
+  // Same as handlePrompt: a SessionStart:compact fired inside a subagent (the
+  // helper's own compaction) is not this session's card to reprint.
+  if (input && input.agent_id) return;
   if (!routerSettings().enabled) return;
   const source = input.source || 'startup';
   if (source === 'clear') { try { unlinkSync(sessionPath(input.session_id)); } catch {} return; }
@@ -804,7 +972,7 @@ function handleSessionStart(input) {
   // unattended loop there may be no user prompt to bring it back. Restore it
   // verbatim here, the same moment the run excerpt is restored.
   if (state.persist && state.persist.armed) out.push(`[orchestrate · ${word}] ${persistLine(state.persist)}`);
-  const lost = unreturnedNote(state);
+  const lost = unreturnedNote(state, { native: stillRunningNative(input, state) });
   if (lost) out.push(lost);
   // After a compaction the reading starts over from the boundary. Usually that
   // says nothing until a response measures it; a summary that is itself huge
