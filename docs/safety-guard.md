@@ -37,6 +37,15 @@ those. Everything else, including loud everyday commands like `npm test` or
   `netlify deploy --prod`
 - any `stripe` CLI command other than a read-only one (`login`, `logout`,
   `config`, `version`, `help`, `listen`, `status`, `samples`, `open`)
+- dropping or truncating a database: `drop database`/`drop table`/`drop
+  schema`/`truncate` on a `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo`, or
+  `redis-cli` command line, including inside a `-c`/`-e`/`--eval` string;
+  `dropDatabase()`/`.drop()` in a `mongosh`/`mongo` command; `redis-cli
+  flushall`/`flushdb`; `prisma migrate reset`; `prisma db push
+  --force-reset`; `rails db:drop`/`db:reset`; `knex migrate:rollback --all`;
+  `dropdb`. Running a `.sql` file against a database (`psql -f x.sql`,
+  `mysql < x.sql`) is **not** stopped on its own — only when the command
+  line itself also says drop or truncate.
 
 `git reset --hard` with no argument is **not** stopped: on its own it only
 discards uncommitted edits in the working copy, never a commit, so there is

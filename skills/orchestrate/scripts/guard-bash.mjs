@@ -81,6 +81,36 @@ function targets(afterCommand) {
 const ASK_TAIL = 'Say yes to continue. If nobody can answer here, stop and tell the user what you were about to run instead of trying again.';
 const ASK_TAIL_RE = / Say yes to continue\. If nobody can answer here, stop and tell the user what you were about to run instead of trying again\.$/;
 
+// Command-line database clients this guard watches for a destructive drop or
+// truncate. Matched by name only (word-boundaried), so `mongodb` in an
+// unrelated path does not trip `mongo`.
+const DB_TOOL_RE = /\b(psql|mysql|sqlite3|mongosh|mongo|redis-cli)\b/i;
+// `drop database|table|schema` or `truncate`, wherever they sit on the
+// command line — including inside a `-c`/`-e`/`--eval` string, since this
+// tests the whole command text, not just flags. Requires whitespace between
+// `drop` and its object, so a file name like `drop_table.sql` never matches.
+const DROP_TRUNCATE_RE = /\b(drop\s+(database|table|schema)|truncate)\b/i;
+
+// Whether the command line destroys data in a database: one of the watched
+// CLI tools paired with drop/truncate anywhere on the line, or one of the
+// specific destructive shapes (a JS call inside a mongosh/mongo --eval, a
+// redis-cli flush, or a named ORM/migration command) that do not use the
+// word "drop" or "truncate" themselves. Not a shell parser — it reads the
+// whole command string, which is why `cat migrations/drop_table.sql` and
+// `grep -r "drop table" src` (no database CLI tool present) stay silent.
+function isDataStoreDestroy(cmd) {
+  if (DB_TOOL_RE.test(cmd) && DROP_TRUNCATE_RE.test(cmd)) return true;
+  if (/\bdropDatabase\s*\(\s*\)/.test(cmd)) return true;
+  if (DB_TOOL_RE.test(cmd) && /\.drop\s*\(\s*\)/.test(cmd)) return true;
+  if (/\bredis-cli\b/i.test(cmd) && /\b(flushall|flushdb)\b/i.test(cmd)) return true;
+  if (/\bprisma\s+migrate\s+reset\b/i.test(cmd)) return true;
+  if (/\bprisma\s+db\s+push\b/i.test(cmd) && /--force-reset\b/i.test(cmd)) return true;
+  if (/\brails\s+db:(drop|reset)\b/i.test(cmd)) return true;
+  if (/\bknex\s+migrate:rollback\b/i.test(cmd) && /--all\b/i.test(cmd)) return true;
+  if (/\bdropdb\b/i.test(cmd)) return true;
+  return false;
+}
+
 const RULES = [
   {
     name: 'branch-delete-remote',
@@ -126,6 +156,11 @@ const RULES = [
     name: 'stripe',
     test: cmd => /\bstripe\b/.test(cmd) && !/\bstripe\s+(login|logout|config|version|--version|-v|help|listen|status|samples|open)\b/.test(cmd),
     reason: `This would create or change something in a real payment account, which can charge or move money. ${ASK_TAIL}`,
+  },
+  {
+    name: 'data-store-destroy',
+    test: cmd => isDataStoreDestroy(cmd),
+    reason: `This would permanently delete data in a database, which cannot be undone. ${ASK_TAIL}`,
   },
 ];
 

@@ -95,6 +95,60 @@ test('a stripe CLI command that changes something is stopped', () => {
   assert.equal(decide('stripe login').kind, 'pass');
 });
 
+// ---- dropping or truncating a database is stopped --------------------------
+
+test('a drop or truncate against a database CLI is stopped, with the data-store reason', () => {
+  const commands = [
+    'psql -c "drop table users"',
+    'mysql -e "DROP DATABASE mydb"',
+    'sqlite3 mydb.db "DROP TABLE users"',
+    'mongosh mydb --eval "db.dropDatabase()"',
+    'mongo mydb --eval "db.dropDatabase()"',
+    'mongosh mydb --eval "db.users.drop()"',
+    'redis-cli flushall',
+    'redis-cli FLUSHDB',
+    'prisma migrate reset',
+    'prisma db push --force-reset',
+    'rails db:drop',
+    'rails db:reset',
+    'knex migrate:rollback --all',
+    'dropdb mydb',
+  ];
+  for (const command of commands) {
+    const d = decide(command);
+    assert.equal(d.kind, 'ask', command);
+    assert.match(d.reason, /^This would permanently delete data in a database, which cannot be undone\. /, command);
+  }
+});
+
+test('a drop table mention that is not a database command is not stopped', () => {
+  assert.equal(decide('cat migrations/drop_table.sql').kind, 'pass');
+  assert.equal(decide('grep -r "drop table" src').kind, 'pass');
+  assert.equal(decide('echo "truncate"').kind, 'pass');
+});
+
+test('a .sql file run against a database is not asked about unless the command line itself says drop or truncate', () => {
+  assert.equal(decide('psql -f migrations/drop_table.sql').kind, 'pass');
+  assert.equal(decide('mysql < migrations/drop_table.sql').kind, 'pass');
+});
+
+test('a drop-database command from a subagent is denied with a report-back reason', () => {
+  const r = run(bash('psql -c "drop table users"', { agent_id: 'helper-1' }));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+});
+
+test('the same drop-database command asked twice in one session gets "Asked already: " the second time', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-bash-home-'));
+  const first = run(bash('redis-cli flushall'), home);
+  assert.equal(first.json.hookSpecificOutput.permissionDecision, 'ask');
+  assert.doesNotMatch(first.json.hookSpecificOutput.permissionDecisionReason, /^Asked already:/);
+
+  const second = run(bash('redis-cli flushall'), home);
+  assert.equal(second.json.hookSpecificOutput.permissionDecision, 'ask');
+  assert.match(second.json.hookSpecificOutput.permissionDecisionReason, /^Asked already: /);
+});
+
 // ---- the PowerShell tool: same decision, same patterns -----------------------
 
 test('PowerShell Remove-Item -Recurse -Force on a real path is stopped, aliases too', () => {
