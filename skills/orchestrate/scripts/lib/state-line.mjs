@@ -124,11 +124,13 @@ const round1 = n => Math.round(Number(n) * 10) / 10;
 // running total — the thing the plugin refuses because it reads as an allowance.
 // With a ceiling it is exactly the "how close to the wall" number the user asked
 // to see. The lead conversation's own cost is not in it; no hook sees that.
+// "at list price" because the figure is modelled from published per-token
+// prices; a subscription bills in quota, not in these dollars.
 export function budgetPhrase(run) {
   const c = run && run.budget && run.budget.ceiling;
   if (c == null) return '';
   const spent = Number(run && run.spend) || 0;
-  return ` · subagent spend ~$${round1(spent)}/$${c}`;
+  return ` · helper spend ~$${round1(spent)}/$${c} at list price`;
 }
 
 export function progressPhrase(run) {

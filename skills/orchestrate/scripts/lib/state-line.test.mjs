@@ -2,7 +2,7 @@
 // directly against the pure functions rather than through a spawned process.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stateLine, stateHash, readyPhrase, ungradedPhrase } from './state-line.mjs';
+import { stateLine, stateHash, readyPhrase, ungradedPhrase, budgetPhrase } from './state-line.mjs';
 
 test('lib/state-line.mjs exports exactly the sixteen names this concern owns', async () => {
   const mod = await import('./state-line.mjs');
@@ -37,4 +37,10 @@ test('a long list of owed returns is trimmed like the ready one', () => {
   assert.match(phrase, /7 returns to grade: 9-8-0001, 9-8-0002, 9-8-0003, 9-8-0004 \+3 more/);
   assert.equal(ungradedPhrase({ ungraded: [] }), '');
   assert.equal(ungradedPhrase(null), '');
+});
+
+test('the spend phrase says helper, not subagent, and that the figure is a list-price model', () => {
+  assert.equal(budgetPhrase({ budget: { ceiling: 120 }, spend: 61.55 }), ' · helper spend ~$61.6/$120 at list price');
+  assert.equal(budgetPhrase({ spend: 5 }), '', 'no ceiling, no running total');
+  assert.doesNotMatch(budgetPhrase({ budget: { ceiling: 10 }, spend: 1 }), /subagent/);
 });
