@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, handoffLine } from './router.mjs';
+import { cardBody, CARD, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, stateLine, stateHash, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, handoffLine } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -141,17 +141,33 @@ function prompt(home, cwd, text, extra = {}) {
   return run(home, { hook_event_name: 'UserPromptSubmit', session_id: extra.session_id || 'sess-a', prompt_id: extra.prompt_id || `p${Math.random()}`, cwd, permission_mode: 'auto', prompt: text, ...extra });
 }
 
-test('the first substantive prompt gets the state line and the card, once', () => {
+// Counter phrases the card must never carry — those live behind `router status`.
+const NO_COUNTERS = /orch-agents|codex:|tier |limits today/;
+
+test('the first substantive prompt gets the card only, once, with no counters', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
   assert.match(first, /\[orchestrate\]/);
-  assert.match(first, /tier max5/);
-  assert.match(first, new RegExp(`orch-agents ${AGENT_NAMES.length}/${AGENT_NAMES.length}`));
-  assert.match(first, /run: none/);
   assert.match(first, /orchestrate is loaded/);
+  assert.doesNotMatch(first, NO_COUNTERS, 'the card carries no counters');
+  assert.doesNotMatch(first, /you: model not known here/);
 
   const second = prompt(home, repo, 'now do the same for the list command and test that too');
   assert.equal(second, '', 'nothing changed, so there is nothing to say');
+});
+
+test('`router status` replies with the full state line and sends no card', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = prompt(home, repo, 'router status', { session_id: 's-status' });
+  assert.match(out, /\[orchestrate\]/);
+  assert.match(out, /tier max5/);
+  assert.match(out, new RegExp(`orch-agents ${AGENT_NAMES.length}/${AGENT_NAMES.length}`));
+  assert.match(out, /run: none/);
+  assert.doesNotMatch(out, /orchestrate is loaded/, 'the rules card is not sent for a status request');
+
+  // Not a substantive prompt: it did not arm the card or persist.
+  const after = prompt(home, repo, 'add a --json flag to the status command and test it', { session_id: 's-status' });
+  assert.match(after, /orchestrate is loaded/, 'the card is still owed after a status request');
 });
 
 test('a hook firing inside a subagent (agent_id present) prints nothing on UserPromptSubmit, and prints the card without it', () => {
@@ -248,14 +264,13 @@ test('a state change is worth a line; a change of wording is not', () => {
     JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: "You've hit your Opus limit" }] } }),
   ].join('\n'));
   const after = prompt(home, repo, 'carry on with the list command now', { session_id: 's-state', transcript_path: tr });
-  assert.match(after, /\[orchestrate · changed\]/);
-  assert.match(after, /limits today: opus/);
+  assert.match(after, /\[orchestrate · changed\] Today's limit on Opus is reached; helpers on it are refused until it resets\./);
 });
 
 test('an open run is named, and its goal comes with it', () => {
   const home = makeHome(); const repo = makeRepo(true);
   const first = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-run' });
-  assert.match(first, /run: 20260908-tidy-finish/);
+  assert.match(first, /This session continues the run at .*20260908-tidy-finish.*RUN\.md\./);
   assert.match(first, /Goal: Finish the tidy command/);
   assert.match(first, /Pickup: Pickup prompt: dispatch 9-8-0002/);
   // The task rows are not re-injected: they are long, mostly finished, and on
@@ -432,17 +447,16 @@ test('unreturned excludes a dispatch runningNative still counts as alive, and so
   assert.equal(list[0].task, '9-1-0002');
 
   const note = unreturnedNote(state, { native });
-  assert.match(note, /9-1-0002/);
-  assert.doesNotMatch(note, /9-1-0001/, 'the still-alive dispatch is not listed');
+  assert.match(note, /has not reported back/);
+  // No role names and no task ids — those are for the ledger, not the note.
+  assert.doesNotMatch(note, /orch-researcher|orch-implementer|9-1-0001|9-1-0002/);
   // Softened wording: not a settled "never returned" verdict.
   assert.doesNotMatch(note, /never returned/i);
-  assert.match(note, /no return seen/i);
 
   // With no runningNative cross-check at all, both are still listed (the
   // check only narrows the list; it is not required for the note to fire).
   const noteNoNative = unreturnedNote(state);
-  assert.match(noteNoNative, /9-1-0001/);
-  assert.match(noteNoNative, /9-1-0002/);
+  assert.equal((noteNoNative.match(/has not reported back/g) || []).length, 2, 'both are still listed');
 });
 
 test('a single unambiguous open run binds itself; two do not', () => {
@@ -454,8 +468,9 @@ test('a single unambiguous open run binds itself; two do not', () => {
   const second = join(repo, '.orchestrator', 'runs', '20260909-other');
   mkdirSync(second, { recursive: true });
   writeFileSync(join(second, 'RUN.md'), '# Run\n\n## Tasks\n\n| id | p | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n');
-  const out = prompt(home, repo, 'start on the second piece of work now please', { session_id: 's-bind2' });
-  assert.match(out, /2 candidates/);
+  prompt(home, repo, 'start on the second piece of work now please', { session_id: 's-bind2' });
+  const status = prompt(home, repo, 'router status', { session_id: 's-bind2' });
+  assert.match(status, /2 candidates/);
   const s2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-bind2.json'), 'utf8'));
   assert.equal(s2.run, undefined, 'ambiguous means unbound, not a guess');
 });
@@ -481,7 +496,8 @@ test('a session above its own repo, with nothing else in play, is offered the ru
   const sub = join(pointerRoot, 'sub');
   mkdirSync(sub, { recursive: true });
   const under = prompt(home, sub, 'pick up where we left off on the tidy work', { session_id: 's-under' });
-  assert.match(under, /candidate, not bound/);
+  const statusUnder = prompt(home, sub, 'router status', { session_id: 's-under' });
+  assert.match(statusUnder, /candidate, not bound/);
   const stateUnder = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-under.json'), 'utf8'));
   assert.equal(stateUnder.run, undefined);
 });
@@ -500,8 +516,11 @@ test('active-run.json names a project the session has nothing to do with: no run
   }));
   const unrelated = mkdtempSync(join(tmpdir(), 'orch-unrelated-'));
   const out = prompt(home, unrelated, 'pick up where we left off on the tidy work', { session_id: 's-unrelated' });
-  assert.match(out, /run: none/);
   assert.doesNotMatch(out, /candidate/);
+  assert.doesNotMatch(out, /continues the run/);
+  const status = prompt(home, unrelated, 'router status', { session_id: 's-unrelated' });
+  assert.match(status, /run: none/);
+  assert.doesNotMatch(status, /candidate/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-unrelated.json'), 'utf8'));
   assert.equal(state.run, undefined);
 });
@@ -554,9 +573,13 @@ test('the card carries no running total and no advice about the session settings
   // A session on the "wrong" model and effort. The router used to tell it so.
   writeFileSync(tr, JSON.stringify({ type: 'assistant', message: { model: 'claude-sonnet-5', content: [] }, effort: 'low', entrypoint: 'claude-desktop' }));
   const out = prompt(home, repo, 'add a --json flag to status and test it', { session_id: 's-card', transcript_path: tr });
-  assert.match(out, /you: sonnet @ low effort/, 'it still reports what it can see');
+  assert.doesNotMatch(out, /you: sonnet|tier |orch-agents|codex:/, 'the proactive card carries none of it');
   assert.doesNotMatch(out, /your setup|belongs on|\/model|Effort → High/, 'and offers no opinion about it');
   assert.doesNotMatch(out, /\$\d|spent|total/);
+  const status = prompt(home, repo, 'router status', { session_id: 's-card', transcript_path: tr });
+  assert.match(status, /you: sonnet @ low effort/, 'router status still reports what it can see');
+  assert.doesNotMatch(status, /your setup|belongs on|\/model|Effort → High/, 'and offers no opinion about it');
+  assert.doesNotMatch(status, /\$\d|spent|total/);
 });
 
 test('malformed or missing input never fails', () => {
@@ -579,22 +602,17 @@ test('--state prints what it would inject and writes nothing', () => {
   assert.equal(existsSync(join(home, '.claude', 'orchestrate', 'sessions', 'cli.json')), false);
 });
 
-test('the card body stays inside the cap it names', () => {
+test('the card body stays inside the cap it names, and has one home in code', () => {
   // Every character is paid on every later turn of the session that got it.
   const body = cardBody();
+  assert.equal(body, CARD, 'cardBody is CARD, with no other source to drift from');
   assert.ok(body.length <= CARD_CAP, `card is ${body.length} characters, cap ${CARD_CAP}`);
-  // It comes from ladder.md, so the text has one home.
-  const ladder = readFileSync(join(HERE, '..', 'references', 'ladder.md'), 'utf8');
-  assert.ok(ladder.includes(body), 'the card is the fenced block in ladder.md, verbatim');
   assert.match(body, /router off/, 'it says how to turn itself off');
+  assert.ok(!existsSync(join(HERE, '..', 'references', 'ladder.md')), 'ladder.md is gone; the card text has one home now');
 });
 
-test('the fallback card cannot silently drift from the real one', () => {
-  // FALLBACK_CARD only runs when ladder.md cannot be read, so nothing else
-  // exercises it; it drifted two paragraphs behind the real card once already.
-  const ladder = readFileSync(join(HERE, '..', 'references', 'ladder.md'), 'utf8');
-  assert.ok(ladder.includes(FALLBACK_CARD), 'FALLBACK_CARD is byte-identical to the fenced block in ladder.md');
-  assert.ok(FALLBACK_CARD.length <= CARD_CAP, `fallback card is ${FALLBACK_CARD.length} characters, cap ${CARD_CAP}`);
+test('the card carries no counter phrase — those live behind `router status`', () => {
+  assert.doesNotMatch(CARD, /orch-agents|codex:|tier \w|limits today/);
 });
 
 // ---- which task is ready ----------------------------------------------------
@@ -610,7 +628,11 @@ const NEW_HEADER = [
 const taskRow = (id, phase, blocks = '—') =>
   `| ${id} | ${phase} | ${blocks} | src/${id}.ts | implementer · sonnet | do ${id} | exit 0 | 0 | — |`;
 
-test('the run line names the tasks that could start right now', () => {
+// Readiness and owed returns no longer print unasked — they are part of the
+// full state line `router status` gives on request; the proactive flow only
+// ever carries the one actionable sentence (a limit, a bound run, persist).
+
+test('`router status` names the tasks that could start right now', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [
     ...NEW_HEADER,
@@ -618,27 +640,13 @@ test('the run line names the tasks that could start right now', () => {
     taskRow('9-8-0002', '📋 planned'),
     taskRow('9-8-0003', '📋 planned', '9-8-0001'),
   ] });
-  const out = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-ready' });
+  prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-ready' });
+  const out = prompt(home, repo, 'router status', { session_id: 's-ready' });
   assert.match(out, /ready now: 9-8-0002/);
   assert.doesNotMatch(out, /9-8-0003/, 'a task whose blocker is still running is not ready');
 });
 
-test('a legacy ledger says nothing about readiness rather than guessing', () => {
-  const home = makeHome();
-  const repo = makeRepo(true);
-  const out = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-legacy' });
-  assert.match(out, /run: 20260908-tidy-finish/);
-  assert.doesNotMatch(out, /ready now/, 'the old table has no edges to read');
-});
-
-test('a run with nothing planned says nothing about readiness', () => {
-  const home = makeHome();
-  const repo = makeRepo(true, { rows: [...NEW_HEADER, taskRow('9-8-0001', '🔨 running')] });
-  const out = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-none' });
-  assert.doesNotMatch(out, /ready now/);
-});
-
-test('a task becoming ready reprints the line; an unchanged board stays quiet', () => {
+test('the proactive flow says nothing about readiness, even when a task becomes ready', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [
     ...NEW_HEADER,
@@ -648,19 +656,19 @@ test('a task becoming ready reprints the line; an unchanged board stays quiet', 
   const runMd = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md');
 
   const first = prompt(home, repo, 'start on the tidy work please', { session_id: 's-change' });
-  assert.doesNotMatch(first, /ready now/, 'nothing is ready while the blocker runs');
+  assert.doesNotMatch(first, /ready now/);
   assert.equal(prompt(home, repo, 'and how is that going now', { session_id: 's-change' }), '',
     'nothing changed, so nothing is said');
 
-  // The blocker lands. That is the moment the lead has something better to do
-  // than wait, and the moment the line is worth its tokens.
+  // The blocker lands; readiness changed, but that is not one of the three
+  // actionable facts, so the "changed" line stays silent.
   writeFileSync(runMd, readFileSync(runMd, 'utf8').replace('| 9-8-0001 | 🔨 running |', '| 9-8-0001 | ✅ done |'));
   const after = prompt(home, repo, 'anything else worth starting yet', { session_id: 's-change' });
-  assert.match(after, /\[orchestrate · changed\]/);
-  assert.match(after, /ready now: 9-8-0002/);
+  assert.doesNotMatch(after, /\[orchestrate · changed\]/);
+  assert.doesNotMatch(after, /ready now/);
 
-  assert.equal(prompt(home, repo, 'right, carrying on with that then', { session_id: 's-change' }), '',
-    'and it says it once, not every turn');
+  const status = prompt(home, repo, 'router status', { session_id: 's-change' });
+  assert.match(status, /ready now: 9-8-0002/, 'the fact is still there on request');
 });
 
 test('a long ready list is trimmed rather than filling the line', () => {
@@ -672,7 +680,7 @@ test('a long ready list is trimmed rather than filling the line', () => {
   assert.equal(readyPhrase(null), '');
 });
 
-test('the run line says what came back and is still waiting on you', () => {
+test('`router status` says what came back and is still waiting on you', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [
     ...NEW_HEADER,
@@ -684,12 +692,13 @@ test('the run line says what came back and is still waiting on you', () => {
   writeFileSync(join(dir, 'returns', 'returns.jsonl'),
     `${JSON.stringify({ task: '9-8-0001', agent: 'orch-implementer', status: 'DONE' })}\n`);
 
-  const out = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-owed' });
+  prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-owed' });
+  const out = prompt(home, repo, 'router status', { session_id: 's-owed' });
   assert.match(out, /1 return to grade: 9-8-0001/, 'singular reads as English');
   assert.match(out, /ready now: 9-8-0002/, 'both facts fit on the one line');
 });
 
-test('setting the row stops the reminder, and that counts as a state change', () => {
+test('the proactive flow never mentions an owed return, before or after it is graded', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [...NEW_HEADER, taskRow('9-8-0001', '🔨 running')] });
   const dir = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish');
@@ -698,13 +707,13 @@ test('setting the row stops the reminder, and that counts as a state change', ()
   writeFileSync(join(dir, 'returns', 'returns.jsonl'),
     `${JSON.stringify({ task: '9-8-0001', status: 'DONE' })}\n`);
 
-  assert.match(prompt(home, repo, 'pick the tidy work back up please', { session_id: 's-owed2' }), /1 return to grade/);
+  assert.doesNotMatch(prompt(home, repo, 'pick the tidy work back up please', { session_id: 's-owed2' }), /to grade/);
   assert.equal(prompt(home, repo, 'anything moved since then', { session_id: 's-owed2' }), '', 'still owed, still silent');
 
   writeFileSync(runMd, readFileSync(runMd, 'utf8').replace('| 9-8-0001 | 🔨 running |', '| 9-8-0001 | ✅ done |'));
   const after = prompt(home, repo, 'right, what is outstanding now', { session_id: 's-owed2' });
-  assert.match(after, /\[orchestrate · changed\]/);
-  assert.doesNotMatch(after, /to grade/, 'it has been judged, so it stops asking');
+  assert.doesNotMatch(after, /\[orchestrate · changed\]/);
+  assert.doesNotMatch(after, /to grade/);
 });
 
 test('a long list of owed returns is trimmed like the ready one', () => {

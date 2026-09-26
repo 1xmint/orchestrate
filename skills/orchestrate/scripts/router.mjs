@@ -56,16 +56,13 @@ export function codexState(now = Date.now()) {
   return c.status === 'limit' ? 'limit' : c.status === 'ok' ? 'ok' : 'off';
 }
 
-// ---- the card (from references/ladder.md, so the text has one home) ---------
+// ---- the card ----------------------------------------------------------------
 // Five short paragraphs: how the work is shaped, how a question is answered,
 // when a dependency or a worker earns its cost, what evidence decides done,
 // and what always stops and asks. No rung numbers and no agent names, because
-// nothing here has read the work.
-// Kept byte-identical to the fenced card in references/ladder.md — see the
-// drift test in router.test.mjs. This copy is the fallback for the rare case
-// the file cannot be read; it used to be a shorter, separately-maintained
-// summary that silently fell two paragraphs behind the real card.
-export const FALLBACK_CARD = [
+// nothing here has read the work. It carries only the behaviour rules — no
+// counters, no state — so it has exactly one home: here.
+export const CARD = [
   "orchestrate is loaded. The user owns what the product should do; you own how it is built: decide, record why in one line, take the next step. Before you propose building anything, check it against what this project is for — the brief (\"What this is for\" in the project's CLAUDE.md or AGENTS.md, and the documents it names) and the goal, not the file you just read. Where they disagree, the brief wins until the user changes it.",
   "At a turning point, look two steps ahead and name what is missing — research, a legal or licence question, a root cause under the symptom, an unchecked fact, a decision that is the user's. Then send orch-advisor your proposal before you commit; its description lists the moments. While it runs, keep preparing whatever does not hang on its answer.",
   "Your context is for judgment. Do a step yourself when it fits in about eight tool calls with small outputs; hand over anything larger and keep only the return. One packet per plan step; three or more independent steps go to orch-coordinator. Change a file with Edit rather than rewriting it, trust a write that did not error, and filter long output before it reaches you. Open a run ledger with a budget when tracks run at once or the work outlives this session.",
@@ -79,12 +76,7 @@ export const FALLBACK_CARD = [
 export const CARD_CAP = 2200;
 
 export function cardBody() {
-  try {
-    const md = readFileSync(join(SKILL_DIR, 'references', 'ladder.md'), 'utf8');
-    const m = /```card\s*\n([\s\S]*?)\n```/.exec(md);
-    if (m && m[1].trim()) return m[1].trim();
-  } catch {}
-  return FALLBACK_CARD;
+  return CARD;
 }
 
 // One line in plain words for the write `autocompact on` (or `autocompact
@@ -123,6 +115,29 @@ export function stateLine(ctx, prefix) {
   const agents = `orch-agents ${ctx.agents}/${AGENT_NAMES.length}`;
   const limits = (ctx.limits.length ? `limits today: ${ctx.limits.join(', ')}` : 'limits today: none') + contextPhrase(ctx.context);
   return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · codex: ${ctx.codex || codexState()} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
+}
+
+// What `router status` prints on request. The full state line has no other
+// home now — see actionableLine for what the card carries unasked.
+export function statusReply(ctx) {
+  return stateLine(ctx, '[orchestrate]');
+}
+
+// The one sentence the card (and a later "changed" line) carries unasked,
+// only when something is actionable right now: a usage limit hit today, a run
+// this session continues, or auto-continue armed. No counters, no model name,
+// no tier word — the full picture is `router status`, read on demand.
+// Checked in this order because a limit that refuses helpers is the most
+// urgent of the three.
+export function actionableLine(ctx) {
+  if (ctx.limits && ctx.limits.length) {
+    const names = ctx.limits.map(f => f.charAt(0).toUpperCase() + f.slice(1));
+    const pronoun = names.length > 1 ? 'them' : 'it';
+    return `Today's limit on ${names.join(', ')} is reached; helpers on ${pronoun} are refused until it resets.`;
+  }
+  if (ctx.run && ctx.run.runMd) return `This session continues the run at ${ctx.run.runMd}.`;
+  if (ctx.persist) return 'Auto-continue is on; say "persist off" to stop it.';
+  return '';
 }
 
 // One policy number decides each cut, read from lib/context.mjs's own
@@ -681,6 +696,14 @@ function handlePrompt(input) {
   if (namedFamily) state.userModel = { family: namedFamily, at: new Date().toISOString() };
 
   if (/^router (off|on)$/i.test(trimmed)) { state.muted = /off$/i.test(trimmed); saveSession(state); return; }
+  // The full state line, on demand: not a substantive prompt, so it sends no
+  // card and arms nothing. The card carries only the actionable one-liner now.
+  if (/^router status$/i.test(trimmed)) {
+    const ctx = gatherContext(input, state);
+    saveSession(state);
+    emit('UserPromptSubmit', statusReply(ctx));
+    return;
+  }
   if (/^persist (off|on)$/i.test(trimmed)) {
     const off = /off$/i.test(trimmed);
     state.persistMuted = off;
@@ -746,7 +769,8 @@ function handlePrompt(input) {
 
   const freshSession = !state.cardSent;
   if (!state.cardSent && substantive) {
-    out.push(stateLine(ctx, '[orchestrate]'));
+    const opening = actionableLine(ctx);
+    out.push(opening ? `[orchestrate] ${opening}` : '[orchestrate]');
     out.push(cardBody());
     if (ctx.run) {
       const ex = resumeExcerpt(ctx.run.runMd);
@@ -754,10 +778,13 @@ function handlePrompt(input) {
     }
     state.cardSent = true;
     state.lastStateHash = stateHash(ctx);
+    state.lastActionable = opening;
   } else if (substantive) {
     const hash = stateHash(ctx);
-    if (state.lastStateHash && hash !== state.lastStateHash) out.push(stateLine(ctx, '[orchestrate · changed]'));
+    const changed = actionableLine(ctx);
+    if (changed && changed !== state.lastActionable) out.push(`[orchestrate · changed] ${changed}`);
     state.lastStateHash = hash;
+    state.lastActionable = changed;
   }
 
   // A brand-new session's first prompt naming no goal of its own — "continue"
@@ -854,16 +881,29 @@ export function unreturned(state, { native = [] } = {}) {
     if (hit) { hit.used = true; continue; }
     const alive = stillAlive.find(w => !w.used && w.role === role && (!d.task || !w.task || w.task === d.task));
     if (alive) { alive.used = true; continue; }
-    out.push({ role, task: d.task || d.key || null, progress: d.progress || null, at: d.at });
+    // `d.task` is a numeric packet id when one was named — never shown to the
+    // user. `d.key` is only ever that id's fallback: the dispatch's own first
+    // line of description, used as the slug precisely when there is no id.
+    out.push({ role, task: d.task || d.key || null, slug: d.task ? null : (d.key || null), progress: d.progress || null, at: d.at });
   }
   return out;
 }
 
-export function unreturnedNote(state, { native = [], max = 5 } = {}) {
+// One plain sentence per helper with no return seen yet, newest first, at most
+// three. No role names and no task ids — those are for the ledger, not the
+// user reading this over the model's shoulder; what to say is the task's own
+// slug when one is on record, else "an earlier step". The tail that follows
+// still says the list only narrows, never closes.
+export function unreturnedNote(state, { native = [], max = 3 } = {}) {
   const list = unreturned(state, { native });
   if (!list.length) return '';
-  const shown = list.slice(-max).map(u => `${u.role}${u.task ? ` ${u.task}` : ''}${u.progress ? ` — progress ${u.progress}` : ' — no PROGRESS file named'}`).join('; ');
-  return `[orchestrate · recover] ${list.length} helper${list.length === 1 ? '' : 's'} dispatched this session, no return seen yet: ${shown}. The still-running check only narrows this list, not clears it — one of these may yet be working, not stopped; check before treating any as dead. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its PROGRESS file and its branch; resuming the stopped agent re-reads its whole context at full price.`;
+  const shown = list.slice(-max).reverse();
+  const sentences = shown.map(u => {
+    const what = u.slug || 'an earlier step';
+    const notes = u.progress ? `its notes are at ${u.progress}` : 'no notes file was named';
+    return `A helper working on ${what} has not reported back; ${notes}.`;
+  });
+  return `[orchestrate · recover] ${sentences.join(' ')} The still-running check only narrows this list, not clears it — one of these may yet be working, not stopped; check before treating any as dead. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its notes and its branch; resuming the stopped agent re-reads its whole context at full price.`;
 }
 
 // Helpers that stopped at their turn cap (lib/workers.mjs), said once each.
@@ -984,6 +1024,7 @@ function handleSessionStart(input) {
 
   state.cardSent = true;
   state.lastStateHash = stateHash(ctx);
+  state.lastActionable = actionableLine(ctx);
   saveSession(state);
   emit('SessionStart', out.join('\n'));
 }

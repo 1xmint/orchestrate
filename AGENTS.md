@@ -15,8 +15,8 @@ Deciding documents (these win when the code and the intent disagree):
   what comes next
 - `skills/orchestrate/SKILL.md` — the method the lead follows; §10 says what may
   be added to it
-- `skills/orchestrate/references/ladder.md` — the card, the guidance a session
-  is sure to see
+- `CARD` in `skills/orchestrate/scripts/router.mjs` — the card, the guidance a
+  session is sure to see; it carries behaviour rules only, never state
 - `docs/scoresheet-audit-prompt.md` and the newest report under `docs/audits/`
   — how the plugin is scored for its audience; an area under 10 there is open
   work, and a change that lowers an area needs a decision here saying why
@@ -45,7 +45,7 @@ Always true:
 - Install and uninstall leave the machine as they found it apart from the
   files the user asked for, and a test proves it. No person's name, machine
   path or account detail in code, docs or tests.
-- The card in `ladder.md` and `FALLBACK_CARD` in `router.mjs` stay byte-identical.
+- The card text has one home, `CARD` in `router.mjs`; no document copies it.
 - `STATE.md` holds the newest release and the one before it in full; older
   entries move to `docs/state/<version>.md` at each release, so a fresh session
   can read where we are in one page.
