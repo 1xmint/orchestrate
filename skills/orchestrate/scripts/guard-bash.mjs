@@ -26,7 +26,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve as resolvePath, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { readJson, findRepoRoot } from './lib/tier.mjs';
+import { createHash } from 'node:crypto';
+import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId } from './lib/tier.mjs';
 
 // Reproducible or already-ephemeral folders: losing one costs a re-run of a
 // build tool, not real work. Named by their last path segment only, so
@@ -71,51 +72,60 @@ function targets(afterCommand) {
 // it through. `test` sees the whole command string, already collapsed to
 // single spaces. Order matters only in that the first match wins; the list
 // is short enough that overlaps do not matter in practice.
+// The tail every "ask" reason ends with. A headless run (no one who can type
+// "yes") gets this stripped off in `decide()` below and replaced with the
+// two real ways forward; a repeat of the same command in the same session
+// gets this kept but the whole reason prefixed "Asked already: " instead of
+// asked fresh, so a model that cannot get an answer stops and reports back
+// rather than sending the same command again.
+const ASK_TAIL = 'Say yes to continue. If nobody can answer here, stop and tell the user what you were about to run instead of trying again.';
+const ASK_TAIL_RE = / Say yes to continue\. If nobody can answer here, stop and tell the user what you were about to run instead of trying again\.$/;
+
 const RULES = [
   {
     name: 'branch-delete-remote',
     test: cmd => /\bgit\s+push\b/.test(cmd) && (/--delete\b/.test(cmd) || /(^|\s):[^\s:][^\s]*/.test(cmd)),
-    reason: 'This would permanently delete a branch on the shared remote, which anyone else using it would lose. Say yes to continue.',
+    reason: `This would permanently delete a branch on the shared remote, which anyone else using it would lose. ${ASK_TAIL}`,
   },
   {
     name: 'push-force',
     test: cmd => /\bgit\s+push\b/.test(cmd) && /(--force(-with-lease)?\b|(^|\s)-f\b)/.test(cmd),
-    reason: 'This would overwrite the history of a shared branch, which can erase other people’s work. Say yes to continue.',
+    reason: `This would overwrite the history of a shared branch, which can erase other people’s work. ${ASK_TAIL}`,
   },
   {
     name: 'branch-delete-local',
     test: cmd => /\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd),
-    reason: 'This would permanently delete a branch. Say yes to continue.',
+    reason: `This would permanently delete a branch. ${ASK_TAIL}`,
   },
   {
     name: 'git-rm-recursive',
     test: cmd => /\bgit\s+rm\b/.test(cmd) && /\s-\w*r\w*\b/.test(cmd),
-    reason: 'This would remove tracked files and folders from the project. Say yes to continue.',
+    reason: `This would remove tracked files and folders from the project. ${ASK_TAIL}`,
   },
   {
     name: 'git-clean',
     test: cmd => /\bgit\s+clean\b/.test(cmd) && /\s-\w*f\w*\b/.test(cmd),
-    reason: 'This would permanently delete files that are not tracked by git, with no way to undo it. Say yes to continue.',
+    reason: `This would permanently delete files that are not tracked by git, with no way to undo it. ${ASK_TAIL}`,
   },
   {
     name: 'npm-publish',
     test: cmd => /\bnpm\s+publish\b/.test(cmd) || /\byarn\s+publish\b/.test(cmd) || /\bpnpm\s+publish\b/.test(cmd),
-    reason: 'This would publish a new version of this package for anyone to install. Say yes to continue.',
+    reason: `This would publish a new version of this package for anyone to install. ${ASK_TAIL}`,
   },
   {
     name: 'gh-release',
     test: cmd => /\bgh\s+release\s+create\b/.test(cmd),
-    reason: 'This would publish a new release of this project. Say yes to continue.',
+    reason: `This would publish a new release of this project. ${ASK_TAIL}`,
   },
   {
     name: 'deploy',
     test: cmd => (/\bvercel\b/.test(cmd) && /--prod\b/.test(cmd)) || /\bfly\s+deploy\b/.test(cmd) || /\bwrangler\s+(publish|deploy)\b/.test(cmd) || /\bnetlify\s+deploy\b.*--prod\b/.test(cmd),
-    reason: 'This would deploy this project to its live, public address. Say yes to continue.',
+    reason: `This would deploy this project to its live, public address. ${ASK_TAIL}`,
   },
   {
     name: 'stripe',
     test: cmd => /\bstripe\b/.test(cmd) && !/\bstripe\s+(login|logout|config|version|--version|-v|help|listen|status|samples|open)\b/.test(cmd),
-    reason: 'This would create or change something in a real payment account, which can charge or move money. Say yes to continue.',
+    reason: `This would create or change something in a real payment account, which can charge or move money. ${ASK_TAIL}`,
   },
 ];
 
@@ -129,7 +139,7 @@ function rmRule(cmd, cwd) {
   if (!list.length) return null;
   const unsafe = list.some(t => !isSafeDeleteTarget(t, cwd));
   if (!unsafe) return null;
-  return { name: 'rm-recursive', reason: 'This would permanently delete files or folders that cannot be recovered. Say yes to continue.' };
+  return { name: 'rm-recursive', reason: `This would permanently delete files or folders that cannot be recovered. ${ASK_TAIL}` };
 }
 
 // The PowerShell equivalent of `rm -rf`: `Remove-Item` (or one of its
@@ -149,7 +159,38 @@ function psRemoveRule(cmd, cwd) {
   if (!list.length) return null;
   const unsafe = list.some(t => !isSafeDeleteTarget(t, cwd));
   if (!unsafe) return null;
-  return { name: 'ps-remove-recursive', reason: 'This would permanently delete files or folders that cannot be recovered. Say yes to continue.' };
+  return { name: 'ps-remove-recursive', reason: `This would permanently delete files or folders that cannot be recovered. ${ASK_TAIL}` };
+}
+
+// Per-session memory of which exact commands have already gotten an "ask"
+// decision, so the second identical retry (a headless model that cannot see
+// the answer, or a script that just resends the same call) is told it was
+// already asked instead of being asked again as if for the first time. One
+// small JSON file per session under the plugin's own state dir; missing,
+// unreadable, or malformed reads as "nothing asked yet" — never as an error.
+function askLogPath(sessionId) {
+  return resolvePath(DIR, 'ask-log', `${sanitizeId(sessionId)}.json`);
+}
+
+function hashCommand(cmd) {
+  return createHash('sha1').update(cmd).digest('hex');
+}
+
+export function wasAskedBefore(sessionId, command) {
+  if (!sessionId) return false;
+  const data = readJson(askLogPath(sessionId));
+  if (!data || !Array.isArray(data.asked)) return false;
+  return data.asked.includes(hashCommand(command));
+}
+
+export function recordAsked(sessionId, command) {
+  if (!sessionId) return;
+  const path = askLogPath(sessionId);
+  const data = readJson(path) || { asked: [] };
+  if (!Array.isArray(data.asked)) data.asked = [];
+  const hash = hashCommand(command);
+  if (!data.asked.includes(hash)) data.asked.push(hash);
+  try { writeJsonAtomic(path, data); } catch {}
 }
 
 // Deny, ask, or pass — the pure decision, given the command string and who is
@@ -168,8 +209,16 @@ export function decide(command, ctx = {}) {
   if (ctx.headless) {
     // Nobody can answer a question in this mode, so "say yes" would be a
     // lie: name the two real ways forward instead.
-    return { kind: 'deny', reason: `${hit.reason.replace(/ Say yes to continue\.$/, '')} Nobody can say yes in this mode, so it is refused: run it yourself in a normal session, or add the exact command to .orchestrator/allow-bash.json.` };
+    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} Nobody can say yes in this mode, so it is refused: run it yourself in a normal session, or add the exact command to .orchestrator/allow-bash.json.` };
   }
+  // A real interactive user who already said yes is not blocked by this: the
+  // host applies their answer before the hook ever sees the next call. This
+  // only catches the case the packet measured — the same command sent again
+  // in the same session before anyone answered the first ask.
+  if (ctx.sessionId && wasAskedBefore(ctx.sessionId, cmd)) {
+    return { kind: 'ask', reason: `Asked already: ${hit.reason}` };
+  }
+  if (ctx.sessionId) recordAsked(ctx.sessionId, cmd);
   return { kind: 'ask', reason: hit.reason };
 }
 
@@ -218,7 +267,7 @@ function main() {
   // this payload, so it still gets "ask" — see docs/safety-guard.md.
   const headless = !subagent && input.permission_mode === 'bypassPermissions';
 
-  const d = decide(command, { cwd: input.cwd, subagent, headless });
+  const d = decide(command, { cwd: input.cwd, subagent, headless, sessionId: input.session_id });
   if (d.kind === 'pass') return;
   emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: d.kind, permissionDecisionReason: d.reason } });
 }
