@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, CARD, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, stateLine, stateHash, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, handoffLine } from './router.mjs';
+import { cardBody, CARD, compactionFact, syntheticPrompt, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, stateLine, stateHash, actionableLine, briefState, briefNote, BRIEF_CAP, unreturned, unreturnedNote, CONTINUE_WORD, continueIntent, handoffLine } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -243,6 +243,40 @@ test("a background-task notice is the host's prompt, not the user's: it arms not
   assert.equal(read().persist.armed, true);
   assert.equal(syntheticPrompt('  [SYSTEM NOTIFICATION - NOT USER INPUT] x'), true);
   assert.equal(syntheticPrompt('the system notification said to keep going'), false);
+});
+
+test("a helper's hand-back, or another session's message, is never the user's goal either", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const read = () => JSON.parse(readFileSync(join(sessions, 's-handback.json'), 'utf8'));
+  // Seen live 2026-09-26: the auto-continue hook took a helper's hand-back,
+  // opening with an <agent-message> tag and "[Subagent hand-back]" on the
+  // next line, as the lead's own goal.
+  const handback = ['<agent-message from="orch-implementer">', '[Subagent hand-back]', 'keep going until the whole plan is done'].join(String.fromCharCode(10));
+  assert.equal(prompt(home, repo, handback, { session_id: 's-handback' }), '', 'no card, no state line');
+  let s = read();
+  assert.ok(!(s.persist && s.persist.armed), 'not armed');
+  assert.equal(s.goal, undefined, 'never becomes the session goal');
+
+  const relayed = 'Another Claude session sent a message: build the entire feature and ship it';
+  assert.equal(prompt(home, repo, relayed, { session_id: 's-handback', prompt_id: 'p2' }), '');
+  s = read();
+  assert.ok(!(s.persist && s.persist.armed));
+  assert.equal(s.goal, undefined);
+
+  const ciEvent = '<ci-monitor-event>keep going until it is green</ci-monitor-event>';
+  assert.equal(prompt(home, repo, ciEvent, { session_id: 's-handback', prompt_id: 'p3' }), '');
+  assert.ok(!(read().persist && read().persist.armed));
+
+  for (const t of [
+    '<agent-message from="orch-implementer">\n[Subagent hand-back]\nkeep going',
+    '[Subagent hand-back]\nbuild the entire dashboard',
+    'Another Claude session sent a message: fix the tests',
+    '<ci-monitor-event>build the whole thing</ci-monitor-event>',
+  ]) {
+    assert.equal(syntheticPrompt(t), true, t);
+  }
+  assert.equal(syntheticPrompt('please tell me about agent-message formats'), false);
 });
 
 test('the same prompt_id twice is emitted once (double registration)', () => {
@@ -803,6 +837,40 @@ test('CONTINUE_WORD matches only the whole trimmed prompt', () => {
   assert.equal(CONTINUE_WORD.test('should I continue'), false);
 });
 
+test('continueIntent: "carry on" without naming a new goal, with or without punctuation', () => {
+  const trueCases = [
+    'continue',
+    'where were we?',
+    'continue.',
+    "what's next?",
+    'go on',
+    'pick up',
+    'status',
+    'what were we doing',
+    'where are we?',
+    "what's left?",
+    'how far did we get?',
+    'continue with the migration',
+  ];
+  for (const t of trueCases) assert.equal(continueIntent(t), true, t);
+});
+
+test('continueIntent: false the moment the prompt names a new goal', () => {
+  const falseCases = [
+    'continue and add a login page',
+    'fix the tests',
+    'build a new dashboard',
+    'add a --json flag',
+    'make it faster',
+    'create a report',
+    'write tests for this',
+    'implement the login flow',
+    'change the config',
+    'remove old code',
+  ];
+  for (const t of falseCases) assert.equal(continueIntent(t), false, t);
+});
+
 test('the first substantive prompt stores it as the session goal, capped and collapsed', () => {
   const home = makeHome(); const repo = makeRepo(false);
   assert.equal(prompt(home, repo, 'ok'), '' , 'too short to be substantive');
@@ -828,6 +896,14 @@ test('a fresh session that says "continue" in the same folder gets the previous 
   const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
   assert.match(out, /Your last session in this folder, 30 minutes ago, was working on: "add a --json flag to the status command"\./);
   assert.match(out, /run `git status`/, 'no run and no checkpoint here, so the plain git-status clause');
+});
+
+test('a fresh session that asks "where were we?" (with the question mark) also gets the previous goal', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 10 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  const out = prompt(home, repo, 'where were we?', { session_id: 'sess-new' });
+  assert.match(out, /Your last session in this folder, 10 minutes ago, was working on: "add a --json flag to the status command"\./);
 });
 
 test('a different cwd gets no handoff line', () => {

@@ -321,6 +321,36 @@ export function resumeExcerpt(runMd, cap = RESUME_CAP) {
 // "keep going" on its own).
 export const CONTINUE_WORD = /^(continue|keep going|resume|pick up where we left off|where were we|what'?s next|carry on)$/i;
 
+// A short lead phrase that opens a "pick up where we left off" prompt, not
+// necessarily the whole prompt (CONTINUE_WORD is the exact-match case; this is
+// the looser "starts with" case for a prompt that says a little more).
+const CONTINUE_LEAD = /^(continue|keep going|carry on|resume|go on|pick up( where we left off)?|where were we|what'?s next|status|what were we doing)\b/i;
+
+// A "?"-only prompt that asks where things stand without any of the lead
+// words above ("where are we?", "what's left?").
+const STATUS_QUESTION = /^(where are we|where('?s| is) (this|it|that)|what'?s (left|the status)|how far did we get|what'?s going on|how'?s it going)\s*\??$/i;
+
+// A build verb followed by another word means the prompt names a new goal,
+// even when it opens with a continue-word ("continue and add a login page").
+// This is the one signal that overrides an otherwise-matching lead phrase.
+const NEW_GOAL_VERB = /\b(build|add|make|fix|create|write|implement|change|remove|update|refactor)\b\s+\S/i;
+
+// True for a prompt that means "tell me what I was doing / keep doing it",
+// false the moment it also names a new goal. CONTINUE_WORD is the strict
+// exact-match subset of this; everything else here is looser on purpose,
+// because a fresh session's first words are rarely typed exactly.
+export function continueIntent(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+  const stripped = raw.replace(/[.!?]+$/, '').trim();
+  if (CONTINUE_WORD.test(stripped)) return true;
+  if (STATUS_QUESTION.test(raw)) return true;
+  if (!CONTINUE_LEAD.test(stripped)) return false;
+  if (NEW_GOAL_VERB.test(stripped)) return false;
+  const words = stripped.split(/\s+/).filter(Boolean);
+  return words.length < 12;
+}
+
 // The newest checkpoint file this previous session wrote, if any — same
 // layout precompact-check.mjs and lib/context.mjs read from.
 function latestCheckpointFor(sessionId) {
@@ -599,10 +629,20 @@ function gatherContext(input, state) {
 // the session.
 export const PERSIST_INTENT = /\b(keep (going|coding|working|building|at it)|don'?t stop|until (it'?s |it is |they'?re |the [\w-]+( [\w-]+)? (is|are) |everything is |all (of it |of them )?(is |are )?)?(done|finished|complete|working|green|passing|shipped|live)\b|(execute|implement|carry out|work through|finish) (the|this|that|my) (whole |full |entire |rest of the )?(plan|roadmap|spec|checklist|task list|todo list|backlog)|finish (it|everything|all of it|the rest)\b|build (out )?the (whole|entire|full) )/i;
 
-// A prompt the host wrote, not the user: a background task's completion
-// notice. The text is the only signal the hook payload carries for this.
+// A prompt the host or another Claude session wrote, not the user typing:
+// a background task's completion notice, a helper's hand-back, or a message
+// relayed from another session. The text is the only signal the hook payload
+// carries for this. Checked against the first non-blank line, because a
+// hand-back's own marker line ("[Subagent hand-back]") sometimes follows an
+// opening `<agent-message ...>` tag rather than starting the prompt.
+// Seen live: a finished helper's hand-back became the persist goal.
+const SYNTHETIC_OPEN = /^\s*(\[SYSTEM NOTIFICATION - NOT USER INPUT\]|<task-notification>|<agent-message|\[Subagent hand-back\]|Another Claude session sent a message|<ci-monitor-event>)/i;
+
 export function syntheticPrompt(text) {
-  return /^\s*(\[SYSTEM NOTIFICATION - NOT USER INPUT\]|<task-notification>)/i.test(String(text || ''));
+  const lines = String(text || '').split('\n').map(l => l.trim()).filter(Boolean);
+  const first = lines[0] || '';
+  const second = lines[1] || '';
+  return SYNTHETIC_OPEN.test(first) || /^\[Subagent hand-back\]/i.test(second);
 }
 
 export function persistIntent(text) {
@@ -790,7 +830,7 @@ function handlePrompt(input) {
   // A brand-new session's first prompt naming no goal of its own — "continue"
   // is one word and never trips the substantive gate above, so this checks
   // for it on its own. Said once per session, whether or not the card fired.
-  if (freshSession && !state.handoffShown && CONTINUE_WORD.test(trimmed)) {
+  if (freshSession && !state.handoffShown && continueIntent(trimmed)) {
     const prev = findPreviousSession({ sessionsDir: SESSIONS_DIR, cwd: input.cwd, exceptId: input.session_id, now: Date.now() });
     if (prev) out.push(handoffLine(prev, ctx));
     state.handoffShown = true;

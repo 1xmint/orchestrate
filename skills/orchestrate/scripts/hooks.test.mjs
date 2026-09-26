@@ -909,10 +909,11 @@ test('precompact: a bound run with a stale Pickup blocks compaction once, and na
 
   const first = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1', cwd: repo.dir, trigger: 'auto' }, home);
   assert.equal(first.json.decision, 'block');
-  assert.equal(first.json.hookSpecificOutput.hookEventName, 'PreCompact');
-  assert.equal(first.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(first.json.hookSpecificOutput.permissionDecisionReason, /Pickup/);
-  assert.ok(first.json.reason.includes(repo.runMd), 'it names the file to edit');
+  assert.deepEqual(Object.keys(first.json).sort(), ['decision', 'reason'], 'PreCompact only documents decision + reason');
+  assert.match(first.json.reason, /Pickup/);
+  const relRunMd = '.orchestrator/runs/20260909-fixture/RUN.md';
+  assert.ok(first.json.reason.includes(relRunMd), 'it names the file to edit, relative to the project');
+  assert.doesNotMatch(first.json.reason, /[A-Za-z]:[\\/]|\bUsers\b/, 'no absolute machine path');
 
   // Never twice for the same unwritten text: PreCompact commonly fires because
   // context is already low, and refusing forever risks the overflow this hook
@@ -958,7 +959,11 @@ test('precompact: a session with no bound run is asked for a checkpoint once, th
   const first = run('precompact-check.mjs', input, home);
   const block = JSON.parse(first.stdout);
   assert.equal(block.decision, 'block');
-  assert.match(block.reason, /context[\\/]spc4[\\/]checkpoint-/);
+  assert.deepEqual(Object.keys(block).sort(), ['decision', 'reason']);
+  // The checkpoint lives under this plugin's own home-directory folder, not
+  // inside the fixture repo (`cwd`) — named in words, with no path at all.
+  assert.match(block.reason, /checkpoint file this plugin keeps/);
+  assert.doesNotMatch(block.reason, /context[\\/]spc4[\\/]checkpoint-|[A-Za-z]:[\\/]|\bUsers\b/, 'no absolute machine path');
   assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '');
 });
 
