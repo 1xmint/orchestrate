@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { PRICES } from './lib/prices.mjs';
 
 const SKILL = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -167,6 +168,54 @@ test('models.md\'s Opus price matches prices.mjs, and its checked date is not ol
   assert.ok(routingChecked, 'routing.md has no "checked YYYY-MM-DD" date to compare against');
   assert.ok(modelsChecked[1] >= routingChecked,
     `models.md was checked ${modelsChecked[1]}, older than routing.md's ${routingChecked}`);
+});
+
+test('every family\'s price in models.md\'s table matches prices.mjs, and so does any price README quotes', () => {
+  // One row per family named in prices.mjs, so a family added there without a
+  // row here — or a row here whose number drifts — fails loudly.
+  const rowFor = {
+    fable: /\|\s*Fable[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/,
+    opus: /\|\s*Opus[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/,
+    sonnet: /\|\s*Sonnet[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/,
+    haiku: /\|\s*Haiku[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/,
+  };
+  for (const [family, re] of Object.entries(rowFor)) {
+    const row = re.exec(MODELS_MD);
+    assert.ok(row, `models.md has no price row for ${family} to check`);
+    assert.equal(Number(row[1]), PRICES[family].in, `models.md's ${family} input price does not match prices.mjs`);
+    assert.equal(Number(row[2]), PRICES[family].out, `models.md's ${family} output price does not match prices.mjs`);
+  }
+
+  // README states no per-family $in/$out prices today (it only quotes
+  // subscription-plan dollar figures, e.g. "Max 5x, $100"); if a future edit
+  // adds one, it must match prices.mjs the same way.
+  const readmeRow = /\b(Fable|Opus|Sonnet|Haiku)[^\n]*?\$(\d+)\s*\/\s*\$(\d+)\s*(?:per|\/)\s*(?:1M|million)/i.exec(README);
+  if (readmeRow) {
+    const f = readmeRow[1].toLowerCase();
+    assert.equal(Number(readmeRow[2]), PRICES[f].in, `README's ${f} input price does not match prices.mjs`);
+    assert.equal(Number(readmeRow[3]), PRICES[f].out, `README's ${f} output price does not match prices.mjs`);
+  }
+});
+
+test('SKILL.md names every hook script hooks.json registers', () => {
+  const SKILL_MD = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  const scripts = scriptsFromHooksJson(HOOKS);
+  for (const script of scripts) {
+    assert.ok(SKILL_MD.includes(`\`${script}\``), `SKILL.md never names ${script}, which hooks.json registers`);
+  }
+});
+
+test('README\'s "Test it" command runs without a shell substitution and actually works', () => {
+  const m = /## Test it\n\n```(?:bash|sh)?\n([^\n]+)\n```/.exec(README);
+  assert.ok(m, 'README has no "## Test it" fenced command to check');
+  const cmd = m[1].trim();
+  assert.doesNotMatch(cmd, /\$\(/, 'the command shells out with $(...), which PowerShell cannot run');
+  assert.doesNotMatch(cmd, /\bfind\b/, 'the command calls find, which PowerShell does not have');
+  assert.match(cmd, /^node\s+scripts\/test\.mjs/, 'README\'s Test it command should be `node scripts/test.mjs`');
+
+  const result = spawnSync(process.execPath, [join(ROOT, 'scripts', 'test.mjs'), '--help'], { encoding: 'utf8' });
+  assert.equal(result.status, 0, `node scripts/test.mjs --help exited ${result.status}: ${result.stderr}`);
+  assert.match(result.stdout, /test files/);
 });
 
 test('README\'s "What the hooks do" table has a row for every script hooks.json registers', () => {

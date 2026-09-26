@@ -845,7 +845,7 @@ STATE.md                build progress and resume point
 ## Test it
 
 ```bash
-node --test $(find skills -name '*.test.mjs')
+node scripts/test.mjs
 ```
 
 No quota, no network, no dependencies. They cover the router's emission policy
