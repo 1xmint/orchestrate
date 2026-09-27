@@ -96,12 +96,12 @@ test('decide(): a run outside cwd (or no cwd given) names no path at all', () =>
   assert.match(d.reason, /run file this plugin is tracking/);
 });
 
-test('unboundDecision(): outside the project, the checkpoint is named in words with no path', () => {
+test('unboundDecision(): outside the project, the checkpoint is named home-relative, no drive letter, no account name', () => {
   const reading = { compaction: { uuid: 'e1' } };
   const d = unboundDecision({ session: 's', reading, prev: {}, checkpoint: false, cwd: '/home/user/proj' });
   assert.equal(d.block, true);
-  assert.match(d.reason, /checkpoint file this plugin keeps for this session/);
-  assert.doesNotMatch(d.reason, /[A-Za-z]:[\\/]|\bUsers\b/);
+  assert.match(d.reason, /~\/\.claude\/orchestrate\/context\/.+checkpoint-.+\.md/);
+  assert.doesNotMatch(d.reason, /[A-Z]:\\|\/Users\//);
 });
 
 test('the emitted JSON on a real block has exactly the keys decision and reason', () => {

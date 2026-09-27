@@ -21,6 +21,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession } from './lib/tier.mjs';
 import { pickupSection, pickupHash, shouldBlock } from './turn-check.mjs';
@@ -52,6 +53,22 @@ export function relativeLocation(path, cwd) {
   return null;
 }
 
+// Names a path under the plugin's own home-directory folder relative to
+// home, with a leading `~` and forward slashes — e.g.
+// `~/.claude/orchestrate/context/<session>/checkpoint-<id>.md`. Never a
+// drive letter or account name, unlike the real absolute path. Returns null
+// if `path` is not actually under home (nothing to shorten).
+export function homeRelativeLocation(path) {
+  if (!path) return null;
+  const norm = p => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
+  const p = norm(path);
+  const h = norm(homedir());
+  if (h && (p === h || p.toLowerCase().startsWith(`${h.toLowerCase()}/`))) {
+    return `~${p.slice(h.length)}`;
+  }
+  return null;
+}
+
 // Pure enough to test without a host: given what the run and the session
 // state say, should this PreCompact be blocked, and with what message. `null`
 // means let it through.
@@ -75,7 +92,7 @@ export function unboundDecision({ session, reading, prev = {}, checkpoint = fals
   const epoch = contextEpoch(reading);
   if (checkpoint || prev.blockedFor === epoch) return { block: false, epoch };
   const path = checkpointPath(session, reading);
-  const rel = relativeLocation(path, cwd);
+  const rel = relativeLocation(path, cwd) || homeRelativeLocation(path);
   const where = rel || "the checkpoint file this plugin keeps for this session, under the plugin's own folder in your home directory";
   return {
     block: true, epoch,
