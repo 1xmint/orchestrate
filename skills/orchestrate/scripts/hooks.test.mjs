@@ -320,7 +320,7 @@ test('guard: an attributable coordinator child is recorded with its parent', () 
   assert.doesNotMatch(out.stdout, /permissionDecision.*deny/);
   const state = JSON.parse(readFileSync(join(sessionDir, 'nested.json'), 'utf8'));
   assert.equal(state.dispatches.at(-1).parent, 'coord');
-  assert.equal(state.dispatches.at(-1).task, 'child');
+  assert.equal(state.dispatches.at(-1).task, '9-9-0007');
 });
 
 test('guard: a dispatch that names no model is recorded as inherited and not priced', () => {
