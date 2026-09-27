@@ -243,8 +243,9 @@ export function decide(command, ctx = {}) {
   }
   if (ctx.headless) {
     // Nobody can answer a question in this mode, so "say yes" would be a
-    // lie: name the two real ways forward instead.
-    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} Nobody can say yes in this mode, so it is refused: run it yourself in a normal session, or add the exact command to .orchestrator/allow-bash.json.` };
+    // lie: name the mode in plain words and the two real ways forward.
+    const mode = ctx.mode ? `${ctx.mode} mode` : 'this mode';
+    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} You are in ${mode}, where nobody can say yes, so this is refused: run it yourself in a normal session, or add the exact command to .orchestrator/allow-bash.json.` };
   }
   // A real interactive user who already said yes is not blocked by this: the
   // host applies their answer before the hook ever sees the next call. This
@@ -296,13 +297,15 @@ function main() {
   if (isAllowed(command, input.cwd)) return;
 
   const subagent = Boolean(input.agent_id);
-  // `bypassPermissions` is the one permission_mode the hooks doc documents
-  // that means nobody sees an interactive prompt at all; a plain `-p` run
-  // that never sets it is not distinguishable from an ordinary session in
-  // this payload, so it still gets "ask" — see docs/safety-guard.md.
-  const headless = !subagent && input.permission_mode === 'bypassPermissions';
+  // `bypassPermissions`, `auto`, and `dontAsk` are the permission_modes where
+  // nobody sees an interactive prompt at all — an "ask" would just sit there
+  // with no one to answer it. A plain `-p` run that never sets one of these
+  // is not distinguishable from an ordinary session in this payload, so it
+  // still gets "ask" — see docs/safety-guard.md.
+  const mode = input.permission_mode;
+  const headless = !subagent && (mode === 'bypassPermissions' || mode === 'auto' || mode === 'dontAsk');
 
-  const d = decide(command, { cwd: input.cwd, subagent, headless, sessionId: input.session_id });
+  const d = decide(command, { cwd: input.cwd, subagent, headless, mode, sessionId: input.session_id });
   if (d.kind === 'pass') return;
   emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: d.kind, permissionDecisionReason: d.reason } });
 }
