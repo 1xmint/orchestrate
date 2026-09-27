@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadPolicy } from './policy.mjs';
 import { normalizeRole } from './prices.mjs';
+import { taskIdIn } from './task-id.mjs';
 
 export const WORKERS_V = 1;
 export const WORKERS_DIR = join(homedir(), '.claude', 'orchestrate', 'workers');
@@ -402,7 +403,7 @@ export function packetFromMarkdown(md, defaults = {}) {
   const scope = section('SCOPE');
   return {
     v: WORKERS_V,
-    taskId: line(/^\s*TASK:\s*(\S+)/m) || defaults.taskId || null,
+    taskId: taskIdIn(t) || defaults.taskId || null,
     run: line(/^\s*RUN:\s*(\S+)/m) || defaults.run || null,
     runtime: defaults.runtime || null,
     role: defaults.role || (line(/ROLE:\s*(\S+)/) || null),

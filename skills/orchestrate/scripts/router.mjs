@@ -38,6 +38,7 @@ import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport } from 
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR, limitsFromTail, scanLimits } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
+import { UNCAPPED_GATE_ROLE } from './lib/workflow.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
 import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
@@ -120,6 +121,7 @@ function gatherContext(input, state) {
     tier: state.tier,
     agents: agentsInfo.installed,
     agentsExpected: agentsInfo.expected,
+    agentsMissing: agentsInfo.missing,
     repoRoot,
     cwd: input.cwd || null,
     run: r.run,
@@ -306,12 +308,17 @@ function handlePrompt(input) {
   if (mode) out.push(mode);
 
   // The additions that ride along with the full card only: a partial-install
-  // notice (guard-agent.mjs only refuses general-purpose/claude once every
-  // role agent is present) and a run's resume excerpt. Never on a helper's
-  // own first prompt (`agent_id` present): only the lead can fix an install.
+  // notice (guard-agent.mjs refuses general-purpose/claude once orch-implementer
+  // itself is installed, whatever the other seven roles are) and a run's resume
+  // excerpt. Never on a helper's own first prompt (`agent_id` present): only
+  // the lead can fix an install.
   const sendFullCardExtras = () => {
     if (!input.agent_id && ctx.agentsExpected && ctx.agents < ctx.agentsExpected) {
-      out.push(`Only ${ctx.agents} of the plugin's ${ctx.agentsExpected} helper roles are installed, so the guard against uncapped helpers is off; run \`claude plugin install orchestrate@orchestrate\` (or \`node scripts/install.mjs --with-router --with-hook\`) to complete it.`);
+      const missing = Array.isArray(ctx.agentsMissing) ? ctx.agentsMissing : [];
+      const guardNote = missing.includes(UNCAPPED_GATE_ROLE)
+        ? 'so the guard against uncapped helpers is off'
+        : 'the guard against uncapped helpers is on, so the missing roles cannot be sent until the install is finished';
+      out.push(`Only ${ctx.agents} of the plugin's ${ctx.agentsExpected} helper roles are installed, ${guardNote}; run \`claude plugin install orchestrate@orchestrate\` (or \`node scripts/install.mjs --with-router --with-hook\`) to complete it.`);
     }
     if (ctx.run) {
       const ex = resumeExcerpt(ctx.run.runMd);

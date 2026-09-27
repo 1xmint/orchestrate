@@ -28,6 +28,7 @@ import { helperFiles, runningNative, runningExternal, freshCodexOk, providerStat
 import { family, normalizeRole, costLabel } from './lib/prices.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
+import { taskIdIn } from './lib/task-id.mjs';
 import { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, nestedReason, workflowDecision } from './lib/workflow.mjs';
 import { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision } from './lib/spend-gate.mjs';
 
@@ -90,8 +91,8 @@ const HEADER_LINE = /^\s*(APPROVED BY USER|RISK|BUILDS ON)\s*:/i;
 
 export function taskKey(prompt) {
   const p = String(prompt || '');
-  const id = (/^\s*TASK:\s*(\S+)/m.exec(p) || [])[1];
-  if (id && /\d/.test(id)) return id;
+  const id = taskIdIn(p);
+  if (id) return id;
   const first = p.split('\n').map(l => l.trim()).find(l => l && !HEADER_LINE.test(l)) || '';
   return first.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
 }
@@ -99,8 +100,7 @@ export function taskKey(prompt) {
 // The packet's own numeric TASK id, or null — what a grant binds to. Distinct
 // from taskKey: a grant needs an actual id, never a first-line fallback.
 export function numericTaskId(prompt) {
-  const id = (/^\s*TASK:\s*(\S+)/m.exec(String(prompt || '')) || [])[1];
-  return id && /\d/.test(id) ? id : null;
+  return taskIdIn(prompt);
 }
 
 const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
@@ -423,7 +423,8 @@ function main() {
       files,
       staleMin: policy.workers.staleMin,
     });
-    m = workflowDecision(input, ti, { policy, installed: agentsInstalled().installed, native, external: runningExternal(), dispatches, files });
+    const agentsInfo = agentsInstalled();
+    m = workflowDecision(input, ti, { policy, installed: agentsInfo.installed, missing: agentsInfo.missing, native, external: runningExternal(), dispatches, files });
   } catch {
     let unrestricted = false;
     try { unrestricted = loadPolicy().workers.nested === 'allow'; } catch {}
@@ -500,7 +501,7 @@ function main() {
   if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
   const rw = inferredReviewWord(ti.prompt);
   if (rw && !/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || ''))) {
-    const task = (/^\s*TASK:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || 'this task';
+    const task = taskIdIn(ti.prompt) || 'this task';
     tag = `${tag ? `${tag}; ` : ''}this task will wait for an independent review because its objective mentions ${rw}; to send one, dispatch orch-reviewer on opus with REVIEW OF: ${task}`;
   }
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
@@ -530,7 +531,7 @@ function recordDispatch(input, ti) {
       // whatever the session was on. It is reported that way, never resolved to
       // a guess.
       model: String(ti.model || 'inherit'),
-      task: (/^\s*TASK:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
+      task: taskIdIn(ti.prompt),
       key: taskKey(ti.prompt),
       // Links this record to the helper's own transcript (subagents/*.meta.json
       // carries the same id), which is how "still running" is judged.

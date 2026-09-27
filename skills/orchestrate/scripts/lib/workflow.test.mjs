@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { workflowDecision, nestedReason } from './workflow.mjs';
 import { loadPolicy } from './policy.mjs';
+import { AGENT_NAMES } from './tier.mjs';
 
 const policy = () => loadPolicy(null);
 
@@ -95,4 +96,46 @@ test('concurrency at the policy limit denies a new direct dispatch', () => {
 test('with nothing running and nothing named, a plain dispatch clears every rule', () => {
   const d = workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'WHERE: worktree: yes' }, { policy: policy() });
   assert.equal(d, null);
+});
+
+// The uncapped-helper gate (general-purpose/claude vs a capped role agent),
+// keyed on orch-implementer being installed rather than a full 8-of-8 count.
+const fullPolicy = loadPolicy();
+const ti = (subagent_type = 'general-purpose') => ({ subagent_type, model: 'sonnet', prompt: 'TASK: 1\ndo it' });
+const ALL_MISSING = AGENT_NAMES.slice();
+const NONE_MISSING = [];
+const THREE_WITH_IMPLEMENTER_MISSING = AGENT_NAMES.filter(n => n !== 'orch-implementer').slice(0, 5); // 3 installed incl. implementer
+const THREE_WITHOUT_IMPLEMENTER_MISSING = AGENT_NAMES.filter(n => n !== 'orch-planner' && n !== 'orch-researcher' && n !== 'orch-browser'); // orch-implementer itself missing
+
+test('0 of 8 installed: general-purpose is allowed, it is the only choice', () => {
+  assert.equal(workflowDecision({}, ti(), { policy: fullPolicy, installed: 0, missing: ALL_MISSING }), null);
+});
+
+test('3 of 8 installed, including orch-implementer: refused, naming the count and the missing files', () => {
+  const d = workflowDecision({}, ti(), { policy: fullPolicy, installed: 3, missing: THREE_WITH_IMPLEMENTER_MISSING });
+  assert.ok(d);
+  assert.match(d.reason, /no turn cap/);
+  assert.match(d.reason, /3 of 8/);
+  assert.match(d.reason, /orch-planner\.md/);
+});
+
+test('3 of 8 installed, orch-implementer itself missing: still allowed', () => {
+  assert.equal(workflowDecision({}, ti(), { policy: fullPolicy, installed: 3, missing: THREE_WITHOUT_IMPLEMENTER_MISSING }), null);
+});
+
+test('8 of 8 installed: refused as before, no missing-files sentence needed', () => {
+  const d = workflowDecision({}, ti(), { policy: fullPolicy, installed: AGENT_NAMES.length, missing: NONE_MISSING });
+  assert.ok(d);
+  assert.match(d.reason, /no turn cap/);
+  assert.doesNotMatch(d.reason, /missing:/);
+});
+
+test('policy.workers.generalPurpose = allow overrides the gate even with orch-implementer installed', () => {
+  const allow = { ...policy, workers: { ...policy.workers, generalPurpose: 'allow' } };
+  assert.equal(workflowDecision({}, ti(), { policy: allow, installed: AGENT_NAMES.length, missing: NONE_MISSING }), null);
+});
+
+test('claude is treated the same as general-purpose', () => {
+  const d = workflowDecision({}, ti('claude'), { policy: fullPolicy, installed: 3, missing: THREE_WITH_IMPLEMENTER_MISSING });
+  assert.match(d.reason, /no turn cap/);
 });

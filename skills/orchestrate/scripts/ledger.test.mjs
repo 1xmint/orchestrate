@@ -116,6 +116,12 @@ test('parseReturn: no REVIEW OF line reads as null', () => {
   assert.equal(parseReturn('TASK: 9-1-0001\nSTATUS: DONE\n').reviewOf, null);
 });
 
+test('a return whose TASK line is prose ("TASK: build the login page") is not filed under its first word', () => {
+  const r = parseReturn('TASK: build the login page\nSTATUS: DONE\nEVIDENCE: it loads\n');
+  assert.equal(r.task, null);
+  assert.notEqual(r.task, 'build');
+});
+
 test('reviewDowngrade: a REVIEW: yes task marked DONE with no reviewer return yet is downgraded to PARTIAL with the note', () => {
   const r = reviewDowngrade('DONE', true, '9-1-0034', []);
   assert.equal(r.status, 'PARTIAL');
