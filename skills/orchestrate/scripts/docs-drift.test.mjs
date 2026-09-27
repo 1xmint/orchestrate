@@ -10,7 +10,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { PRICES } from './lib/prices.mjs';
+import { PRICES, cacheReadShare } from './lib/prices.mjs';
 
 const SKILL = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = resolve(SKILL, '..', '..');
@@ -174,16 +174,23 @@ test('every family\'s price in models.md\'s table matches prices.mjs, and so doe
   // One row per family named in prices.mjs, so a family added there without a
   // row here — or a row here whose number drifts — fails loudly.
   const rowFor = {
-    fable: /\|\s*Fable[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/,
-    opus: /\|\s*Opus[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/,
-    sonnet: /\|\s*Sonnet[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/,
-    haiku: /\|\s*Haiku[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|/,
+    fable: /\|\s*Fable[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|\s*\$([\d.]+)\s*\|/,
+    opus: /\|\s*Opus[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|\s*\$([\d.]+)\s*\|/,
+    sonnet: /\|\s*Sonnet[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|\s*\$([\d.]+)\s*\|/,
+    haiku: /\|\s*Haiku[^|]*\|[^|]*\|\s*\$(\d+)\s*\/\s*\$(\d+)\s*\|\s*\$([\d.]+)\s*\|/,
   };
+  // A model id per family that cacheReadShare actually recognises (its own
+  // pattern match, e.g. "fable-5-1" or "opus"), so the expected cache-read
+  // dollar figure below is computed the same way prices.mjs computes it, not
+  // just hard-coded a second time.
+  const modelIdFor = { fable: 'claude-fable-5-1', opus: 'claude-opus-5-5', sonnet: 'claude-sonnet-5', haiku: 'claude-haiku-4-5' };
   for (const [family, re] of Object.entries(rowFor)) {
     const row = re.exec(MODELS_MD);
     assert.ok(row, `models.md has no price row for ${family} to check`);
     assert.equal(Number(row[1]), PRICES[family].in, `models.md's ${family} input price does not match prices.mjs`);
     assert.equal(Number(row[2]), PRICES[family].out, `models.md's ${family} output price does not match prices.mjs`);
+    const expectedCacheRead = PRICES[family].in * cacheReadShare(modelIdFor[family]);
+    assert.equal(Number(row[3]), expectedCacheRead, `models.md's ${family} cache-read price does not match prices.mjs's cacheReadShare`);
   }
 
   // README states no per-family $in/$out prices today (it only quotes

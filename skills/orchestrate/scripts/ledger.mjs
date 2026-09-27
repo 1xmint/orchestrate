@@ -208,18 +208,24 @@ export function evidenceDowngrade(status, text) {
 
 export const NO_REVIEW_NOTE = 'done, but it was marked for an independent review and none has returned yet.';
 
-// A task's packet can ask for independent review (packet.md: REVIEW: yes).
-// A DONE return for such a task is recorded PARTIAL, with a note, until a
-// reviewer return naming this task under "REVIEW OF:" exists in the run's own
-// returns index. Only ever narrows DONE, the same shape as evidenceDowngrade:
-// a PARTIAL or BLOCKED return is left exactly as it was, and this never
-// upgrades a status once downgraded — a later reviewer return does not rewrite
-// an earlier PARTIAL filing, it only lets the *next* DONE return through.
-export function reviewDowngrade(status, reviewFlagged, task, indexRows) {
+// A task's packet can ask for independent review (packet.md: REVIEW: yes), or
+// guard-agent.mjs's recordDispatch can infer the same gate from a word in the
+// packet's own OBJECTIVE (money, auth, destructive data, a shared contract) —
+// either way the dispatch record carries `review: true`. A DONE return for
+// such a task is recorded PARTIAL, with a note, until a reviewer return naming
+// this task under "REVIEW OF:" exists in the run's own returns index. Only
+// ever narrows DONE, the same shape as evidenceDowngrade: a PARTIAL or BLOCKED
+// return is left exactly as it was, and this never upgrades a status once
+// downgraded — a later reviewer return does not rewrite an earlier PARTIAL
+// filing, it only lets the *next* DONE return through.
+export function reviewDowngrade(status, reviewFlagged, task, indexRows, reviewInferred = null) {
   if (status !== 'DONE' || !reviewFlagged || !task) return { status, note: null };
   const reviewed = (indexRows || []).some(row => row && row.reviewOf === task);
   if (reviewed) return { status, note: null };
-  return { status: 'PARTIAL', note: NO_REVIEW_NOTE };
+  const note = reviewInferred
+    ? `done, but its objective mentions ${reviewInferred}, so it waits for an independent review that has not returned yet.`
+    : NO_REVIEW_NOTE;
+  return { status: 'PARTIAL', note };
 }
 
 // The run's own returns index, read fresh for each SubagentStop so a reviewer
@@ -432,7 +438,7 @@ function main() {
   // already exists in this run's own returns index. Read before this return is
   // indexed, so this return's own reviewOf (if it is itself a reviewer return)
   // never counts as reviewing itself.
-  const review = reviewDowngrade(r.status, Boolean(dispatch && dispatch.review), r.task, readReturnsIndex(dir));
+  const review = reviewDowngrade(r.status, Boolean(dispatch && dispatch.review), r.task, readReturnsIndex(dir), (dispatch && dispatch.reviewInferred) || null);
   r.status = review.status;
 
   try {

@@ -125,3 +125,10 @@ for another delete-target rule) with:
 Add a case to `guard-bash.test.mjs` for the new shape, and a case proving
 the command it must *not* catch still passes through silently — a rule that
 is too broad is exactly as costly as a missing one, just quieter about it.
+
+## The dispatch guard's own review gate
+
+A different guard, `guard-agent.mjs`, holds a task's DONE return back for
+independent review not only when its packet says `REVIEW: yes`, but also
+when the packet's own OBJECTIVE mentions money, auth, destructive data, or a
+shared contract — the word list lives in `REVIEW_WORDS` in that file.

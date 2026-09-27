@@ -619,6 +619,27 @@ test('ledger: a REVIEW: yes task returned DONE with no reviewer return yet is fi
   assert.equal(later[0].status, 'DONE', 'a reviewer return now on file for this task lets the next DONE through');
 });
 
+test('ledger: a task whose review was inferred from its objective (no REVIEW: yes) returned DONE is filed PARTIAL naming the word', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'rv-inferred', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'rv-inferred.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-implementer', model: 'sonnet', task: '9-9-0001', run: repo.runId, review: true, reviewInferred: 'payment', toolUseId: 'toolu_b' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'rv-inferred', cwd: repo.dir,
+    agent_id: 'impl-3', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.equal(out.status, 0);
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index[0].status, 'PARTIAL');
+  assert.equal(index[0].reviewGated, true);
+  const savedFile = readFileSync(index[0].file, 'utf8');
+  assert.match(savedFile, /its objective mentions payment, so it waits for an independent review/);
+});
+
 test('ledger: a helper stopped at its turn cap with no final message is still recorded', () => {
   const home = sandbox();
   const repo = fixtureRepo();

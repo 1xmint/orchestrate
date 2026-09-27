@@ -7,16 +7,16 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dollars, family, priceTag, reasonedPrice, PRICES, REASONED, PRICES_AS_OF, checked, costLabel } from './prices.mjs';
+import { dollars, family, priceTag, reasonedPrice, PRICES, REASONED, PRICES_AS_OF, checked, costLabel, cacheReadShare } from './prices.mjs';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'prices.mjs'), 'utf8');
 
 test('a known usage prices to a hand-computed figure', () => {
   // Opus 5.5 ($4/$20): 1M fresh input at $4, 1M output at $20, 1M cache
-  // read at $0.40 (10% of input), 1M cache write at $5 (125% of input) =
-  // $29.40.
+  // read at $0.20 (5% of input), 1M cache write at $5 (125% of input) =
+  // $29.20.
   const d = dollars({ input: 1e6, output: 1e6, cacheRead: 1e6, cacheWrite: 1e6 }, 'opus');
-  assert.equal(Number(d.toFixed(2)), 29.4);
+  assert.equal(Number(d.toFixed(2)), 29.2);
   // Sonnet is 2/10, so the same usage is half of Opus on input and output.
   assert.equal(Number(dollars({ input: 1e6 }, 'sonnet').toFixed(2)), 2);
   assert.equal(dollars({}, 'opus'), 0, 'no tokens, no dollars');
@@ -28,6 +28,14 @@ test('opus prices to the current opus alias, Opus 5.5, and the check date is cur
   assert.equal(checked, '2026-09-24');
   assert.equal(PRICES_AS_OF, '2026-09-24');
   assert.match(SOURCE, /https:\/\/claude\.com\/pricing/);
+});
+
+test('cacheReadShare: opus is 5%, fable 5.1 is 2.5%, everything else is 10%', () => {
+  assert.equal(cacheReadShare('claude-opus-5-5'), 0.05);
+  assert.equal(cacheReadShare('claude-fable-5-1'), 0.025);
+  assert.equal(cacheReadShare('claude-sonnet-5'), 0.1);
+  assert.equal(cacheReadShare('claude-haiku-4-5'), 0.1);
+  assert.equal(cacheReadShare(''), 0.1);
 });
 
 test('an unnamed model has no family and no price', () => {
