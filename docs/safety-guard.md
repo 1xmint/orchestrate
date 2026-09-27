@@ -46,6 +46,14 @@ those. Everything else, including loud everyday commands like `npm test` or
   `dropdb`. Running a `.sql` file against a database (`psql -f x.sql`,
   `mysql < x.sql`) is **not** stopped on its own — only when the command
   line itself also says drop or truncate.
+- ending programs by name rather than by one known process id: `taskkill
+  /IM` (also `//IM` and `-IM`), `pkill`, `killall`, a `kill -9`/`-KILL`
+  whose target is anything but plain process ids (`$(pgrep node)`, a
+  backtick, `-1`), and PowerShell's `Stop-Process -Name`/`-ProcessName` or
+  a `Get-Process | Stop-Process` pipe. `taskkill /PID 123`, `kill -9 12345`
+  and `Stop-Process -Id 5` name one process the caller already knows and
+  are **not** stopped. A name ends every program by that name on the
+  machine, other people's servers and sessions included.
 
 `git reset --hard` with no argument is **not** stopped: on its own it only
 discards uncommitted edits in the working copy, never a commit, so there is

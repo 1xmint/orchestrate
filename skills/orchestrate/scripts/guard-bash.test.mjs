@@ -132,6 +132,64 @@ test('a .sql file run against a database is not asked about unless the command l
   assert.equal(decide('mysql < migrations/drop_table.sql').kind, 'pass');
 });
 
+// ---- killing processes by name is stopped ---------------------------------
+
+test('a process kill by name is stopped, with the process-kill reason', () => {
+  const commands = [
+    'taskkill //F //IM node.exe',
+    'taskkill /F /IM node.exe',
+    'taskkill -F -IM node.exe',
+    'pkill -f node',
+    'pkill node',
+    'killall node',
+    'kill -9 $(pgrep node)',
+    'kill -9 `pgrep node`',
+    'kill -9 -1',
+    'kill -KILL $(lsof -t -i:3000)',
+    'kill -s KILL $(cat server.pid)',
+    'Stop-Process -Name node -Force',
+    'Stop-Process -ProcessName node',
+    'Get-Process node | Stop-Process -Force',
+  ];
+  for (const command of commands) {
+    const d = decide(command);
+    assert.equal(d.kind, 'ask', command);
+    assert.match(d.reason, /^This would end every running program with that name on this machine, not only the one you started/, command);
+    assert.match(d.reason, /Say yes to continue./, command);
+  }
+});
+
+test('a kill of one known process id is not stopped', () => {
+  for (const command of [
+    'taskkill /PID 1234',
+    'taskkill //F //PID 1234',
+    'kill -9 12345',
+    'kill -9 12345 12346',
+    'kill 12345',
+    'kill -TERM 12345',
+    'Stop-Process -Id 5',
+    'Stop-Process -Id 5 -Force',
+    'echo "the skill is loaded"',
+  ]) assert.equal(decide(command).kind, 'pass', command);
+});
+
+test('a process kill by name from a helper or in headless mode is refused, not asked', () => {
+  const helper = decide('taskkill //F //IM node.exe', { subagent: true });
+  assert.equal(helper.kind, 'deny');
+  assert.match(helper.reason, /report back to the lead/);
+  assert.doesNotMatch(helper.reason, /Say yes/);
+  const headless = decide('pkill -f node', { headless: true, mode: 'auto' });
+  assert.equal(headless.kind, 'deny');
+  assert.match(headless.reason, /auto mode, where nobody can say yes/);
+  assert.doesNotMatch(headless.reason, /Say yes/);
+});
+
+test('a process kill by name sent as a PowerShell tool call is stopped too', () => {
+  const r = run(powershell('Get-Process node | Stop-Process -Force'));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'ask');
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /^This would end every running program with that name/);
+});
+
 test('a drop-database command from a subagent is denied with a report-back reason', () => {
   const r = run(bash('psql -c "drop table users"', { agent_id: 'helper-1' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');

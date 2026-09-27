@@ -111,6 +111,28 @@ function isDataStoreDestroy(cmd) {
   return false;
 }
 
+// Whether the command line ends processes by name rather than by one known
+// id: `taskkill /IM node.exe` (also `//IM` from a POSIX shell on Windows and
+// `-IM`), `pkill`, `killall`, a `kill -9`/`-KILL` whose target is anything
+// but plain process ids (a `$(pgrep …)`, a backtick, `-1` for everything), and
+// PowerShell's `Stop-Process -Name` or a `Get-Process | Stop-Process` pipe.
+// `taskkill /PID 123`, `kill -9 12345` and `Stop-Process -Id 5` name one
+// process the caller already knows and pass. A helper stopping the test
+// server it started has a pid for it; a name kills every program by that
+// name on the machine, other people's servers and sessions included.
+function isProcessKill(cmd) {
+  if (/\btaskkill\b/i.test(cmd) && /(^|\s)(\/\/?|-)im\b/i.test(cmd)) return true;
+  if (/\b(pkill|killall)\b/.test(cmd)) return true;
+  const k = /\bkill\s+(?:-9|-KILL|-SIGKILL|-s\s+(?:SIG)?KILL)\b\s*(.*)$/i.exec(cmd);
+  if (k) {
+    const targets = k[1].trim().split(/\s+/).filter(Boolean);
+    if (targets.length && !targets.every(t => /^\d+$/.test(t))) return true;
+  }
+  if (/\bStop-Process\b/i.test(cmd) && /\s-(Process)?Name\b/i.test(cmd)) return true;
+  if (/\bGet-Process\b/i.test(cmd) && /\|\s*Stop-Process\b/i.test(cmd)) return true;
+  return false;
+}
+
 const RULES = [
   {
     name: 'branch-delete-remote',
@@ -161,6 +183,11 @@ const RULES = [
     name: 'data-store-destroy',
     test: cmd => isDataStoreDestroy(cmd),
     reason: `This would permanently delete data in a database, which cannot be undone. ${ASK_TAIL}`,
+  },
+  {
+    name: 'process-kill',
+    test: cmd => isProcessKill(cmd),
+    reason: `This would end every running program with that name on this machine, not only the one you started, including other people’s servers and sessions. ${ASK_TAIL}`,
   },
 ];
 
