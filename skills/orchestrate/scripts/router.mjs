@@ -115,9 +115,11 @@ function gatherContext(input, state) {
     state.run = { root: r.run.root, runId: r.run.runId, runMd: r.run.runMd, boundAt: (state.run && state.run.boundAt) || new Date().toISOString() };
   }
 
+  const agentsInfo = agentsInstalled();
   return {
     tier: state.tier,
-    agents: agentsInstalled().installed,
+    agents: agentsInfo.installed,
+    agentsExpected: agentsInfo.expected,
     repoRoot,
     cwd: input.cwd || null,
     run: r.run,
@@ -285,6 +287,13 @@ function handlePrompt(input) {
     const opening = actionableLine(ctx);
     out.push(opening ? `[orchestrate] ${opening}` : '[orchestrate]');
     out.push(cardBody());
+    // A partial install turns off the guard against uncapped helpers
+    // (guard-agent.mjs only refuses general-purpose/claude once every role
+    // agent is present) with nothing else saying so. Never on a helper's own
+    // first prompt (`agent_id` present): only the lead can fix an install.
+    if (!input.agent_id && ctx.agentsExpected && ctx.agents < ctx.agentsExpected) {
+      out.push(`Only ${ctx.agents} of the plugin's ${ctx.agentsExpected} helper roles are installed, so the guard against uncapped helpers is off; run \`claude plugin install orchestrate@orchestrate\` (or \`node scripts/install.mjs --with-router --with-hook\`) to complete it.`);
+    }
     if (ctx.run) {
       const ex = resumeExcerpt(ctx.run.runMd);
       if (ex) out.push(`[orchestrate · run ${ctx.run.runMd}]\n${ex}`);

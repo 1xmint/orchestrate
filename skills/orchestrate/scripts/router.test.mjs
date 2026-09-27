@@ -14,14 +14,14 @@ import { AGENT_NAMES } from './lib/tier.mjs';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTER = join(HERE, 'router.mjs');
 
-function makeHome() {
+function makeHome(agentNames = AGENT_NAMES) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'max5', tierSource: 'user', setAt: '2026-09-08T00:00:00Z' }));
   // Most router tests are about ordinary prompts, not this one-time migration.
   writeFileSync(join(home, '.claude', 'orchestrate', 'autocompact-default.json'), '{}');
   mkdirSync(join(home, '.claude', 'agents'), { recursive: true });
-  for (const n of AGENT_NAMES) {
+  for (const n of agentNames) {
     writeFileSync(join(home, '.claude', 'agents', `${n}.md`), `---\nname: ${n}\n---\n`);
   }
   return home;
@@ -175,6 +175,27 @@ test('a hook firing inside a subagent (agent_id present) prints nothing on Sessi
   assert.equal(inside, '', 'a subagent compacting its own transcript gets no card');
   const outside = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-agent2', cwd: repo });
   assert.match(outside, /\[orchestrate/, 'the same payload without agent_id still prints');
+});
+
+test('a partial install of the role agents says so on the first card, once, and names the count', () => {
+  const home = makeHome([]); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(first, new RegExp(`Only 0 of the plugin's ${AGENT_NAMES.length} helper roles are installed`));
+  assert.match(first, /claude plugin install orchestrate@orchestrate/);
+  const second = prompt(home, repo, 'now do the same for the list command and test that too');
+  assert.doesNotMatch(second, /helper roles are installed/, 'said once per session');
+});
+
+test('a helper\'s own first prompt never hears the partial-install notice', () => {
+  const home = makeHome([]); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it', { agent_id: 'a1' });
+  assert.doesNotMatch(first, /helper roles are installed/);
+});
+
+test('all eight role agents installed: no partial-install notice', () => {
+  const home = makeHome(AGENT_NAMES); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.doesNotMatch(first, /helper roles are installed/);
 });
 
 test('the wording of a message never produces an instruction', () => {

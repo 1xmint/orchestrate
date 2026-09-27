@@ -211,6 +211,8 @@ install. You should not need to type them.
 | `precompact-check.mjs` | just before the conversation is compacted | the same Pickup rule as `turn-check.mjs`, fired one moment earlier: a long session can auto-compact mid-turn, and a stale Pickup line does not just age, it is gone. Asks once per unwritten line, then lets compaction proceed either way so it can never block the very thing that frees up context |
 | `postcompact-check.mjs` | just after a helper's own conversation is compacted | saves the summary the helper was left with under the run it belongs to, so when its return lands the ledger can say that it lost its earlier context along the way. Does nothing for your own session |
 
+`guard-agent.mjs` only refuses `general-purpose`/`claude` once all eight role agents are installed; on a partial install that guard is silently off, so `router.mjs` says so once on the first card of a session, naming how many of the eight are present.
+
 The router, the guard and the ledger are global, registered once from the
 plugin's own `hooks/hooks.json` so they run whether or not the skill is
 currently in play — **for a plugin install.** `SKILL.md`'s frontmatter carries
