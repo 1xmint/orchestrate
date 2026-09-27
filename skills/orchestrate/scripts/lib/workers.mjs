@@ -220,7 +220,7 @@ export function cappedNote(state) {
   if (!list.length) return '';
   for (const r of list) r.cappedShown = true;
   const shown = list.slice(-4).map(r => `${r.agent}${r.task ? ` ${r.task}` : ''} (${r.cap != null ? `used all ${r.cap} turns it is allowed` : `${r.turns} turns`}${r.progress ? `, progress ${r.progress}` : ''})`).join('; ');
-  return `[orchestrate · partial] stopped at the turn cap, so partial: ${shown}. Check what its evidence shows is done, then send only the remaining work as a fresh, smaller packet from its progress file and branch. Do not resume the stopped helper.`;
+  return `[orchestrate · partial] stopped at the turn cap, so partial: ${shown}. Check what its evidence shows is done; if what is left is small, SendMessage it now while it is warm, otherwise send it as a fresh, smaller packet from its progress file and branch.`;
 }
 
 // ---- external workers --------------------------------------------------------

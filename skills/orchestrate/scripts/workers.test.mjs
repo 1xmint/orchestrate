@@ -472,8 +472,8 @@ test('capped returns are partial, and the recovery note is said once', () => {
   const state = { returned: [{ agent: 'orch-implementer', task: '9-14-0002', capped: true, turns: 50, cap: 20, progress: '/r/progress/9-14-0002.md' }, { agent: 'orch-reviewer', task: '3' }] };
   const note = cappedNote(state);
   assert.match(note, /orch-implementer 9-14-0002 \(used all 20 turns it is allowed, progress \/r\/progress\/9-14-0002\.md\)/, 'names the cap, not the 50-turn count');
-  assert.match(note, /only the remaining work as a fresh, smaller packet/);
-  assert.match(note, /Do not resume the stopped helper/);
+  assert.match(note, /a fresh, smaller packet from its progress file and branch/);
+  assert.match(note, /if what is left is small, SendMessage it now while it is warm/);
   assert.equal(cappedNote(state), '', 'once');
 });
 

@@ -88,11 +88,12 @@ costs one step; send what it says.
 
 ## Partial returns
 
-A return that used every turn its role allows is **partial**, whatever it says;
-the ledger marks it and you are told once. Check what its evidence shows is
-done, then dispatch only the remaining work as a fresh, smaller packet from its
-PROGRESS file and branch. Do not keep resuming a large helper: every step it
-takes re-reads its whole grown context.
+A return that used every turn is **partial**, whatever it says; the ledger
+marks it and you are told once. Check what its evidence shows is done. If
+what is left is small, `SendMessage` the agent's id while its cache is warm
+(about five minutes), the same move as any other continue. Otherwise dispatch
+only the remaining work as a fresh, smaller packet from its PROGRESS file and
+branch: a cold resume re-reads its whole grown context at full price.
 
 The cap stops the helper mid-call with no report, so work that lives only in
 its working tree is at risk of being left uncommitted. A packet for a code
