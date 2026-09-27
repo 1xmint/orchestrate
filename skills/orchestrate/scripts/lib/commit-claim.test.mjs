@@ -3,7 +3,7 @@
 //   node --test skills/orchestrate/scripts/lib/commit-claim.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyClaim, lastAssistantText, contradicts } from './commit-claim.mjs';
+import { classifyClaim, lastAssistantText, contradicts, countedPaths } from './commit-claim.mjs';
 
 const line = rec => JSON.stringify(rec) + '\n';
 const assistantText = (...texts) => line({ type: 'assistant', message: { content: texts.map(t => ({ type: 'text', text: t })) } });
@@ -105,4 +105,18 @@ test('contradicts: not-committed claim with a clean tree and zero commits since 
 test('contradicts: a mixed or absent claim is never a contradiction', () => {
   assert.equal(contradicts('mixed', 0, 4), false);
   assert.equal(contradicts(null, 3, 0), false);
+});
+
+// ---- countedPaths -------------------------------------------------------------
+
+test("the plugin's own folders are not counted as uncommitted work", () => {
+  assert.deepEqual(countedPaths(['.claude/', '.orchestrator/runs/x/RUN.md', 'server.js']), ['server.js']);
+  assert.deepEqual(countedPaths(['.claude/worktrees/agent-1/a.js']), []);
+  assert.deepEqual(countedPaths(['"path with space/.claude"', '.claude']), ['"path with space/.claude"']);
+});
+
+test('ordinary paths, including dotfiles, all count', () => {
+  assert.deepEqual(countedPaths(['.gitignore', 'README.md', 'src/.claude-notes.md', 'lib/borrow.js']), ['.gitignore', 'README.md', 'src/.claude-notes.md', 'lib/borrow.js']);
+  assert.deepEqual(countedPaths([]), []);
+  assert.deepEqual(countedPaths(null), []);
 });

@@ -177,6 +177,20 @@ test('a committed claim over a dirty tree is blocked and names the files', () =>
   assert.match(out.reason, /shows 1 file not committed \(c\.txt\)/);
 });
 
+test("a committed claim is not blocked when only the plugin's own folders are untracked", () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  mkdirSync(join(dir, '.claude', 'worktrees', 'agent-1'), { recursive: true });
+  writeFileSync(join(dir, '.claude', 'worktrees', 'agent-1', 'x.txt'), 'helper\n');
+  mkdirSync(join(dir, '.orchestrator', 'runs'), { recursive: true });
+  writeFileSync(join(dir, '.orchestrator', 'runs', 'RUN.md'), 'ledger\n');
+  const transcript_path = writeTranscript(home, 'All committed.');
+  writeSession(home, 'sess-3b', { startHead });
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-3b', cwd: dir, transcript_path }, home);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+});
+
 test('the same contradicted claim is never blocked twice in one session', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
   const { dir, startHead } = makeRepo();

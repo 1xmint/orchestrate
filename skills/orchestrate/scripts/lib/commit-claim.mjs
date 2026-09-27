@@ -85,3 +85,14 @@ export function contradicts(claim, porcelainCount, commitsSinceStart = null) {
   }
   return false;
 }
+
+// The paths from `git status --porcelain` that count as the user's own
+// uncommitted work. The plugin's own folders are left out: `.claude/` holds the
+// helpers' worktrees and `.orchestrator/` the run ledger, and both sit
+// untracked in nearly every repo the plugin works in. Counting them made the
+// check block a true sentence in the round-7 live run ("committed on branch
+// X" while `.claude/` was the only untracked entry).
+const OWN_FOLDERS = /^(?:"?)(?:\.claude|\.orchestrator)(?:\/|$)/;
+export function countedPaths(paths) {
+  return (Array.isArray(paths) ? paths : []).map(p => String(p || '').trim()).filter(p => p && !OWN_FOLDERS.test(p));
+}

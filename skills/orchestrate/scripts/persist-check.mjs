@@ -32,7 +32,7 @@ import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, r
 import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 import { sampleContext, markAnnounced, markTicked, checkpointPath, contextEpoch, hasCheckpoint, thresholds, switchAdvice } from './lib/context.mjs';
 import { modeOf } from './lib/modes.mjs';
-import { classifyClaim, lastAssistantText, contradicts } from './lib/commit-claim.mjs';
+import { classifyClaim, lastAssistantText, contradicts, countedPaths } from './lib/commit-claim.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -148,14 +148,15 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
 
 const STORE = () => join(DIR, 'persist-checks.json');
 
-// `git status --porcelain`, parsed to a count and up to three file names. Any
+// `git status --porcelain`, parsed to a count and up to three file names, with
+// the plugin's own untracked folders (.claude/, .orchestrator/) left out. Any
 // failure (no git on PATH, cwd not inside a repo, the 3s timeout) is a silent
 // skip: this check only ever fires when it can be sure of the repo's state.
 function gitPorcelain(cwd) {
   try {
     const r = spawnSync('git', ['status', '--porcelain'], { cwd, timeout: 3000, encoding: 'utf8' });
     if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return null;
-    const files = r.stdout.split('\n').map(l => l.trimEnd()).filter(Boolean).map(l => l.slice(3).trim());
+    const files = countedPaths(r.stdout.split('\n').map(l => l.trimEnd()).filter(Boolean).map(l => l.slice(3).trim()));
     return { count: files.length, files: files.slice(0, 3) };
   } catch { return null; }
 }
