@@ -2,15 +2,71 @@
 // directly against the pure functions rather than through a spawned process.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stateLine, stateHash, readyPhrase, ungradedPhrase, budgetPhrase } from './state-line.mjs';
+import { stateLine, statusReply, statusOpener, actionableLine, stateHash, readyPhrase, ungradedPhrase, budgetPhrase } from './state-line.mjs';
+import { AGENT_NAMES } from './tier.mjs';
 
-test('lib/state-line.mjs exports exactly the sixteen names this concern owns', async () => {
+test('lib/state-line.mjs exports exactly the seventeen names this concern owns', async () => {
   const mod = await import('./state-line.mjs');
   assert.deepEqual(Object.keys(mod).sort(), [
-    'stateLine', 'statusReply', 'actionableLine', 'contextBand', 'contextPhrase', 'quotaPhrase', 'quotaBand',
+    'stateLine', 'statusReply', 'statusOpener', 'actionableLine', 'contextBand', 'contextPhrase', 'quotaPhrase', 'quotaBand',
     'READY_SHOWN', 'readyPhrase', 'ungradedPhrase', 'budgetPhrase', 'progressPhrase', 'edgesPhrase', 'runPhrase',
     'stateHash', 'codexState',
   ].sort());
+});
+
+// ---- statusReply opens with one actionable sentence, chosen by state -------
+
+const baseCtx = { self: null, tier: 'pro', agents: AGENT_NAMES.length, limits: [], candidates: [], run: null, quota: null, persist: false, context: null };
+
+test('statusOpener leads with an actionable fact when one exists (limit reached)', () => {
+  const ctx = { ...baseCtx, limits: ['codex'] };
+  const opener = statusOpener(ctx);
+  assert.equal(opener, actionableLine(ctx));
+  assert.match(opener, /limit on Codex is reached/);
+  assert.ok(opener.length < 120);
+});
+
+test('statusOpener leads with an actionable fact when one exists (run continues this session)', () => {
+  const ctx = { ...baseCtx, run: { runId: '20260101-thing', runMd: '.orchestrator/runs/20260101-thing/RUN.md' } };
+  const opener = statusOpener(ctx);
+  assert.match(opener, /This session continues the run at/);
+  assert.ok(opener.length < 120);
+});
+
+test('statusOpener leads with an actionable fact when one exists (auto-continue on)', () => {
+  const ctx = { ...baseCtx, persist: true };
+  const opener = statusOpener(ctx);
+  assert.match(opener, /Auto-continue is on/);
+  assert.ok(opener.length < 120);
+});
+
+test('statusOpener names the missing helper roles when the install is incomplete', () => {
+  const ctx = { ...baseCtx, agents: AGENT_NAMES.length - 3 };
+  const opener = statusOpener(ctx);
+  assert.match(opener, new RegExp(`Only ${AGENT_NAMES.length - 3} of ${AGENT_NAMES.length} helper roles are installed`));
+  assert.match(opener, /finish the install/);
+  assert.ok(opener.length < 120);
+});
+
+test('statusOpener says nothing is running when no run is bound and none is a lone candidate', () => {
+  const opener = statusOpener(baseCtx);
+  assert.match(opener, /^Nothing is running; describe what you want built/);
+  assert.ok(opener.length < 120);
+});
+
+test('statusOpener nudges the in-progress run when one is bound and nothing else is actionable', () => {
+  const ctx = { ...baseCtx, run: { runId: '20260101-thing' } };
+  const opener = statusOpener(ctx);
+  assert.equal(opener, 'Run 20260101-thing is in progress; say what to do next.');
+  assert.ok(opener.length < 120);
+});
+
+test('statusReply opens with the same sentence as statusOpener, then the full state line', () => {
+  const opener = statusOpener(baseCtx);
+  const reply = statusReply(baseCtx);
+  assert.ok(reply.startsWith(opener));
+  assert.match(reply, /\[orchestrate\]/);
+  assert.match(reply, /tier pro/);
 });
 
 test('state line and hash carry context bands', () => {
