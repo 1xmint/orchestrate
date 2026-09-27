@@ -255,6 +255,12 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
 export const PLAN_READ_ROLES = new Set(['orch-advisor', 'orch-planner', 'orch-researcher', 'orch-reviewer', 'Explore', 'Plan', 'claude-code-guide']);
 export const UNCAPPED = new Set(['general-purpose', 'claude']);
 export const COORDINATOR_CHILD_ROLES = new Set(['orch-implementer', 'orch-researcher', 'orch-reviewer', 'Explore']);
+// Roles whose agent file declares `isolation: worktree` (see
+// skills/orchestrate/assets/agents/*.md front matter). These helpers always
+// work in their own worktree and branch; a packet that sends one into the
+// shared checkout makes it write outside the repo or refuse.
+export const WORKTREE_ISOLATED_ROLES = new Set(['orch-implementer', 'orch-debugger']);
+const SHARED_CHECKOUT_RE = /project root|shared checkout|do not use a separate worktree|work directly in the (repo|checkout)|same checkout/i;
 
 const nestedReason = 'this nested dispatch cannot be attributed to a recorded coordinator parent, so it is denied';
 
@@ -279,6 +285,12 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
     if (!PLAN_READ_ROLES.has(role)) return { prefix: 'plan', reason: `the host is in Plan mode, where helpers only read. ${role} can change files. Send orch-advisor to test a direction, orch-planner for an ordered plan returned inline, orch-researcher for facts outside the code, orch-reviewer to judge a change, or Explore (naming a model) to find things. Or do the inspection yourself.` };
     if (ti.isolation === 'worktree' || /^\s*WHERE:.*worktree:\s*yes/mi.test(prompt) || /^\s*worktree:\s*yes/mi.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: no worktrees. Remove the worktree and ask for read-only findings returned inline.' };
     if (/^\s*PROGRESS:/m.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: helpers write no progress files. Remove the PROGRESS line and ask for findings returned inline; only the lead maintains the plan.' };
+  }
+
+  if (WORKTREE_ISOLATED_ROLES.has(role) && !/worktree:\s*yes/i.test(prompt)) {
+    if (/worktree:\s*no/i.test(prompt) || SHARED_CHECKOUT_RE.test(prompt)) {
+      return { prefix: 'workers', reason: `${role} always works in its own worktree and branch; a packet that sends it into the shared checkout makes it write outside the repo or refuse. Say WHERE: … worktree: yes and merge its branch when it returns.` };
+    }
   }
 
   // Only once all six role agents are present: a partial script install still

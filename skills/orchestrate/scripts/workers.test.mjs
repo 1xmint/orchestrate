@@ -46,6 +46,13 @@ test('only a recorded depth-1 coordinator may dispatch a named capped child', ()
   assert.equal(workflowDecision({}, ti('orch-coordinator'), { policy, installed: 7 }), null, 'the lead remains free to dispatch a coordinator');
 });
 
+test('a worktree-isolated helper refuses a packet that sends it into the shared checkout', () => {
+  assert.match(workflowDecision({}, ti('orch-implementer', 'TASK: 1\nWHERE: repo /r\nworktree: no'), { policy, installed: ALL }).reason, /own worktree and branch/);
+  assert.match(workflowDecision({}, ti('orch-debugger', 'TASK: 1\nWork directly in the project root (do not use a separate worktree)'), { policy, installed: ALL }).reason, /own worktree and branch/);
+  assert.equal(workflowDecision({}, ti('orch-implementer', 'TASK: 1\nWHERE: repo /r\nworktree: yes'), { policy, installed: ALL }), null);
+  assert.equal(workflowDecision({}, ti('orch-researcher', 'TASK: 1\nworktree: no'), { policy, installed: ALL }), null, 'orch-researcher is not worktree-isolated');
+});
+
 test('general-purpose is replaced by capped role agents while they are installed', () => {
   const d = workflowDecision({}, ti('general-purpose'), { policy, installed: ALL });
   assert.match(d.reason, /no turn cap/);
