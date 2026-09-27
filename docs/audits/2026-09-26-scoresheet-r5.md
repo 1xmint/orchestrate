@@ -171,3 +171,7 @@ context-check, persist-check (x2), turn-check               -> 0 chars
 ```
 
 Static facts (`facts.sh`, `facts2.sh`): sizes, version strings, agent frontmatter, `hooks.json` entries, `prices.mjs` table, `guard-agent.mjs:286` install-count condition, `prices.mjs:115-125` mean over recorded rows.
+
+## Erratum (added by the lead after reading the report)
+
+Row 12 and item 12 of §3 ask for `isolation: worktree` in the writing roles' frontmatter "instead of prose". It is already there: `skills/orchestrate/assets/agents/orch-implementer.md:6` and `orch-debugger.md:6` both carry it, and `assets.test.mjs` pins it. The prose rule 40ba545 added sits beside it, for the lead's packet rather than the host. The score for that row was not changed.
