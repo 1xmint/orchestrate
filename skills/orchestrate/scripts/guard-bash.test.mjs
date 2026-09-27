@@ -236,6 +236,35 @@ test('a session with no one able to answer an interactive prompt (bypassPermissi
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
 });
 
+test('auto mode has nobody to answer an ask, so it is denied with the mode named', () => {
+  const r = run(bash('git push --force', { permission_mode: 'auto' }));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /auto mode/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
+});
+
+test('dontAsk mode has nobody to answer an ask, so it is denied with the mode named', () => {
+  const r = run(bash('git push --force', { permission_mode: 'dontAsk' }));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /dontAsk mode/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
+});
+
+test('default mode still asks: someone is there to answer', () => {
+  const r = run(bash('git push --force', { permission_mode: 'default' }));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'ask');
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes to continue/);
+});
+
+test('deny reasons in modes with nobody to answer name no drive letter or account detail', () => {
+  for (const mode of ['bypassPermissions', 'auto', 'dontAsk']) {
+    const r = run(bash('git push --force', { permission_mode: mode, cwd: 'C:\\Users\\someone\\project' }));
+    assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+    assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /[A-Z]:\\/);
+    assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Users/);
+  }
+});
+
 // ---- the "ask" tail tells a headless model to stop instead of retrying -----
 
 test('every "ask" reason ends with the plain instruction to stop and tell the user rather than retry', () => {

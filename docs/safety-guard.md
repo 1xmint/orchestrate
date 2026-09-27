@@ -63,17 +63,19 @@ outside the local repo.
   back to the lead instead of retrying. A hook payload carries `agent_id`
   only when it fires inside a helper's own call; that field is the signal.
 - **From a session with nobody able to see an interactive prompt at all:**
-  the guard also refuses outright, with the same plain sentence as the
-  reason, rather than asking. The one field the hooks documentation confirms
-  for this is `permission_mode: "bypassPermissions"` (set for
-  `--dangerously-skip-permissions`) — a session in that mode never shows a
-  prompt to anyone, so an "ask" there would either hang or, on at least one
-  machine this was checked against, silently pass as if nobody had objected.
-  A plain `claude -p` run that does not also set `bypassPermissions` is not
-  distinguishable from an ordinary interactive session anywhere in the hook
-  payload, so it is not treated as headless here; it still gets asked. If
-  that turns out wrong in practice, the fix is a better-documented field to
-  key on, not guessing at one now.
+  the guard also refuses outright, naming the mode in plain words in the
+  reason, rather than asking. Three `permission_mode` values put a session in
+  this state: `"bypassPermissions"` (set for
+  `--dangerously-skip-permissions`), `"auto"`, and `"dontAsk"` — a session in
+  any of these never shows a prompt to anyone, so an "ask" there would either
+  hang or, on at least one machine this was checked against, silently pass as
+  if nobody had objected. `"default"`, `"plan"`, and `"acceptEdits"` still
+  show a prompt, so those keep asking. A plain `claude -p` run that does not
+  also set one of the three headless modes is not distinguishable from an
+  ordinary interactive session anywhere in the hook payload, so it is not
+  treated as headless here; it still gets asked. If that turns out wrong in
+  practice, the fix is a better-documented field to key on, not guessing at
+  one now.
 - **The same command asked twice in one session:** the second identical
   command gets the same "ask" decision, but the reason starts "Asked
   already: " instead of reading like the first time. This is for a model

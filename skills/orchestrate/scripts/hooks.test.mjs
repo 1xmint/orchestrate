@@ -961,9 +961,10 @@ test('precompact: a session with no bound run is asked for a checkpoint once, th
   assert.equal(block.decision, 'block');
   assert.deepEqual(Object.keys(block).sort(), ['decision', 'reason']);
   // The checkpoint lives under this plugin's own home-directory folder, not
-  // inside the fixture repo (`cwd`) — named in words, with no path at all.
-  assert.match(block.reason, /checkpoint file this plugin keeps/);
-  assert.doesNotMatch(block.reason, /context[\\/]spc4[\\/]checkpoint-|[A-Za-z]:[\\/]|\bUsers\b/, 'no absolute machine path');
+  // inside the fixture repo (`cwd`) — named relative to home, with no drive
+  // letter or account name.
+  assert.match(block.reason, /~\/\.claude\/orchestrate\/context\/.+checkpoint-.+\.md/);
+  assert.doesNotMatch(block.reason, /[A-Za-z]:[\\/]|\bUsers\b/, 'no absolute machine path');
   assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '');
 });
 
