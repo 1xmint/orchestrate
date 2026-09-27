@@ -146,3 +146,14 @@ test('reviewDowngrade never touches PARTIAL or BLOCKED, and never upgrades', () 
   assert.equal(reviewDowngrade('BLOCKED', true, '9-1-0034', []).status, 'BLOCKED');
   assert.equal(reviewDowngrade(null, true, '9-1-0034', []).status, null);
 });
+
+test('reviewDowngrade: a review inferred from the objective\'s own words names the word in the note', () => {
+  const r = reviewDowngrade('DONE', true, '9-1-0034', [], 'payment');
+  assert.equal(r.status, 'PARTIAL');
+  assert.equal(r.note, "done, but its objective mentions payment, so it waits for an independent review that has not returned yet.");
+});
+
+test('reviewDowngrade: no reviewInferred word falls back to the plain NO_REVIEW_NOTE', () => {
+  const r = reviewDowngrade('DONE', true, '9-1-0034', []);
+  assert.equal(r.note, NO_REVIEW_NOTE);
+});

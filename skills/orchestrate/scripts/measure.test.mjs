@@ -46,7 +46,7 @@ test('growth attributes the main session tool payloads, hooks, context and price
   assert.deepEqual(r.contexts, [{ response: 10, tokens: 330 }]);
   assert.deepEqual({ input: r.input, output: r.output, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }, { input: 550, output: 55, cacheRead: 1100, cacheWrite: 165 });
   assert.equal(r.priceModel, 'opus');
-  assert.equal(r.price, 0.004565);
+  assert.equal(r.price, 0.004345);
   assert.match(growthReport(r), /context every 10th response: #10 330/);
 });
 

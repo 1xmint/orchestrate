@@ -15,8 +15,9 @@ import { shortModel } from './tier.mjs';
 
 // Per million tokens (https://claude.com/pricing, checked 2026-09-24). A
 // 5-minute cache write is 125% of input. Cache read is 10% of input, except
-// Fable 5.1 at 2.5%. How a 1-hour cache write lands on plan usage is
-// undocumented, so it is priced as a 5-minute one and the number is a floor.
+// Fable 5.1 at 2.5% and Opus 5.5 at 5%. How a 1-hour cache write lands on
+// plan usage is undocumented, so it is priced as a 5-minute one and the
+// number is a floor.
 // `opus` here is the current `opus` alias, Opus 5.5 ($4/$20) — not the legacy
 // Opus 5 ($5/$25).
 export const PRICES = {
@@ -37,7 +38,10 @@ export function costLabel() {
 }
 
 export function cacheReadShare(modelId) {
-  return /fable-5[-.]1/i.test(String(modelId || '')) ? 0.025 : 0.1;
+  const s = String(modelId || '');
+  if (/fable-5[-.]1/i.test(s)) return 0.025;
+  if (/opus/i.test(s)) return 0.05;
+  return 0.1;
 }
 
 // The family a model id belongs to, or null when it is not one of the four.

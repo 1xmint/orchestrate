@@ -11,7 +11,7 @@ limits"). Read the ratios.
 | Model | Window | In / Out per 1M | Cache read | Effort | Pick it for |
 |---|---|---|---|---|---|
 | Fable 5.1 | 1M | $10 / $50 | $0.25 | low–max | work that is hard to check and expensive to get wrong |
-| Opus 5.5 | 1M | $4 / $20 | $0.40 | low–max | judgment: planning, grading, deciding, diagnosing |
+| Opus 5.5 | 1M | $4 / $20 | $0.20 | low–max | judgment: planning, grading, deciding, diagnosing |
 | Sonnet 5 | 1M | $2 / $10 | $0.20 | low–max | bounded work with a strong oracle |
 | Haiku 4.5 | **200K** | $1 / $5 | $0.10 | **none** | reading, sweeping, extracting |
 
