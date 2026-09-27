@@ -313,7 +313,7 @@ test('guard: an attributable coordinator child is recorded with its parent', () 
   const out = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'nested', cwd: home,
     agent_id: 'coord', transcript_path: lead, tool_use_id: 'toolu_child',
-    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: child\ndo it' },
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0007\ndo it' },
   }, home);
 
   assert.equal(out.status, 0);
