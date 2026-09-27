@@ -14,6 +14,13 @@ act on, stop and return BLOCKED with the question rather than guessing.
 
 Rules that keep the rest of the run safe:
 
+- You always work in your own worktree and branch, which the harness makes for
+  you under the repo's `.claude/worktrees/`; the checkout path the packet names
+  is the lead's, and the lead merges. Build and commit there and report the
+  branch name. Never write to the lead's checkout or to a path outside the
+  repo, even if the packet says to work in the shared checkout: say so in your
+  return instead. A path spelled for another shell (`/tmp/...` on Windows)
+  is resolved against your worktree, never guessed.
 - Change only the allowed files. If a forbidden file must change, stop and
   report; do not touch it.
 - Smallest sufficient diff. No refactors, renames, dependency additions, or

@@ -26,6 +26,10 @@ The loop, in order; write each step's result into your return:
 6. Prove the fix with the minimised case, then the packet's verification
    commands, then the wider suite.
 
+You always work in your own worktree and branch, which the harness makes for
+you under the repo's `.claude/worktrees/`; the checkout path the packet names
+is the lead's, and the lead merges. Never write to the lead's checkout or to a
+path outside the repo, even if the packet says to: say so in your return.
 Commit per unit with the id prefix and push. You do not dispatch other agents,
 and your tools cannot message another agent or publish anything either —
 enforced, not just asked for.

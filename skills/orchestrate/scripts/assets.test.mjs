@@ -182,6 +182,20 @@ test('WS4: no worker role can message another agent or publish, and the browser 
   }
 });
 
+test('the worktree-isolated roles are told where they work, so a lead cannot instruct the opposite', () => {
+  // Live run r5 (docs/audits/2026-09-26-live-runs-r5.md): the lead told three
+  // builders to work in the shared checkout; the harness isolates them, one
+  // wrote to a mis-resolved path outside the repo, and the lead spent ~30
+  // calls finding the work. The role text now says the worktree is theirs
+  // and the lead's checkout is not, whatever the packet says.
+  for (const n of ['orch-implementer', 'orch-debugger']) {
+    const body = readFileSync(join(AGENTS, `${n}.md`), 'utf8');
+    assert.match(body, /isolation: worktree/, `${n} is isolated in a worktree`);
+    assert.match(body, /own worktree and branch/, `${n} is told the worktree is its own`);
+    assert.match(body, /Never write to the lead's checkout/, `${n} is told not to write to the lead's checkout`);
+  }
+});
+
 test('the placeholder is only ever {{SKILL_DIR}}, never a machine path', () => {
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const text = readFileSync(join(AGENTS, f), 'utf8');
