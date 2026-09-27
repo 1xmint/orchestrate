@@ -98,8 +98,8 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
   const out = [];
   if (router) {
     const cmd = commandFor(join(scriptsDir, 'router.mjs'));
-    out.push({ event: 'UserPromptSubmit', matcher: null, command: cmd, timeout: 5 });
-    out.push({ event: 'SessionStart', matcher: 'resume|compact|clear', command: cmd, timeout: 5 });
+    out.push({ event: 'UserPromptSubmit', matcher: null, command: cmd, timeout: 15 });
+    out.push({ event: 'SessionStart', matcher: 'resume|compact|clear', command: cmd, timeout: 15 });
     // The other half of the router's "keep going" arming: without it the router
     // pins a goal nothing ever acts on.
     out.push({ event: 'Stop', matcher: null, command: commandFor(join(scriptsDir, 'persist-check.mjs')), timeout: 5 });

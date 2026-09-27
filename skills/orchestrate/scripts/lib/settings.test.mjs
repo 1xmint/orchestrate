@@ -94,7 +94,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
 
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.equal(s.hooks.UserPromptSubmit[0].matcher, undefined, 'UserPromptSubmit takes no matcher');
-  assert.equal(s.hooks.UserPromptSubmit[0].hooks[0].timeout, 5);
+  assert.equal(s.hooks.UserPromptSubmit[0].hooks[0].timeout, 15, 'the router has headroom: a cold `router status` measured 4.6 s against the old 5 s cap');
   assert.equal(s.hooks.SessionStart[0].matcher, 'resume|compact|clear');
   assert.equal(s.hooks.SubagentStop[0].hooks[0].command, commandFor(join(SCRIPTS, 'ledger.mjs')));
   assert.match(s.hooks.PreToolUse.map(g => JSON.stringify(g)).join(''), /guard-agent\.mjs/);

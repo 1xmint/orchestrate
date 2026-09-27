@@ -103,9 +103,18 @@ export function reasonedPrice(role, model) {
 export function estimateDollars(role, model, rows) {
   const f = family(model);
   if (!f) return null;
-  const mine = (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && r.dollars != null && Number.isFinite(Number(r.dollars)));
+  const mine = measuredRows(role, f, rows);
   if (mine.length) return mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
   return reasonedPrice(role, model);
+}
+
+// The rows that count as a measurement of this role on this model family: a
+// helper that ran spent tokens, so a row priced at $0 is a stop hook that saw
+// no usage (a helper that died at its cap, a transcript it could not read),
+// not a cheap run. Averaging those in would drag the mean to nothing and
+// switch the run ceiling off after two empty returns.
+function measuredRows(role, fam, rows) {
+  return (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === fam && r.dollars != null && Number.isFinite(Number(r.dollars)) && Number(r.dollars) > 0);
 }
 
 // A price tag: measured from this machine's own past runs when there are any,
@@ -115,7 +124,7 @@ export function estimateDollars(role, model, rows) {
 export function priceTag(role, model, rows, tier, profile) {
   const f = family(model);
   if (!f) return `price tag: ${role} on an unnamed model — not priced, because nothing here knows which model it will run on`;
-  const mine = (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && r.dollars != null && Number.isFinite(Number(r.dollars)));
+  const mine = measuredRows(role, f, rows);
   if (mine.length) {
     const avg = mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
     return `price tag: ${role} on ${f} ≈ $${avg.toFixed(2)} at list price, not subscription usage (measured here, n=${mine.length})`;

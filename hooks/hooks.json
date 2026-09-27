@@ -6,7 +6,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/router.mjs\"",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }
@@ -18,7 +18,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/router.mjs\"",
-            "timeout": 5
+            "timeout": 15
           }
         ]
       }

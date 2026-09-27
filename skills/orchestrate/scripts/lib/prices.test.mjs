@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dollars, family, priceTag, reasonedPrice, PRICES, REASONED, PRICES_AS_OF, checked, costLabel, cacheReadShare } from './prices.mjs';
+import { dollars, family, priceTag, reasonedPrice, estimateDollars, PRICES, REASONED, PRICES_AS_OF, checked, costLabel, cacheReadShare } from './prices.mjs';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'prices.mjs'), 'utf8');
 
@@ -102,4 +102,23 @@ test('every reasoned row is ordered by what the model costs', () => {
       if (PRICES[a].in > PRICES[b].in) assert.ok(row[a] >= row[b], `${role}: ${a} should not be cheaper than ${b}`);
     }
   }
+});
+
+test("a row priced at $0 is not a measurement: it never lowers the mean or switches the ceiling off", () => {
+  // Round-5 audit finding 1 (docs/audits/2026-09-26-scoresheet-r5.md): two
+  // returns that carried no usage were averaged in, the tag read "≈ $0.00
+  // (measured here, n=2)", and a dispatch that should have crossed the run
+  // ceiling went through. A helper that ran spent tokens; a $0 row is a stop
+  // hook that saw nothing.
+  const zeros = [
+    { agent: "z1", role: "orch-implementer", model: "sonnet", dollars: 0 },
+    { agent: "z2", role: "orch-implementer", model: "sonnet", dollars: 0 },
+  ];
+  assert.equal(estimateDollars("orch-implementer", "sonnet", zeros), REASONED["orch-implementer"].sonnet, "only empty rows: the reasoned figure stands");
+  assert.match(priceTag("orch-implementer", "sonnet", zeros, "pro", null), /reasoned .*not yet measured here/);
+  assert.doesNotMatch(priceTag("orch-implementer", "sonnet", zeros, "pro", null), /\$0\.00/);
+
+  const mixed = [...zeros, { agent: "m1", role: "orch-implementer", model: "sonnet", dollars: 1.2 }, { agent: "m2", role: "orch-implementer", model: "sonnet", dollars: 0.8 }];
+  assert.equal(estimateDollars("orch-implementer", "sonnet", mixed), 1.0, "the mean is over the rows that measured something");
+  assert.match(priceTag("orch-implementer", "sonnet", mixed, "pro", null), /≈ \$1\.00 .*\(measured here, n=2\)/);
 });
