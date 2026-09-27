@@ -22,12 +22,14 @@ import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, AGENT_NAMES } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { helperFiles, nativeAgent, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
-import { priceTag, estimateDollars, family, normalizeRole, costLabel } from './lib/prices.mjs';
+import { helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
+import { family, normalizeRole, costLabel } from './lib/prices.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
-import { readCosts } from './ledger.mjs';
+import { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
+import { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, nestedReason, workflowDecision } from './lib/workflow.mjs';
+import { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision } from './lib/spend-gate.mjs';
 
 // Anything here means the packet is carrying a live secret. The list grew after
 // an audit fed it four shapes it did not know: an OpenAI project key, a Google
@@ -241,73 +243,6 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
   return null;
 }
 
-// ---- the workflow rules ------------------------------------------------------
-// Scheduling belongs to the lead. The record that set these: one Sonnet helper
-// dispatched as built-in general-purpose (no turn cap) made 274 model calls,
-// reached 683k context, and started helpers of its own. Each rule names what to
-// send instead.
-//
-//   nested       only a recorded coordinator may start a capped child
-//   plan mode    helpers only read and return findings inline
-//   uncapped     general-purpose/claude while capped role agents are installed
-//   worktree     a Claude helper aimed at a worktree a live Codex worker holds
-//   concurrency  two workers normally, three while a coordinator holds a slot
-export const PLAN_READ_ROLES = new Set(['orch-advisor', 'orch-planner', 'orch-researcher', 'orch-reviewer', 'Explore', 'Plan', 'claude-code-guide']);
-export const UNCAPPED = new Set(['general-purpose', 'claude']);
-export const COORDINATOR_CHILD_ROLES = new Set(['orch-implementer', 'orch-researcher', 'orch-reviewer', 'Explore']);
-// Roles whose agent file declares `isolation: worktree` (see
-// skills/orchestrate/assets/agents/*.md front matter). These helpers always
-// work in their own worktree and branch; a packet that sends one into the
-// shared checkout makes it write outside the repo or refuse.
-export const WORKTREE_ISOLATED_ROLES = new Set(['orch-implementer', 'orch-debugger']);
-const SHARED_CHECKOUT_RE = /project root|shared checkout|do not use a separate worktree|work directly in the (repo|checkout)|same checkout/i;
-
-const nestedReason = 'this nested dispatch cannot be attributed to a recorded coordinator parent, so it is denied';
-
-export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, native = [], external = [], dispatches = [], files = new Map() } = {}) {
-  const role = normalizeRole(ti.subagent_type || 'general-purpose');
-  const prompt = String(ti.prompt || '');
-  const nestedParent = input && input.agent_id ? nativeAgent(dispatches, files, input.agent_id) : null;
-
-  if (input && input.agent_id && policy.workers.nested !== 'allow') {
-    if (policy.workers.nested === 'deny') {
-      return { prefix: 'workers', reason: 'nested dispatches are disabled by policy.workers.nested=deny' };
-    }
-    const parent = nestedParent;
-    if (!parent || parent.depth == null) return { prefix: 'workers', reason: nestedReason };
-    if (parent.role !== 'orch-coordinator') return { prefix: 'workers', reason: `only orch-coordinator may dispatch workers; recorded parent ${parent.agentId} is ${parent.role}` };
-    if (!COORDINATOR_CHILD_ROLES.has(role)) return { prefix: 'workers', reason: `orch-coordinator may dispatch only orch-implementer, orch-researcher, orch-reviewer, or Explore; ${role} is not allowed` };
-    if (!String(ti.model || '').trim()) return { prefix: 'workers', reason: 'a coordinator child must name its model' };
-    if (parent.depth + 1 > 2) return { prefix: 'workers', reason: `nested dispatch depth ${parent.depth + 1} exceeds the depth-2 limit` };
-  }
-
-  if (input && input.permission_mode === 'plan') {
-    if (!PLAN_READ_ROLES.has(role)) return { prefix: 'plan', reason: `the host is in Plan mode, where helpers only read. ${role} can change files. Send orch-advisor to test a direction, orch-planner for an ordered plan returned inline, orch-researcher for facts outside the code, orch-reviewer to judge a change, or Explore (naming a model) to find things. Or do the inspection yourself.` };
-    if (ti.isolation === 'worktree' || /^\s*WHERE:.*worktree:\s*yes/mi.test(prompt) || /^\s*worktree:\s*yes/mi.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: no worktrees. Remove the worktree and ask for read-only findings returned inline.' };
-    if (/^\s*PROGRESS:/m.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: helpers write no progress files. Remove the PROGRESS line and ask for findings returned inline; only the lead maintains the plan.' };
-  }
-
-  if (WORKTREE_ISOLATED_ROLES.has(role) && !/worktree:\s*yes/i.test(prompt)) {
-    if (/worktree:\s*no/i.test(prompt) || SHARED_CHECKOUT_RE.test(prompt)) {
-      return { prefix: 'workers', reason: `${role} always works in its own worktree and branch; a packet that sends it into the shared checkout makes it write outside the repo or refuse. Say WHERE: … worktree: yes and merge its branch when it returns.` };
-    }
-  }
-
-  // Only once all six role agents are present: a partial script install still
-  // falls back on general-purpose for a writing role (SKILL.md §0).
-  if (UNCAPPED.has(role) && installed >= AGENT_NAMES.length && policy.workers.generalPurpose !== 'allow') {
-    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orch-implementer (model "sonnet") to change code, orch-researcher or Explore (model "haiku") to find things, orch-planner when you cannot yet name the steps, orch-debugger for a failure that survived one attempt, orch-reviewer before shipping something expensive to get wrong, orch-advisor before committing to a direction, orch-browser when only a real browser settles it. Or do a small task yourself.` };
-  }
-
-  const locked = lockedWorktreeIn(prompt, external);
-  if (locked) return { prefix: 'workers', reason: `a Codex worker (${locked.task || 'task'}, pid ${locked.pid}) is still running in ${locked.worktree}. Two providers never work in one worktree at once: wait for it to exit, then send only the unfinished part.` };
-
-  const coordinatorParentId = nestedParent && nestedParent.role === 'orch-coordinator' ? nestedParent.agentId : null;
-  const busy = concurrencyDecision(role, { native, external, policy, coordinatorParentId });
-  if (busy) return { prefix: 'workers', reason: busy };
-  return null;
-}
-
 // Which invocation this is. The documented hook payload carries `tool_use_id`
 // alongside `session_id`, and that pair identifies one tool call exactly: two
 // registrations of this hook see the same pair, and a genuine retry gets a new
@@ -348,6 +283,9 @@ export const EVENTS_MAX = 400;
 // `recordSeen` (`lib/tier.mjs`) replace it with an append-only log: a
 // concurrent writer only ever adds its own line, so there is nothing to race.
 export { markSeen } from './lib/tier.mjs';
+export { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
+export { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, workflowDecision } from './lib/workflow.mjs';
+export { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision } from './lib/spend-gate.mjs';
 
 function seenBefore(id) {
   const now = Date.now();
@@ -366,22 +304,6 @@ function emit(obj) {
   process.stdout.write(JSON.stringify(obj));
 }
 
-// A price, said once, before the spend. Measured from this machine's own past
-// runs when there are any; labelled reasoned when there are not; absent when
-// neither exists, including when the packet named no model at all.
-//
-// It carries NO `permissionDecision`. `allow` alongside `additionalContext` is
-// documented and would work, and it would also auto-approve every dispatch and
-// take away the user's permission prompt — a silent change to a default nobody
-// asked to change.
-export function tagFor(ti) {
-  try {
-    const role = String(ti.subagent_type || 'claude');
-    const model = String(ti.model || '');
-    if (!model) return '';
-    return priceTag(role, model, readCosts(), detectTier().tier, readJson(PROFILE_PATH));
-  } catch { return ''; }
-}
 
 // Roles that write their own findings to disk mid-task and can be cut off by
 // a turn cap or a usage limit before they return: a capped return with no
@@ -399,74 +321,6 @@ const PACKET_PATH_RE = /\bpacket\b[^\n,]{0,40}?([^\s,]+\.[A-Za-z0-9]+)(?=[,\s]|$
 function packetPathFrom(prompt) {
   const m = PACKET_PATH_RE.exec(String(prompt || ''));
   return m ? m[1] : null;
-}
-
-// Money, auth, destructive data, and shared-contract words. A packet whose
-// OBJECTIVE mentions one of these waits for an independent review even when
-// the packet never wrote REVIEW: yes — the same gate, reached a different way.
-//
-// A negation directly ahead of the word ("not auth", "no payment is
-// involved") clears that match: reviewWordMatch below looks up to three
-// words back for "not", "no", "never", "without", "non-", "excluding" or
-// "other than" before counting a hit. Any other occurrence of the same word
-// still matches ("touches payment; not auth" → "payment"), and the list
-// itself stays eager: one unneeded review dispatched is cheap, one a real
-// change should have gotten and silently skipped is not.
-export const REVIEW_WORDS = [
-  'payment', 'payments', 'billing', 'invoice', 'refund', 'checkout', 'stripe', 'price', 'pricing',
-  'auth', 'authentication', 'authorization', 'login', 'password', 'credential', 'credentials', 'token', 'oauth', 'permission',
-  'drop table', 'truncate', 'delete rows', 'delete records', 'purge', 'migration',
-  'public api', 'schema others consume', 'contract',
-];
-
-// The OBJECTIVE section of a packet: everything between an OBJECTIVE heading
-// (its own line, an optional trailing colon) and the next CONTEXT/SCOPE/DONE
-// WHEN heading, or to the end of the prompt when none of those follow. A
-// packet with no OBJECTIVE heading at all is judged on its first 600
-// characters instead, since that is usually where the ask is stated.
-export function objectiveSection(prompt) {
-  const text = String(prompt || '');
-  const start = /^[ \t]*OBJECTIVE[ \t]*:?[ \t]*$/im.exec(text);
-  if (!start) return text.slice(0, 600);
-  const rest = text.slice(start.index + start[0].length);
-  const end = /^[ \t]*(CONTEXT|SCOPE|DONE WHEN)[ \t]*:?[ \t]*$/im.exec(rest);
-  return end ? rest.slice(0, end.index) : rest;
-}
-
-// A negation directly ahead of a candidate match clears it: up to three
-// words back (not counting the match itself) for "not", "no", "never",
-// "without", "non-", "excluding" or "other than".
-const NEGATOR = /\b(not|no|never|without|non-?|excluding|other\s+than)\b/i;
-
-function negatedBefore(text, index) {
-  const before = text.slice(0, index);
-  const words = before.trim().split(/\s+/).filter(Boolean).slice(-3);
-  return NEGATOR.test(words.join(' '));
-}
-
-// The first REVIEW_WORDS entry (whole word or phrase, case-insensitive) found
-// in an OBJECTIVE section with no negation directly ahead of it, or null. A
-// small, pure function on purpose, kept apart from the regex-building above
-// so both are testable on their own.
-export function reviewWordMatch(section) {
-  const text = String(section || '');
-  for (const word of REVIEW_WORDS) {
-    const pattern = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
-    const re = new RegExp(`\\b${pattern}\\b`, 'gi');
-    let m;
-    while ((m = re.exec(text))) {
-      if (!negatedBefore(text, m.index)) return word;
-      if (m.index === re.lastIndex) re.lastIndex++; // guard against a zero-width match
-    }
-  }
-  return null;
-}
-
-// What recordDispatch actually calls: the word (if any) that makes this
-// packet's objective wait for independent review, regardless of whether the
-// packet also wrote REVIEW: yes.
-export function inferredReviewWord(prompt) {
-  return reviewWordMatch(objectiveSection(prompt));
 }
 
 // A fact, not a denial: Plan mode already forbids a PROGRESS line (its own
@@ -529,66 +383,6 @@ export function codexFact(role, dir = WORKERS_DIR, now = Date.now()) {
   return `Codex ok at ${hhmm}; Terra medium fits a bounded change with tests`;
 }
 
-// The run this packet belongs to: the `RUN:` line a coordinated packet carries,
-// or the run this session is bound to. The ledger resolves a return from this,
-// rather than from whichever run on the machine happens to be newest.
-export function runFor(input, ti) {
-  const named = (/^\s*RUN:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1];
-  if (named) return named;
-  const bound = sessionRun(input.session_id);
-  return bound ? bound.runId : null;
-}
-
-const round2 = n => Math.round(Number(n) * 100) / 100;
-
-// The run object this dispatch bills against, so the gate can read its budget
-// ceiling and spend so far. Resolved the way a return is: the session binding
-// first, then a run named in the packet or the one open run in the repo, then
-// the machine's last-opened run as a hint for a session working above its repo.
-// This is a read, never a write, so the last-opened hint is allowed here where
-// it is refused for filing a return — *except* for the budget gate, whose
-// caller passes `forBudget: true`. The pointer names whichever run was opened
-// last on this whole machine, which can belong to a repo this dispatch has
-// nothing to do with; enforcing its ceiling denied dispatches against a
-// stranger repo's budget. Everywhere the pointer is shown rather than
-// enforced (`router.mjs`'s "candidate, not bound") already hedges it; the gate
-// is the one caller that would otherwise have treated it as authoritative.
-export function resolveRunObj(input, ti, { forBudget = false } = {}) {
-  const bound = sessionRun(input.session_id);
-  if (bound) return bound;
-  const named = (/^\s*RUN:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1];
-  const root = findRepoRoot(input.cwd);
-  if (root) {
-    if (named) { const hit = runsUnder(root).find(r => r.runId === named); if (hit) return hit; }
-    const open = openRunsUnder(root);
-    if (open.length === 1) return open[0];
-  }
-  if (forBudget) return null;
-  return activeRunPointer();
-}
-
-// The pure arithmetic of the gate, so it can be tested without a machine's cost
-// history: does spend-so-far plus this dispatch cross the ceiling? Null when
-// there is nothing to decide (no ceiling, or no price for this dispatch).
-export function overCeiling(already, est, ceiling) {
-  if (ceiling == null || est == null) return null;
-  const total = (Number(already) || 0) + Number(est);
-  return total > ceiling
-    ? { already: round2(Number(already) || 0), est: round2(Number(est)), total: round2(total), ceiling }
-    : null;
-}
-
-// Would this dispatch push the run past its budget ceiling? Null when there is
-// nothing to gate on: no model named (so no price), no run resolved, or no
-// ceiling set. Otherwise the numbers the deny reason needs.
-export function budgetDecision(input, ti, run = resolveRunObj(input, ti, { forBudget: true })) {
-  const model = String(ti.model || '');
-  if (!model) return null;
-  if (!run || !run.budget || run.budget.ceiling == null) return null;
-  const est = estimateDollars(String(ti.subagent_type || 'claude'), model, readCosts());
-  const over = overCeiling(Number(run.spend) || 0, est, run.budget.ceiling);
-  return over ? { runId: run.runId, ...over } : null;
-}
 
 function main() {
   let payload = '';

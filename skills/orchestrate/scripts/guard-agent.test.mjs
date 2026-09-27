@@ -1,7 +1,8 @@
 // guard-agent.test.mjs — the review gate a dispatch's own OBJECTIVE can
-// trigger, with no REVIEW: yes line at all: the pure functions
-// (objectiveSection, reviewWordMatch, inferredReviewWord) and the hook
-// process's actual dispatch record.
+// trigger, with no REVIEW: yes line at all: the hook process's actual
+// dispatch record. The pure functions behind the gate (objectiveSection,
+// reviewWordMatch, inferredReviewWord) have their own tests in
+// lib/review-words.test.mjs.
 //   node --test skills/orchestrate/scripts/guard-agent.test.mjs
 
 import { test } from 'node:test';
@@ -11,7 +12,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { objectiveSection, reviewWordMatch, inferredReviewWord, REVIEW_WORDS } from './guard-agent.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GUARD = join(HERE, 'guard-agent.mjs');
@@ -38,60 +38,6 @@ function lastDispatch(home, sid) {
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${sid}.json`), 'utf8'));
   return state.dispatches[state.dispatches.length - 1];
 }
-
-// ---- objectiveSection ------------------------------------------------------
-
-test('objectiveSection: the text between OBJECTIVE and the next heading', () => {
-  const prompt = 'TASK: 1\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nsome context here';
-  assert.equal(objectiveSection(prompt).trim(), 'Add Stripe payment capture');
-});
-
-test('objectiveSection: runs to the end of the prompt when no closing heading follows', () => {
-  const prompt = 'OBJECTIVE\nRename a CSS class';
-  assert.equal(objectiveSection(prompt).trim(), 'Rename a CSS class');
-});
-
-test('objectiveSection: the first 600 characters when there is no OBJECTIVE heading at all', () => {
-  const prompt = `x${'y'.repeat(700)}`;
-  assert.equal(objectiveSection(prompt), prompt.slice(0, 600));
-});
-
-test('objectiveSection: stops at SCOPE or DONE WHEN too, not only CONTEXT', () => {
-  assert.equal(objectiveSection('OBJECTIVE\nDrop the old index\nSCOPE\nmore').trim(), 'Drop the old index');
-  assert.equal(objectiveSection('OBJECTIVE\nDrop the old index\nDONE WHEN\nmore').trim(), 'Drop the old index');
-});
-
-// ---- reviewWordMatch / inferredReviewWord ----------------------------------
-
-test('reviewWordMatch: matches every word in the list as a whole word or phrase', () => {
-  for (const word of REVIEW_WORDS) {
-    assert.equal(reviewWordMatch(`some text with ${word} in it`), word, `did not match "${word}"`);
-  }
-});
-
-test('reviewWordMatch: a substring that is not a whole word does not match', () => {
-  assert.equal(reviewWordMatch('this is a pricingless sentence about authors'), null);
-});
-
-test('inferredReviewWord: a Stripe-payment objective is caught, a CSS rename is not', () => {
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore'), 'payment');
-  assert.equal(inferredReviewWord('OBJECTIVE\nRename a CSS class'), null);
-});
-
-test('inferredReviewWord: a negation directly ahead of the word clears it', () => {
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\n(not auth)\nCONTEXT\nmore'), null);
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nno payment is involved\nCONTEXT\nmore'), null);
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nNo auth changes in this task\nCONTEXT\nmore'), null);
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nNot a payment feature\nCONTEXT\nmore'), null);
-});
-
-test('inferredReviewWord: the same word elsewhere, not negated, still matches', () => {
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\ntouches payment; not auth\nCONTEXT\nmore'), 'payment');
-});
-
-test('inferredReviewWord: a word outside the OBJECTIVE section is not caught', () => {
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nthis touches billing code too'), null);
-});
 
 // ---- the dispatch record itself --------------------------------------------
 
