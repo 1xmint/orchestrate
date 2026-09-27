@@ -239,7 +239,7 @@ export function decide(command, ctx = {}) {
   if (!hit) return { kind: 'pass' };
 
   if (ctx.subagent) {
-    return { kind: 'deny', reason: `${hit.reason} A background helper cannot ask, so this is refused; report back to the lead instead of retrying.` };
+    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} A background helper cannot ask, so this is refused: report back to the lead instead of retrying.` };
   }
   if (ctx.headless) {
     // Nobody can answer a question in this mode, so "say yes" would be a
