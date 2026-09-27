@@ -469,12 +469,17 @@ test('capped returns are partial, and the recovery note is said once', () => {
   assert.deepEqual(cappedReturn(50, 50, 'DONE'), { capped: true, status: 'PARTIAL', claimed: 'DONE' });
   assert.deepEqual(cappedReturn(12, 50, 'DONE'), { capped: false, status: 'DONE', claimed: 'DONE' });
   assert.equal(cappedReturn(274, null, null).capped, false, 'no cap known, nothing inferred');
-  const state = { returned: [{ agent: 'orch-implementer', task: '9-14-0002', capped: true, turns: 50, progress: '/r/progress/9-14-0002.md' }, { agent: 'orch-reviewer', task: '3' }] };
+  const state = { returned: [{ agent: 'orch-implementer', task: '9-14-0002', capped: true, turns: 50, cap: 20, progress: '/r/progress/9-14-0002.md' }, { agent: 'orch-reviewer', task: '3' }] };
   const note = cappedNote(state);
-  assert.match(note, /orch-implementer 9-14-0002 \(50 turns, progress \/r\/progress\/9-14-0002\.md\)/);
+  assert.match(note, /orch-implementer 9-14-0002 \(used all 20 turns it is allowed, progress \/r\/progress\/9-14-0002\.md\)/, 'names the cap, not the 50-turn count');
   assert.match(note, /only the remaining work as a fresh, smaller packet/);
   assert.match(note, /Do not resume the stopped helper/);
   assert.equal(cappedNote(state), '', 'once');
+});
+
+test('cappedNote falls back to the turn count when an older return recorded no cap', () => {
+  const state = { returned: [{ agent: 'orch-implementer', task: '5', capped: true, turns: 100 }] };
+  assert.match(cappedNote(state), /orch-implementer 5 \(100 turns\)/);
 });
 
 test('a helper resumed once after its cap: pricing sums the whole transcript, but the cap decision uses only the current segment', () => {

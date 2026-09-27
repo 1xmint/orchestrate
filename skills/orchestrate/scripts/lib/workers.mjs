@@ -209,14 +209,17 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
 
 // Helpers that stopped at their turn cap, from the ledger's return records,
 // said once each (marks them shown on the state object passed in). A capped
-// return is partial whatever it claims; the recovery is a fresh, smaller packet
-// for what is left, never resuming the stopped helper, which re-reads its whole
-// large context on every further step.
+// return is partial whatever it claims. The wording names the cap, not the
+// turn count: a resumed helper's transcript can run well past its role's
+// cap (its earlier segment already spent), so "used 28 turns" reads as
+// nothing wrong when the cap is 20 — "used all 20 turns it is allowed" says
+// what actually happened. If a return recorded no cap, the turn count is
+// still said, so nothing is lost.
 export function cappedNote(state) {
   const list = (state && Array.isArray(state.returned) ? state.returned : []).filter(r => r && r.capped && !r.cappedShown);
   if (!list.length) return '';
   for (const r of list) r.cappedShown = true;
-  const shown = list.slice(-4).map(r => `${r.agent}${r.task ? ` ${r.task}` : ''} (${r.turns} turns${r.progress ? `, progress ${r.progress}` : ''})`).join('; ');
+  const shown = list.slice(-4).map(r => `${r.agent}${r.task ? ` ${r.task}` : ''} (${r.cap != null ? `used all ${r.cap} turns it is allowed` : `${r.turns} turns`}${r.progress ? `, progress ${r.progress}` : ''})`).join('; ');
   return `[orchestrate · partial] stopped at the turn cap, so partial: ${shown}. Check what its evidence shows is done, then send only the remaining work as a fresh, smaller packet from its progress file and branch. Do not resume the stopped helper.`;
 }
 

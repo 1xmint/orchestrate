@@ -660,6 +660,40 @@ test('ledger: a helper stopped at its turn cap with no final message is still re
   const returned = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'capped-stop.json'), 'utf8')).returned;
   assert.equal(returned[0].agentId, 'capped-id', 'recorded against the helper, so its worker slot frees');
   assert.equal(returned[0].turns, 100);
+  assert.equal(returned[0].cap, 100, 'the cap is recorded alongside the turn count');
+});
+
+test('ledger: a helper resumed once after its cap names the cap in the note, not its longer whole-transcript turn count', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'capped-resumed', repo);
+  const tr = join(repo.dir, 'agent.jsonl');
+  const msg = id => JSON.stringify({ type: 'assistant', message: { id, usage: { input_tokens: 10, output_tokens: 5 } } });
+  const userText = JSON.stringify({ type: 'user', message: { content: 'The coordinator sent a message while you were working: keep going' } });
+  // orch-advisor's cap is 12; this run's first segment ran 20 turns (already
+  // over the cap), was resumed, and its current segment has run exactly 12 —
+  // capped again, but by the *segment*, not the 32-turn whole transcript.
+  const lines = [
+    ...Array.from({ length: 20 }, (_, i) => msg(`a${i}`)),
+    userText,
+    ...Array.from({ length: 12 }, (_, i) => msg(`b${i}`)),
+  ];
+  writeFileSync(tr, lines.join('\n'));
+
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'capped-resumed', cwd: repo.dir, agent_id: 'resumed-id',
+    agent_type: 'orch-advisor', agent_transcript_path: tr, last_assistant_message: '',
+  }, home);
+
+  assert.equal(out.status, 0);
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index[0].capped, true, 'the current segment (12) is at the 12-turn cap, so this is capped');
+  const returned = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'capped-resumed.json'), 'utf8')).returned;
+  assert.equal(returned[0].turns, 32, 'pricing sums the whole transcript');
+  assert.equal(returned[0].cap, 12);
+  const saved = readFileSync(index[0].file, 'utf8');
+  assert.match(saved, /stopped at its 12-turn cap/, 'the note names the 12-turn cap');
+  assert.doesNotMatch(saved, /32-turn cap/, 'never the whole-transcript total');
 });
 
 test('ledger: a nested SubagentStop is filed and indexed with its parent', () => {
