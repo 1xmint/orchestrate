@@ -242,7 +242,9 @@ test('assets/packet.md carries every field a dispatch needs', () => {
   assert.ok(packet.includes('VERDICT: PASS|FAIL'), 'with the one schema');
   // 6,500 until the advisor packet (six lines) joined it in 0.16.0.
   assert.ok(packet.includes('ROLE: advisor'), 'the advisor packet is here too');
-  assert.ok(packet.length < 7000, `packet.md is ${packet.length} bytes; it exists to be small`);
+  // 7,000 until the commit-before-the-cap sentence (two lines) joined the intro.
+  assert.ok(packet.includes('commit each piece'), 'helpers are told to commit before the cap');
+  assert.ok(packet.length < 7200, `packet.md is ${packet.length} bytes; it exists to be small`);
 });
 
 // turn-check.mjs's idle nudge reads `run.ready`, computed by readyTasks() from

@@ -7,7 +7,8 @@ when they apply to this task.
 The packet is re-read every step, so size is cost: point at `path:line` ranges
 instead of pasting content, under about 6,000 characters. One verifiable
 change per packet; a task needing more steps than the role's `maxTurns` is two
-packets.
+packets. The cap ends a helper mid-call with no report, so a code packet
+says: commit each piece as its check passes; stop adding at three quarters.
 
 ## Author packet (implementer, researcher, browser, debugger, planner)
 

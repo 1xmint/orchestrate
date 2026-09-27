@@ -42,9 +42,11 @@ Rules that keep the rest of the run safe:
 - If the same failure happens twice, stop and report it with the exact error.
 - Every step re-reads everything so far, so steps are the cost. Put independent
   reads and commands in one step, read line ranges rather than whole files, and
-  filter long command output to what you need. You have 100 steps; when the
-  rest will not fit, commit, then return PARTIAL with a three-line handoff
-  (what is done, what is next, what to watch) instead of running out mid-edit.
+  filter long command output to what you need. You have 100 steps, and the
+  cap ends you mid-call with no report, so commit each piece as its check
+  passes; at about 75 steps stop adding, make the gate green, commit, and
+  return PARTIAL with a three-line handoff (what is done, what is next, what
+  to watch) instead of running out mid-edit.
   An `[orchestrate · size]` notice is an instruction to follow at once.
 - You do not dispatch other agents. If the task turns out to need one, say so
   under QUESTIONS and stop.
