@@ -6,10 +6,35 @@
 
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { sectionExcerpt } from './resume.mjs';
+import { DIR, readJson, writeJsonAtomic } from './tier.mjs';
 
-const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+// Where "this project has already been told" is remembered across sessions,
+// keyed by project root. Kept separate from the profile so a corrupt or
+// unwritable file here never touches anything else this plugin remembers.
+const BRIEF_MISSING_STORE = join(DIR, 'brief-missing.json');
+
+function normRoot(root) {
+  return String(root || '').replace(/\\/g, '/').toLowerCase();
+}
+
+// Has this project root already been told, in an earlier session? Read
+// failures (missing file, bad JSON, unreadable home folder) all read as "no" —
+// the in-session flag on `state` is what keeps a broken store from repeating
+// the line within one session.
+function alreadyToldAcrossSessions(store, root) {
+  const data = readJson(store);
+  return Boolean(data && data.roots && data.roots[normRoot(root)]);
+}
+
+function rememberToldAcrossSessions(store, root) {
+  try {
+    const data = readJson(store) || { v: 1, roots: {} };
+    if (!data.roots || typeof data.roots !== 'object') data.roots = {};
+    data.roots[normRoot(root)] = new Date().toISOString();
+    writeJsonAtomic(store, data);
+  } catch {}
+}
 
 // ---- the brief: the project's own "What this is for" -----------------------
 // "The brief" is that section of the project's instruction file, not a
@@ -133,13 +158,15 @@ export function briefState(ctx, state) {
 // per epoch (the file that earned it changing counts as a new epoch too), on
 // the first prompt after the root is known and again — forced — right after a
 // compaction, since a summary drops everything a hook said before it.
-export function briefNote(ctx, state, { force = false } = {}) {
+export function briefNote(ctx, state, { force = false, store = BRIEF_MISSING_STORE } = {}) {
   const b = briefState(ctx, state);
   if (b.kind === 'none') return '';
   if (b.kind === 'missing') {
     if (state.briefMissingShown) return '';
     state.briefMissingShown = true;
-    return `[orchestrate · brief] no "What this is for" section ${b.dir === b.root ? `in ${b.dir}` : `between ${b.dir} and ${b.root}`} (checked CLAUDE.md, .claude/CLAUDE.md, CLAUDE.local.md, AGENTS.md, .claude/AGENTS.md in each). Template: ${join(SKILL_DIR, 'assets', 'BRIEF.md')}`;
+    if (alreadyToldAcrossSessions(store, b.root)) return '';
+    rememberToldAcrossSessions(store, b.root);
+    return `[orchestrate · brief] This project has no "What this is for" section in its CLAUDE.md or AGENTS.md. Add one (what it is for, who it serves, which documents decide) so the goal survives summaries; the plugin's assets folder has a BRIEF.md template.`;
   }
   if (b.kind === 'kept') { state.briefSentFor = null; return ''; }
   if (!force && state.briefSentFor === b.file) return '';
