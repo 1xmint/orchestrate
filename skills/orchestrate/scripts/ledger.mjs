@@ -29,6 +29,7 @@ import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findR
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
 import { roleMaxTurns } from './lib/workers.mjs';
 import { checkReturn } from './lib/report.mjs';
+import { taskIdIn } from './lib/task-id.mjs';
 import { addSuggestion } from './suggest.mjs';
 export { roleMaxTurns };
 
@@ -46,7 +47,7 @@ export function parseReturn(text) {
   const status = (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
   const lines = t.trim() ? t.trim().split('\n').length : 0;
   return {
-    task: field(/^\s*TASK:\s*(\S+)/im),
+    task: taskIdIn(t, { caseInsensitive: true }),
     run: field(/^\s*RUN:\s*(\S+)/im),
     status,
     evidence: /^\s*EVIDENCE:\s*\S/im.test(t),

@@ -84,3 +84,12 @@ test('an explicit REVIEW: yes dispatch gets no duplicate inferred-review sentenc
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
   assert.doesNotMatch(ctx, /will wait for an independent review/);
 });
+
+test('a prose TASK line ("TASK: build the login page") holds for review under "this task", never the first word', () => {
+  const home = sandboxHome();
+  const sid = 's-prose-task';
+  const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: build the login page\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.match(ctx, /REVIEW OF: this task$/);
+  assert.doesNotMatch(ctx, /REVIEW OF: build\b/);
+});

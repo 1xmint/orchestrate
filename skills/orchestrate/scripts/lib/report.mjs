@@ -11,6 +11,7 @@
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { taskIdIn } from './task-id.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const SCHEMA_PATH = join(__dirname, '..', '..', 'assets', 'worker-report.schema.json');
@@ -78,8 +79,7 @@ export function checkReturn(text) {
   const t = typeof text === 'string' ? text : String(text == null ? '' : text);
   const missing = [];
 
-  const taskMatch = /^\s*TASK:\s*(\S+)/im.exec(t);
-  if (!taskMatch) missing.push('task');
+  if (!taskIdIn(t, { caseInsensitive: true })) missing.push('task');
 
   const statusMatch = /^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im.exec(t);
   const status = statusMatch ? statusMatch[1].toUpperCase() : null;
