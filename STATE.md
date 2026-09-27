@@ -34,11 +34,29 @@ Guidance re-checked 2026-09-24 against the same pages listed below plus
 https://code.claude.com/docs/en/hooks (a plugin's and a skill's copy of one
 handler both run, which is why "registered once" is a rule now).
 
-Work in progress on branch `audit/scoresheet-to-ten`, ledger
-`.orchestrator/runs/20260924-audit-to-ten/RUN.md` (git-ignored): wave 1 is
-seven tracks (docs truth pass, install hygiene, hooks quiet in helpers,
-deterministic ledger, Bash guard with all hooks in hooks.json, three eval
-cases, live scenario runs), then a re-audit on Fable.
+Six waves of fixes followed on branch `audit/scoresheet-to-ten`, each
+re-scored by a fresh Fable audit: 49 (r1), 55 (r2), 68 (r3), 72 (r4, in
+`docs/audits/2026-09-26-scoresheet-r4.md`). What changed, in order: a docs
+truth pass and install hygiene; hooks silent inside helpers and every hook
+registered once; a deterministic ledger; the Bash guard; three eval cases and
+a no-machinery check on hook text; live scenario runs
+(`docs/audits/2026-09-2{4,6}-live-runs-r{3,4}.md`: a real project built
+end to end for under a dollar, tests passing, no machinery shown); the router
+split into small tested parts (card, state line, resume, brief, recover,
+limits scan, plugin-fit report); a checkpoint before compaction; the review
+gate; and, in wave 6, the guard refusing destructive commands in every mode
+where nobody can answer, the pre-compaction line naming its checkpoint path,
+reviews inferred from an objective that mentions money, auth or destructive
+data, the Opus cache-read price at its current $0.20, and the brief-missing
+line as one plain sentence shown once per project.
+
+Four things the audit cannot measure on this machine, so they stay short of
+10 until someone runs them elsewhere: `claude plugin eval` (no sandbox
+backend on Windows without WSL), a triggering eval, a clean-profile install,
+and a spend figure read from the bill rather than from token counts. The
+round-4 report names each with the reason. The live run in round 4 also
+showed the lead building directly instead of sending a helper; the card rule
+is followed by the model, not enforced, and that stays a known gap.
 
 ## v0.16.1 — a review that can stop the merge, 2026-09-21
 
