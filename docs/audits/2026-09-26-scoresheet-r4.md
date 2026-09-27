@@ -110,7 +110,7 @@ Not re-searched this round (web spend limited to the named docs pages and the pr
 
 ## Commands run (all at 2415dfb, claude 2.1.274, node v24.14.0)
 
-Gate (`C:\Users\Josh\AppData\Local\Temp\orch-r4\gate.sh`, run from the repo root):
+Gate (`<temp>\orch-r4\gate.sh`, run from the repo root):
 
 ```
 node scripts/package.mjs --both            # exit 0: orchestrate.skill 66 files; orchestrate-spec.skill 66 files
@@ -118,7 +118,7 @@ node scripts/test.mjs                      # exit 0: tests 630, pass 630, fail 0
 node --test evals/no-machinery.test.mjs    # exit 0: tests 13, pass 13, fail 0, duration_ms 130
 ```
 
-Hook probes (`C:\Users\Josh\AppData\Local\Temp\orch-r4\probes.sh`; HOME and USERPROFILE = `C:\Users\Josh\AppData\Local\Temp\orch-r4\home`, emptied first; PROJ = `<temp>/orch-r4/proj` holding `.git/` and `.orchestrator/runs/r4run/RUN.md` with `## Budget` / `Ceiling: $0.01` and no task rows; WT = the auditor's worktree path, used as cwd for guard-bash because anything under temp counts as a safe delete target). Each entry: payload -> exit, chars, stdout.
+Hook probes (`<temp>\orch-r4\probes.sh`; HOME and USERPROFILE = `<temp>\orch-r4\home`, emptied first; PROJ = `<temp>/orch-r4/proj` holding `.git/` and `.orchestrator/runs/r4run/RUN.md` with `## Budget` / `Ceiling: $0.01` and no task rows; WT = the auditor's worktree path, used as cwd for guard-bash because anything under temp counts as a safe delete target). Each entry: payload -> exit, chars, stdout.
 
 ```
 router.mjs   {"session_id":"sess-r4a","cwd":PROJ,"hook_event_name":"UserPromptSubmit","prompt":"add login with email and password, a profile page, and tests"}
@@ -156,4 +156,4 @@ guard-bash.mjs  stdin "{not json"                          -> exit 0, 0 chars
 stat -c '%y' ~/.claude/settings.json          # 2026-09-26 12:25:42 before and after (unchanged)
 ```
 
-Static facts (`C:\Users\Josh\AppData\Local\Temp\orch-r4\facts.sh`): `wc -c` on SKILL.md, references, scripts, lib, agents, README (45,597), STATE.md (16,742), AGENTS.md (5,317), CLAUDE.md (11), packet.md (7,023), plain.md (4,679); a node one-liner for frontmatter field lengths; `grep -c "<ref>.md" SKILL.md` per reference; `grep -n "0\.16\.[0-9]"` across plugin.json, SKILL.md, README.md, STATE.md; `grep -n -i "turn 70|before turn|100-turn|commit what passes|turn cap"` over SKILL.md, packet.md, card.mjs, dispatch.md; `grep -h maxTurns assets/agents/*.md`; `ls ... *.test.mjs | wc -l` (48); `grep -c "^test(" docs-drift.test.mjs` (13); `cat .git/refs/heads/audit/scoresheet-to-ten` (2415dfb...).
+Static facts (`<temp>\orch-r4\facts.sh`): `wc -c` on SKILL.md, references, scripts, lib, agents, README (45,597), STATE.md (16,742), AGENTS.md (5,317), CLAUDE.md (11), packet.md (7,023), plain.md (4,679); a node one-liner for frontmatter field lengths; `grep -c "<ref>.md" SKILL.md` per reference; `grep -n "0\.16\.[0-9]"` across plugin.json, SKILL.md, README.md, STATE.md; `grep -n -i "turn 70|before turn|100-turn|commit what passes|turn cap"` over SKILL.md, packet.md, card.mjs, dispatch.md; `grep -h maxTurns assets/agents/*.md`; `ls ... *.test.mjs | wc -l` (48); `grep -c "^test(" docs-drift.test.mjs` (13); `cat .git/refs/heads/audit/scoresheet-to-ten` (2415dfb...).
