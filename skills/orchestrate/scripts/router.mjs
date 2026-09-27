@@ -13,8 +13,10 @@
 // Choosing the shape of the work is the model's job, made from the work itself.
 // This file now reports facts and stays quiet.
 //
-// Never blocks, never rewrites input, never exits non-zero. No network, no
-// child processes.
+// Never blocks, never rewrites input, never exits non-zero. No network. The
+// one child process: `git rev-parse HEAD`, read once on a session's first
+// prompt and kept as `startHead`, so the Stop hook's commit check (lib/
+// commit-claim.mjs) can later count commits made since this session began.
 //
 //   echo '<hook json>' | node router.mjs          hook mode (stdin)
 //   node router.mjs --state                       what it would inject, no writes
@@ -23,6 +25,7 @@
 
 import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -156,11 +159,23 @@ function isSmallPrompt(trimmed) {
   return !BUILD_WORDS.test(trimmed);
 }
 
+// The repo HEAD at the moment this session starts, or null when the cwd is
+// not a git repo (or git is missing) — either is a silent skip, never a
+// thrown error. A short timeout keeps a hung git from holding up the prompt.
+function currentHead(cwd) {
+  try {
+    const r = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: cwd || undefined, timeout: 3000, encoding: 'utf8' });
+    if (r.status === 0 && typeof r.stdout === 'string' && r.stdout.trim()) return r.stdout.trim();
+  } catch {}
+  return null;
+}
+
 function newState(input) {
   return {
     v: 1, session_id: input.session_id || 'unknown', cwd: input.cwd || '',
     started: new Date().toISOString(), prompts: 0, cardSent: false, muted: false,
     lastPromptId: null, lastStateHash: null, limits: [],
+    startHead: currentHead(input.cwd),
   };
 }
 
@@ -189,6 +204,9 @@ function handlePrompt(input) {
   const text = promptText(input);
   if (text == null) return;
   const state = loadSession(input.session_id) || newState(input);
+  // A session recorded before this field existed has no startHead yet; fill
+  // it in from whatever the repo's HEAD is now, the same as a brand-new one.
+  if (state.startHead === undefined) state.startHead = currentHead(input.cwd);
 
   const promptKey = input.prompt_id
     ? `${input.prompt_id}:${createHash('sha256').update(text).digest('hex').slice(0, 12)}`
