@@ -24,7 +24,7 @@ import { resolve as resolvePath, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sampleContext, agentTranscriptPath, markAnnounced, storedAdvisedKey } from './lib/context.mjs';
 import { modeNote, modeOf } from './lib/modes.mjs';
-import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, transcriptTurns } from './lib/workers.mjs';
+import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, segmentTurns } from './lib/workers.mjs';
 import { loadSession, saveSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
 import { loadPolicy, sizeBudget } from './lib/policy.mjs';
 
@@ -213,7 +213,7 @@ export function check(input) {
       // call that is past warnAt, not on every tool call a helper makes.
       if (!budget || tokens == null || tokens < budget.warnAt) return '';
       const maxTurns = roleMaxTurns(owner ? owner.dispatch.agent : role);
-      const turn = transcriptTurns(t);
+      const turn = segmentTurns(t).segment;
       const progressPath = owner && owner.dispatch ? owner.dispatch.progress : null;
       let progress = null;
       if (progressPath) {
