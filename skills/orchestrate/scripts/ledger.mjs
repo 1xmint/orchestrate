@@ -28,6 +28,8 @@ import { createHash } from 'node:crypto';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
 import { roleMaxTurns } from './lib/workers.mjs';
+import { checkReturn } from './lib/report.mjs';
+import { taskIdIn } from './lib/task-id.mjs';
 import { addSuggestion } from './suggest.mjs';
 export { roleMaxTurns };
 
@@ -37,10 +39,15 @@ export { roleMaxTurns };
 export function parseReturn(text) {
   const t = String(text || '');
   const field = re => { const m = re.exec(t); return m ? m[1].trim() : null; };
-  const status = (field(/^\s*STATUS:\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
+  // Lenient on the separator too: "STATUS:", "STATUS -", "status —" and plain
+  // case variation all named the field; a return that used a dash instead of
+  // a colon still said what it said. `exec` on a pattern without `g` returns
+  // the first match in the string, so the first STATUS-shaped line anywhere
+  // in the return is the one read, wherever it falls.
+  const status = (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
   const lines = t.trim() ? t.trim().split('\n').length : 0;
   return {
-    task: field(/^\s*TASK:\s*(\S+)/im),
+    task: taskIdIn(t, { caseInsensitive: true }),
     run: field(/^\s*RUN:\s*(\S+)/im),
     status,
     evidence: /^\s*EVIDENCE:\s*\S/im.test(t),
@@ -53,6 +60,11 @@ export function parseReturn(text) {
     // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what older
     // reviewer instructions produced, and is still read.
     verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
+    // A reviewer's own return names the task it reviewed under "REVIEW OF:"
+    // (packet.md's Reviewer packet RETURN schema), the task id its own first
+    // token. This is how a reviewer return is told from any other return —
+    // never TASK, which on a reviewer return names the reviewer's own task id.
+    reviewOf: field(/^\s*REVIEW OF:\s*(\S+)/im),
   };
 }
 
@@ -134,16 +146,36 @@ export function latestPerAgent(rows) {
 // content, so whichever wrote second silently discarded the first's cost
 // line — the read-all/write-all shape the index beside it (`appendIndex`)
 // already avoided. `appendFileSync` is one line, not a read-modify-write, so
-// a concurrent writer can only ever add its own line. Trimming to `COSTS_MAX`
-// is still a read-modify-write, so it runs rarely rather than on every call:
-// losing that race only delays a trim, never a cost line.
+// a concurrent writer can only ever add its own line.
+//
+// Trimming to `COSTS_MAX` used to run on a random 2% of calls, which left the
+// cap itself probabilistic: a session could log hundreds of rows past 500
+// before the coin landed. The cap is a promise about the file's size, so it
+// is kept every time — trimming after every append rather than gambling on
+// it. A concurrent writer can still land a line between this trim's read and
+// its write, but the next append's trim cleans that up; the file never grows
+// unbounded, it just occasionally sits a line or two over `COSTS_MAX` for a
+// moment.
 export function appendCost(row, path = COSTS_PATH) {
   try {
     mkdirSync(DIR, { recursive: true });
     appendFileSync(path, JSON.stringify(row) + '\n');
-    if (Math.random() < 0.02) trimLog(path, COSTS_MAX);
+    trimLog(path, COSTS_MAX);
   } catch {}
   return row;
+}
+
+// A sum over cost rows that never treats "no known model" as "$0": a row
+// without a price is skipped rather than counted as free, and the caller is
+// told how many rows contributed nothing, so a low total is never mistaken
+// for a cheap run when it is really an unpriced one.
+export function sumCosts(rows) {
+  let total = 0, skipped = 0;
+  for (const r of rows || []) {
+    if (r && typeof r.dollars === 'number' && Number.isFinite(r.dollars)) total += r.dollars;
+    else skipped++;
+  }
+  return { total: Number(total.toFixed(4)), skipped };
 }
 
 export function readCosts(path = COSTS_PATH) {
@@ -158,6 +190,54 @@ export function readCosts(path = COSTS_PATH) {
 export function cappedReturn(turns, cap, parsedStatus) {
   const capped = cap != null && Number(turns) >= cap;
   return { capped, status: capped ? 'PARTIAL' : (parsedStatus || null), claimed: parsedStatus || null };
+}
+
+export const NO_EVIDENCE_NOTE = 'said done, but its return carried no evidence line; treat as unverified.';
+
+// A DONE return with no evidence line is recorded as unverified, not as
+// done: `checkReturn` reads the return itself (lib/report.mjs), so whether
+// it is caught does not depend on what parseReturn already extracted. Never
+// called for a status other than DONE — a PARTIAL or BLOCKED return, whether
+// it started that way or was just downgraded by `cappedReturn` above, is
+// left alone: this only ever narrows DONE, never touches anything else.
+export function evidenceDowngrade(status, text) {
+  if (status !== 'DONE') return { status, note: null };
+  const check = checkReturn(text);
+  if (check.evidence) return { status, note: null };
+  return { status: 'PARTIAL', note: NO_EVIDENCE_NOTE };
+}
+
+export const NO_REVIEW_NOTE = 'done, but it was marked for an independent review and none has returned yet.';
+
+// A task's packet can ask for independent review (packet.md: REVIEW: yes), or
+// guard-agent.mjs's recordDispatch can infer the same gate from a word in the
+// packet's own OBJECTIVE (money, auth, destructive data, a shared contract) —
+// either way the dispatch record carries `review: true`. A DONE return for
+// such a task is recorded PARTIAL, with a note, until a reviewer return naming
+// this task under "REVIEW OF:" exists in the run's own returns index. Only
+// ever narrows DONE, the same shape as evidenceDowngrade: a PARTIAL or BLOCKED
+// return is left exactly as it was, and this never upgrades a status once
+// downgraded — a later reviewer return does not rewrite an earlier PARTIAL
+// filing, it only lets the *next* DONE return through.
+export function reviewDowngrade(status, reviewFlagged, task, indexRows, reviewInferred = null) {
+  if (status !== 'DONE' || !reviewFlagged || !task) return { status, note: null };
+  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task);
+  if (reviewed) return { status, note: null };
+  const note = reviewInferred
+    ? `done, but its objective mentions ${reviewInferred}, so it waits for an independent review that has not returned yet.`
+    : NO_REVIEW_NOTE;
+  return { status: 'PARTIAL', note };
+}
+
+// The run's own returns index, read fresh for each SubagentStop so a reviewer
+// return that landed earlier in the same run is seen. Missing or unreadable
+// reads as no prior returns, never as a crash.
+export function readReturnsIndex(dir) {
+  try {
+    const p = join(dir, INDEX_NAME);
+    if (!existsSync(p)) return [];
+    return readFileSync(p, 'utf8').split('\n').filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  } catch { return []; }
 }
 
 // What this helper's PostCompact hook (postcompact-check.mjs) already left
@@ -239,6 +319,32 @@ export function orphanDir(sessionId) {
   return join(DIR, 'returns', sanitizeId(sessionId || 'nosession'));
 }
 
+// A markdown table row split into its cells, the header and border rows
+// dropped by whoever calls this (there is nothing here that tells a header
+// from a data row). Leading/trailing pipes are optional and do not count as
+// cells.
+function tableCells(line) {
+  const t = String(line || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+  return t.split('|').map(c => c.trim());
+}
+
+// A RUN.md task row is refused, not silently written, when it does not have
+// one cell per header column. Two returns racing to append a row have been
+// seen to land a cell short or a cell shifted — evidence in the wrong column
+// reads as a different fact entirely, and nobody notices until the count is
+// wrong too. Returns the row unchanged when it is well-formed, or a reason
+// naming the task id (from the row's own first cell, since a malformed row is
+// exactly the case where nothing else has parsed the id yet) when it is not.
+export function lintRunRow(headerLine, rowLine) {
+  const header = tableCells(headerLine);
+  const row = tableCells(rowLine);
+  if (row.length !== header.length) {
+    const id = row[0] || 'unknown task';
+    return { ok: false, reason: `row for ${id} has ${row.length} column${row.length === 1 ? '' : 's'}, the table header has ${header.length}: refused, not written` };
+  }
+  return { ok: true, cells: row };
+}
+
 export const INDEX_NAME = 'returns.jsonl';
 
 // The association, appended as one line. Append-only, so two hooks finishing at
@@ -276,7 +382,7 @@ function alreadyHandled(input, agent, text) {
     const now = Date.now();
     const seen = seenRecently(SEEN_RETURNS_PATH, sig, now, DEDUPE_MS);
     recordSeen(SEEN_RETURNS_PATH, sig, now);
-    if (Math.random() < 0.02) trimLog(SEEN_RETURNS_PATH, SEEN_RETURNS_MAX);
+    trimLog(SEEN_RETURNS_PATH, SEEN_RETURNS_MAX);
     return seen;
   } catch {}
   return false;
@@ -315,6 +421,8 @@ function main() {
   const usage = sumUsage(input.agent_transcript_path);
   const cap = cappedReturn(usage.turns, roleMaxTurns(agentType), r.status);
   r.status = silent && !cap.capped ? 'PARTIAL' : cap.status;
+  const noEvidence = evidenceDowngrade(r.status, text);
+  r.status = noEvidence.status;
   const dispatch = dispatchFor(input.session_id, r.task);
   const asked = dispatch && dispatch.model !== 'inherit' ? dispatch.model : '';
   const ranModel = usage.model || asked || 'inherit';
@@ -326,12 +434,22 @@ function main() {
   const file = join(dir, returnFilename(agent, input, text));
   const priced = cost.dollars == null ? 'unpriced (no model named)' : `$${cost.dollars.toFixed(2)} at list price`;
 
+  // A task flagged REVIEW: yes at dispatch (guard-agent.mjs's recordDispatch)
+  // cannot be filed DONE until a reviewer return naming it under "REVIEW OF:"
+  // already exists in this run's own returns index. Read before this return is
+  // indexed, so this return's own reviewOf (if it is itself a reviewer return)
+  // never counts as reviewing itself.
+  const review = reviewDowngrade(r.status, Boolean(dispatch && dispatch.review), r.task, readReturnsIndex(dir), (dispatch && dispatch.reviewInferred) || null);
+  r.status = review.status;
+
   try {
     mkdirSync(dir, { recursive: true });
     const capNote = cap.capped ? ` · stopped at its ${usage.turns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
+    const evidenceNote = noEvidence.note ? ` · ${noEvidence.note}` : '';
+    const reviewNote = review.note ? ` · ${review.note}` : '';
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
-    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${compactNote} -->\n\n`;
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${compactNote} -->\n\n`;
     writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
@@ -346,6 +464,9 @@ function main() {
     model: ranModel,
     status: r.status || null,
     ...(cap.capped ? { capped: true, claimed: cap.claimed } : {}),
+    ...(noEvidence.note ? { noEvidence: true } : {}),
+    ...(review.note ? { reviewGated: true } : {}),
+    ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}),
     verdict: r.verdict || null,
     evidence: r.evidence,
     file,
@@ -358,7 +479,10 @@ function main() {
     const state = input.session_id && loadSession(input.session_id);
     if (state) {
       state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}) });
+      // toolUseId is the id of the Agent call that started this helper, the
+      // same one guard-agent.mjs stored on the dispatch row, so the worker
+      // count can pair the two directly even when no transcript file exists.
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}) });
       saveSession(state);
     }
   } catch {}

@@ -83,6 +83,24 @@ itself in doubt. A conditional pass is a `FAIL` with the exact edit named. An
 unavailable reviewer is reported, never silently skipped. Never review your own
 edits. After a fix, review the fix, not the whole project again.
 
+Decide that work owes a review before it is designed, and write the review's
+questions then: the ways it could go wrong that a passing test would not show.
+For money, who could be charged twice, too much or not at all; which way each
+rounding goes and what that costs; what two at once does; what is left behind
+when a step fails, is cancelled, or the process restarts. One list, used three
+times unchanged: in the planner's packet so the design answers it, in the
+builder's DONE WHEN so the answers are built and tested, and as the reviewer's
+ACCEPTANCE. Asked only at review, the same questions find design flaws after
+the code rests on them, and each costs a fix round dearer than the review.
+When the design cannot answer one, have the reviewer read that part of the
+design before the build.
+
+The reviewer runs on Opus or stronger; the guard refuses less, because a PASS
+from the author's own model cannot be banked. Send it when the change is
+pushed, beside CI, not after CI. A review that cannot stop the merge is not a
+gate: the pull request stays a draft until the verdict is PASS, then
+`gh pr ready <n>`. GitHub merges no draft, by hand or by an auto-merge rule.
+
 ## When it is not right
 
 | Failure class | How to tell | Response |
@@ -99,6 +117,11 @@ corrected context, or an actionable finding — not another go at the same one.
 Three attempts per task, then stop and report with the evidence and the class.
 When a failed attempt left useful work, repair from the diff rather than
 starting over.
+
+On Codex, escalation is one step: Luna to Terra to Sol to Astra, with the
+user's approval for Astra. A per-family usage limit moves that family one step
+down for the run; a session or weekly limit ends the run cleanly at a written
+ledger — never a quietly shrunk plan.
 
 ## When a loop is worth another round
 
@@ -143,6 +166,12 @@ beats watching CI.
   ambiguous, and nothing is guessed into the wrong ledger either.
 
 ## Research results
+
+Keep researching only while an unresolved question could still change what you
+build. Use community reports to find undocumented failure cases, then confirm
+the important part against the maintainer's issue, the source or the official
+document, and say which of the three you have: documented, observed, or
+inferred.
 
 Graded by source distance and counterexample search, not by confidence.
 `REFEREED`, `REFUTED`, `GAP` are valid grades. A renamed obstacle is not

@@ -8,44 +8,80 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, compactionFact, CARD_CAP, resumeExcerpt, sectionExcerpt, RESUME_CAP, readyPhrase, ungradedPhrase, FALLBACK_CARD, stateLine, stateHash, briefState, briefNote, BRIEF_CAP } from './router.mjs';
+import { cardBody, syntheticPrompt, sectionExcerpt, RESUME_CAP, actionableLine, BRIEF_CAP } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROUTER = join(HERE, 'router.mjs');
 
-test('state line and hash carry context bands', () => {
-  const base = { self: null, tier: 'pro', agents: 0, limits: [], candidates: [], run: null, quota: null, persist: false };
-  assert.match(stateLine({ ...base, context: { tokens: 151000 } }, '[x]'), /ctx ~151k/);
-  assert.match(stateLine({ ...base, context: { tokens: 52000 } }, '[x]'), /ctx ~52k/, 'the measured size is always shown');
-  assert.notEqual(stateHash({ ...base, context: { tokens: 121000 } }), stateHash({ ...base, context: { tokens: 151000 } }));
-  assert.match(stateLine({ ...base, codex: 'limit', context: null }, '[x]'), /codex: limit/);
-  assert.notEqual(stateHash({ ...base, codex: 'limit', context: null }), stateHash({ ...base, codex: 'ok', context: null }));
-});
-
-function makeHome() {
+function makeHome(agentNames = AGENT_NAMES) {
   const home = mkdtempSync(join(tmpdir(), 'orch-home-'));
   mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'max5', tierSource: 'user', setAt: '2026-09-08T00:00:00Z' }));
   // Most router tests are about ordinary prompts, not this one-time migration.
   writeFileSync(join(home, '.claude', 'orchestrate', 'autocompact-default.json'), '{}');
   mkdirSync(join(home, '.claude', 'agents'), { recursive: true });
-  for (const n of AGENT_NAMES) {
+  for (const n of agentNames) {
     writeFileSync(join(home, '.claude', 'agents', `${n}.md`), `---\nname: ${n}\n---\n`);
   }
   return home;
 }
 
-test('the first router prompt applies auto-compact once and carries its notice', () => {
+test('the first substantive router prompt offers auto-compact once, after the state line, and writes nothing', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
   unlinkSync(marker);
-  const first = prompt(home, repo, 'short prompt');
-  assert.match(first, /set auto-compact to 200k/);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(first, /Tip: this plugin works best with Claude Code's auto-compact set to 200k tokens\. Type `autocompact on`/);
+  assert.equal(existsSync(join(home, '.claude', 'settings.json')), false, 'the offer alone never writes settings.json');
+  const stateIdx = first.indexOf('[orchestrate]');
+  const tipIdx = first.indexOf('Tip: this plugin works best');
+  assert.ok(stateIdx >= 0 && tipIdx > stateIdx, 'the tip comes after the state line, not before it');
+  assert.equal(prompt(home, repo, 'another substantive prompt goes here too'), '', 'the marker makes later prompts cheap and silent, offer or not');
+});
+
+test('a non-substantive first prompt does not spend the one-time offer', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  assert.equal(prompt(home, repo, 'ok'), '', 'too short to be substantive, so no tip and no marker spent');
+  assert.equal(existsSync(marker), false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(first, /Tip: this plugin works best/, 'the tip still arrives on the first substantive prompt');
+});
+
+test('a HOME whose settings.json already sets auto-compact gets no tip and no write', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '12345' } }));
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.doesNotMatch(first, /Tip: this plugin/);
+  assert.equal(JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8')).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '12345', 'untouched');
+});
+
+test('"autocompact on" writes the key, replies with the compact note, and sends no card or persist arming', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'autocompact on', { session_id: 's-auto-on' });
+  assert.match(first, /auto-compact setting was changed to 200k/);
+  assert.doesNotMatch(first, /\[orchestrate\]/, 'no card');
+  assert.doesNotMatch(first, /\[orchestrate · persist\]/, 'no auto-continue armed');
   const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
   assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
-  assert.match(first, /backup at/);
-  assert.equal(prompt(home, repo, 'another short prompt'), '', 'the marker makes later prompts cheap and silent');
+  assert.doesNotMatch(first, /~[\\/]\.claude[\\/]settings\.json/, 'no raw settings path');
+
+  const off = prompt(home, repo, 'autocompact off', { session_id: 's-auto-on' });
+  assert.match(off, /auto-compact setting was removed/);
+  const after = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(after.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined, 'the key is gone');
+});
+
+test('the typed command is case- and space-insensitive', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = prompt(home, repo, '  AUTOCOMPACT ON  ', { session_id: 's-auto-case' });
+  assert.match(out, /auto-compact setting was changed to 200k/);
+  const settings = JSON.parse(readFileSync(join(home, '.claude', 'settings.json'), 'utf8'));
+  assert.equal(settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
 });
 
 function makeRepo(withRun, opts = {}) {
@@ -96,17 +132,96 @@ function prompt(home, cwd, text, extra = {}) {
   return run(home, { hook_event_name: 'UserPromptSubmit', session_id: extra.session_id || 'sess-a', prompt_id: extra.prompt_id || `p${Math.random()}`, cwd, permission_mode: 'auto', prompt: text, ...extra });
 }
 
-test('the first substantive prompt gets the state line and the card, once', () => {
+// Counter phrases the card must never carry — those live behind `router status`.
+const NO_COUNTERS = /orch-agents|codex:|tier |limits today/;
+
+test('the first substantive prompt gets the card only, once, with no counters', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
   assert.match(first, /\[orchestrate\]/);
-  assert.match(first, /tier max5/);
-  assert.match(first, new RegExp(`orch-agents ${AGENT_NAMES.length}/${AGENT_NAMES.length}`));
-  assert.match(first, /run: none/);
   assert.match(first, /orchestrate is loaded/);
+  assert.doesNotMatch(first, NO_COUNTERS, 'the card carries no counters');
+  assert.doesNotMatch(first, /you: model not known here/);
 
   const second = prompt(home, repo, 'now do the same for the list command and test that too');
   assert.equal(second, '', 'nothing changed, so there is nothing to say');
+});
+
+test('a small first prompt gets the short card, under 600 characters, with no full-card text; a later larger prompt earns the full card once', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'fix the typo in the README', { session_id: 's-small' });
+  assert.ok(first.length < 600, `short-card turn is ${first.length} characters`);
+  assert.doesNotMatch(first, /orchestrate is loaded\. The user owns/, 'the full card did not go out');
+  assert.match(first, /orchestrate is loaded/);
+
+  const second = prompt(home, repo, 'build me a small app with a login page and tests', { session_id: 's-small' });
+  assert.match(second, /orchestrate is loaded\. The user owns/, 'the full card arrives on the first larger request');
+
+  const third = prompt(home, repo, 'now do the same for the list command and test that too', { session_id: 's-small' });
+  assert.equal(third, '', 'the full card was already spent, once');
+});
+
+test('a large first prompt still gets the full card, not the short one', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it', { session_id: 's-large' });
+  assert.match(first, /orchestrate is loaded\. The user owns/);
+});
+
+test("a helper's own first prompt (agent_id present) gets neither card, short or full, for a small prompt", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const inside = prompt(home, repo, 'fix the typo in the README', { session_id: 's-small-helper', agent_id: 'a1' });
+  assert.equal(inside, '', 'a subagent call is not the lead session, so it gets no card');
+});
+
+test('`router status` replies with the full state line and sends no card', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = prompt(home, repo, 'router status', { session_id: 's-status' });
+  assert.match(out, /\[orchestrate\]/);
+  assert.match(out, /tier max5/);
+  assert.match(out, new RegExp(`orch-agents ${AGENT_NAMES.length}/${AGENT_NAMES.length}`));
+  assert.match(out, /run: none/);
+  assert.doesNotMatch(out, /orchestrate is loaded/, 'the rules card is not sent for a status request');
+
+  // Not a substantive prompt: it did not arm the card or persist.
+  const after = prompt(home, repo, 'add a --json flag to the status command and test it', { session_id: 's-status' });
+  assert.match(after, /orchestrate is loaded/, 'the card is still owed after a status request');
+});
+
+test('a hook firing inside a subagent (agent_id present) prints nothing on UserPromptSubmit, and prints the card without it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const inside = prompt(home, repo, 'add a --json flag to the status command and test it', { agent_id: 'agent-1' });
+  assert.equal(inside, '', 'a subagent call is not the lead session, so it gets no card');
+  const outside = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(outside, /\[orchestrate\]/, 'the same payload without agent_id still gets the card');
+});
+
+test('a hook firing inside a subagent (agent_id present) prints nothing on SessionStart, and prints the card without it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const inside = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-agent', cwd: repo, agent_id: 'agent-1' });
+  assert.equal(inside, '', 'a subagent compacting its own transcript gets no card');
+  const outside = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-agent2', cwd: repo });
+  assert.match(outside, /\[orchestrate/, 'the same payload without agent_id still prints');
+});
+
+test('a partial install of the role agents says so on the first card, once, and names the count', () => {
+  const home = makeHome([]); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.match(first, new RegExp(`Only 0 of the plugin's ${AGENT_NAMES.length} helper roles are installed`));
+  assert.match(first, /claude plugin install orchestrate@orchestrate/);
+  const second = prompt(home, repo, 'now do the same for the list command and test that too');
+  assert.doesNotMatch(second, /helper roles are installed/, 'said once per session');
+});
+
+test('a helper\'s own first prompt never hears the partial-install notice', () => {
+  const home = makeHome([]); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it', { agent_id: 'a1' });
+  assert.doesNotMatch(first, /helper roles are installed/);
+});
+
+test('all eight role agents installed: no partial-install notice', () => {
+  const home = makeHome(AGENT_NAMES); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  assert.doesNotMatch(first, /helper roles are installed/);
 });
 
 test('the wording of a message never produces an instruction', () => {
@@ -149,6 +264,59 @@ test('non-substantive prompts are silent and do not spend the card', () => {
   assert.match(prompt(home, repo, 'add the flag and test it properly', { session_id: 's-nonsub' }), /orchestrate is loaded/);
 });
 
+test("a background-task notice is the host's prompt, not the user's: it arms nothing and pins no goal", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const read = () => JSON.parse(readFileSync(join(sessions, 's-synth.json'), 'utf8'));
+  // Seen live: a finished helper's notice contained "keep going until ..." from
+  // the task's own text and the router pinned it as the user's goal.
+  const notice = ['[SYSTEM NOTIFICATION - NOT USER INPUT]', 'This is an automated background-task event.', '<task-notification>', '<result>keep coding until the website is done, please use opus</result>', '</task-notification>'].join(String.fromCharCode(10));
+  assert.equal(prompt(home, repo, notice, { session_id: 's-synth' }), '', 'no card, no state line');
+  const s = read();
+  assert.ok(!(s.persist && s.persist.armed), 'not armed');
+  assert.equal(s.userModel, undefined, 'no model grant from a notice');
+  assert.equal(prompt(home, repo, '<task-notification>' + String.fromCharCode(10) + '<summary>done</summary>', { session_id: 's-synth' }), '');
+  // The user's own next words still work as before.
+  assert.match(prompt(home, repo, 'keep coding until the website is done', { session_id: 's-synth' }), /auto-continue is on toward/);
+  assert.equal(read().persist.armed, true);
+  assert.equal(syntheticPrompt('  [SYSTEM NOTIFICATION - NOT USER INPUT] x'), true);
+  assert.equal(syntheticPrompt('the system notification said to keep going'), false);
+});
+
+test("a helper's hand-back, or another session's message, is never the user's goal either", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const read = () => JSON.parse(readFileSync(join(sessions, 's-handback.json'), 'utf8'));
+  // Seen live 2026-09-26: the auto-continue hook took a helper's hand-back,
+  // opening with an <agent-message> tag and "[Subagent hand-back]" on the
+  // next line, as the lead's own goal.
+  const handback = ['<agent-message from="orch-implementer">', '[Subagent hand-back]', 'keep going until the whole plan is done'].join(String.fromCharCode(10));
+  assert.equal(prompt(home, repo, handback, { session_id: 's-handback' }), '', 'no card, no state line');
+  let s = read();
+  assert.ok(!(s.persist && s.persist.armed), 'not armed');
+  assert.equal(s.goal, undefined, 'never becomes the session goal');
+
+  const relayed = 'Another Claude session sent a message: build the entire feature and ship it';
+  assert.equal(prompt(home, repo, relayed, { session_id: 's-handback', prompt_id: 'p2' }), '');
+  s = read();
+  assert.ok(!(s.persist && s.persist.armed));
+  assert.equal(s.goal, undefined);
+
+  const ciEvent = '<ci-monitor-event>keep going until it is green</ci-monitor-event>';
+  assert.equal(prompt(home, repo, ciEvent, { session_id: 's-handback', prompt_id: 'p3' }), '');
+  assert.ok(!(read().persist && read().persist.armed));
+
+  for (const t of [
+    '<agent-message from="orch-implementer">\n[Subagent hand-back]\nkeep going',
+    '[Subagent hand-back]\nbuild the entire dashboard',
+    'Another Claude session sent a message: fix the tests',
+    '<ci-monitor-event>build the whole thing</ci-monitor-event>',
+  ]) {
+    assert.equal(syntheticPrompt(t), true, t);
+  }
+  assert.equal(syntheticPrompt('please tell me about agent-message formats'), false);
+});
+
 test('the same prompt_id twice is emitted once (double registration)', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const p = { session_id: 's-dup', prompt_id: 'p-1' };
@@ -168,14 +336,13 @@ test('a state change is worth a line; a change of wording is not', () => {
     JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: "You've hit your Opus limit" }] } }),
   ].join('\n'));
   const after = prompt(home, repo, 'carry on with the list command now', { session_id: 's-state', transcript_path: tr });
-  assert.match(after, /\[orchestrate · changed\]/);
-  assert.match(after, /limits today: opus/);
+  assert.match(after, /\[orchestrate · changed\] Today's limit on Opus is reached; helpers on it are refused until it resets\./);
 });
 
 test('an open run is named, and its goal comes with it', () => {
   const home = makeHome(); const repo = makeRepo(true);
   const first = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-run' });
-  assert.match(first, /run: 20260908-tidy-finish/);
+  assert.match(first, /This session continues the run at .*20260908-tidy-finish.*RUN\.md\./);
   assert.match(first, /Goal: Finish the tidy command/);
   assert.match(first, /Pickup: Pickup prompt: dispatch 9-8-0002/);
   // The task rows are not re-injected: they are long, mostly finished, and on
@@ -232,8 +399,7 @@ test('the after-compaction line states facts, not an instruction', () => {
   // Facts only: nothing in the line tells the lead what to do.
   const line = /\[orchestrate · after compaction\][^\n]*/.exec(second)[0];
   assert.doesNotMatch(line, /\b(should|must|send|call|dispatch|consider)\b/i);
-  assert.match(compactionFact({ dispatches: [] }), /0 helpers sent so far; orch-advisor last sent: never\./);
-  assert.match(compactionFact({ dispatches: [{ agent: 'orch-advisor' }] }), /1 helper sent so far; orch-advisor last sent: the most recent helper\./);
+  // compactionFact's own direct-call tests moved to lib/recover.test.mjs.
 });
 
 test('SessionStart compact with no bound run injects the checkpoint file, capped at 1,200 chars', () => {
@@ -253,15 +419,32 @@ test('SessionStart compact with no bound run injects the checkpoint file, capped
   assert.equal(excerpt, `${long.slice(0, 1197)}...`);
 });
 
-test('the resume excerpt is bounded', () => {
-  const repo = makeRepo(true);
-  const runMd = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md');
-  const long = readFileSync(runMd, 'utf8').replace('Finish the tidy command so notes stop piling up.', 'x '.repeat(5000));
-  writeFileSync(runMd, long);
-  const ex = resumeExcerpt(runMd);
-  assert.ok(ex.length <= RESUME_CAP, `${ex.length} <= ${RESUME_CAP}`);
-  assert.match(ex, /\.\.\.$/);
+test('checkpointExcerpt cuts at the last newline before the cap, never mid-word', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sessionId = 's-checkpoint2';
+  const dir = join(home, '.claude', 'orchestrate', 'context', sessionId);
+  mkdirSync(dir, { recursive: true });
+  // Short lines so a newline boundary sits well before the raw cut point.
+  const lines = [];
+  for (let i = 0; i < 60; i++) lines.push(`line ${i}: some notes about the work done so far, nothing longer`);
+  const long = lines.join('\n');
+  writeFileSync(join(dir, 'checkpoint-e1.md'), long);
+
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo });
+  const m = /\[orchestrate · compacted\] checkpoint\n([\s\S]*)/.exec(out);
+  assert.ok(m, `expected a checkpoint block: ${out}`);
+  const excerpt = m[1];
+  assert.ok(excerpt.length <= 1200, `${excerpt.length} <= 1200`);
+  assert.match(excerpt, /\.\.\.$/);
+  // Raw cut at 1197 chars would land inside a line; confirm the fixture
+  // reproduces that before checking the fix.
+  assert.doesNotMatch(long.slice(1194, 1200), /\n/, 'fixture must cross mid-line under a raw cut');
+  // The fix cuts back to the end of the last whole line before the cap.
+  const lastFullLine = long.slice(0, 1197).split('\n').slice(0, -1).join('\n');
+  assert.equal(excerpt, `${lastFullLine}...`);
 });
+
+// unreturned/unreturnedNote's own direct-call test moved to lib/recover.test.mjs.
 
 test('a single unambiguous open run binds itself; two do not', () => {
   const home = makeHome(); const repo = makeRepo(true);
@@ -272,24 +455,60 @@ test('a single unambiguous open run binds itself; two do not', () => {
   const second = join(repo, '.orchestrator', 'runs', '20260909-other');
   mkdirSync(second, { recursive: true });
   writeFileSync(join(second, 'RUN.md'), '# Run\n\n## Tasks\n\n| id | p | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n');
-  const out = prompt(home, repo, 'start on the second piece of work now please', { session_id: 's-bind2' });
-  assert.match(out, /2 candidates/);
+  prompt(home, repo, 'start on the second piece of work now please', { session_id: 's-bind2' });
+  const status = prompt(home, repo, 'router status', { session_id: 's-bind2' });
+  assert.match(status, /2 candidates/);
   const s2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-bind2.json'), 'utf8'));
   assert.equal(s2.run, undefined, 'ambiguous means unbound, not a guess');
 });
 
-test('a session outside any repo is offered the run, never bound to it', () => {
-  const home = makeHome(); const repo = makeRepo(true);
+test('a session above its own repo, with nothing else in play, is offered the run as a candidate, never bound to it', () => {
+  // The pointer root itself carries no .git, so findRepoRoot never finds it —
+  // this is the "session started above the project" shape the pointer exists
+  // for, not an ordinary repo session (which resolves its own open runs and
+  // never reads the pointer at all).
+  const home = makeHome();
+  const pointerRoot = mkdtempSync(join(tmpdir(), 'orch-pointer-root-'));
+  const runDir = join(pointerRoot, '.orchestrator', 'runs', '20260908-tidy-finish');
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'RUN.md'), '# Run\n\n## Tasks\n\n| id | p | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n');
   writeFileSync(join(home, '.claude', 'orchestrate', 'active-run.json'), JSON.stringify({
-    v: 1, root: repo, runMd: join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md'), at: new Date().toISOString(),
+    v: 1, root: pointerRoot, runMd: join(runDir, 'RUN.md'), at: new Date().toISOString(),
   }));
-  const outside = mkdtempSync(join(tmpdir(), 'orch-outside-'));
-  const out = prompt(home, outside, 'pick up where we left off on the tidy work', { session_id: 's-outside' });
-  // The run's picture is shown so a session above its repo can still see what is
-  // ready, but it is labelled a candidate and the session is not bound: display
-  // is read-only, and a hook that writes still needs the binding.
-  assert.match(out, /candidate, not bound/);
-  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-outside.json'), 'utf8'));
+
+  // cwd under the pointer's own root: the run's picture is shown so a session
+  // above its repo can still see what is ready, but it is labelled a
+  // candidate and the session is not bound: display is read-only, and a hook
+  // that writes still needs the binding.
+  const sub = join(pointerRoot, 'sub');
+  mkdirSync(sub, { recursive: true });
+  const under = prompt(home, sub, 'pick up where we left off on the tidy work', { session_id: 's-under' });
+  const statusUnder = prompt(home, sub, 'router status', { session_id: 's-under' });
+  assert.match(statusUnder, /candidate, not bound/);
+  const stateUnder = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-under.json'), 'utf8'));
+  assert.equal(stateUnder.run, undefined);
+});
+
+test('active-run.json names a project the session has nothing to do with: no run phrase at all', () => {
+  // The bug this guards: a session in one project must not be told about a
+  // run from another project just because that one happened to be the last
+  // run opened on the machine.
+  const home = makeHome();
+  const pointerRoot = mkdtempSync(join(tmpdir(), 'orch-pointer-root-'));
+  const runDir = join(pointerRoot, '.orchestrator', 'runs', '20260908-tidy-finish');
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'RUN.md'), '# Run\n\n## Tasks\n\n| id | p | r | t | u | a | e |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 🔨 running | x | y | z | 0 | — |\n');
+  writeFileSync(join(home, '.claude', 'orchestrate', 'active-run.json'), JSON.stringify({
+    v: 1, root: pointerRoot, runMd: join(runDir, 'RUN.md'), at: new Date().toISOString(),
+  }));
+  const unrelated = mkdtempSync(join(tmpdir(), 'orch-unrelated-'));
+  const out = prompt(home, unrelated, 'pick up where we left off on the tidy work', { session_id: 's-unrelated' });
+  assert.doesNotMatch(out, /candidate/);
+  assert.doesNotMatch(out, /continues the run/);
+  const status = prompt(home, unrelated, 'router status', { session_id: 's-unrelated' });
+  assert.match(status, /run: none/);
+  assert.doesNotMatch(status, /candidate/);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-unrelated.json'), 'utf8'));
   assert.equal(state.run, undefined);
 });
 
@@ -311,7 +530,7 @@ test('naming a family records the earliest one in the prompt, not the ladder\'s 
   // FAMILY_ORDER is ['fable', 'opus', 'sonnet', 'haiku'], so .find used to
   // check fable before opus regardless of where each word actually sits in
   // the sentence — "use opus, not fable" recorded fable even though opus is
-  // what Josh asked for and fable is what he ruled out.
+  // what the user asked for and fable is what they ruled out.
   prompt(home, repo, 'use opus, not fable, for this one', { session_id: 's-order' });
   const s1 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-order.json'), 'utf8'));
   assert.equal(s1.userModel.family, 'opus', 'the earliest-named family wins, not the ladder position');
@@ -341,9 +560,13 @@ test('the card carries no running total and no advice about the session settings
   // A session on the "wrong" model and effort. The router used to tell it so.
   writeFileSync(tr, JSON.stringify({ type: 'assistant', message: { model: 'claude-sonnet-5', content: [] }, effort: 'low', entrypoint: 'claude-desktop' }));
   const out = prompt(home, repo, 'add a --json flag to status and test it', { session_id: 's-card', transcript_path: tr });
-  assert.match(out, /you: sonnet @ low effort/, 'it still reports what it can see');
+  assert.doesNotMatch(out, /you: sonnet|tier |orch-agents|codex:/, 'the proactive card carries none of it');
   assert.doesNotMatch(out, /your setup|belongs on|\/model|Effort → High/, 'and offers no opinion about it');
   assert.doesNotMatch(out, /\$\d|spent|total/);
+  const status = prompt(home, repo, 'router status', { session_id: 's-card', transcript_path: tr });
+  assert.match(status, /you: sonnet @ low effort/, 'router status still reports what it can see');
+  assert.doesNotMatch(status, /your setup|belongs on|\/model|Effort → High/, 'and offers no opinion about it');
+  assert.doesNotMatch(status, /\$\d|spent|total/);
 });
 
 test('malformed or missing input never fails', () => {
@@ -366,24 +589,6 @@ test('--state prints what it would inject and writes nothing', () => {
   assert.equal(existsSync(join(home, '.claude', 'orchestrate', 'sessions', 'cli.json')), false);
 });
 
-test('the card body stays inside the cap it names', () => {
-  // Every character is paid on every later turn of the session that got it.
-  const body = cardBody();
-  assert.ok(body.length <= CARD_CAP, `card is ${body.length} characters, cap ${CARD_CAP}`);
-  // It comes from ladder.md, so the text has one home.
-  const ladder = readFileSync(join(HERE, '..', 'references', 'ladder.md'), 'utf8');
-  assert.ok(ladder.includes(body), 'the card is the fenced block in ladder.md, verbatim');
-  assert.match(body, /router off/, 'it says how to turn itself off');
-});
-
-test('the fallback card cannot silently drift from the real one', () => {
-  // FALLBACK_CARD only runs when ladder.md cannot be read, so nothing else
-  // exercises it; it drifted two paragraphs behind the real card once already.
-  const ladder = readFileSync(join(HERE, '..', 'references', 'ladder.md'), 'utf8');
-  assert.ok(ladder.includes(FALLBACK_CARD), 'FALLBACK_CARD is byte-identical to the fenced block in ladder.md');
-  assert.ok(FALLBACK_CARD.length <= CARD_CAP, `fallback card is ${FALLBACK_CARD.length} characters, cap ${CARD_CAP}`);
-});
-
 // ---- which task is ready ----------------------------------------------------
 // A lead was watched waiting on one agent with a finished plan on the board and
 // a `/goal` loop running, which is no progress and quota burning at once. It
@@ -397,7 +602,11 @@ const NEW_HEADER = [
 const taskRow = (id, phase, blocks = '—') =>
   `| ${id} | ${phase} | ${blocks} | src/${id}.ts | implementer · sonnet | do ${id} | exit 0 | 0 | — |`;
 
-test('the run line names the tasks that could start right now', () => {
+// Readiness and owed returns no longer print unasked — they are part of the
+// full state line `router status` gives on request; the proactive flow only
+// ever carries the one actionable sentence (a limit, a bound run, persist).
+
+test('`router status` names the tasks that could start right now', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [
     ...NEW_HEADER,
@@ -405,27 +614,13 @@ test('the run line names the tasks that could start right now', () => {
     taskRow('9-8-0002', '📋 planned'),
     taskRow('9-8-0003', '📋 planned', '9-8-0001'),
   ] });
-  const out = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-ready' });
+  prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-ready' });
+  const out = prompt(home, repo, 'router status', { session_id: 's-ready' });
   assert.match(out, /ready now: 9-8-0002/);
   assert.doesNotMatch(out, /9-8-0003/, 'a task whose blocker is still running is not ready');
 });
 
-test('a legacy ledger says nothing about readiness rather than guessing', () => {
-  const home = makeHome();
-  const repo = makeRepo(true);
-  const out = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-legacy' });
-  assert.match(out, /run: 20260908-tidy-finish/);
-  assert.doesNotMatch(out, /ready now/, 'the old table has no edges to read');
-});
-
-test('a run with nothing planned says nothing about readiness', () => {
-  const home = makeHome();
-  const repo = makeRepo(true, { rows: [...NEW_HEADER, taskRow('9-8-0001', '🔨 running')] });
-  const out = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-none' });
-  assert.doesNotMatch(out, /ready now/);
-});
-
-test('a task becoming ready reprints the line; an unchanged board stays quiet', () => {
+test('the proactive flow says nothing about readiness, even when a task becomes ready', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [
     ...NEW_HEADER,
@@ -435,31 +630,22 @@ test('a task becoming ready reprints the line; an unchanged board stays quiet', 
   const runMd = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish', 'RUN.md');
 
   const first = prompt(home, repo, 'start on the tidy work please', { session_id: 's-change' });
-  assert.doesNotMatch(first, /ready now/, 'nothing is ready while the blocker runs');
+  assert.doesNotMatch(first, /ready now/);
   assert.equal(prompt(home, repo, 'and how is that going now', { session_id: 's-change' }), '',
     'nothing changed, so nothing is said');
 
-  // The blocker lands. That is the moment the lead has something better to do
-  // than wait, and the moment the line is worth its tokens.
+  // The blocker lands; readiness changed, but that is not one of the three
+  // actionable facts, so the "changed" line stays silent.
   writeFileSync(runMd, readFileSync(runMd, 'utf8').replace('| 9-8-0001 | 🔨 running |', '| 9-8-0001 | ✅ done |'));
   const after = prompt(home, repo, 'anything else worth starting yet', { session_id: 's-change' });
-  assert.match(after, /\[orchestrate · changed\]/);
-  assert.match(after, /ready now: 9-8-0002/);
+  assert.doesNotMatch(after, /\[orchestrate · changed\]/);
+  assert.doesNotMatch(after, /ready now/);
 
-  assert.equal(prompt(home, repo, 'right, carrying on with that then', { session_id: 's-change' }), '',
-    'and it says it once, not every turn');
+  const status = prompt(home, repo, 'router status', { session_id: 's-change' });
+  assert.match(status, /ready now: 9-8-0002/, 'the fact is still there on request');
 });
 
-test('a long ready list is trimmed rather than filling the line', () => {
-  const ready = Array.from({ length: 9 }, (_, i) => `9-8-000${i + 1}`);
-  const phrase = readyPhrase({ ready });
-  assert.match(phrase, /ready now: 9-8-0001, 9-8-0002, 9-8-0003, 9-8-0004 \+5 more/);
-  assert.ok(phrase.length < 80, `${phrase.length} characters is small enough to print every turn`);
-  assert.equal(readyPhrase({ ready: [] }), '');
-  assert.equal(readyPhrase(null), '');
-});
-
-test('the run line says what came back and is still waiting on you', () => {
+test('`router status` says what came back and is still waiting on you', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [
     ...NEW_HEADER,
@@ -471,12 +657,13 @@ test('the run line says what came back and is still waiting on you', () => {
   writeFileSync(join(dir, 'returns', 'returns.jsonl'),
     `${JSON.stringify({ task: '9-8-0001', agent: 'orch-implementer', status: 'DONE' })}\n`);
 
-  const out = prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-owed' });
+  prompt(home, repo, 'carry on with the tidy work from yesterday', { session_id: 's-owed' });
+  const out = prompt(home, repo, 'router status', { session_id: 's-owed' });
   assert.match(out, /1 return to grade: 9-8-0001/, 'singular reads as English');
   assert.match(out, /ready now: 9-8-0002/, 'both facts fit on the one line');
 });
 
-test('setting the row stops the reminder, and that counts as a state change', () => {
+test('the proactive flow never mentions an owed return, before or after it is graded', () => {
   const home = makeHome();
   const repo = makeRepo(true, { rows: [...NEW_HEADER, taskRow('9-8-0001', '🔨 running')] });
   const dir = join(repo, '.orchestrator', 'runs', '20260908-tidy-finish');
@@ -485,35 +672,16 @@ test('setting the row stops the reminder, and that counts as a state change', ()
   writeFileSync(join(dir, 'returns', 'returns.jsonl'),
     `${JSON.stringify({ task: '9-8-0001', status: 'DONE' })}\n`);
 
-  assert.match(prompt(home, repo, 'pick the tidy work back up please', { session_id: 's-owed2' }), /1 return to grade/);
+  assert.doesNotMatch(prompt(home, repo, 'pick the tidy work back up please', { session_id: 's-owed2' }), /to grade/);
   assert.equal(prompt(home, repo, 'anything moved since then', { session_id: 's-owed2' }), '', 'still owed, still silent');
 
   writeFileSync(runMd, readFileSync(runMd, 'utf8').replace('| 9-8-0001 | 🔨 running |', '| 9-8-0001 | ✅ done |'));
   const after = prompt(home, repo, 'right, what is outstanding now', { session_id: 's-owed2' });
-  assert.match(after, /\[orchestrate · changed\]/);
-  assert.doesNotMatch(after, /to grade/, 'it has been judged, so it stops asking');
-});
-
-test('a long list of owed returns is trimmed like the ready one', () => {
-  const ungraded = Array.from({ length: 7 }, (_, i) => `9-8-000${i + 1}`);
-  const phrase = ungradedPhrase({ ungraded });
-  assert.match(phrase, /7 returns to grade: 9-8-0001, 9-8-0002, 9-8-0003, 9-8-0004 \+3 more/);
-  assert.equal(ungradedPhrase({ ungraded: [] }), '');
-  assert.equal(ungradedPhrase(null), '');
+  assert.doesNotMatch(after, /\[orchestrate · changed\]/);
+  assert.doesNotMatch(after, /to grade/);
 });
 
 // ---- the brief: "What this is for" ------------------------------------------
-
-function makeBriefRepo({ file = 'CLAUDE.md', body = '## What this is for\n\nMakes toast, for people in a hurry.\n\nDeciding documents (these win when the code and the intent disagree):\n- docs/roadmap.md — where we are\n' } = {}) {
-  const repo = mkdtempSync(join(tmpdir(), 'orch-brief-repo-'));
-  mkdirSync(join(repo, '.git'), { recursive: true });
-  if (file) {
-    const p = join(repo, file);
-    mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, body);
-  }
-  return repo;
-}
 
 test('sectionExcerpt is capped and section-ordered, and the brief reader reuses it', () => {
   const md = `## What this is for\n\n${'x'.repeat(BRIEF_CAP + 200)}\n`;
@@ -525,48 +693,69 @@ test('sectionExcerpt is capped and section-ordered, and the brief reader reuses 
   assert.equal(goalFirst.indexOf('Goal:'), 0);
 });
 
-test('a missing brief section prints one fact line, once', () => {
-  const repo = makeBriefRepo({ file: 'CLAUDE.md', body: '# Just some notes\n\nNo section here.\n' });
-  const ctx = { repoRoot: repo, cwd: repo, run: null };
-  const state = {};
-  const first = briefNote(ctx, state);
-  assert.match(first, /\[orchestrate · brief\] no "What this is for" section between/);
-  assert.match(first, /Template: .*assets[\\/]BRIEF\.md/);
-  assert.equal(briefNote(ctx, state), '', 'said once per session');
+// briefState/briefNote's own tests (missing section, host-loaded, once-per-
+// epoch, AGENTS.md) moved to lib/brief.test.mjs with the functions.
+
+// ---- fresh-session handoff ---------------------------------------------------
+
+test('the first substantive prompt stores it as the session goal, capped and collapsed', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  assert.equal(prompt(home, repo, 'ok'), '' , 'too short to be substantive');
+  prompt(home, repo, '  add   a --json   flag\nto the status command  ', { session_id: 'sess-goal' });
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sess-goal.json'), 'utf8'));
+  assert.equal(state.goal, 'add a --json flag to the status command');
+  const before = state.goal;
+  prompt(home, repo, 'a second substantive prompt in the same session', { session_id: 'sess-goal', prompt_id: 'p2' });
+  const state2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sess-goal.json'), 'utf8'));
+  assert.equal(state2.goal, before, 'the goal is set once, from the first substantive prompt only');
 });
 
-test('a brief the host loads prints nothing', () => {
-  const repo = makeBriefRepo();
-  const ctx = { repoRoot: repo, cwd: repo, run: null };
-  const state = {};
-  assert.equal(briefState(ctx, state).kind, 'kept');
-  assert.equal(briefNote(ctx, state), '');
+function seedSession(home, id, rec) {
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${id}.json`), JSON.stringify({ v: 1, session_id: id, prompts: 1, cardSent: true, ...rec }));
+}
+
+test('a fresh session that says "continue" in the same folder gets the previous goal', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 30 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.match(out, /Your last session in this folder, 30 minutes ago, was working on: "add a --json flag to the status command"\./);
+  assert.match(out, /run `git status`/, 'no run and no checkpoint here, so the plain git-status clause');
 });
 
-test('a brief the host does not keep in view is printed once per epoch and again after a compaction', () => {
-  const repo = makeBriefRepo();
-  // No repoRoot: the session was started above the project, and the working
-  // project is known only from touched paths (context-check.mjs's state.work).
-  const ctx = { repoRoot: null, cwd: null, run: null };
-  const state = { work: { root: repo, dir: repo, counts: {} } };
-  const b = briefState(ctx, state);
-  assert.equal(b.kind, 'other');
-  const first = briefNote(ctx, state);
-  assert.match(first, /\[orchestrate · brief\] from .*CLAUDE\.md/);
-  assert.match(first, /Makes toast/);
-  assert.equal(briefNote(ctx, state), '', 'once per epoch');
-  // A compaction is a new epoch: the router forces it, whatever was said before.
-  const again = briefNote(ctx, state, { force: true });
-  assert.match(again, /Makes toast/);
+test('a fresh session that asks "where were we?" (with the question mark) also gets the previous goal', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 10 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  const out = prompt(home, repo, 'where were we?', { session_id: 'sess-new' });
+  assert.match(out, /Your last session in this folder, 10 minutes ago, was working on: "add a --json flag to the status command"\./);
 });
 
-test('the brief section is found in AGENTS.md', () => {
-  const repo = makeBriefRepo({ file: 'AGENTS.md', body: '## What this is for\n\nRuns the payroll for one small shop.\n' });
-  const ctx = { repoRoot: repo, cwd: repo, run: null };
-  const state = {};
-  const b = briefState(ctx, state);
-  assert.match(b.file, /AGENTS\.md$/);
-  assert.match(b.text, /Runs the payroll/);
-  // A bare AGENTS.md nobody pulls in with @AGENTS.md is not kept in view.
-  assert.equal(b.kind, 'other');
+test('a different cwd gets no handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false); const other = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 5 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: other, goal: 'work on the other project', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.doesNotMatch(out, /Your last session in this folder/);
 });
+
+test('a previous session older than 7 days gets no handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 8 * 86400000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'stale work', lastSeen });
+  const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.doesNotMatch(out, /Your last session in this folder/);
+});
+
+test('a second "continue" in the same session does not repeat the handoff line', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const lastSeen = new Date(Date.now() - 5 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  const first = prompt(home, repo, 'continue', { session_id: 'sess-new' });
+  assert.match(first, /Your last session in this folder/);
+  const second = prompt(home, repo, 'continue', { session_id: 'sess-new', prompt_id: 'p2' });
+  assert.doesNotMatch(second, /Your last session in this folder/);
+});
+

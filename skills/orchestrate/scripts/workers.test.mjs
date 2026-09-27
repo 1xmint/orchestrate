@@ -46,6 +46,13 @@ test('only a recorded depth-1 coordinator may dispatch a named capped child', ()
   assert.equal(workflowDecision({}, ti('orch-coordinator'), { policy, installed: 7 }), null, 'the lead remains free to dispatch a coordinator');
 });
 
+test('a worktree-isolated helper refuses a packet that sends it into the shared checkout', () => {
+  assert.match(workflowDecision({}, ti('orch-implementer', 'TASK: 1\nWHERE: repo /r\nworktree: no'), { policy, installed: ALL }).reason, /own worktree and branch/);
+  assert.match(workflowDecision({}, ti('orch-debugger', 'TASK: 1\nWork directly in the project root (do not use a separate worktree)'), { policy, installed: ALL }).reason, /own worktree and branch/);
+  assert.equal(workflowDecision({}, ti('orch-implementer', 'TASK: 1\nWHERE: repo /r\nworktree: yes'), { policy, installed: ALL }), null);
+  assert.equal(workflowDecision({}, ti('orch-researcher', 'TASK: 1\nworktree: no'), { policy, installed: ALL }), null, 'orch-researcher is not worktree-isolated');
+});
+
 test('general-purpose is replaced by capped role agents while they are installed', () => {
   const d = workflowDecision({}, ti('general-purpose'), { policy, installed: ALL });
   assert.match(d.reason, /no turn cap/);
@@ -214,10 +221,44 @@ test('two workers across providers; browser work serial', () => {
   assert.match(busy, /limit is 2 across Claude and Codex/);
   assert.match(concurrencyDecision('orch-browser', { native: [{ provider: 'claude', role: 'orch-browser', task: 'b' }], policy }), /browser work is serial/);
   assert.equal(concurrencyDecision('x', { native: two, policy: loadPolicy({ policy: { workers: { maxConcurrent: 3 } } }) }), null);
-  const coordinator = [{ provider: 'claude', role: 'orch-coordinator', task: 'wave' }];
-  assert.equal(concurrencyDecision('orch-implementer', { native: [...coordinator, one[0]], policy }), null, 'a live coordinator raises the default slot count to three');
-  assert.match(concurrencyDecision('orch-reviewer', { native: [...coordinator, ...two], policy }), /limit is 3/);
   assert.match(workflowDecision({}, ti('orchestrate:orch-researcher'), { policy, installed: 6, native: two }).reason, /already running/);
+});
+
+test('a live coordinator reserves its own two child slots on top of the session pool, not inside it', () => {
+  // Two lead direct dispatches already fill workers.maxConcurrent=2, plus one
+  // live coordinator (also a direct dispatch, occupying its own ordinary slot).
+  const direct = [
+    { provider: 'claude', role: 'orch-implementer', task: 'd1' },
+    { provider: 'claude', role: 'orch-researcher', task: 'd2' },
+  ];
+  const coordinator = { provider: 'claude', role: 'orch-coordinator', task: 'wave', agentId: 'coord-1' };
+  const native = [...direct, coordinator];
+  // The coordinator's own children draw on its private pool, never the
+  // session-wide one the two direct dispatches already filled.
+  assert.equal(concurrencyDecision('orch-implementer', { native, policy, coordinatorParentId: 'coord-1' }), null, 'first child');
+  const withOneChild = [...native, { provider: 'claude', role: 'orch-implementer', task: 'c1', parent: 'coord-1' }];
+  assert.equal(concurrencyDecision('orch-researcher', { native: withOneChild, policy, coordinatorParentId: 'coord-1' }), null, 'second child');
+  const withTwoChildren = [...withOneChild, { provider: 'claude', role: 'orch-researcher', task: 'c2', parent: 'coord-1' }];
+  const thirdChild = concurrencyDecision('orch-reviewer', { native: withTwoChildren, policy, coordinatorParentId: 'coord-1' });
+  assert.match(thirdChild, /already has 2 of its own children running/);
+  // Meanwhile the session-wide pool still means what it says for a third
+  // *direct* dispatch (not a coordinator's child): it is refused even though
+  // the coordinator's children have their own separate slots.
+  assert.match(concurrencyDecision('orch-implementer', { native: withTwoChildren, external: [], policy }), /limit is 2 across Claude and Codex/);
+});
+
+test('two coordinators live at once each keep their own two child slots', () => {
+  const coordA = { provider: 'claude', role: 'orch-coordinator', task: 'wave-a', agentId: 'coord-a' };
+  const coordB = { provider: 'claude', role: 'orch-coordinator', task: 'wave-b', agentId: 'coord-b' };
+  const native = [
+    coordA, coordB,
+    { provider: 'claude', role: 'orch-implementer', task: 'a1', parent: 'coord-a' },
+    { provider: 'claude', role: 'orch-implementer', task: 'b1', parent: 'coord-b' },
+  ];
+  // Each coordinator already has one child; its second slot is still free,
+  // regardless of what the other coordinator's children are doing.
+  assert.equal(concurrencyDecision('orch-researcher', { native, policy, coordinatorParentId: 'coord-a' }), null);
+  assert.equal(concurrencyDecision('orch-researcher', { native, policy, coordinatorParentId: 'coord-b' }), null);
 });
 
 test('running helpers: dispatched and not returned and still alive', () => {
@@ -238,6 +279,25 @@ test('running helpers: dispatched and not returned and still alive', () => {
   assert.deepEqual(live.map(w => w.task || w.role), ['1', 'Explore'], 'writing recently or just dispatched; the silent, returned and stale ones do not count');
   // A return recorded without an agent id still matches by role and task.
   assert.deepEqual(runningNative([{ agent: 'orch-researcher', task: '7', at: ago(1) }], { returned: [{ agent: 'orch-researcher', task: '7', at: ago(0) }], now: NOW }), []);
+});
+
+test('running helpers: a return carrying the dispatch id frees the slot with no transcript file and no task id', () => {
+  // Seen live: three prose briefs (no TASK: line) dispatched at once, one helper
+  // returned with an agent id, but no transcript file was mapped for its
+  // dispatch, so the dispatch stayed "running" until the silence rule and a
+  // fresh dispatch was refused as a third worker. The ledger now stores the
+  // dispatch's tool_use_id on the return; that pairing needs nothing else.
+  const dispatches = [
+    { agent: 'orchestrate:orch-implementer', at: ago(3), toolUseId: 'tu_done' },
+    { agent: 'orchestrate:orch-implementer', at: ago(3), toolUseId: 'tu_still' },
+  ];
+  const returned = [{ agent: 'orch-implementer', agentId: 'agent-done', toolUseId: 'tu_done', at: ago(1) }];
+  const live = runningNative(dispatches, { returned, files: new Map(), now: NOW, staleMin: 10 });
+  assert.equal(live.length, 1, 'the returned one is gone, the other is still inside its dispatch grace');
+  assert.equal(live[0].task, null);
+  // The same return does not also match the other dispatch loosely by role.
+  const both = runningNative(dispatches, { returned: [{ ...returned[0], agentId: null }], files: new Map(), now: NOW, staleMin: 10 });
+  assert.equal(both.length, 1);
 });
 
 test('running helpers: liveness is one number — just-dispatched counts, a fresh transcript counts however old the dispatch, silent past staleMin does not', () => {

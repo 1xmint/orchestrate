@@ -12,10 +12,10 @@
 // Pure functions, so the unit test can run the whole merge on a copy of a real
 // settings.json without touching the machine.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 
-export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'postcompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];
+export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'guard-bash.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'postcompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];
 
 export function toPosix(p) {
   return String(p).replace(/\\/g, '/');
@@ -98,8 +98,8 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
   const out = [];
   if (router) {
     const cmd = commandFor(join(scriptsDir, 'router.mjs'));
-    out.push({ event: 'UserPromptSubmit', matcher: null, command: cmd, timeout: 5 });
-    out.push({ event: 'SessionStart', matcher: 'resume|compact|clear', command: cmd, timeout: 5 });
+    out.push({ event: 'UserPromptSubmit', matcher: null, command: cmd, timeout: 15 });
+    out.push({ event: 'SessionStart', matcher: 'resume|compact|clear', command: cmd, timeout: 15 });
     // The other half of the router's "keep going" arming: without it the router
     // pins a goal nothing ever acts on.
     out.push({ event: 'Stop', matcher: null, command: commandFor(join(scriptsDir, 'persist-check.mjs')), timeout: 5 });
@@ -110,13 +110,12 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
   }
   if (guard) {
     out.push({ event: 'PreToolUse', matcher: 'Agent|Task', command: commandFor(join(scriptsDir, 'guard-agent.mjs')), timeout: 10 });
+    // The Bash guard: a destructive, public or paid shell command is asked
+    // about in the main session and refused inside a helper (docs/safety-guard.md).
+    out.push({ event: 'PreToolUse', matcher: 'Bash', command: commandFor(join(scriptsDir, 'guard-bash.mjs')), timeout: 5 });
     out.push({ event: 'SubagentStop', matcher: null, command: commandFor(join(scriptsDir, 'ledger.mjs')), timeout: 10 });
-    // SKILL.md's own frontmatter also registers this on Stop, with a bare
-    // `node` that only resolves on a plugin install. A script install is the
-    // one path that can pin the interpreter's absolute path, and `--with-hook`
-    // is already the flag that does that for the other two money-mechanics
-    // hooks, so the Pickup check belongs in the same group rather than a third
-    // flag nobody would think to pass.
+    // The Pickup check belongs with the other money-mechanics hooks under
+    // `--with-hook`, rather than a third flag nobody would think to pass.
     out.push({ event: 'Stop', matcher: null, command: commandFor(join(scriptsDir, 'turn-check.mjs')), timeout: 10 });
     out.push({ event: 'PreCompact', matcher: null, command: commandFor(join(scriptsDir, 'precompact-check.mjs')), timeout: 10 });
     // Unlike precompact-check.mjs, this one is safe to register plugin-wide
@@ -145,9 +144,17 @@ export function readSettings(path) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return {}; }
 }
 
+// Only one backup is ever kept: a fresh one replaces whatever backup(s) the
+// last run left, so an install run daily does not leave dozens of these
+// behind in ~/.claude/orchestrate.
 export function backupSettings(path, backupDir, now = new Date()) {
   if (!existsSync(path)) return null;
   mkdirSync(backupDir, { recursive: true });
+  for (const f of readdirSync(backupDir)) {
+    if (/^settings\.backup\..*\.json$/.test(f)) {
+      try { unlinkSync(join(backupDir, f)); } catch {}
+    }
+  }
   const stamp = now.toISOString().replace(/[:.]/g, '-');
   const dest = join(backupDir, `settings.backup.${stamp}.json`);
   copyFileSync(path, dest);
@@ -196,8 +203,53 @@ export function autocompactMarkerPath(markerDir) {
   return join(markerDir, 'autocompact-default.json');
 }
 
-// Returns an application report, never throws.  Check the marker first: this
-// is the normal hook path after the one-time write and avoids reading settings.
+// Never writes settings.json. Returns {offer: true, value} the one time it is
+// worth asking: no marker yet, the policy has not been turned off, and
+// settings.json does not already carry the key (the user's own choice always
+// wins). Whatever the answer, a marker is written so this is asked at most
+// once per HOME — offering is itself the one-time event, not the write.
+export function autocompactOffer({ settingsPath, markerDir, policy, now = new Date() } = {}) {
+  try {
+    const marker = autocompactMarkerPath(markerDir);
+    if (existsSync(marker)) return { offer: false, reason: 'marker', marker };
+    const value = policy && policy.context && policy.context.autocompactDefault;
+    if (value === 'off') return { offer: false, reason: 'off', marker };
+    const tokens = parseAutocompact(value);
+    if (!tokens) return { offer: false, reason: 'off', marker };
+    const settings = readSettings(settingsPath);
+    if (settings.env && Object.prototype.hasOwnProperty.call(settings.env, 'CLAUDE_CODE_AUTO_COMPACT_WINDOW')) {
+      // The user chose already. Remember that, so later prompts stop at the
+      // marker instead of re-reading settings.json every time.
+      mkdirSync(markerDir, { recursive: true });
+      writeFileSync(marker, JSON.stringify({ at: now.toISOString(), value: 'existing', settingsPath }, null, 2) + '\n');
+      return { offer: false, reason: 'existing', marker };
+    }
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(marker, JSON.stringify({ at: now.toISOString(), value: 'asked', settingsPath }, null, 2) + '\n');
+    return { offer: true, value: tokens, marker };
+  } catch { return { offer: false, reason: 'error' }; }
+}
+
+// The write itself: backup + set the key + a marker recording the value.
+// Shared by the typed `autocompact on` / `autocompact <N>k` commands and by
+// profile.mjs --autocompact <tokens>, so there is exactly one place that
+// writes CLAUDE_CODE_AUTO_COMPACT_WINDOW into settings.json.
+export function applyAutocompact({ settingsPath, markerDir, tokens, now = new Date() } = {}) {
+  const settings = readSettings(settingsPath);
+  const backup = backupSettings(settingsPath, markerDir, now);
+  setEnv(settings, { CLAUDE_CODE_AUTO_COMPACT_WINDOW: tokens });
+  writeSettings(settingsPath, settings);
+  mkdirSync(markerDir, { recursive: true });
+  const marker = autocompactMarkerPath(markerDir);
+  writeFileSync(marker, JSON.stringify({ at: now.toISOString(), value: tokens, settingsPath, backup }, null, 2) + '\n');
+  return { applied: true, value: tokens, settingsPath, backup, marker };
+}
+
+// Kept for scripts/install.mjs (outside this task's scope), which still
+// applies the one-time 200k default at install time — an explicit user
+// action, not a hook running mid-conversation. router.mjs no longer calls
+// this; see autocompactOffer/applyAutocompact/removeAutocompact above for
+// the ask-once path a hook uses.
 export function applyAutocompactDefault({ settingsPath, markerDir, policy, now = new Date() } = {}) {
   try {
     const marker = autocompactMarkerPath(markerDir);
@@ -208,8 +260,6 @@ export function applyAutocompactDefault({ settingsPath, markerDir, policy, now =
     if (!tokens) return { applied: false, reason: 'off', marker };
     const settings = readSettings(settingsPath);
     if (settings.env && Object.prototype.hasOwnProperty.call(settings.env, 'CLAUDE_CODE_AUTO_COMPACT_WINDOW')) {
-      // The user chose already. Remember that, so later prompts stop at the
-      // marker instead of re-reading settings.json every time.
       mkdirSync(markerDir, { recursive: true });
       writeFileSync(marker, JSON.stringify({ at: now.toISOString(), value: 'existing', settingsPath }, null, 2) + '\n');
       return { applied: false, reason: 'existing', marker };
@@ -221,4 +271,18 @@ export function applyAutocompactDefault({ settingsPath, markerDir, policy, now =
     writeFileSync(marker, JSON.stringify({ at: now.toISOString(), value: tokens, settingsPath, backup }, null, 2) + '\n');
     return { applied: true, value: tokens, settingsPath, backup, marker };
   } catch { return { applied: false, reason: 'error' }; }
+}
+
+// The undo: removes the key if present, still with a backup first. Shared by
+// the typed `autocompact off` command and profile.mjs --autocompact off.
+export function removeAutocompact({ settingsPath, markerDir, now = new Date() } = {}) {
+  const settings = readSettings(settingsPath);
+  const had = !!(settings.env && Object.prototype.hasOwnProperty.call(settings.env, 'CLAUDE_CODE_AUTO_COMPACT_WINDOW'));
+  const backup = backupSettings(settingsPath, markerDir, now);
+  if (settings.env && typeof settings.env === 'object') delete settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW;
+  writeSettings(settingsPath, settings);
+  mkdirSync(markerDir, { recursive: true });
+  const marker = autocompactMarkerPath(markerDir);
+  writeFileSync(marker, JSON.stringify({ at: now.toISOString(), value: 'off', settingsPath, backup }, null, 2) + '\n');
+  return { removed: had, settingsPath, backup, marker };
 }

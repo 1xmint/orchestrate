@@ -94,14 +94,22 @@ if (wantRouter || wantGuard) {
   const settings = readSettings(settingsPath);
   const before = JSON.stringify(settings);
   const report = applyRegistrations(settings, entries);
+  const unchanged = before === JSON.stringify(settings);
   if (!dryRun) {
-    const backup = backupSettings(settingsPath, join(HOME, '.claude', 'orchestrate'));
-    if (backup) say(`backed up settings -> ${toPosix(backup)}`);
-    writeSettings(settingsPath, settings);
+    if (unchanged) {
+      say('settings already registered; nothing written');
+    } else {
+      const backup = backupSettings(settingsPath, join(HOME, '.claude', 'orchestrate'));
+      if (backup) say(`backed up settings -> ${toPosix(backup)}`);
+      writeSettings(settingsPath, settings);
+      say(`settings ${toPosix(settingsPath)}: ${report.removed} stale orchestrate entr${report.removed === 1 ? 'y' : 'ies'} removed, ${report.added} registered (${report.basenames.join(', ')})`);
+      say('takes effect in new sessions');
+    }
+  } else {
+    say(`settings ${toPosix(settingsPath)}: ${report.removed} stale orchestrate entr${report.removed === 1 ? 'y' : 'ies'} removed, ${report.added} registered (${report.basenames.join(', ')})`);
+    say('takes effect in new sessions');
+    if (unchanged) say('no change needed');
   }
-  say(`settings ${toPosix(settingsPath)}: ${report.removed} stale orchestrate entr${report.removed === 1 ? 'y' : 'ies'} removed, ${report.added} registered (${report.basenames.join(', ')})`);
-  say('takes effect in new sessions');
-  if (dryRun && before === JSON.stringify(settings)) say('no change needed');
 }
 
 if (!has('--no-autocompact')) {

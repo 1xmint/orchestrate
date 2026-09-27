@@ -24,12 +24,15 @@
 // its own errors.
 
 import { readFileSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
 import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 import { sampleContext, markAnnounced, markTicked, checkpointPath, contextEpoch, hasCheckpoint, thresholds, switchAdvice } from './lib/context.mjs';
 import { modeOf } from './lib/modes.mjs';
+import { classifyClaim, lastAssistantText, contradicts, countedPaths } from './lib/commit-claim.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -123,14 +126,14 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate')) {
     const path = checkpointPath(contextReading && contextReading.session, contextReading);
     const n = contextReading && contextReading.tokens != null ? `~${Math.round(contextReading.tokens / 1000)}k` : 'high';
-    return stop(`context is ${n}: write the checkpoint at ${path}, then ${switchAdvice(contextReading, contextAdvice)}`);
+    return stop(`the conversation is getting long (${n} tokens tracked): save a checkpoint first, then ${switchAdvice(contextReading, contextAdvice)} Save the checkpoint to ${path}.`);
   }
   if (quota && quota.fiveHour && quota.fiveHour.pct >= PERSIST_STOP_FIVE_HOUR) return stop(`the 5-hour usage window is at ${Math.round(quota.fiveHour.pct)}% (resets ${resetClock(quota.fiveHour.resetsAt)})`);
   if (scan.denied) return stop('a dispatch was denied (budget, credential or usage limit)');
   if (repeat) return stop(`the same error came back twice: ${repeat}`);
   if (scan.asked) return stop('the last message asks the user something');
   if (scan.goalMet) return stop('the last message says the goal is met');
-  if (steps > PERSIST_STEP_CAP) return stop(`${PERSIST_STEP_CAP} auto-continued steps`);
+  if (steps > PERSIST_STEP_CAP) return stop(`reached the limit of ${PERSIST_STEP_CAP} auto-continued steps in a row`);
   if (!scan.progressed) return stop('the last step did no visible work (no edit, command or dispatch)');
 
   const parts = [];
@@ -145,11 +148,85 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
 
 const STORE = () => join(DIR, 'persist-checks.json');
 
+// `git status --porcelain`, parsed to a count and up to three file names, with
+// the plugin's own untracked folders (.claude/, .orchestrator/) left out. Any
+// failure (no git on PATH, cwd not inside a repo, the 3s timeout) is a silent
+// skip: this check only ever fires when it can be sure of the repo's state.
+function gitPorcelain(cwd) {
+  try {
+    const r = spawnSync('git', ['status', '--porcelain'], { cwd, timeout: 3000, encoding: 'utf8' });
+    if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return null;
+    const files = countedPaths(r.stdout.split('\n').map(l => l.trimEnd()).filter(Boolean).map(l => l.slice(3).trim()));
+    return { count: files.length, files: files.slice(0, 3) };
+  } catch { return null; }
+}
+
+// Commits made since the session's recorded starting HEAD, or null when
+// there is no startHead to compare against (an older session, or a cwd that
+// was not a repo on its first prompt) — the caller treats null as unknown.
+function commitsSince(cwd, startHead) {
+  if (!startHead) return null;
+  try {
+    const r = spawnSync('git', ['rev-list', '--count', `${startHead}..HEAD`], { cwd, timeout: 3000, encoding: 'utf8' });
+    if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return null;
+    const n = parseInt(r.stdout.trim(), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch { return null; }
+}
+
+function commitClaimReason(claim, git, commitsSinceStart) {
+  if (claim === 'not-committed') {
+    const commitNote = commitsSinceStart ? ` and ${commitsSinceStart} commit${commitsSinceStart === 1 ? '' : 's'} since this session started` : '';
+    return `Before you finish: your last message says nothing is committed, but git status shows a clean tree${commitNote}. Tell the user exactly what is committed and what is not, from git status, then finish.`;
+  }
+  const names = git.files.length ? ` (${git.files.join(', ')})` : '';
+  return `Before you finish: your last message says the work is committed, but git status shows ${git.count} file${git.count === 1 ? '' : 's'} not committed${names}. Say which files are not committed, then finish.`;
+}
+
+// Checks the closing message's claim about `git commit` against what the
+// repo actually shows. Independent of the auto-continue loop above — an
+// ordinary Stop with no persist armed gets this too — and never blocks the
+// same claim twice in one session (docs/audits/2026-09-27-live-runs-r6.md,
+// docs/audits/2026-09-27-scoresheet-r6.md top-five item 1 and row 11).
+function checkCommitClaim(input, state) {
+  if (input.stop_hook_active || !input.cwd) return null;
+  const tail = input.transcript_path ? readTail(input.transcript_path, PERSIST_SCAN_CAP) : '';
+  const text = lastAssistantText(tail);
+  if (!text) return null;
+  const claim = classifyClaim(text);
+  if (!claim || claim === 'mixed') return null;
+  const git = gitPorcelain(input.cwd);
+  if (!git) return null;
+  const commitsSinceStart = commitsSince(input.cwd, state && state.startHead);
+  if (!contradicts(claim, git.count, commitsSinceStart)) return null;
+  const claimHash = createHash('sha256').update(text).digest('hex').slice(0, 16);
+  if (state && state.commitClaimBlocked === claimHash) return null;
+  const st = state || { session_id: input.session_id };
+  st.commitClaimBlocked = claimHash;
+  try { saveSession(st); } catch {}
+  return commitClaimReason(claim, git, commitsSinceStart);
+}
+
 function emitBlock(reason) {
   process.stdout.write(JSON.stringify({ decision: 'block', reason }));
 }
 
+// Shown to the user, never blocks: the loop is over, and why, in one line.
+export function endMessage(why) {
+  return `Auto-continue stopped: ${why}. Say "keep going" to start it again.`;
+}
+
+function emitSystemMessage(message) {
+  process.stdout.write(JSON.stringify({ systemMessage: message }));
+}
+
 export function check(input) {
+  // A subagent's own Stop is not the lead's auto-continue loop — `agent_id`
+  // on the payload (hooks doc, "common input fields") marks a call that fires
+  // inside a subagent. Refusing a helper's own Stop with the lead's goal text
+  // would be both wrong (the helper does not own that loop) and pure noise
+  // read back into a context that did not ask for it.
+  if (input && input.agent_id) return null;
   const state = loadSession(input.session_id);
   const p = state && state.persist;
 
@@ -159,6 +236,10 @@ export function check(input) {
   const bound = (state && state.run && state.run.runMd) || null;
   let ctx = null;
   try { ctx = input.transcript_path ? sampleContext({ transcriptPath: input.transcript_path, session: input.session_id || null, announce: false, runMd: bound, permissionMode: modeOf(input) }) : null; } catch { ctx = null; }
+  // Independent of auto-continue and everything below it: an ordinary Stop
+  // with nothing armed gets this too.
+  const commitClaimReasonText = checkCommitClaim(input, state);
+  if (commitClaimReasonText) return { kind: 'continue', why: commitClaimReasonText };
   // This is deliberately outside auto-continue: reaching the compaction line
   // is unsafe even for an ordinary Stop. A block is once per epoch, and an
   // active Stop hook must not block itself again.
@@ -170,7 +251,7 @@ export function check(input) {
     if (ctx.reading.tokens >= at && !checkpoint && rec.contextBlockedFor !== epoch) {
       store[key] = { ...rec, contextBlockedFor: epoch, checkedAt: new Date().toISOString() };
       try { writeJsonAtomic(path, store); } catch {}
-      return { rec: store[key], kind: 'continue', why: `orchestrate: context is ~${Math.round(ctx.reading.tokens / 1000)}k: write the checkpoint at ${checkpointPath(input.session_id || null, ctx.reading)}, then ${switchAdvice(ctx.reading, ctx.advice)}` };
+      return { rec: store[key], kind: 'continue', why: `orchestrate: context is ~${Math.round(ctx.reading.tokens / 1000)}k: write a checkpoint first, then ${switchAdvice(ctx.reading, ctx.advice)} Save the checkpoint to ${checkpointPath(input.session_id || null, ctx.reading)}.` };
     }
     return null;
   }
@@ -212,6 +293,7 @@ function main() {
   // step cap and the no-work stop are what end it.
   const dec = check(input);
   if (dec && dec.kind === 'continue') emitBlock(dec.why);
+  else if (dec && dec.kind === 'stop' && dec.why) emitSystemMessage(endMessage(dec.why));
 }
 
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {

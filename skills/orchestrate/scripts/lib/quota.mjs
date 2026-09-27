@@ -7,7 +7,8 @@
 // that usage stood still.
 
 import { join } from 'node:path';
-import { DIR, readJson, currentAccount } from './tier.mjs';
+import { existsSync, statSync } from 'node:fs';
+import { DIR, readJson, currentAccount, readTail } from './tier.mjs';
 
 export const QUOTA_PATH = join(DIR, 'quota.json');
 export const QUOTA_FRESH_MS = 10 * 60 * 1000;
@@ -69,4 +70,35 @@ export function resetClock(epochSeconds) {
   if (!epochSeconds) return 'its reset';
   const d = new Date(epochSeconds * 1000);
   return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+}
+
+// Only the host's own limit messages count: they arrive as assistant records
+// with the model "<synthetic>". Matching the phrase anywhere in the tail
+// counted a research report that quoted it, and told the lead the user had hit
+// two limits they had not. "Today" means today: the set resets with the date.
+export function limitsFromTail(tail) {
+  const found = new Set();
+  for (const l of String(tail || '').split('\n')) {
+    if (!l.includes('<synthetic>') && !l.includes('isApiErrorMessage')) continue;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    const m = o && o.type === 'assistant' && o.message;
+    if (!m || !(m.model === '<synthetic>' || o.isApiErrorMessage)) continue;
+    const text = (Array.isArray(m.content) ? m.content : []).map(b => (b && b.text) || '').join(' ');
+    for (const hit of text.matchAll(/hit your (Opus|Sonnet|Haiku|Fable) limit/gi)) found.add(hit[1].toLowerCase());
+    if (/hit your (session|weekly) limit/i.test(text)) found.add('session');
+  }
+  return found;
+}
+
+export function scanLimits(transcriptPath, state) {
+  try {
+    const day = new Date().toISOString().slice(0, 10);
+    if (state.limitsDay !== day || state.limitsV !== 2) { state.limits = []; state.limitsDay = day; state.limitsV = 2; state.limitsScanMtime = null; }
+    if (!transcriptPath || !existsSync(transcriptPath)) return state.limits;
+    const mt = statSync(transcriptPath).mtimeMs;
+    if (state.limitsScanMtime === mt) return state.limits;
+    const found = new Set([...state.limits, ...limitsFromTail(readTail(transcriptPath, 65536))]);
+    state.limitsScanMtime = mt;
+    return [...found];
+  } catch { return state.limits || []; }
 }

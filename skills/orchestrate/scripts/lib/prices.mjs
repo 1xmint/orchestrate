@@ -13,20 +13,35 @@
 
 import { shortModel } from './tier.mjs';
 
-// Per million tokens (platform.claude.com pricing, checked 2026-09-13). A
+// Per million tokens (https://claude.com/pricing, checked 2026-09-24). A
 // 5-minute cache write is 125% of input. Cache read is 10% of input, except
-// Fable 5.1 at 2.5%. How a 1-hour cache write lands on plan usage is
-// undocumented, so it is priced as a 5-minute one and the number is a floor.
+// Fable 5.1 at 2.5% and Opus 5.5 at 5%. How a 1-hour cache write lands on
+// plan usage is undocumented, so it is priced as a 5-minute one and the
+// number is a floor.
+// `opus` here is the current `opus` alias, Opus 5.5 ($4/$20) — not the legacy
+// Opus 5 ($5/$25).
 export const PRICES = {
   fable: { in: 10, out: 50 },
-  opus: { in: 5, out: 25 },
+  opus: { in: 4, out: 20 },
   sonnet: { in: 2, out: 10 },
   haiku: { in: 1, out: 5 },
 };
-export const PRICES_AS_OF = '2026-09-13';
+export const PRICES_AS_OF = '2026-09-24';
+export const PRICES_SOURCE = 'https://claude.com/pricing';
+export const checked = '2026-09-24';
+
+// One sentence, said once wherever a dollar figure is printed to the model,
+// so it never reads as a bill: every number here comes from per-token list
+// prices, and a subscription plan can charge something else entirely.
+export function costLabel() {
+  return 'modelled from list prices; your plan may bill differently';
+}
 
 export function cacheReadShare(modelId) {
-  return /fable-5[-.]1/i.test(String(modelId || '')) ? 0.025 : 0.1;
+  const s = String(modelId || '');
+  if (/fable-5[-.]1/i.test(s)) return 0.025;
+  if (/opus/i.test(s)) return 0.05;
+  return 0.1;
 }
 
 // The family a model id belongs to, or null when it is not one of the four.
@@ -67,6 +82,9 @@ export const REASONED = {
   'orch-browser': { opus: 3, sonnet: 1 },
   // About half a reviewer run: twelve read-only steps and a twenty-line return.
   'orch-advisor': { fable: 3, opus: 1.5, sonnet: 0.5 },
+  // Fixed to opus in its own frontmatter, no cheaper model to fall back to.
+  // models.md: "about 40 steps near 60k on Opus, roughly $1-2 list price per wave".
+  'orch-coordinator': { opus: 1.5 },
   Explore: { haiku: 0.1, sonnet: 0.5 },
 };
 export const REASONED_AS_OF = '2026-09-09';
@@ -85,9 +103,18 @@ export function reasonedPrice(role, model) {
 export function estimateDollars(role, model, rows) {
   const f = family(model);
   if (!f) return null;
-  const mine = (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && r.dollars != null && Number.isFinite(Number(r.dollars)));
+  const mine = measuredRows(role, f, rows);
   if (mine.length) return mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
   return reasonedPrice(role, model);
+}
+
+// The rows that count as a measurement of this role on this model family: a
+// helper that ran spent tokens, so a row priced at $0 is a stop hook that saw
+// no usage (a helper that died at its cap, a transcript it could not read),
+// not a cheap run. Averaging those in would drag the mean to nothing and
+// switch the run ceiling off after two empty returns.
+function measuredRows(role, fam, rows) {
+  return (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === fam && r.dollars != null && Number.isFinite(Number(r.dollars)) && Number(r.dollars) > 0);
 }
 
 // A price tag: measured from this machine's own past runs when there are any,
@@ -97,7 +124,7 @@ export function estimateDollars(role, model, rows) {
 export function priceTag(role, model, rows, tier, profile) {
   const f = family(model);
   if (!f) return `price tag: ${role} on an unnamed model — not priced, because nothing here knows which model it will run on`;
-  const mine = (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === f && r.dollars != null && Number.isFinite(Number(r.dollars)));
+  const mine = measuredRows(role, f, rows);
   if (mine.length) {
     const avg = mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
     return `price tag: ${role} on ${f} ≈ $${avg.toFixed(2)} at list price, not subscription usage (measured here, n=${mine.length})`;

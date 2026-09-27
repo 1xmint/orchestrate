@@ -231,6 +231,42 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
   assert.equal(state.dispatches[0].model, 'sonnet');
 });
 
+test('guard: a packet marked REVIEW: yes is recorded with the review flag; one without it is not', () => {
+  const home = sandbox();
+  run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'rv1', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\nREVIEW: yes\nPROGRESS: /r/p.md\nmoves money' },
+  }, home);
+  run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'rv1', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0002\nPROGRESS: /r/p.md\nordinary work' },
+  }, home);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'rv1.json'), 'utf8'));
+  assert.equal(state.dispatches[0].review, true);
+  assert.equal(state.dispatches[1].review, undefined);
+});
+
+test('guard: the over-ceiling denial names the ceiling and the cost label', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-repo-'));
+  mkdirSync(join(dir, '.git'), { recursive: true });
+  const runDir = join(dir, '.orchestrator', 'runs', '20260910-cap');
+  mkdirSync(runDir, { recursive: true });
+  const runMd = join(runDir, 'RUN.md');
+  writeFileSync(runMd, '# Run\n\n## Budget\n\nCeiling: $0.01 at list price · sessions: ~1 · set 2026-09-10\n\n## Tasks\n\n| id | phase | role · model | task | acceptance | attempts | result |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 📋 planned | i · sonnet | do it | ev | 0 | — |\n');
+  const sessDir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessDir, { recursive: true });
+  writeFileSync(join(sessDir, 'cap1.json'), JSON.stringify({ v: 1, session_id: 'cap1', run: { root: dir, runId: '20260910-cap', runMd, boundAt: new Date().toISOString(), explicit: true } }));
+
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'cap1', cwd: dir,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\nPROGRESS: /r/p.md\ndo it' },
+  }, home);
+
+  assert.match(out.stdout, /orchestrate budget:.*ceiling/);
+  assert.match(out.stdout, /modelled from list prices; your plan may bill differently/);
+});
+
 test('guard: the packet notice names a missing PROGRESS line on an author-role dispatch, plainly, and not in Plan mode', () => {
   const home = sandbox();
   const noProgress = run('guard-agent.mjs', {
@@ -277,14 +313,14 @@ test('guard: an attributable coordinator child is recorded with its parent', () 
   const out = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'nested', cwd: home,
     agent_id: 'coord', transcript_path: lead, tool_use_id: 'toolu_child',
-    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: child\ndo it' },
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0007\ndo it' },
   }, home);
 
   assert.equal(out.status, 0);
   assert.doesNotMatch(out.stdout, /permissionDecision.*deny/);
   const state = JSON.parse(readFileSync(join(sessionDir, 'nested.json'), 'utf8'));
   assert.equal(state.dispatches.at(-1).parent, 'coord');
-  assert.equal(state.dispatches.at(-1).task, 'child');
+  assert.equal(state.dispatches.at(-1).task, '9-9-0007');
 });
 
 test('guard: a dispatch that names no model is recorded as inherited and not priced', () => {
@@ -293,7 +329,9 @@ test('guard: a dispatch that names no model is recorded as inherited and not pri
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's9', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0001\nPROGRESS: /r/progress/1.md\ndo it' },
   }, home);
-  assert.equal(out.stdout.trim(), '', 'no model named means no figure to give, and the packet already names its progress file');
+  // No model named means no price figure to give; the packet already names its
+  // progress file, so the only context line left is the worktree fallback for it.
+  assert.match(out.json.hookSpecificOutput.additionalContext, /write the same relative path inside your own worktree/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit');
 });
@@ -544,6 +582,64 @@ test('ledger: the return is written under the bound run and indexed', () => {
   assert.equal(out.status, 0);
 });
 
+test('ledger: a REVIEW: yes task returned DONE with no reviewer return yet is filed PARTIAL with the note; a reviewer return then lets the next DONE through', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'rv-session', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'rv-session.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-implementer', model: 'sonnet', task: '9-9-0001', run: repo.runId, review: true, toolUseId: 'toolu_a' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  const first = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'rv-session', cwd: repo.dir,
+    agent_id: 'impl-1', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.equal(first.status, 0);
+  let index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index[0].status, 'PARTIAL', 'DONE is held back until a reviewer has returned');
+  assert.equal(index[0].reviewGated, true);
+  const savedFile = readFileSync(index[0].file, 'utf8');
+  assert.match(savedFile, /marked for an independent review and none has returned yet/);
+
+  const REVIEWER_RETURN = 'TASK: 9-9-0500\nREVIEW OF: 9-9-0001 on task/9-9-0001 @ abc123, worktree /w\nSTATUS: DONE\nVERDICT: PASS\nEVIDENCE: read the diff, tests pass\n';
+  run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'rv-session', cwd: repo.dir,
+    agent_id: 'rev-1', agent_type: 'orch-reviewer', last_assistant_message: REVIEWER_RETURN,
+  }, home);
+
+  const second = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'rv-session', cwd: repo.dir,
+    agent_id: 'impl-2', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.equal(second.status, 0);
+  index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  const later = index.filter(r => r.agentId === 'impl-2');
+  assert.equal(later.length, 1);
+  assert.equal(later[0].status, 'DONE', 'a reviewer return now on file for this task lets the next DONE through');
+});
+
+test('ledger: a task whose review was inferred from its objective (no REVIEW: yes) returned DONE is filed PARTIAL naming the word', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'rv-inferred', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'rv-inferred.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-implementer', model: 'sonnet', task: '9-9-0001', run: repo.runId, review: true, reviewInferred: 'payment', toolUseId: 'toolu_b' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'rv-inferred', cwd: repo.dir,
+    agent_id: 'impl-3', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+  }, home);
+  assert.equal(out.status, 0);
+  const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(index[0].status, 'PARTIAL');
+  assert.equal(index[0].reviewGated, true);
+  const savedFile = readFileSync(index[0].file, 'utf8');
+  assert.match(savedFile, /its objective mentions payment, so it waits for an independent review/);
+});
+
 test('ledger: a helper stopped at its turn cap with no final message is still recorded', () => {
   const home = sandbox();
   const repo = fixtureRepo();
@@ -580,14 +676,16 @@ test('ledger: a nested SubagentStop is filed and indexed with its parent', () =>
 
   const out = run('ledger.mjs', {
     hook_event_name: 'SubagentStop', session_id: 'nested-stop', cwd: repo.dir,
-    agent_id: 'child-id', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+    agent_id: 'child-id', tool_use_id: 'toolu_child', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
   }, home);
 
   assert.equal(out.status, 0);
   const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(index[0].parent, 'coord-parent');
   assert.ok(existsSync(index[0].file), 'the nested return is filed under the run');
-  assert.equal(JSON.parse(readFileSync(sessionPath, 'utf8')).returned[0].parent, 'coord-parent');
+  const rec = JSON.parse(readFileSync(sessionPath, 'utf8')).returned[0];
+  assert.equal(rec.parent, 'coord-parent');
+  assert.equal(rec.toolUseId, 'toolu_child', 'the dispatch id rides on the return so the worker count can pair them without a transcript file');
 });
 
 test('ledger: the task rows are left exactly as they were', () => {
@@ -834,16 +932,29 @@ test('precompact: a bound run with a stale Pickup blocks compaction once, and na
 
   const first = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1', cwd: repo.dir, trigger: 'auto' }, home);
   assert.equal(first.json.decision, 'block');
-  assert.equal(first.json.hookSpecificOutput.hookEventName, 'PreCompact');
-  assert.equal(first.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(first.json.hookSpecificOutput.permissionDecisionReason, /Pickup/);
-  assert.ok(first.json.reason.includes(repo.runMd), 'it names the file to edit');
+  assert.deepEqual(Object.keys(first.json).sort(), ['decision', 'reason'], 'PreCompact only documents decision + reason');
+  assert.match(first.json.reason, /Pickup/);
+  const relRunMd = '.orchestrator/runs/20260909-fixture/RUN.md';
+  assert.ok(first.json.reason.includes(relRunMd), 'it names the file to edit, relative to the project');
+  assert.doesNotMatch(first.json.reason, /[A-Za-z]:[\\/]|\bUsers\b/, 'no absolute machine path');
 
   // Never twice for the same unwritten text: PreCompact commonly fires because
   // context is already low, and refusing forever risks the overflow this hook
   // exists to prevent.
   const second = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1', cwd: repo.dir, trigger: 'auto' }, home);
   assert.equal(second.stdout.trim(), '', 'it blocks once, not in a loop, and lets compaction proceed');
+});
+
+test('precompact: agent_id present (a subagent compacting its own transcript) is never blocked, even with a stale Pickup', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'spc1b', repo);
+  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+  const state = JSON.parse(readFileSync(join(sessions, 'spc1b.json'), 'utf8'));
+  state.lastDispatchAt = new Date().toISOString();
+  writeFileSync(join(sessions, 'spc1b.json'), JSON.stringify(state));
+  const out = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1b', cwd: repo.dir, trigger: 'auto', agent_id: 'agent-1' }, home);
+  assert.equal(out.stdout.trim(), '', "a subagent is not the lead's Pickup line to demand");
 });
 
 test('precompact: a written Pickup, or no dispatch yet, never blocks', () => {
@@ -871,7 +982,12 @@ test('precompact: a session with no bound run is asked for a checkpoint once, th
   const first = run('precompact-check.mjs', input, home);
   const block = JSON.parse(first.stdout);
   assert.equal(block.decision, 'block');
-  assert.match(block.reason, /context[\\/]spc4[\\/]checkpoint-/);
+  assert.deepEqual(Object.keys(block).sort(), ['decision', 'reason']);
+  // The checkpoint lives under this plugin's own home-directory folder, not
+  // inside the fixture repo (`cwd`) — named relative to home, with no drive
+  // letter or account name.
+  assert.match(block.reason, /~\/\.claude\/orchestrate\/context\/.+checkpoint-.+\.md/);
+  assert.doesNotMatch(block.reason, /[A-Za-z]:[\\/]|\bUsers\b/, 'no absolute machine path');
   assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '');
 });
 

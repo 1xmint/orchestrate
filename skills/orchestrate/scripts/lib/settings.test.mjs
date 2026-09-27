@@ -10,17 +10,18 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   registrations, applyRegistrations, readSettings, writeSettings, backupSettings,
-  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys, setEnv, OUR_SCRIPTS, applyAutocompactDefault, autocompactMarkerPath,
+  commandBasename, stripByBasename, nodeMajor, toPosix, commandFor, setKeys, setEnv, OUR_SCRIPTS,
+  autocompactOffer, applyAutocompact, removeAutocompact, autocompactMarkerPath,
 } from './settings.mjs';
 
-// A settings file shaped like Josh's: an unrelated PreToolUse hook that must
-// survive, plus the keys the app writes around it.
+// A settings file shaped like a real user's: an unrelated PreToolUse hook that
+// must survive, plus the keys the app writes around it.
 const REAL_SHAPE = {
   permissions: { defaultMode: 'auto' },
   model: 'sonnet',
   hooks: {
     PreToolUse: [
-      { matcher: 'Write|Edit', hooks: [{ type: 'command', command: 'node "C:/Users/Josh/.claude/hooks/memory-write-gate.mjs"' }] },
+      { matcher: 'Write|Edit', hooks: [{ type: 'command', command: 'node "C:/Users/someone/.claude/hooks/memory-write-gate.mjs"' }] },
     ],
   },
   effortLevel: 'low',
@@ -28,7 +29,7 @@ const REAL_SHAPE = {
 };
 
 const clone = o => JSON.parse(JSON.stringify(o));
-const SCRIPTS = 'C:/Users/Josh/.claude/skills/orchestrate/scripts';
+const SCRIPTS = 'C:/Users/someone/.claude/skills/orchestrate/scripts';
 
 test('autocompact settings merge writes only the env key', () => {
   const s = clone(REAL_SHAPE);
@@ -37,30 +38,41 @@ test('autocompact settings merge writes only the env key', () => {
   assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
 });
 
-test('auto-compact default applies once, preserving existing settings with backup and marker', () => {
+test('the offer fires once and never writes settings.json on its own', () => {
   const dir = tmp(), settingsPath = join(dir, 'settings.json'), markerDir = join(dir, 'orchestrate');
   writeSettings(settingsPath, REAL_SHAPE);
-  const r = applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } }, now: new Date('2026-09-14T00:00:00Z') });
+  const o = autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } }, now: new Date('2026-09-14T00:00:00Z') });
+  assert.equal(o.offer, true);
+  assert.equal(o.value, 200000);
+  assert.deepEqual(readSettings(settingsPath), REAL_SHAPE, 'the offer itself never touches settings.json');
+  assert.deepEqual(JSON.parse(readFileSync(o.marker, 'utf8')).value, 'asked');
+  assert.equal(autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).offer, false, 'asked once per HOME, never again');
+  assert.equal(autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker');
+});
+
+test('the offer never fires again once a value exists, whether the user or a prior write set it', () => {
+  const dir = tmp(), settingsPath = join(dir, 'settings.json'), markerDir = join(dir, 'orchestrate');
+  writeSettings(settingsPath, { env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '12345' } });
+  assert.equal(autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'existing');
+  assert.equal(readSettings(settingsPath).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '12345');
+  assert.equal(autocompactOffer({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker', 'the user\'s own value is remembered, so settings.json is not re-read');
+  const offDir = join(dir, 'off');
+  assert.equal(autocompactOffer({ settingsPath: join(offDir, 'settings.json'), markerDir: join(offDir, 'orchestrate'), policy: { context: { autocompactDefault: 'off' } } }).reason, 'off');
+  assert.equal(existsSync(autocompactMarkerPath(join(offDir, 'orchestrate'))), false);
+});
+
+test('applyAutocompact writes the key, backs up first, and records a marker; removeAutocompact undoes it', () => {
+  const dir = tmp(), settingsPath = join(dir, 'settings.json'), markerDir = join(dir, 'orchestrate');
+  writeSettings(settingsPath, REAL_SHAPE);
+  const r = applyAutocompact({ settingsPath, markerDir, tokens: 200000, now: new Date('2026-09-14T00:00:00Z') });
   assert.equal(r.applied, true);
   assert.equal(readSettings(settingsPath).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '200000');
   assert.deepEqual(readSettings(r.backup), REAL_SHAPE);
   assert.deepEqual(JSON.parse(readFileSync(r.marker, 'utf8')).value, 200000);
-  assert.equal(applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker');
-  delete readSettings(settingsPath).env; // prove an intentional later removal is not undone
-  const s = readSettings(settingsPath); delete s.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW; writeSettings(settingsPath, s);
-  assert.equal(applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker');
+  const u = removeAutocompact({ settingsPath, markerDir, now: new Date('2026-09-14T00:05:00Z') });
+  assert.equal(u.removed, true);
   assert.equal(readSettings(settingsPath).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, undefined);
-});
-
-test('auto-compact default never overwrites a value and honors off policy', () => {
-  const dir = tmp(), settingsPath = join(dir, 'settings.json'), markerDir = join(dir, 'orchestrate');
-  writeSettings(settingsPath, { env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '12345' } });
-  assert.equal(applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'existing');
-  assert.equal(readSettings(settingsPath).env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, '12345');
-  assert.equal(applyAutocompactDefault({ settingsPath, markerDir, policy: { context: { autocompactDefault: 200000 } } }).reason, 'marker', 'the user\'s own value is remembered, so settings.json is not re-read');
-  const offDir = join(dir, 'off');
-  assert.equal(applyAutocompactDefault({ settingsPath: join(offDir, 'settings.json'), markerDir: join(offDir, 'orchestrate'), policy: { context: { autocompactDefault: 'off' } } }).reason, 'off');
-  assert.equal(existsSync(autocompactMarkerPath(join(offDir, 'orchestrate'))), false);
+  assert.equal(removeAutocompact({ settingsPath, markerDir }).removed, false, 'a second undo has nothing left to remove');
 });
 
 function tmp() {
@@ -73,7 +85,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
   const report = applyRegistrations(s, entries);
 
   assert.equal(report.removed, 0);
-  assert.equal(report.added, 9);
+  assert.equal(report.added, 10);
   const gate = s.hooks.PreToolUse.find(g => JSON.stringify(g).includes('memory-write-gate.mjs'));
   assert.deepEqual(gate, REAL_SHAPE.hooks.PreToolUse[0], 'the memory-write-gate entry is untouched');
   assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
@@ -82,7 +94,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
 
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.equal(s.hooks.UserPromptSubmit[0].matcher, undefined, 'UserPromptSubmit takes no matcher');
-  assert.equal(s.hooks.UserPromptSubmit[0].hooks[0].timeout, 5);
+  assert.equal(s.hooks.UserPromptSubmit[0].hooks[0].timeout, 15, 'the router has headroom: a cold `router status` measured 4.6 s against the old 5 s cap');
   assert.equal(s.hooks.SessionStart[0].matcher, 'resume|compact|clear');
   assert.equal(s.hooks.SubagentStop[0].hooks[0].command, commandFor(join(SCRIPTS, 'ledger.mjs')));
   assert.match(s.hooks.PreToolUse.map(g => JSON.stringify(g)).join(''), /guard-agent\.mjs/);
@@ -100,7 +112,7 @@ test('a second run replaces our entries instead of stacking them', () => {
   const once = clone(s);
   const report = applyRegistrations(s, registrations(SCRIPTS, { router: true, guard: true }));
 
-  assert.equal(report.removed, 9, 'the stale copies are found by basename and dropped');
+  assert.equal(report.removed, 10, 'the stale copies are found by basename and dropped');
   assert.equal(s.hooks.PostToolUse.length, 1, 'the context sampler, once');
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.equal(s.hooks.SessionStart.length, 1);
@@ -108,7 +120,7 @@ test('a second run replaces our entries instead of stacking them', () => {
   assert.equal(s.hooks.Stop.length, 2, 'the Pickup check and the persist loop');
   assert.equal(s.hooks.PreCompact.length, 1);
   assert.equal(s.hooks.PostCompact.length, 1);
-  assert.equal(s.hooks.PreToolUse.length, 2, 'the user hook plus one of ours');
+  assert.equal(s.hooks.PreToolUse.length, 3, 'the user hook plus the agent guard and the Bash guard');
   assert.deepEqual(new Set(Object.keys(s.hooks)), new Set(Object.keys(once.hooks)));
 });
 
@@ -117,7 +129,7 @@ test('an old entry under a different path is still recognised as ours', () => {
   s.hooks.PreToolUse.push({ matcher: 'Agent', hooks: [{ type: 'command', command: 'node "/home/someone/else/guard-agent.mjs"' }] });
   const report = applyRegistrations(s, registrations(SCRIPTS, { guard: true }));
   assert.equal(report.removed, 1);
-  assert.equal(s.hooks.PreToolUse.length, 2);
+  assert.equal(s.hooks.PreToolUse.length, 3);
   assert.match(JSON.stringify(s.hooks.PreToolUse), /skills\/orchestrate\/scripts\/guard-agent\.mjs/);
 });
 
@@ -143,7 +155,7 @@ test('commands name the interpreter by absolute path, quoted, with no shell oper
   // Bare `node` is not enough: a desktop app launched from the dock or Start
   // menu has the OS login environment, not a shell's, so an nvm or Homebrew
   // Node is not on its PATH and every hook would fail silently.
-  for (const e of registrations('C:\\Users\\Josh\\.claude\\skills\\orchestrate\\scripts', { router: true, guard: true })) {
+  for (const e of registrations('C:\\Users\\someone\\.claude\\skills\\orchestrate\\scripts', { router: true, guard: true })) {
     assert.match(e.command, /^"[^"]+" "[^"]+\.mjs"$/);
     assert.ok(e.command.startsWith(`"${process.execPath.split('\\').join('/')}"`));
     assert.doesNotMatch(e.command, /\\|&&|\||;|\$\(/, 'no backslashes and no shell operators');

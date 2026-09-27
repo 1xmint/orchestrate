@@ -26,6 +26,7 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadPolicy } from './policy.mjs';
 import { normalizeRole } from './prices.mjs';
+import { taskIdIn } from './task-id.mjs';
 
 export const WORKERS_V = 1;
 export const WORKERS_DIR = join(homedir(), '.claude', 'orchestrate', 'workers');
@@ -119,24 +120,30 @@ export function nativeAgent(dispatches, files, agentId) {
 //      signal, since it needs no SubagentStop at all.
 //   2. `agentId`, set by that same handler from `tool_response.agentId`,
 //      found in the set of agent ids SubagentStop later recorded returned.
-//   3. the transcript-file map (`toolUseId` -> helper transcript -> its own
-//      agent id), found in that same returned set — the original pairing,
-//      still needed for a return that has no PostToolUse fields.
-//   4. a return recorded with no agent id at all, matched in order by role
-//      and task — the last-resort fallback.
+//   3. the dispatch id the ledger stored on the return record
+//      (`toolUseId`) — the one pairing that needs neither a transcript file
+//      nor a task id, but SubagentStop's own input never actually carries
+//      one (see below), so in practice this one never fires.
+//   4. the transcript-file map (`toolUseId` -> helper transcript -> its own
+//      agent id), found in the set of agent ids SubagentStop recorded
+//      returned — needed for a return that has no PostToolUse fields.
+// A return recorded with no agent id and no toolUseId at all is a last
+// resort, matched by role and task instead of any id.
+//
 // The SubagentStop hook's own input carries no dispatch id: the documented
 // fields are agent_id, agent_type, agent_transcript_path and
 // last_assistant_message, and a live run recorded `toolUseId: null` on every
-// return. So a return record's own `agentId` (ledger.mjs falls back to
-// `input.tool_use_id` when `agent_id` is absent) stays null on that fallback
-// path on the current CLI; pairings 1 and 2 above exist precisely because
+// return. So pairing 3's `toolUseId` (ledger.mjs falls back to
+// `input.tool_use_id` when `agent_id` is absent) stays a fallback that is
+// null on the current CLI; pairings 1 and 2 above exist precisely because
 // SubagentStop cannot be relied on to arrive with anything to match against.
 //
 // Pure except that it reads the transcript of a helper that otherwise looks
 // alive, to see whether its turns ran out.
 export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin, capOf = roleMaxTurns, turnsOf = transcriptTurns } = {}) {
   const back = new Set((returned || []).map(r => r && r.agentId).filter(Boolean));
-  const loose = (returned || []).filter(r => r && !r.agentId).map(r => ({ ...r, used: false }));
+  const backTu = new Set((returned || []).map(r => r && r.toolUseId).filter(Boolean));
+  const loose = (returned || []).filter(r => r && !r.agentId && !r.toolUseId).map(r => ({ ...r, used: false }));
   const out = [];
   for (const d of dispatches || []) {
     if (!d || !d.at) continue;
@@ -144,6 +151,7 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
     if (!Number.isFinite(age)) continue;
     if (d.returnedAt) continue;
     if (d.agentId && back.has(d.agentId)) continue;
+    if (d.toolUseId && backTu.has(d.toolUseId)) continue;
     const f = d.toolUseId ? files.get(d.toolUseId) : null;
     if (f && back.has(f.agentId)) continue;
     // A return with no agent id, matched in order by role and task.
@@ -156,7 +164,7 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
     if (!alive) continue;
     const cap = f && f.path ? capOf(d.agent) : null;
     if (cap && turnsOf(f.path) >= cap) continue;
-    out.push({ provider: 'claude', role, task: d.task || null, at: d.at, agentId: f ? f.agentId : null });
+    out.push({ provider: 'claude', role, task: d.task || null, at: d.at, agentId: f ? f.agentId : null, parent: d.parent || null });
   }
   return out;
 }
@@ -231,21 +239,44 @@ export function lockHolder(worktree, external) {
 
 // ---- the concurrency rule (pure) ----------------------------------------------
 
-export function concurrencyDecision(role, { native = [], external = [], policy = loadPolicy() } = {}) {
+// The rule (written out because the rail and the code have disagreed before):
+// `policy.workers.maxConcurrent` counts only direct dispatches — the lead's
+// own helpers plus each live coordinator's own one slot — never a
+// coordinator's children. Each live coordinator (a native entry with role
+// orch-coordinator and an agentId) gets its own reserved pool of exactly two
+// child slots, on top of that direct-dispatch pool, tracked by matching a
+// child's `parent` field to that coordinator's agentId. Two coordinators live
+// at once each keep their own two-slot pool; one coordinator's children never
+// borrow or spend another coordinator's slots, and never count against
+// maxConcurrent at all.
+export function concurrencyDecision(role, { native = [], external = [], policy = loadPolicy(), coordinatorParentId = null } = {}) {
   const all = [...native, ...external];
   const r = roleOf(role);
-  // A coordinator occupies one ordinary slot while scheduling its two capped
-  // children. The extra slot exists only while that coordinator is live.
-  const maxConcurrent = all.some(w => roleOf(w.role) === 'orch-coordinator')
-    ? Math.max(policy.workers.maxConcurrent, 3)
-    : policy.workers.maxConcurrent;
   const list = xs => xs.map(w => `${w.provider === 'claude' ? w.role : `${w.provider} ${w.role || 'worker'}`}${w.task ? ` ${w.task}` : ''}`).join(', ');
   if (r === 'orch-browser') {
     const b = all.filter(w => roleOf(w.role) === 'orch-browser');
     if (b.length >= policy.workers.browserConcurrent) return `browser work is serial and ${list(b)} is still using the browser. Wait for it to return, then send this one.`;
   }
-  if (all.length >= maxConcurrent) {
-    return `${all.length} worker${all.length === 1 ? ' is' : 's are'} already running (${list(all)}), and the limit is ${maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for ${policy.workers.staleMin} minutes stops counting.`;
+
+  // This candidate is itself a live coordinator's child: it draws only on
+  // that coordinator's own two-slot pool, never on the session-wide pool.
+  if (coordinatorParentId) {
+    const ownChildren = native.filter(w => w && w.parent === coordinatorParentId);
+    if (ownChildren.length >= 2) {
+      return `this coordinator already has ${ownChildren.length} of its own children running (${list(ownChildren)}), and each coordinator holds exactly two child slots. Wait for one to return before sending another.`;
+    }
+    return null;
+  }
+
+  // Every other dispatch — the lead's own direct helpers and each live
+  // coordinator's own single slot — draws on the session-wide pool. A
+  // coordinator's children are excluded from this pool entirely so they
+  // never eat into what the rest of the session is using.
+  const liveCoordinatorIds = new Set(native.filter(w => roleOf(w.role) === 'orch-coordinator' && w.agentId).map(w => w.agentId));
+  const directPool = all.filter(w => !(w && w.parent && liveCoordinatorIds.has(w.parent)));
+  const maxConcurrent = policy.workers.maxConcurrent;
+  if (directPool.length >= maxConcurrent) {
+    return `${directPool.length} worker${directPool.length === 1 ? ' is' : 's are'} already running (${list(directPool)}), and the limit is ${maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for ${policy.workers.staleMin} minutes stops counting.`;
   }
   return null;
 }
@@ -403,7 +434,7 @@ export function packetFromMarkdown(md, defaults = {}) {
   const scope = section('SCOPE');
   return {
     v: WORKERS_V,
-    taskId: line(/^\s*TASK:\s*(\S+)/m) || defaults.taskId || null,
+    taskId: taskIdIn(t) || defaults.taskId || null,
     run: line(/^\s*RUN:\s*(\S+)/m) || defaults.run || null,
     runtime: defaults.runtime || null,
     role: defaults.role || (line(/ROLE:\s*(\S+)/) || null),

@@ -26,6 +26,7 @@ import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dollars, family } from './lib/prices.mjs';
+import { taskIdIn } from './lib/task-id.mjs';
 import { detectTier, readJson, PROFILE_PATH } from './lib/tier.mjs';
 
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -98,11 +99,11 @@ export function measure(text) {
         // measurement and is not one.
         const head = s.trimStart();
         if (head.startsWith('orchestrate: Pickup has')) r.stopBlocks++;
-        const m = /^\s*TASK:\s*(\S+)/m.exec(s);
+        const id = taskIdIn(s);
         // STATUS is the current schema; RESTATED is what returns written to the
         // older instruction carry. Both count, because the transcripts this
         // reads are on disk already and predate the change.
-        if (m && /^\s*(RESTATED|STATUS):/m.test(s)) r.returns.push({ task: m[1], lines: s.trim().split('\n').length });
+        if (id && /^\s*(RESTATED|STATUS):/m.test(s)) r.returns.push({ task: id, lines: s.trim().split('\n').length });
       }
     }
   }
@@ -293,7 +294,7 @@ export function callsOf(text, { lead = false, seen = new Set() } = {}) {
       if (b.name === 'Agent' || b.name === 'Task') r.nestedDispatches++;
     }
     if (!msg.usage) continue;
-    const id = msg.id || `anon-${anon++}-${Math.random()}`;
+    const id = msg.id || `anon-${anon++}`;
     if (seen.has(id) && !byId.has(id)) continue;
     seen.add(id);
     byId.set(id, msg.usage);

@@ -1,6 +1,6 @@
 ---
 name: orch-planner
-description: "Reach for this when the work crosses several files or sittings and you cannot yet name the steps: it reads the ground and returns an ordered plan with a done-when for each step. Not for a change you can already describe in three steps."
+description: "Reach for this when work crosses several files or sittings and you cannot yet name the steps: it reads the ground and returns an ordered plan with a done-when. Not for a change you can already describe in three steps — just make it."
 model: opus
 effort: high
 tools: Read, Grep, Glob, WebFetch, WebSearch, Write, Skill, Bash(git log:*), Bash(git diff:*), Bash(git status:*), Bash(git branch:*)

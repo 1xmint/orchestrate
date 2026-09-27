@@ -22,12 +22,15 @@ import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, AGENT_NAMES } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { helperFiles, nativeAgent, runningNative, runningExternal, lockedWorktreeIn, concurrencyDecision, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
-import { priceTag, estimateDollars, family, normalizeRole } from './lib/prices.mjs';
+import { helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
+import { family, normalizeRole, costLabel } from './lib/prices.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
-import { readCosts } from './ledger.mjs';
+import { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
+import { taskIdIn } from './lib/task-id.mjs';
+import { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, nestedReason, workflowDecision } from './lib/workflow.mjs';
+import { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision } from './lib/spend-gate.mjs';
 
 // Anything here means the packet is carrying a live secret. The list grew after
 // an audit fed it four shapes it did not know: an OpenAI project key, a Google
@@ -88,8 +91,8 @@ const HEADER_LINE = /^\s*(APPROVED BY USER|RISK|BUILDS ON)\s*:/i;
 
 export function taskKey(prompt) {
   const p = String(prompt || '');
-  const id = (/^\s*TASK:\s*(\S+)/m.exec(p) || [])[1];
-  if (id && /\d/.test(id)) return id;
+  const id = taskIdIn(p);
+  if (id) return id;
   const first = p.split('\n').map(l => l.trim()).find(l => l && !HEADER_LINE.test(l)) || '';
   return first.toLowerCase().replace(/\s+/g, ' ').slice(0, 80);
 }
@@ -97,8 +100,7 @@ export function taskKey(prompt) {
 // The packet's own numeric TASK id, or null — what a grant binds to. Distinct
 // from taskKey: a grant needs an actual id, never a first-line fallback.
 export function numericTaskId(prompt) {
-  const id = (/^\s*TASK:\s*(\S+)/m.exec(String(prompt || '')) || [])[1];
-  return id && /\d/.test(id) ? id : null;
+  return taskIdIn(prompt);
 }
 
 const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
@@ -117,7 +119,7 @@ export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!id) return null;
   if (!boundId) return { allow: true, bind: id };
   if (boundId === id) return { allow: true, bind: null };
-  return { deny: true, reason: `Josh named ${f} for task ${boundId}; this is task ${id} — ask him or start on Sonnet.` };
+  return { deny: true, reason: `the user named ${f} for task ${boundId}; this is task ${id} — ask them or start on Sonnet.` };
 }
 
 // Where a grant's claim lives: one file per session+moment-the-user-named-it,
@@ -177,7 +179,7 @@ export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
   const won = claim(session, grantToClaim.at, grantToClaim.grantBind);
   if (won === grantToClaim.grantBind) return null;
   if (won && won !== GRANT_PENDING) {
-    return { prefix: 'model', reason: `Josh named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask him or start on Sonnet.` };
+    return { prefix: 'model', reason: `the user named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask them or start on Sonnet.` };
   }
   return { prefix: 'model', reason: `the ${grantToClaim.family} grant could not be claimed; resend with model: "sonnet".` };
 }
@@ -241,59 +243,6 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
   return null;
 }
 
-// ---- the workflow rules ------------------------------------------------------
-// Scheduling belongs to the lead. The record that set these: one Sonnet helper
-// dispatched as built-in general-purpose (no turn cap) made 274 model calls,
-// reached 683k context, and started helpers of its own. Each rule names what to
-// send instead.
-//
-//   nested       only a recorded coordinator may start a capped child
-//   plan mode    helpers only read and return findings inline
-//   uncapped     general-purpose/claude while capped role agents are installed
-//   worktree     a Claude helper aimed at a worktree a live Codex worker holds
-//   concurrency  two workers normally, three while a coordinator holds a slot
-export const PLAN_READ_ROLES = new Set(['orch-advisor', 'orch-planner', 'orch-researcher', 'orch-reviewer', 'Explore', 'Plan', 'claude-code-guide']);
-export const UNCAPPED = new Set(['general-purpose', 'claude']);
-export const COORDINATOR_CHILD_ROLES = new Set(['orch-implementer', 'orch-researcher', 'orch-reviewer', 'Explore']);
-
-const nestedReason = 'this nested dispatch cannot be attributed to a recorded coordinator parent, so it is denied';
-
-export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, native = [], external = [], dispatches = [], files = new Map() } = {}) {
-  const role = normalizeRole(ti.subagent_type || 'general-purpose');
-  const prompt = String(ti.prompt || '');
-
-  if (input && input.agent_id && policy.workers.nested !== 'allow') {
-    if (policy.workers.nested === 'deny') {
-      return { prefix: 'workers', reason: 'nested dispatches are disabled by policy.workers.nested=deny' };
-    }
-    const parent = nativeAgent(dispatches, files, input.agent_id);
-    if (!parent || parent.depth == null) return { prefix: 'workers', reason: nestedReason };
-    if (parent.role !== 'orch-coordinator') return { prefix: 'workers', reason: `only orch-coordinator may dispatch workers; recorded parent ${parent.agentId} is ${parent.role}` };
-    if (!COORDINATOR_CHILD_ROLES.has(role)) return { prefix: 'workers', reason: `orch-coordinator may dispatch only orch-implementer, orch-researcher, orch-reviewer, or Explore; ${role} is not allowed` };
-    if (!String(ti.model || '').trim()) return { prefix: 'workers', reason: 'a coordinator child must name its model' };
-    if (parent.depth + 1 > 2) return { prefix: 'workers', reason: `nested dispatch depth ${parent.depth + 1} exceeds the depth-2 limit` };
-  }
-
-  if (input && input.permission_mode === 'plan') {
-    if (!PLAN_READ_ROLES.has(role)) return { prefix: 'plan', reason: `the host is in Plan mode, where helpers only read. ${role} can change files. Send orch-advisor to test a direction, orch-planner for an ordered plan returned inline, orch-researcher for facts outside the code, orch-reviewer to judge a change, or Explore (naming a model) to find things. Or do the inspection yourself.` };
-    if (ti.isolation === 'worktree' || /^\s*WHERE:.*worktree:\s*yes/mi.test(prompt) || /^\s*worktree:\s*yes/mi.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: no worktrees. Remove the worktree and ask for read-only findings returned inline.' };
-    if (/^\s*PROGRESS:/m.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: helpers write no progress files. Remove the PROGRESS line and ask for findings returned inline; only the lead maintains the plan.' };
-  }
-
-  // Only once all six role agents are present: a partial script install still
-  // falls back on general-purpose for a writing role (SKILL.md §0).
-  if (UNCAPPED.has(role) && installed >= AGENT_NAMES.length && policy.workers.generalPurpose !== 'allow') {
-    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orch-implementer (model "sonnet") to change code, orch-researcher or Explore (model "haiku") to find things, orch-planner when you cannot yet name the steps, orch-debugger for a failure that survived one attempt, orch-reviewer before shipping something expensive to get wrong, orch-advisor before committing to a direction, orch-browser when only a real browser settles it. Or do a small task yourself.` };
-  }
-
-  const locked = lockedWorktreeIn(prompt, external);
-  if (locked) return { prefix: 'workers', reason: `a Codex worker (${locked.task || 'task'}, pid ${locked.pid}) is still running in ${locked.worktree}. Two providers never work in one worktree at once: wait for it to exit, then send only the unfinished part.` };
-
-  const busy = concurrencyDecision(role, { native, external, policy });
-  if (busy) return { prefix: 'workers', reason: busy };
-  return null;
-}
-
 // Which invocation this is. The documented hook payload carries `tool_use_id`
 // alongside `session_id`, and that pair identifies one tool call exactly: two
 // registrations of this hook see the same pair, and a genuine retry gets a new
@@ -334,6 +283,9 @@ export const EVENTS_MAX = 400;
 // `recordSeen` (`lib/tier.mjs`) replace it with an append-only log: a
 // concurrent writer only ever adds its own line, so there is nothing to race.
 export { markSeen } from './lib/tier.mjs';
+export { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
+export { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, workflowDecision } from './lib/workflow.mjs';
+export { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision } from './lib/spend-gate.mjs';
 
 function seenBefore(id) {
   const now = Date.now();
@@ -352,22 +304,6 @@ function emit(obj) {
   process.stdout.write(JSON.stringify(obj));
 }
 
-// A price, said once, before the spend. Measured from this machine's own past
-// runs when there are any; labelled reasoned when there are not; absent when
-// neither exists, including when the packet named no model at all.
-//
-// It carries NO `permissionDecision`. `allow` alongside `additionalContext` is
-// documented and would work, and it would also auto-approve every dispatch and
-// take away the user's permission prompt — a silent change to a default nobody
-// asked to change.
-export function tagFor(ti) {
-  try {
-    const role = String(ti.subagent_type || 'claude');
-    const model = String(ti.model || '');
-    if (!model) return '';
-    return priceTag(role, model, readCosts(), detectTier().tier, readJson(PROFILE_PATH));
-  } catch { return ''; }
-}
 
 // Roles that write their own findings to disk mid-task and can be cut off by
 // a turn cap or a usage limit before they return: a capped return with no
@@ -376,15 +312,58 @@ export function tagFor(ti) {
 // (its own packet is the lead's business, not a worker's).
 export const AUTHOR_ROLES = new Set(['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-debugger']);
 
+// A short prompt that only points at a packet file ("Your packet is in
+// <path>, lines ..." or "packet: <path>") carries no PROGRESS line itself
+// even when the file it names does. Cheapest match first: a bare path token
+// that follows the word "packet" up to its extension.
+const PACKET_PATH_RE = /\bpacket\b[^\n,]{0,40}?([^\s,]+\.[A-Za-z0-9]+)(?=[,\s]|$)/i;
+
+function packetPathFrom(prompt) {
+  const m = PACKET_PATH_RE.exec(String(prompt || ''));
+  return m ? m[1] : null;
+}
+
 // A fact, not a denial: Plan mode already forbids a PROGRESS line (its own
 // rule above), so this says nothing there. Elsewhere, an author-role packet
 // with no PROGRESS line is named as what it is before the dispatch happens,
 // since M4's two worst-shaped helpers had none and nothing told the lead.
-export function progressFact(role, prompt, planMode) {
+//
+// The prompt text is checked first and is the only check for the common case
+// (a PROGRESS line inline): no file is ever opened then. Only when that check
+// fails and the prompt names a packet file is that file opened and checked
+// too, so a dispatch pointing at a packet on disk is not warned about a line
+// that is right there, just not in the short prompt the guard first saw.
+export function progressFact(role, prompt, planMode, readFile = readFileSync) {
   if (planMode) return '';
   if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
-  if (/^\s*PROGRESS:\s*\S+/m.test(String(prompt || ''))) return '';
+  const text = String(prompt || '');
+  if (/^\s*PROGRESS:\s*\S+/m.test(text)) return '';
+  const packetPath = packetPathFrom(text);
+  if (packetPath) {
+    try {
+      if (/^\s*PROGRESS:\s*\S+/m.test(String(readFile(packetPath, 'utf8')))) return '';
+    } catch {}
+  }
   return 'no PROGRESS line: a capped return will have nothing to resume from';
+}
+
+// The opposite fact from progressFact: a packet that does name a PROGRESS
+// path, for a helper that may be working in its own worktree and so cannot
+// write under the main checkout the path is written relative to. Said once,
+// plainly, so a refused write is not a dead end.
+export function progressWorktreeNote(role, prompt, planMode, readFile = readFileSync) {
+  if (planMode) return '';
+  if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
+  const text = String(prompt || '');
+  let has = /^\s*PROGRESS:\s*\S+/m.test(text);
+  if (!has) {
+    const packetPath = packetPathFrom(text);
+    if (packetPath) {
+      try { has = /^\s*PROGRESS:\s*\S+/m.test(String(readFile(packetPath, 'utf8'))); } catch {}
+    }
+  }
+  if (!has) return '';
+  return 'if writing the progress file is refused, write the same relative path inside your own worktree instead, and say so in your return';
 }
 
 // A fact, not an order, said only on an orch-implementer dispatch: Codex was
@@ -404,66 +383,6 @@ export function codexFact(role, dir = WORKERS_DIR, now = Date.now()) {
   return `Codex ok at ${hhmm}; Terra medium fits a bounded change with tests`;
 }
 
-// The run this packet belongs to: the `RUN:` line a coordinated packet carries,
-// or the run this session is bound to. The ledger resolves a return from this,
-// rather than from whichever run on the machine happens to be newest.
-export function runFor(input, ti) {
-  const named = (/^\s*RUN:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1];
-  if (named) return named;
-  const bound = sessionRun(input.session_id);
-  return bound ? bound.runId : null;
-}
-
-const round2 = n => Math.round(Number(n) * 100) / 100;
-
-// The run object this dispatch bills against, so the gate can read its budget
-// ceiling and spend so far. Resolved the way a return is: the session binding
-// first, then a run named in the packet or the one open run in the repo, then
-// the machine's last-opened run as a hint for a session working above its repo.
-// This is a read, never a write, so the last-opened hint is allowed here where
-// it is refused for filing a return — *except* for the budget gate, whose
-// caller passes `forBudget: true`. The pointer names whichever run was opened
-// last on this whole machine, which can belong to a repo this dispatch has
-// nothing to do with; enforcing its ceiling denied dispatches against a
-// stranger repo's budget. Everywhere the pointer is shown rather than
-// enforced (`router.mjs`'s "candidate, not bound") already hedges it; the gate
-// is the one caller that would otherwise have treated it as authoritative.
-export function resolveRunObj(input, ti, { forBudget = false } = {}) {
-  const bound = sessionRun(input.session_id);
-  if (bound) return bound;
-  const named = (/^\s*RUN:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1];
-  const root = findRepoRoot(input.cwd);
-  if (root) {
-    if (named) { const hit = runsUnder(root).find(r => r.runId === named); if (hit) return hit; }
-    const open = openRunsUnder(root);
-    if (open.length === 1) return open[0];
-  }
-  if (forBudget) return null;
-  return activeRunPointer();
-}
-
-// The pure arithmetic of the gate, so it can be tested without a machine's cost
-// history: does spend-so-far plus this dispatch cross the ceiling? Null when
-// there is nothing to decide (no ceiling, or no price for this dispatch).
-export function overCeiling(already, est, ceiling) {
-  if (ceiling == null || est == null) return null;
-  const total = (Number(already) || 0) + Number(est);
-  return total > ceiling
-    ? { already: round2(Number(already) || 0), est: round2(Number(est)), total: round2(total), ceiling }
-    : null;
-}
-
-// Would this dispatch push the run past its budget ceiling? Null when there is
-// nothing to gate on: no model named (so no price), no run resolved, or no
-// ceiling set. Otherwise the numbers the deny reason needs.
-export function budgetDecision(input, ti, run = resolveRunObj(input, ti, { forBudget: true })) {
-  const model = String(ti.model || '');
-  if (!model) return null;
-  if (!run || !run.budget || run.budget.ceiling == null) return null;
-  const est = estimateDollars(String(ti.subagent_type || 'claude'), model, readCosts());
-  const over = overCeiling(Number(run.spend) || 0, est, run.budget.ceiling);
-  return over ? { runId: run.runId, ...over } : null;
-}
 
 function main() {
   let payload = '';
@@ -504,7 +423,8 @@ function main() {
       files,
       staleMin: policy.workers.staleMin,
     });
-    m = workflowDecision(input, ti, { policy, installed: agentsInstalled().installed, native, external: runningExternal(), dispatches, files });
+    const agentsInfo = agentsInstalled();
+    m = workflowDecision(input, ti, { policy, installed: agentsInfo.installed, missing: agentsInfo.missing, native, external: runningExternal(), dispatches, files });
   } catch {
     let unrestricted = false;
     try { unrestricted = loadPolicy().workers.nested === 'allow'; } catch {}
@@ -546,7 +466,7 @@ function main() {
   // stop the compliance evidence says actually works.
   const b = budgetDecision(input, ti);
   if (b) {
-    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate budget: this ${String(ti.subagent_type || 'dispatch')} is about $${b.est} at list price, and run ${b.runId} has already spent about $${b.already}, so it would cross the $${b.ceiling} ceiling. Raise the ceiling in the run's Budget section, or stop — nothing tightens or lifts it on its own.` } });
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate budget: this ${String(ti.subagent_type || 'dispatch')} is about $${b.est} at list price, and run ${b.runId} has already spent about $${b.already}, so it would cross the $${b.ceiling} ceiling (${costLabel()}). Raise the ceiling in the run's Budget section, or stop — nothing tightens or lifts it on its own.` } });
     return;
   }
 
@@ -575,8 +495,15 @@ function main() {
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = progressFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
+  const pw = progressWorktreeNote(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
+  if (pw) tag = `${tag ? `${tag}; ` : ''}${pw}`;
   const cf = codexFact(ti.subagent_type);
   if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
+  const rw = inferredReviewWord(ti.prompt);
+  if (rw && !/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || ''))) {
+    const task = taskIdIn(ti.prompt) || 'this task';
+    tag = `${tag ? `${tag}; ` : ''}this task will wait for an independent review because its objective mentions ${rw}; to send one, dispatch orch-reviewer on opus with REVIEW OF: ${task}`;
+  }
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
 
@@ -593,6 +520,7 @@ function withSession(input, fn) {
 // One line per dispatch in the session state, for the ledger. Never throws; a
 // missing session file just means no router ran here.
 function recordDispatch(input, ti) {
+  const reviewWord = inferredReviewWord(ti.prompt);
   withSession(input, state => {
     state.dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
     if (state.dispatches.length > 200) state.dispatches = state.dispatches.slice(-200);
@@ -603,7 +531,7 @@ function recordDispatch(input, ti) {
       // whatever the session was on. It is reported that way, never resolved to
       // a guess.
       model: String(ti.model || 'inherit'),
-      task: (/^\s*TASK:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
+      task: taskIdIn(ti.prompt),
       key: taskKey(ti.prompt),
       // Links this record to the helper's own transcript (subagents/*.meta.json
       // carries the same id), which is how "still running" is judged.
@@ -612,6 +540,14 @@ function recordDispatch(input, ti) {
       // found from disk rather than by resuming the stopped agent.
       progress: (/^\s*PROGRESS:\s*(\S+)/m.exec(String(ti.prompt || '')) || [])[1] || null,
       run: runFor(input, ti),
+      // Marks a task whose packet asked for independent review (money, auth,
+      // destructive data, a contract others consume) so ledger.mjs can hold a
+      // DONE return back until a reviewer return for this task exists. The
+      // same gate is also reached without an explicit REVIEW: yes line, when
+      // the packet's own OBJECTIVE mentions one of REVIEW_WORDS (reviewWord
+      // below) — reviewInferred records which word tripped it.
+      ...(/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || '')) ? { review: true } : {}),
+      ...(reviewWord ? { review: true, reviewInferred: reviewWord } : {}),
       ...(input.agent_id ? { parent: String(input.agent_id) } : {}),
     });
     state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;

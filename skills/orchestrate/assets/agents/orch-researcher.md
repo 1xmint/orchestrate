@@ -1,6 +1,6 @@
 ---
 name: orch-researcher
-description: "Reach for this when the answer lives outside the code — docs, an API's real behaviour, prior art, a vendor's terms, a legal or licence question — and guessing would cost more than looking. Returns findings with sources and changes nothing."
+description: "Reach for this when the answer lives outside the code — a vendor's terms, an API's behaviour, a licence question, prior art. Returns findings with sources. Not for a one-page lookup — the built-in general-purpose agent does that."
 model: sonnet
 effort: medium
 disallowedTools: Agent, SendMessage, Artifact, Monitor, NotebookEdit

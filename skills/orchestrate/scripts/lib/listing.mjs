@@ -14,6 +14,11 @@
 // Read-only, no model calls, and any failure reads as "nothing known".
 
 import { openSync, readSync, closeSync, statSync } from 'node:fs';
+import { join, dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { DIR, readJson, writeJsonAtomic, PROFILE_PATH } from './tier.mjs';
+
+const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 export const HEAD_BYTES = 600000;
 const TOKENS_PER_CHAR = 1 / 3.6;
@@ -117,4 +122,35 @@ export function pluginFitLine(l, { known = null, paidMode = 'ask', paidAllowed =
     `Once, in a few lines, sort ${known ? 'the new ones' : 'them'} for the user: keep what serves the work they do or orchestrate itself; remove what is unrelated, repeats a built-in, or bills an outside service they have not allowed — ${PAID_RULE[paidMode] || PAID_RULE.ask}${allowed}. Give the rough per-step saving. Removing is their choice: plugins added to their Claude account are removed in the Claude app's plugin settings and do not show in /plugin; ones installed from a terminal are removed with /plugin.`,
     `Do not suggest installing plugins now: each one is re-read on every step. When a task later needs what the built-ins cannot do, search the plugin catalog then, name one, and say whether it bills an outside service. To let orchestrate use a paid one they bought: node "${profileScript}" --set allowPaid=<plugin>.`,
   ].join(' ');
+}
+
+export const LISTING_REPORT_PATH = join(DIR, 'listing-report.json');
+export const LISTING_REPORT_MIN_TOKENS = 4000;
+
+// Machine-wide, not per session: the plugins are the same in every session. The
+// full check is said the first time the listings are seen, and after that only
+// when plugins are added — a reminder of a choice the user already made is
+// noise, and a plugin they just installed is the moment its fit matters. A small
+// setup gets no full check. The stamp is written only once the listings were
+// actually read, so a session whose listings are not in the transcript yet tries
+// again on its next prompt.
+export function pluginFitReport(transcriptPath, { path = LISTING_REPORT_PATH, profilePath = PROFILE_PATH, now = Date.now() } = {}) {
+  try {
+    if (!transcriptPath) return '';
+    const l = parseListing(readHead(transcriptPath));
+    if (!l.found) return '';
+    const stamp = readJson(path);
+    const known = stamp && Array.isArray(stamp.plugins) ? stamp.plugins : null;
+    const names = pluginNames(l);
+    if (known && names.length === known.length && names.every(p => known.includes(p))) return '';
+    writeJsonAtomic(path, { at: now, plugins: names });
+    if (!known && tokens(l.skillChars + l.toolChars + l.serverChars) < LISTING_REPORT_MIN_TOKENS) return '';
+    const profile = readJson(profilePath) || {};
+    return pluginFitLine(l, {
+      known,
+      paidMode: profile.paidServices || 'ask',
+      paidAllowed: Array.isArray(profile.paidAllowed) ? profile.paidAllowed : [],
+      profileScript: join(SKILL_DIR, 'scripts', 'profile.mjs'),
+    });
+  } catch { return ''; }
 }

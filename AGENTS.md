@@ -15,20 +15,47 @@ Deciding documents (these win when the code and the intent disagree):
   what comes next
 - `skills/orchestrate/SKILL.md` — the method the lead follows; §10 says what may
   be added to it
-- `skills/orchestrate/references/ladder.md` — the card, the guidance a session
-  is sure to see
+- `CARD` in `skills/orchestrate/scripts/lib/card.mjs` — the card, the guidance a
+  session is sure to see; it carries behaviour rules only, never state
+- `docs/scoresheet-audit-prompt.md` and the newest report under `docs/audits/`
+  — how the plugin is scored for its audience; an area under 10 there is open
+  work, and a change that lowers an area needs a decision here saying why
 
 Always true:
 - Hooks state facts the lead cannot see; they do not give orders.
 - Every always-on line names the failure it prevents and what it costs per turn.
 - Quota first: the cheapest model that can do a step does it.
 - Tests need no network and no quota, run in CI, and pin behaviour, not numbers.
-- The card in `ladder.md` and `FALLBACK_CARD` in `router.mjs` stay byte-identical.
+- Claims the user feels (the thing got built, what it cost, it picks up again,
+  it stopped before deleting) are measured, not argued: `claude plugin eval`
+  with the no-plugin baseline, and the audit prompt's live scenarios, before a
+  release and after any change to the skill body, the card or a hook. Each
+  measured run has a spend cap written down first; day-to-day changes are still
+  judged from the tests and from records already on disk.
+- Every number a doc states (hook count, agent count, line count, price, model
+  name, version) is either read from the source at build time or pinned by a
+  test that fails when it drifts. One version string, in `plugin.json`; every
+  other place reads it or a test checks it.
+- Every hook script is registered exactly once, in `hooks/hooks.json`. Nothing a
+  hook prints reaches a helper's context; a hook goes silent when the payload
+  says it is inside one.
+- Where something must not happen (a destructive, public or paid action, a
+  helper on the wrong model), a hook refuses it or the tool is taken away.
+  Prose is for judgement.
+- Install and uninstall leave the machine as they found it apart from the
+  files the user asked for, and a test proves it. No person's name, machine
+  path or account detail in code, docs or tests.
+- The card text has one home, `CARD` in `scripts/lib/card.mjs`; no document copies it.
+- `STATE.md` holds the newest release and the one before it in full; older
+  entries move to `docs/state/<version>.md` at each release, so a fresh session
+  can read where we are in one page.
 
 Not doing:
 - Anything that bills an outside service or needs its own API key.
 - Self-modification, or a growing pile of lessons after each incident.
-- Staged runs to prove a change; real use is judged from records already on disk.
+- Unmeasured staged runs: a run that is not an eval case or an audit scenario,
+  with no baseline and no cap, proves nothing and spends quota.
+- A rule that lives only in prose when a hook or a test could hold it.
 
 ## How this plugin is developed
 
