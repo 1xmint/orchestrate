@@ -676,14 +676,16 @@ test('ledger: a nested SubagentStop is filed and indexed with its parent', () =>
 
   const out = run('ledger.mjs', {
     hook_event_name: 'SubagentStop', session_id: 'nested-stop', cwd: repo.dir,
-    agent_id: 'child-id', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
+    agent_id: 'child-id', tool_use_id: 'toolu_child', agent_type: 'orch-implementer', last_assistant_message: GOOD_RETURN,
   }, home);
 
   assert.equal(out.status, 0);
   const index = readFileSync(join(repo.runDir, 'returns', 'returns.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(index[0].parent, 'coord-parent');
   assert.ok(existsSync(index[0].file), 'the nested return is filed under the run');
-  assert.equal(JSON.parse(readFileSync(sessionPath, 'utf8')).returned[0].parent, 'coord-parent');
+  const rec = JSON.parse(readFileSync(sessionPath, 'utf8')).returned[0];
+  assert.equal(rec.parent, 'coord-parent');
+  assert.equal(rec.toolUseId, 'toolu_child', 'the dispatch id rides on the return so the worker count can pair them without a transcript file');
 });
 
 test('ledger: the task rows are left exactly as they were', () => {

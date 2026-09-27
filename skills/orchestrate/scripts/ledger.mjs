@@ -479,7 +479,10 @@ function main() {
     const state = input.session_id && loadSession(input.session_id);
     if (state) {
       state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}) });
+      // toolUseId is the id of the Agent call that started this helper, the
+      // same one guard-agent.mjs stored on the dispatch row, so the worker
+      // count can pair the two directly even when no transcript file exists.
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}) });
       saveSession(state);
     }
   } catch {}

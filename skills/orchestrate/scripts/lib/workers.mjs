@@ -115,12 +115,16 @@ export function nativeAgent(dispatches, files, agentId) {
 // transcript of a helper that otherwise looks alive, to see whether its turns ran out.
 export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin, capOf = roleMaxTurns, turnsOf = transcriptTurns } = {}) {
   const back = new Set((returned || []).map(r => r && r.agentId).filter(Boolean));
-  const loose = (returned || []).filter(r => r && !r.agentId).map(r => ({ ...r, used: false }));
+  // The dispatch id the ledger stored on the return: the one pairing that needs
+  // neither a transcript file nor a task id, so it is tried first.
+  const backTu = new Set((returned || []).map(r => r && r.toolUseId).filter(Boolean));
+  const loose = (returned || []).filter(r => r && !r.agentId && !r.toolUseId).map(r => ({ ...r, used: false }));
   const out = [];
   for (const d of dispatches || []) {
     if (!d || !d.at) continue;
     const age = now - Date.parse(d.at);
     if (!Number.isFinite(age)) continue;
+    if (d.toolUseId && backTu.has(d.toolUseId)) continue;
     const f = d.toolUseId ? files.get(d.toolUseId) : null;
     if (f && back.has(f.agentId)) continue;
     // A return with no agent id, matched in order by role and task.

@@ -281,6 +281,25 @@ test('running helpers: dispatched and not returned and still alive', () => {
   assert.deepEqual(runningNative([{ agent: 'orch-researcher', task: '7', at: ago(1) }], { returned: [{ agent: 'orch-researcher', task: '7', at: ago(0) }], now: NOW }), []);
 });
 
+test('running helpers: a return carrying the dispatch id frees the slot with no transcript file and no task id', () => {
+  // Seen live: three prose briefs (no TASK: line) dispatched at once, one helper
+  // returned with an agent id, but no transcript file was mapped for its
+  // dispatch, so the dispatch stayed "running" until the silence rule and a
+  // fresh dispatch was refused as a third worker. The ledger now stores the
+  // dispatch's tool_use_id on the return; that pairing needs nothing else.
+  const dispatches = [
+    { agent: 'orchestrate:orch-implementer', at: ago(3), toolUseId: 'tu_done' },
+    { agent: 'orchestrate:orch-implementer', at: ago(3), toolUseId: 'tu_still' },
+  ];
+  const returned = [{ agent: 'orch-implementer', agentId: 'agent-done', toolUseId: 'tu_done', at: ago(1) }];
+  const live = runningNative(dispatches, { returned, files: new Map(), now: NOW, staleMin: 10 });
+  assert.equal(live.length, 1, 'the returned one is gone, the other is still inside its dispatch grace');
+  assert.equal(live[0].task, null);
+  // The same return does not also match the other dispatch loosely by role.
+  const both = runningNative(dispatches, { returned: [{ ...returned[0], agentId: null }], files: new Map(), now: NOW, staleMin: 10 });
+  assert.equal(both.length, 1);
+});
+
 test('running helpers: liveness is one number — just-dispatched counts, a fresh transcript counts however old the dispatch, silent past staleMin does not', () => {
   const files = new Map([
     // Dispatched long ago, but its transcript is still being written: alive.
