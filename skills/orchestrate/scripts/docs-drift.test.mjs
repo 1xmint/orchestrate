@@ -62,7 +62,7 @@ test('README\'s hook count matches hooks.json, if it names one', () => {
     `README says "${m[0]}" but hooks/hooks.json registers ${countHooks(HOOKS)}`);
 });
 
-test('agent counts in README, hosts.md and models.md match plugin.json', () => {
+test('agent counts in README, hosts.md, claude-code.md and models.md match plugin.json', () => {
   const n = agentCount();
   const words = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
   const numberWord = Object.keys(words).find(w => words[w] === n) || String(n);
@@ -70,6 +70,7 @@ test('agent counts in README, hosts.md and models.md match plugin.json', () => {
   const files = {
     'README.md': README,
     'references/hosts.md': readFileSync(join(SKILL, 'references', 'hosts.md'), 'utf8'),
+    'references/claude-code.md': readFileSync(join(SKILL, 'references', 'claude-code.md'), 'utf8'),
     'references/models.md': readFileSync(join(SKILL, 'references', 'models.md'), 'utf8'),
   };
   for (const [name, text] of Object.entries(files)) {

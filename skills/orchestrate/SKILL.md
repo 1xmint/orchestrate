@@ -340,8 +340,8 @@ voice in full; these still apply when the style is off:
   "${CLAUDE_SKILL_DIR}/scripts/suggest.mjs" add "<text>"` (it only writes; read
   the pile back with `suggest.mjs show`, never as part of a run).
 - No secrets or personal data in packets or ledgers.
-- A repo's own `AGENTS.md` or `CLAUDE.md` wins over this skill. `hosts.md` has
-  which file wins when a repo has both, and why a helper's packet still needs
+- A repo's own `AGENTS.md` or `CLAUDE.md` wins over this skill. `claude-code.md` has
+  which file wins when a repo has both, and why a helper's packet needs
   the `AGENTS.md` rules that matter to it.
 - **A role's tool scope is a guarantee, not a description**, enforced by the
   host's restrictions on each agent file, not by an instruction the agent could
