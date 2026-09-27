@@ -78,9 +78,15 @@ test('inferredReviewWord: a Stripe-payment objective is caught, a CSS rename is 
   assert.equal(inferredReviewWord('OBJECTIVE\nRename a CSS class'), null);
 });
 
-test('inferredReviewWord: a negation still matches, on purpose', () => {
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nNo auth changes in this task\nCONTEXT\nmore'), 'auth');
-  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nNot a payment feature\nCONTEXT\nmore'), 'payment');
+test('inferredReviewWord: a negation directly ahead of the word clears it', () => {
+  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\n(not auth)\nCONTEXT\nmore'), null);
+  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nno payment is involved\nCONTEXT\nmore'), null);
+  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nNo auth changes in this task\nCONTEXT\nmore'), null);
+  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nNot a payment feature\nCONTEXT\nmore'), null);
+});
+
+test('inferredReviewWord: the same word elsewhere, not negated, still matches', () => {
+  assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\ntouches payment; not auth\nCONTEXT\nmore'), 'payment');
 });
 
 test('inferredReviewWord: a word outside the OBJECTIVE section is not caught', () => {

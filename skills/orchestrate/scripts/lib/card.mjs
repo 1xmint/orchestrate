@@ -26,6 +26,16 @@ export function cardBody() {
   return CARD;
 }
 
+// A one-sentence prompt with no build word in it ("fix the typo in the
+// README") does not need five paragraphs of behaviour rules: the full card
+// still arrives on the first request big enough to need it. Kept well under
+// SHORT_CARD_CAP so a small ask stays small.
+export const SHORT_CARD_CAP = 600;
+
+export function shortCard() {
+  return 'orchestrate is loaded. This looks like a small, one-step task: just do it yourself and report back in plain words with the evidence (what you ran or checked) that it is done. The fuller guidance on planning, delegation and review arrives with your first larger request.';
+}
+
 // One line in plain words for the write `autocompact on` (or `autocompact
 // <N>k`) makes: what changed, that it starts next session, and how to undo
 // it. No raw settings path — the user does not need one to act on this.
