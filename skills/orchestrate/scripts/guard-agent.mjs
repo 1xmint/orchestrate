@@ -405,10 +405,13 @@ function packetPathFrom(prompt) {
 // OBJECTIVE mentions one of these waits for an independent review even when
 // the packet never wrote REVIEW: yes — the same gate, reached a different way.
 //
-// A negation in the objective text ("not auth", "no payment") still matches:
-// this is a plain substring/word check with no sense of negation, on purpose.
-// One unneeded review dispatched is cheap; one review a real change should
-// have gotten and silently skipped is not, so this list is deliberately eager.
+// A negation directly ahead of the word ("not auth", "no payment is
+// involved") clears that match: reviewWordMatch below looks up to three
+// words back for "not", "no", "never", "without", "non-", "excluding" or
+// "other than" before counting a hit. Any other occurrence of the same word
+// still matches ("touches payment; not auth" → "payment"), and the list
+// itself stays eager: one unneeded review dispatched is cheap, one a real
+// change should have gotten and silently skipped is not.
 export const REVIEW_WORDS = [
   'payment', 'payments', 'billing', 'invoice', 'refund', 'checkout', 'stripe', 'price', 'pricing',
   'auth', 'authentication', 'authorization', 'login', 'password', 'credential', 'credentials', 'token', 'oauth', 'permission',
@@ -430,14 +433,31 @@ export function objectiveSection(prompt) {
   return end ? rest.slice(0, end.index) : rest;
 }
 
+// A negation directly ahead of a candidate match clears it: up to three
+// words back (not counting the match itself) for "not", "no", "never",
+// "without", "non-", "excluding" or "other than".
+const NEGATOR = /\b(not|no|never|without|non-?|excluding|other\s+than)\b/i;
+
+function negatedBefore(text, index) {
+  const before = text.slice(0, index);
+  const words = before.trim().split(/\s+/).filter(Boolean).slice(-3);
+  return NEGATOR.test(words.join(' '));
+}
+
 // The first REVIEW_WORDS entry (whole word or phrase, case-insensitive) found
-// in an OBJECTIVE section, or null. A small, pure function on purpose, kept
-// apart from the regex-building above so both are testable on their own.
+// in an OBJECTIVE section with no negation directly ahead of it, or null. A
+// small, pure function on purpose, kept apart from the regex-building above
+// so both are testable on their own.
 export function reviewWordMatch(section) {
   const text = String(section || '');
   for (const word of REVIEW_WORDS) {
     const pattern = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
-    if (new RegExp(`\\b${pattern}\\b`, 'i').test(text)) return word;
+    const re = new RegExp(`\\b${pattern}\\b`, 'gi');
+    let m;
+    while ((m = re.exec(text))) {
+      if (!negatedBefore(text, m.index)) return word;
+      if (m.index === re.lastIndex) re.lastIndex++; // guard against a zero-width match
+    }
   }
   return null;
 }
