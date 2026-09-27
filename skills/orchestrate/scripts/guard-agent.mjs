@@ -423,7 +423,8 @@ function main() {
       files,
       staleMin: policy.workers.staleMin,
     });
-    m = workflowDecision(input, ti, { policy, installed: agentsInstalled().installed, native, external: runningExternal(), dispatches, files });
+    const agentsInfo = agentsInstalled();
+    m = workflowDecision(input, ti, { policy, installed: agentsInfo.installed, missing: agentsInfo.missing, native, external: runningExternal(), dispatches, files });
   } catch {
     let unrestricted = false;
     try { unrestricted = loadPolicy().workers.nested === 'allow'; } catch {}

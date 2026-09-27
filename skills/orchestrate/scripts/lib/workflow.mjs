@@ -25,11 +25,15 @@ export const COORDINATOR_CHILD_ROLES = new Set(['orch-implementer', 'orch-resear
 // work in their own worktree and branch; a packet that sends one into the
 // shared checkout makes it write outside the repo or refuse.
 export const WORKTREE_ISOLATED_ROLES = new Set(['orch-implementer', 'orch-debugger']);
+// The one capped role whose install flips the uncapped-helper gate: router.mjs
+// reads this rather than naming the role itself, since router.mjs is kept free
+// of agent/role names (see router.test.mjs).
+export const UNCAPPED_GATE_ROLE = 'orch-implementer';
 const SHARED_CHECKOUT_RE = /project root|shared checkout|do not use a separate worktree|work directly in the (repo|checkout)|same checkout/i;
 
 export const nestedReason = 'this nested dispatch cannot be attributed to a recorded coordinator parent, so it is denied';
 
-export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, native = [], external = [], dispatches = [], files = new Map() } = {}) {
+export function workflowDecision(input, ti, { policy = loadPolicy(), installed = 0, missing = null, native = [], external = [], dispatches = [], files = new Map() } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const prompt = String(ti.prompt || '');
   const nestedParent = input && input.agent_id ? nativeAgent(dispatches, files, input.agent_id) : null;
@@ -58,10 +62,19 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
     }
   }
 
-  // Only once all six role agents are present: a partial script install still
-  // falls back on general-purpose for a writing role (SKILL.md §0).
-  if (UNCAPPED.has(role) && installed >= AGENT_NAMES.length && policy.workers.generalPurpose !== 'allow') {
-    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orch-implementer (model "sonnet") to change code, orch-researcher or Explore (model "haiku") to find things, orch-planner when you cannot yet name the steps, orch-debugger for a failure that survived one attempt, orch-reviewer before shipping something expensive to get wrong, orch-advisor before committing to a direction, orch-browser when only a real browser settles it. Or do a small task yourself.` };
+  // The gate is about orch-implementer specifically, not the full set: it is
+  // the one capped role that writes code, so it is the uncapped helper's only
+  // real substitute. Once its file is installed, general-purpose/claude is
+  // refused even on a partial install of the other seven roles (SKILL.md §0);
+  // only when orch-implementer itself is missing does general-purpose remain
+  // the sole choice for a writing role.
+  const implementerMissing = missing ? missing.includes(UNCAPPED_GATE_ROLE) : installed < AGENT_NAMES.length;
+  if (UNCAPPED.has(role) && !implementerMissing && policy.workers.generalPurpose !== 'allow') {
+    const missingNames = Array.isArray(missing) ? missing : [];
+    const tail = missingNames.length
+      ? ` ${installed} of ${AGENT_NAMES.length} role agent files are installed; missing: ${missingNames.map(n => `${n}.md`).join(', ')}.`
+      : '';
+    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orch-implementer (model "sonnet") to change code, orch-researcher or Explore (model "haiku") to find things, orch-planner when you cannot yet name the steps, orch-debugger for a failure that survived one attempt, orch-reviewer before shipping something expensive to get wrong, orch-advisor before committing to a direction, orch-browser when only a real browser settles it. Or do a small task yourself.${tail}` };
   }
 
   const locked = lockedWorktreeIn(prompt, external);
