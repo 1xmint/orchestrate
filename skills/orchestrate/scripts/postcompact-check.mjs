@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // postcompact-check.mjs — a PostCompact hook: the read-side companion to
 // precompact-check.mjs's write-side warning. A helper compacts on its own
-// when its window fills (hosts.md, "Helper compaction"), and nothing outside
+// when its window fills (claude-code.md, "Helper compaction"), and nothing outside
 // it can trigger that compaction or shape its result — but the host still
 // hands the compacted summary to a hook that fires inside the helper
 // (`agent_id` present, hooks.md PostCompact input, read 2026-09-18). That

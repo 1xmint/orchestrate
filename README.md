@@ -216,7 +216,7 @@ plugin's own `hooks/hooks.json` so they run whether or not the skill is
 currently in play — **for a plugin install.** `SKILL.md`'s frontmatter carries
 no hooks of its own, so `hooks/hooks.json` is the one place any hook is
 registered — see "A hook registered in two places runs twice" in
-`references/hosts.md` for why that would matter if it ever changed. **A
+`references/claude-code.md` for why that would matter if it ever changed. **A
 script install (`--with-hook`) additionally registers the turn check in
 `settings.json`** with the interpreter's absolute path pinned in, the same
 way it pins the other two; only there does it not depend on `node` being on

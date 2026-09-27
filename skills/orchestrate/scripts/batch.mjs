@@ -7,7 +7,7 @@
 //
 // This exists because the model cannot reliably start Claude Code's own
 // `/batch` (a user-typed slash command, per lanes.md) or the Workflow tool
-// (not exposed to the model here, re-checked 2026-09-10 — see hosts.md), so a
+// (not exposed to the model here, re-checked 2026-09-10 — see claude-code.md), so a
 // portable fallback that works with only the Agent tool this skill already
 // uses is worth building. If a future host exposes either to the model
 // directly, prefer that; this stays the one that works everywhere.

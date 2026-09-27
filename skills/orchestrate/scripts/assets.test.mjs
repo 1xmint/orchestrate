@@ -3,7 +3,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { AGENT_NAMES, readyTasks } from './lib/tier.mjs';
@@ -168,7 +168,7 @@ test('WS4: no worker role can message another agent or publish, and the browser 
   // plugin-installed subagent ignores permissionMode in its own frontmatter
   // entirely (code.claude.com/docs/en/sub-agents, checked 2026-09-10) — the
   // plugin path is this skill's primary channel, so tools/disallowedTools is
-  // the only lever that reaches every install path. See hosts.md.
+  // the only lever that reaches every install path. See claude-code.md.
   const deny = n => (/^disallowedTools: (.+)$/m.exec(readFileSync(join(AGENTS, `${n}.md`), 'utf8')) || [])[1] || '';
   for (const n of ['orch-implementer', 'orch-debugger']) {
     const d = deny(n);
@@ -565,4 +565,14 @@ test('plugin hooks and script-install registrations name the same scripts on the
   }
   const script = new Set(registrations('/x', { router: true, guard: true }).map(r => `${r.event}:${/([\w-]+\.mjs)/.exec(r.command)[1]}`));
   assert.deepEqual([...pairs].sort(), [...script].sort());
+});
+
+test('hosts.md is the short reference a lead reads; claude-code.md holds the mechanics', () => {
+  const hostsPath = join(SKILL, 'references', 'hosts.md');
+  const hostsSize = statSync(hostsPath).size;
+  assert.ok(hostsSize < 8000, `hosts.md is ${hostsSize} bytes, must be under 8000`);
+  const ccPath = join(SKILL, 'references', 'claude-code.md');
+  assert.ok(existsSync(ccPath), 'claude-code.md must exist');
+  const cc = readFileSync(ccPath, 'utf8');
+  assert.match(cc, /hosts\.md/, 'claude-code.md must name hosts.md');
 });
