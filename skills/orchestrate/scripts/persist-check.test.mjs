@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +20,39 @@ function run(input, home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'))) {
     env: { ...process.env, HOME: home, USERPROFILE: home },
   });
   return { stdout: r.stdout, status: r.status };
+}
+
+// ---- commit-claim helpers -------------------------------------------------------
+
+function git(cwd, args) {
+  return spawnSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' } });
+}
+
+// A repo with two commits: `startHead` (the first) and HEAD one commit ahead
+// of it, tree clean. Callers that want a dirty tree edit a file afterwards.
+function makeRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-persist-repo-'));
+  git(dir, ['init', '-q']);
+  writeFileSync(join(dir, 'a.txt'), 'one\n');
+  git(dir, ['add', '.']);
+  git(dir, ['commit', '-q', '-m', 'first']);
+  const startHead = git(dir, ['rev-parse', 'HEAD']).stdout.trim();
+  writeFileSync(join(dir, 'b.txt'), 'two\n');
+  git(dir, ['add', '.']);
+  git(dir, ['commit', '-q', '-m', 'second']);
+  return { dir, startHead };
+}
+
+function writeTranscript(home, lastAssistantText) {
+  const p = join(home, 'transcript.jsonl');
+  writeFileSync(p, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: lastAssistantText }] } }) + '\n');
+  return p;
+}
+
+function writeSession(home, sessionId, extra = {}) {
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${sessionId}.json`), JSON.stringify({ v: 1, session_id: sessionId, ...extra }));
 }
 
 // ---- pure: scanTurn -----------------------------------------------------------
@@ -103,5 +136,73 @@ test('a helper\'s own Stop (agent_id present) is silent, never blocked with the 
 test('an unarmed session with no bound run and no transcript is silent', () => {
   const r = run({ hook_event_name: 'Stop', session_id: 'unbound-session', transcript_path: '' });
   assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+});
+
+// ---- commit-claim check: closing message vs. git status ------------------------
+
+test('a not-committed claim over a clean tree is blocked with a plain reason', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  const transcript_path = writeTranscript(home, 'I have not committed these changes to git.');
+  writeSession(home, 'sess-1', { startHead });
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-1', cwd: dir, transcript_path }, home);
+  assert.equal(r.status, 0);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /nothing is committed, but git status shows a clean tree and 1 commit since this session started/);
+});
+
+test('the same not-committed claim over a dirty tree is not blocked', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  writeFileSync(join(dir, 'c.txt'), 'three\n');
+  const transcript_path = writeTranscript(home, 'I have not committed these changes to git.');
+  writeSession(home, 'sess-2', { startHead });
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-2', cwd: dir, transcript_path }, home);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+});
+
+test('a committed claim over a dirty tree is blocked and names the files', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  writeFileSync(join(dir, 'c.txt'), 'three\n');
+  const transcript_path = writeTranscript(home, 'All committed.');
+  writeSession(home, 'sess-3', { startHead });
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-3', cwd: dir, transcript_path }, home);
+  assert.equal(r.status, 0);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /shows 1 file not committed \(c\.txt\)/);
+});
+
+test('the same contradicted claim is never blocked twice in one session', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  writeFileSync(join(dir, 'c.txt'), 'three\n');
+  const transcript_path = writeTranscript(home, 'All committed.');
+  writeSession(home, 'sess-4', { startHead });
+  const first = run({ hook_event_name: 'Stop', session_id: 'sess-4', cwd: dir, transcript_path }, home);
+  assert.equal(JSON.parse(first.stdout).decision, 'block');
+  const second = run({ hook_event_name: 'Stop', session_id: 'sess-4', cwd: dir, transcript_path }, home);
+  assert.equal(second.stdout.trim(), '');
+});
+
+test('a helper\'s own Stop (agent_id present) is silent even over a contradicted claim', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  const transcript_path = writeTranscript(home, 'I have not committed these changes to git.');
+  writeSession(home, 'sess-5', { startHead });
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-5', agent_id: 'helper-1', cwd: dir, transcript_path }, home);
+  assert.equal(r.stdout.trim(), '');
+});
+
+test('no git repo at cwd is silent, whatever the transcript claims', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const notARepo = mkdtempSync(join(tmpdir(), 'orch-persist-norepo-'));
+  const transcript_path = writeTranscript(home, 'I have not committed these changes to git.');
+  writeSession(home, 'sess-6', {});
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-6', cwd: notARepo, transcript_path }, home);
   assert.equal(r.stdout.trim(), '');
 });
