@@ -110,8 +110,30 @@ export function nativeAgent(dispatches, files, agentId) {
   return null;
 }
 
-// Which dispatch records still count as running. Pure except that it reads the
-// transcript of a helper that otherwise looks alive, to see whether its turns ran out.
+// Which dispatch records still count as running. A dispatch stops counting
+// the moment any one of four pairings, tried in this order, says it has
+// returned:
+//   1. `returnedAt`, set directly on the row by context-check.mjs's
+//      PostToolUse(Agent/Task) handler, from that same tool call's own
+//      `tool_response.status === 'completed'` — the fastest and most direct
+//      signal, since it needs no SubagentStop at all.
+//   2. `agentId`, set by that same handler from `tool_response.agentId`,
+//      found in the set of agent ids SubagentStop later recorded returned.
+//   3. the transcript-file map (`toolUseId` -> helper transcript -> its own
+//      agent id), found in that same returned set — the original pairing,
+//      still needed for a return that has no PostToolUse fields.
+//   4. a return recorded with no agent id at all, matched in order by role
+//      and task — the last-resort fallback.
+// The SubagentStop hook's own input carries no dispatch id: the documented
+// fields are agent_id, agent_type, agent_transcript_path and
+// last_assistant_message, and a live run recorded `toolUseId: null` on every
+// return. So a return record's own `agentId` (ledger.mjs falls back to
+// `input.tool_use_id` when `agent_id` is absent) stays null on that fallback
+// path on the current CLI; pairings 1 and 2 above exist precisely because
+// SubagentStop cannot be relied on to arrive with anything to match against.
+//
+// Pure except that it reads the transcript of a helper that otherwise looks
+// alive, to see whether its turns ran out.
 export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin, capOf = roleMaxTurns, turnsOf = transcriptTurns } = {}) {
   const back = new Set((returned || []).map(r => r && r.agentId).filter(Boolean));
   const loose = (returned || []).filter(r => r && !r.agentId).map(r => ({ ...r, used: false }));
@@ -120,6 +142,8 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
     if (!d || !d.at) continue;
     const age = now - Date.parse(d.at);
     if (!Number.isFinite(age)) continue;
+    if (d.returnedAt) continue;
+    if (d.agentId && back.has(d.agentId)) continue;
     const f = d.toolUseId ? files.get(d.toolUseId) : null;
     if (f && back.has(f.agentId)) continue;
     // A return with no agent id, matched in order by role and task.
