@@ -213,6 +213,8 @@ install. You should not need to type them.
 
 `guard-agent.mjs` only refuses `general-purpose`/`claude` once all eight role agents are installed; on a partial install that guard is silently off, so `router.mjs` says so once on the first card of a session, naming how many of the eight are present.
 
+Every hook that reads a brief's task id uses one rule (`lib/task-id.mjs`): the token after `TASK:` counts as an id only when it contains a digit. A brief written as prose ("TASK: build the login page") has no id, so its return is filed with none rather than under the word "build".
+
 The router, the guard and the ledger are global, registered once from the
 plugin's own `hooks/hooks.json` so they run whether or not the skill is
 currently in play — **for a plugin install.** `SKILL.md`'s frontmatter carries
