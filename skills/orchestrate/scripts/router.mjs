@@ -39,7 +39,7 @@ import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR, limits
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
-import { CARD, CARD_CAP, cardBody, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
+import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
   stillRunningNative, unreturned, unreturnedNote, STALE_SEEN_PATH, staleNote, compactionFact,
@@ -55,7 +55,7 @@ import {
   handoffLine, continueIntent, CONTINUE_WORD,
 } from './lib/resume.mjs';
 
-export { CARD, CARD_CAP, cardBody, compactNote };
+export { CARD, CARD_CAP, cardBody, shortCard, compactNote };
 export {
   stateLine, statusReply, actionableLine, contextBand, contextPhrase, quotaPhrase, quotaBand,
   READY_SHOWN, readyPhrase, ungradedPhrase, budgetPhrase, progressPhrase, edgesPhrase, runPhrase,
@@ -136,6 +136,22 @@ function gatherContext(input, state) {
 
 function transcriptSize(p) {
   try { return p ? statSync(p).size : 0; } catch { return 0; }
+}
+
+// A build word (or "and then", which chains a second step onto the first)
+// means the prompt is shaping work, not just naming a fix — the full card
+// earns its cost there even on a short sentence.
+const BUILD_WORDS = /\b(build|make|create|add|implement|design|plan|feature|app|system|project|refactor|migrate|ship|deploy|release|integrate|wire|set ?up)\b|\band then\b/i;
+
+// "Small": one sentence (no sentence-ending punctuation before the very end),
+// under about 15 words, and none of BUILD_WORDS. Called only once a prompt is
+// already known to be substantive.
+function isSmallPrompt(trimmed) {
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  if (words.length >= 15) return false;
+  const withoutEnding = trimmed.replace(/[.!?]+\s*$/, '');
+  if (/[.!?]/.test(withoutEnding)) return false;
+  return !BUILD_WORDS.test(trimmed);
 }
 
 function newState(input) {
@@ -269,6 +285,13 @@ function handlePrompt(input) {
   if (substantive && !state.goal) state.goal = trimmed.replace(/\s+/g, ' ').trim().slice(0, 300);
 
   const ctx = gatherContext(input, state);
+  // A substantive prompt that is still just a single short sentence with no
+  // build word in it ("fix the typo in the README") is not worth five
+  // paragraphs of behaviour rules on its first turn: the short card covers it,
+  // and the full card still arrives on the first request big enough to need it.
+  // Not when an open run is already bound: picking up run work is never a
+  // small, one-off ask, whatever the sentence looks like.
+  const small = substantive && !ctx.run && isSmallPrompt(trimmed);
   const out = [];
   // Plugin settings cannot carry env vars, and this plugin never writes to
   // them without being asked. Offered once, on the first substantive prompt
@@ -282,15 +305,11 @@ function handlePrompt(input) {
   const mode = modeNote(state, input);
   if (mode) out.push(mode);
 
-  const freshSession = !state.cardSent;
-  if (!state.cardSent && substantive) {
-    const opening = actionableLine(ctx);
-    out.push(opening ? `[orchestrate] ${opening}` : '[orchestrate]');
-    out.push(cardBody());
-    // A partial install turns off the guard against uncapped helpers
-    // (guard-agent.mjs only refuses general-purpose/claude once every role
-    // agent is present) with nothing else saying so. Never on a helper's own
-    // first prompt (`agent_id` present): only the lead can fix an install.
+  // The additions that ride along with the full card only: a partial-install
+  // notice (guard-agent.mjs only refuses general-purpose/claude once every
+  // role agent is present) and a run's resume excerpt. Never on a helper's
+  // own first prompt (`agent_id` present): only the lead can fix an install.
+  const sendFullCardExtras = () => {
     if (!input.agent_id && ctx.agentsExpected && ctx.agents < ctx.agentsExpected) {
       out.push(`Only ${ctx.agents} of the plugin's ${ctx.agentsExpected} helper roles are installed, so the guard against uncapped helpers is off; run \`claude plugin install orchestrate@orchestrate\` (or \`node scripts/install.mjs --with-router --with-hook\`) to complete it.`);
     }
@@ -298,6 +317,32 @@ function handlePrompt(input) {
       const ex = resumeExcerpt(ctx.run.runMd);
       if (ex) out.push(`[orchestrate · run ${ctx.run.runMd}]\n${ex}`);
     }
+  };
+
+  const freshSession = !state.cardSent;
+  if (!state.cardSent && substantive) {
+    const opening = actionableLine(ctx);
+    out.push(opening ? `[orchestrate] ${opening}` : '[orchestrate]');
+    if (small) {
+      // A short sentence with no build word in it: the short card covers it,
+      // and the full card still arrives on the first later request big enough
+      // to need it (state.cardSent === 'short' below).
+      out.push(shortCard());
+      state.cardSent = 'short';
+    } else {
+      out.push(cardBody());
+      sendFullCardExtras();
+      state.cardSent = true;
+    }
+    state.lastStateHash = stateHash(ctx);
+    state.lastActionable = opening;
+  } else if (state.cardSent === 'short' && substantive && !small) {
+    // The short card already ran once; this is the first request big enough
+    // to earn the full one, sent exactly like a first prompt would be.
+    const opening = actionableLine(ctx);
+    out.push(opening ? `[orchestrate] ${opening}` : '[orchestrate]');
+    out.push(cardBody());
+    sendFullCardExtras();
     state.cardSent = true;
     state.lastStateHash = stateHash(ctx);
     state.lastActionable = opening;

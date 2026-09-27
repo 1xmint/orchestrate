@@ -147,6 +147,32 @@ test('the first substantive prompt gets the card only, once, with no counters', 
   assert.equal(second, '', 'nothing changed, so there is nothing to say');
 });
 
+test('a small first prompt gets the short card, under 600 characters, with no full-card text; a later larger prompt earns the full card once', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'fix the typo in the README', { session_id: 's-small' });
+  assert.ok(first.length < 600, `short-card turn is ${first.length} characters`);
+  assert.doesNotMatch(first, /orchestrate is loaded\. The user owns/, 'the full card did not go out');
+  assert.match(first, /orchestrate is loaded/);
+
+  const second = prompt(home, repo, 'build me a small app with a login page and tests', { session_id: 's-small' });
+  assert.match(second, /orchestrate is loaded\. The user owns/, 'the full card arrives on the first larger request');
+
+  const third = prompt(home, repo, 'now do the same for the list command and test that too', { session_id: 's-small' });
+  assert.equal(third, '', 'the full card was already spent, once');
+});
+
+test('a large first prompt still gets the full card, not the short one', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it', { session_id: 's-large' });
+  assert.match(first, /orchestrate is loaded\. The user owns/);
+});
+
+test("a helper's own first prompt (agent_id present) gets neither card, short or full, for a small prompt", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const inside = prompt(home, repo, 'fix the typo in the README', { session_id: 's-small-helper', agent_id: 'a1' });
+  assert.equal(inside, '', 'a subagent call is not the lead session, so it gets no card');
+});
+
 test('`router status` replies with the full state line and sends no card', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const out = prompt(home, repo, 'router status', { session_id: 's-status' });
