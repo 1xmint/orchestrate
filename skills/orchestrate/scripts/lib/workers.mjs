@@ -111,12 +111,37 @@ export function nativeAgent(dispatches, files, agentId) {
   return null;
 }
 
-// Which dispatch records still count as running. Pure except that it reads the
-// transcript of a helper that otherwise looks alive, to see whether its turns ran out.
+// Which dispatch records still count as running. A dispatch stops counting
+// the moment any one of four pairings, tried in this order, says it has
+// returned:
+//   1. `returnedAt`, set directly on the row by context-check.mjs's
+//      PostToolUse(Agent/Task) handler, from that same tool call's own
+//      `tool_response.status === 'completed'` — the fastest and most direct
+//      signal, since it needs no SubagentStop at all.
+//   2. `agentId`, set by that same handler from `tool_response.agentId`,
+//      found in the set of agent ids SubagentStop later recorded returned.
+//   3. the dispatch id the ledger stored on the return record
+//      (`toolUseId`) — the one pairing that needs neither a transcript file
+//      nor a task id, but SubagentStop's own input never actually carries
+//      one (see below), so in practice this one never fires.
+//   4. the transcript-file map (`toolUseId` -> helper transcript -> its own
+//      agent id), found in the set of agent ids SubagentStop recorded
+//      returned — needed for a return that has no PostToolUse fields.
+// A return recorded with no agent id and no toolUseId at all is a last
+// resort, matched by role and task instead of any id.
+//
+// The SubagentStop hook's own input carries no dispatch id: the documented
+// fields are agent_id, agent_type, agent_transcript_path and
+// last_assistant_message, and a live run recorded `toolUseId: null` on every
+// return. So pairing 3's `toolUseId` (ledger.mjs falls back to
+// `input.tool_use_id` when `agent_id` is absent) stays a fallback that is
+// null on the current CLI; pairings 1 and 2 above exist precisely because
+// SubagentStop cannot be relied on to arrive with anything to match against.
+//
+// Pure except that it reads the transcript of a helper that otherwise looks
+// alive, to see whether its turns ran out.
 export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin, capOf = roleMaxTurns, turnsOf = transcriptTurns } = {}) {
   const back = new Set((returned || []).map(r => r && r.agentId).filter(Boolean));
-  // The dispatch id the ledger stored on the return: the one pairing that needs
-  // neither a transcript file nor a task id, so it is tried first.
   const backTu = new Set((returned || []).map(r => r && r.toolUseId).filter(Boolean));
   const loose = (returned || []).filter(r => r && !r.agentId && !r.toolUseId).map(r => ({ ...r, used: false }));
   const out = [];
@@ -124,6 +149,8 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
     if (!d || !d.at) continue;
     const age = now - Date.parse(d.at);
     if (!Number.isFinite(age)) continue;
+    if (d.returnedAt) continue;
+    if (d.agentId && back.has(d.agentId)) continue;
     if (d.toolUseId && backTu.has(d.toolUseId)) continue;
     const f = d.toolUseId ? files.get(d.toolUseId) : null;
     if (f && back.has(f.agentId)) continue;

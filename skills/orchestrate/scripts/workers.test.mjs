@@ -333,6 +333,25 @@ test('running helpers: one that used every turn its role allows has stopped, eve
   assert.match(concurrencyDecision('orch-implementer', { native: live, policy: loadPolicy() }) || 'free', /free/);
 });
 
+test('running helpers: a dispatch marked returnedAt frees its slot with no return record or transcript at all', () => {
+  const dispatches = [
+    { agent: 'orch-implementer', task: '1', at: ago(3), toolUseId: 'tu_a', returnedAt: new Date(NOW - 1000).toISOString() },
+    { agent: 'orch-implementer', task: '2', at: ago(3), toolUseId: 'tu_b' },
+  ];
+  const live = runningNative(dispatches, { now: NOW, staleMin: 10 });
+  assert.deepEqual(live.map(w => w.task), ['2'], 'the returnedAt row is done; the other has no signal either way but is within the just-dispatched grace');
+});
+
+test('running helpers: a dispatch whose agentId matches a return record frees its slot even with no transcript and no toolUseId on the return', () => {
+  const dispatches = [
+    { agent: 'orch-implementer', task: '1', at: ago(3), toolUseId: 'tu_a', agentId: 'agent-x' },
+    { agent: 'orch-implementer', task: '2', at: ago(3), toolUseId: 'tu_b', agentId: 'agent-y' },
+  ];
+  const returned = [{ agent: 'orch-implementer', agentId: 'agent-x', at: ago(1) }];
+  const live = runningNative(dispatches, { returned, now: NOW, staleMin: 10 });
+  assert.deepEqual(live.map(w => w.task), ['2'], 'agent-x is in the returned set; agent-y is not, so it still counts as running');
+});
+
 test('transcriptTurns counts one turn per model message, however many records it was written as', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-turns-'));
   const tr = join(dir, 'agent.jsonl');

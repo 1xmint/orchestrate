@@ -161,6 +161,38 @@ function trackWork(state, input) {
   return true;
 }
 
+// `tool_response` on a PostToolUse(Agent/Task) event, however the host sent
+// it: already an object, a JSON string, or absent. Never throws.
+function parseToolResponse(raw) {
+  if (raw && typeof raw === 'object') return raw;
+  if (typeof raw === 'string') {
+    try { const o = JSON.parse(raw); return o && typeof o === 'object' ? o : null; } catch { return null; }
+  }
+  return null;
+}
+
+// The one signal that frees a helper's slot the moment it actually returns,
+// instead of waiting on a SubagentStop that never carries the dispatch's own
+// id. The Agent/Task tool's own PostToolUse event carries `tool_use_id`,
+// which matches the `toolUseId` guard-agent.mjs stored on the dispatch row,
+// and its `tool_response` carries `agentId` and a `status` of "completed"
+// (a foreground helper already back) or "async_launched" (a background one,
+// still running). Marks the row in place; saves only when it changed.
+function markDispatchReturn(state, input) {
+  if (input.tool_name !== 'Agent' && input.tool_name !== 'Task') return false;
+  const toolUseId = input.tool_use_id ? String(input.tool_use_id) : null;
+  if (!toolUseId) return false;
+  const dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
+  const row = dispatches.find(d => d && d.toolUseId === toolUseId);
+  if (!row) return false;
+  const tr = parseToolResponse(input.tool_response);
+  if (!tr) return false;
+  let changed = false;
+  if (tr.agentId != null && row.agentId !== String(tr.agentId)) { row.agentId = String(tr.agentId); changed = true; }
+  if (tr.status === 'completed' && !row.returnedAt) { row.returnedAt = new Date().toISOString(); changed = true; }
+  return changed;
+}
+
 export function check(input) {
   if (!input || typeof input !== 'object' || !input.session_id) return '';
   const session = input.session_id;
@@ -217,7 +249,8 @@ export function check(input) {
     if (capped) out.push(capped);
     if (workCallsChanged) state.workCalls = { count: workCalls };
     const workChanged = trackWork(state, input);
-    if ((state.mode || null) !== before || capped || workCallsChanged || workChanged) { try { saveSession(state); } catch {} }
+    const returnChanged = markDispatchReturn(state, input);
+    if ((state.mode || null) !== before || capped || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
   } else if (workCallsChanged) {
     try { saveSession({ v: 1, session_id: session, started: new Date().toISOString(), workCalls: { count: workCalls } }); } catch {}
   }

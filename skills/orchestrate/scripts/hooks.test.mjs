@@ -1006,6 +1006,90 @@ test('precompact: no bound run, but a plan file touched this epoch, is a real ch
   assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '', 'a fresh plan file stands in for the checkpoint');
 });
 
+// context-check.mjs: the PostToolUse(Agent) result is the fastest signal that
+// a helper's slot should free — faster than SubagentStop, whose own input
+// carries no dispatch id to match against.
+test('context-check: a completed Agent return marks agentId and returnedAt on the matching dispatch row', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'ptu-completed', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'ptu-completed.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-implementer', task: '9-9-0001', run: repo.runId, toolUseId: 'toolu_1' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  const out = run('context-check.mjs', {
+    hook_event_name: 'PostToolUse', session_id: 'ptu-completed', cwd: repo.dir,
+    tool_name: 'Agent', tool_use_id: 'toolu_1',
+    tool_response: { status: 'completed', agentId: 'agent-x' },
+  }, home);
+
+  assert.equal(out.status, 0);
+  const row = JSON.parse(readFileSync(sessionPath, 'utf8')).dispatches[0];
+  assert.equal(row.agentId, 'agent-x');
+  assert.ok(row.returnedAt, 'a completed foreground return frees the slot at once');
+});
+
+test('context-check: an async-launched Agent result records the agent id but leaves the slot running', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'ptu-async', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'ptu-async.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-implementer', task: '9-9-0002', run: repo.runId, toolUseId: 'toolu_2' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  run('context-check.mjs', {
+    hook_event_name: 'PostToolUse', session_id: 'ptu-async', cwd: repo.dir,
+    tool_name: 'Agent', tool_use_id: 'toolu_2',
+    tool_response: { status: 'async_launched', agentId: 'agent-y' },
+  }, home);
+
+  const row = JSON.parse(readFileSync(sessionPath, 'utf8')).dispatches[0];
+  assert.equal(row.agentId, 'agent-y');
+  assert.equal(row.returnedAt, undefined, 'a background dispatch is not done yet');
+});
+
+test('context-check: tool_response given as a JSON string is parsed the same way', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'ptu-string', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'ptu-string.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-implementer', task: '9-9-0003', run: repo.runId, toolUseId: 'toolu_3' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  run('context-check.mjs', {
+    hook_event_name: 'PostToolUse', session_id: 'ptu-string', cwd: repo.dir,
+    tool_name: 'Agent', tool_use_id: 'toolu_3',
+    tool_response: JSON.stringify({ status: 'completed', agentId: 'agent-z' }),
+  }, home);
+
+  const row = JSON.parse(readFileSync(sessionPath, 'utf8')).dispatches[0];
+  assert.equal(row.agentId, 'agent-z');
+  assert.ok(row.returnedAt);
+});
+
+test('context-check: a tool_use_id with no matching dispatch row changes nothing and does not throw', () => {
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'ptu-nomatch', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'ptu-nomatch.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-implementer', task: '9-9-0004', run: repo.runId, toolUseId: 'toolu_other' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+  const before = readFileSync(sessionPath, 'utf8');
+
+  const out = run('context-check.mjs', {
+    hook_event_name: 'PostToolUse', session_id: 'ptu-nomatch', cwd: repo.dir,
+    tool_name: 'Agent', tool_use_id: 'toolu_nomatch',
+    tool_response: { status: 'completed', agentId: 'agent-w' },
+  }, home);
+
+  assert.equal(out.status, 0);
+  assert.deepEqual(JSON.parse(readFileSync(sessionPath, 'utf8')).dispatches, JSON.parse(before).dispatches);
+});
+
 test('turn check: nothing in it can ask for more research, testing or improvement', () => {
   // The check that used to live here counted the source-reading tool calls in a
   // turn and blocked a recommendation answered from fewer than two. Two failed
