@@ -33,10 +33,27 @@ export function stateLine(ctx, prefix) {
   return `${prefix} ${you} · tier ${ctx.tier} · ${agents} · codex: ${ctx.codex || codexState()} · ${runPhrase(ctx)} · ${limits}${quotaPhrase(ctx.quota)}${ctx.persist ? ' · auto-continue on' : ''}`;
 }
 
-// What `router status` prints on request. The full state line has no other
-// home now — see actionableLine for what the card carries unasked.
+// What `router status` prints on request. Opens with one plain sentence a
+// person can act on — never a bare list of counters — then the full state
+// line those counters belong to. The sentence is chosen in the order below,
+// because a limit that refuses helpers is the most urgent fact there is:
+// an actionable fact already computed in actionableLine(), else a missing
+// helper install, else whether a run is even bound, else a nudge to keep
+// going on the one that is. See actionableLine for what the card carries
+// unasked.
+export function statusOpener(ctx) {
+  const actionable = actionableLine(ctx);
+  if (actionable) return actionable;
+  if (ctx.agents < AGENT_NAMES.length) {
+    return `Only ${ctx.agents} of ${AGENT_NAMES.length} helper roles are installed; finish the install before sending helpers.`;
+  }
+  const focus = ctx.run || (ctx.candidates && ctx.candidates.length === 1 ? ctx.candidates[0] : null);
+  if (!focus) return 'Nothing is running; describe what you want built and a run starts when the work needs one.';
+  return `Run ${focus.runId} is in progress; say what to do next.`;
+}
+
 export function statusReply(ctx) {
-  return stateLine(ctx, '[orchestrate]');
+  return `${statusOpener(ctx)} · ${stateLine(ctx, '[orchestrate]')}`;
 }
 
 // The one sentence the card (and a later "changed" line) carries unasked,

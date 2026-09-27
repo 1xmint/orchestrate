@@ -203,6 +203,8 @@ test('an unsafe Bash rm -rf from a subagent is denied with a report-back reason'
   const r = run(bash('rm -rf src', { agent_id: 'helper-1', cwd: '/home/user/project' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  // Nobody can answer inside a helper, so the reason must not invite a "yes".
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
 });
 
 // ---- ordinary commands pass through with no output -------------------------
@@ -221,6 +223,7 @@ test('the same command from a subagent payload is denied with a report-back reas
   const r = run(bash('git push --force', { agent_id: 'helper-1' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
 });
 
 test('the same command from the main interactive session asks, with a plain sentence', () => {
