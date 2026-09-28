@@ -29,6 +29,12 @@ test('the card body stays inside the cap it names, and has one home in code', ()
   assert.ok(!existsSync(join(HERE, '..', '..', 'references', 'ladder.md')), 'ladder.md is gone; the card text has one home now');
 });
 
+test('the card has the user pick before a small build is split across helpers', () => {
+  // Live runs put the helper path at two to three times the lead's own cost on
+  // a small app, and the user had never been shown the pair before it was chosen.
+  assert.match(CARD, /Before splitting a small build across helpers, tell the user it has cost about two to three times doing it alone, and let them pick\./);
+});
+
 test('the card carries no counter phrase — those live behind `router status`', () => {
   assert.doesNotMatch(CARD, /orch-agents|codex:|tier \w|limits today/);
 });

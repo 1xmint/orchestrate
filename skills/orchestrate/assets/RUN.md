@@ -47,7 +47,7 @@ thing that costs the most.
 
 ## Shape
 
-tasks: <N> · at once: <M> · models: <which roles on which models> · why not smaller: <one line>
+tasks: <N> · at once: <M> · models: <which roles on which models> · why not smaller: <one line; when a small build was split across helpers, the pair the user was shown (helpers vs alone) and what they picked>
 
 ## Profile
 
