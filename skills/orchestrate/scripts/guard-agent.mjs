@@ -554,6 +554,11 @@ function recordDispatch(input, ti) {
       // below) — reviewInferred records which word tripped it.
       ...(/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || '')) ? { review: true } : {}),
       ...(reviewWord ? { review: true, reviewInferred: reviewWord } : {}),
+      // A reviewer's own packet names the task it reviews under "REVIEW OF:"
+      // (packet.md). Recorded on the reviewer's own dispatch row so
+      // turn-check.mjs can tell a review was actually sent for a tagged task
+      // without re-reading any packet text.
+      ...((/^\s*REVIEW OF:\s*(\S+)/im.exec(String(ti.prompt || '')) || [])[1] ? { reviewOf: (/^\s*REVIEW OF:\s*(\S+)/im.exec(String(ti.prompt || '')))[1] } : {}),
       ...(input.agent_id ? { parent: String(input.agent_id) } : {}),
     });
     state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;

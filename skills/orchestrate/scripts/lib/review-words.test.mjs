@@ -60,3 +60,25 @@ test('inferredReviewWord: the same word elsewhere, not negated, still matches', 
 test('inferredReviewWord: a word outside the OBJECTIVE section is not caught', () => {
   assert.equal(inferredReviewWord('TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nthis touches billing code too'), null);
 });
+
+// ---- WHERE / FILES / RULES lines never count -------------------------------
+
+test('objectiveSection: a WHERE line is stripped even inside the OBJECTIVE section', () => {
+  const prompt = 'OBJECTIVE\nRename a CSS class\nWHERE: repo x  run dir <absolute path in the main checkout>\nCONTEXT\nmore';
+  assert.equal(objectiveSection(prompt).includes('checkout'), false);
+});
+
+test('inferredReviewWord: a packet with no OBJECTIVE heading and a WHERE line naming "checkout" is not tagged', () => {
+  const prompt = 'TASK: 1\nPROGRESS: x\nBRANCH: task/1\nREPO: C:\\x (worktree copy)\nWHY: fix the lint\nWHERE: repo C:\\x  run dir <absolute path in the main checkout>\nDO:\n1. fix it\nRULES: no secrets\nDONE WHEN: tests pass';
+  assert.equal(inferredReviewWord(prompt), null);
+});
+
+test('inferredReviewWord: a FILES or RULES line naming a review word is not tagged either', () => {
+  assert.equal(inferredReviewWord('TASK: x\nWHY: tidy up\nFILES: src/payment/*.ts\nDO:\n1. rename'), null);
+  assert.equal(inferredReviewWord('TASK: x\nWHY: tidy up\nRULES: do not touch auth code\nDO:\n1. rename'), null);
+});
+
+test('inferredReviewWord: the same word in the actual objective text still matches', () => {
+  const prompt = 'TASK: 1\nWHY: add Stripe payment capture\nWHERE: repo x  run dir in the main checkout\nDO:\n1. build it';
+  assert.equal(inferredReviewWord(prompt), 'payment');
+});
