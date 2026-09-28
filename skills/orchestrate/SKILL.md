@@ -145,7 +145,9 @@ files, a build or test suite, or a read whose answer is a paragraph.
 **Assisted**: one worker for one larger step. **Coordinated**: one packet per
 plan step, three or more independent steps going to `orch-coordinator` (§5);
 a ledger and dependencies join when several tracks run at once or the work
-must survive this session ending.
+must survive this session ending. Before splitting a small build across
+helpers, tell the user it has cost about two to three times doing it alone,
+and let them pick.
 
 Never `Write` a whole file you could `Edit`. Never `Read` back a file you just
 wrote. Filter command output to what decides the next step. Move down to a
@@ -154,9 +156,7 @@ high-risk change can get an independent review without becoming a project.
 
 Concurrent code writers each get a worktree; read-only work does not.
 **Two workers at once, across Claude and Codex**, browser work one at a time;
-a live coordinator holds a third slot. Group related mechanical edits into
-one task rather than one helper per file. The guard enforces the limit
-(`profile.mjs --policy workers.maxConcurrent=N` changes it).
+a live coordinator holds a third slot.
 
 **Plan mode is the user's switch, not yours.** Recommend switching the app to
 it, with the reason, when the first inspection shows consequential ambiguity,

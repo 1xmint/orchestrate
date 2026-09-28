@@ -358,10 +358,12 @@ test('the run ledger keeps the goal above the task table', () => {
   assert.match(run, /Why it matters/);
   assert.match(run, /Next deliverable/);
   assert.match(run, /why not smaller/);
+  assert.match(run, /the pair the user was shown \(helpers vs alone\)/, 'the Shape line records the choice the user made on a small split build');
   assert.match(run, /Ceiling:/, 'the Budget block seeds a ceiling');
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
   assert.match(skill, /[Ff]ill the sections above the task table before the first dispatch/);
   assert.match(skill, /budget of record/, 'the skill tells the lead to set a budget of record');
+  assert.match(skill, /Before splitting a small build across helpers, tell the user it has cost about two to three times doing it alone, and let them pick\./);
 });
 
 test('the safety rails survive a post-compaction truncation of SKILL.md', () => {
