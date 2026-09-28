@@ -93,3 +93,57 @@ test('a prose TASK line ("TASK: build the login page") holds for review under "t
   assert.match(ctx, /REVIEW OF: this task$/);
   assert.doesNotMatch(ctx, /REVIEW OF: build\b/);
 });
+
+// ---- the solo/helper pair (round-9 audit Part C item 3, area 2) -----------
+
+test('the first orch-implementer dispatch of a session with no run ledger open carries both figures', () => {
+  const home = sandboxHome();
+  const sid = 's-pair-first';
+  const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.match(ctx, /price tag: orch-implementer on sonnet ≈ \$1\.50/);
+  assert.match(ctx, /≈ \$0\.60 done in this chat \(measured ratio over five live rounds\)/);
+});
+
+test('a second orch-implementer dispatch in the same session gets today\'s tag only', () => {
+  const home = sandboxHome();
+  const sid = 's-pair-second';
+  dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
+  const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: y\nOBJECTIVE\nRename another CSS class\nCONTEXT\nmore' });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.match(ctx, /price tag: orch-implementer on sonnet ≈ \$1\.50/);
+  assert.doesNotMatch(ctx, /done in this chat/);
+});
+
+test('a dispatch with no REVIEW-triggering context but a role other than orch-implementer gets today\'s tag only', () => {
+  const home = sandboxHome();
+  const sid = 's-pair-role';
+  const { json } = dispatch(home, sid, { subagent_type: 'orch-researcher', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRead a file\nCONTEXT\nmore' });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.match(ctx, /price tag: orch-researcher on sonnet/);
+  assert.doesNotMatch(ctx, /done in this chat/);
+});
+
+test('the first orch-implementer dispatch of a session bound to an open run ledger gets today\'s tag only', () => {
+  const home = sandboxHome();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-repo-'));
+  mkdirSync(join(dir, '.git'), { recursive: true });
+  const runDir = join(dir, '.orchestrator', 'runs', '20260910-open');
+  mkdirSync(runDir, { recursive: true });
+  const runMd = join(runDir, 'RUN.md');
+  writeFileSync(runMd, '# Run\n\n## Budget\n\nCeiling: $50 at list price · sessions: ~1 · set 2026-09-10\n\n## Tasks\n\n| id | phase | role · model | task | acceptance | attempts | result |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 📋 planned | i · sonnet | do it | ev | 0 | — |\n');
+  const sessDir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessDir, { recursive: true });
+  const sid = 'ledger1';
+  writeFileSync(join(sessDir, `${sid}.json`), JSON.stringify({ v: 1, session_id: sid, run: { root: dir, runId: '20260910-open', runMd, boundAt: new Date().toISOString(), explicit: true } }));
+
+  const r = spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: sid, cwd: dir, tool_use_id: 'u-ledger', tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' } }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' },
+  });
+  const json = r.stdout.trim() ? JSON.parse(r.stdout) : null;
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.match(ctx, /price tag: orch-implementer on sonnet/);
+  assert.doesNotMatch(ctx, /done in this chat/);
+});

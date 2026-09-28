@@ -1,7 +1,7 @@
 // lib/spend-gate.mjs — the price tag and the budget-ceiling gate, split out of
 // guard-agent.mjs. No network, no child processes.
 
-import { priceTag, estimateDollars } from './prices.mjs';
+import { priceTag, priceTagPair, estimateDollars } from './prices.mjs';
 import { readJson, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer } from './tier.mjs';
 import { readCosts } from '../ledger.mjs';
 
@@ -13,12 +13,18 @@ import { readCosts } from '../ledger.mjs';
 // documented and would work, and it would also auto-approve every dispatch and
 // take away the user's permission prompt — a silent change to a default nobody
 // asked to change.
-export function tagFor(ti) {
+// `pair`: true only for the first orch-implementer dispatch of a session with
+// no run ledger open (guard-agent.mjs decides that; this just prints the
+// extra figure when told to).
+export function tagFor(ti, { pair = false } = {}) {
   try {
     const role = String(ti.subagent_type || 'claude');
     const model = String(ti.model || '');
     if (!model) return '';
-    return priceTag(role, model, readCosts(), detectTier().tier, readJson(PROFILE_PATH));
+    const rows = readCosts();
+    const t = detectTier().tier;
+    const profile = readJson(PROFILE_PATH);
+    return pair ? priceTagPair(role, model, rows, t, profile) : priceTag(role, model, rows, t, profile);
   } catch { return ''; }
 }
 

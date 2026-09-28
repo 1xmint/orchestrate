@@ -58,3 +58,9 @@ test('runFor falls back to nothing when neither a RUN: line nor a session bindin
 test('tagFor is empty when the dispatch names no model, and never throws', () => {
   assert.equal(tagFor({ subagent_type: 'orch-implementer', prompt: '' }), '');
 });
+
+test('tagFor prints the plain tag by default, and the solo/helper pair only when told to', () => {
+  const ti = { subagent_type: 'orch-implementer', model: 'sonnet', prompt: '' };
+  assert.doesNotMatch(tagFor(ti), /done in this chat/);
+  assert.match(tagFor(ti, { pair: true }), /done in this chat/);
+});

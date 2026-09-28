@@ -117,6 +117,18 @@ function measuredRows(role, fam, rows) {
   return (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === fam && r.dollars != null && Number.isFinite(Number(r.dollars)) && Number(r.dollars) > 0);
 }
 
+// The dollar figure a price tag would print, plus whether it was measured
+// here or reasoned — split out of priceTag so priceTagPair can reuse the same
+// number instead of re-parsing the sentence.
+function figureFor(role, model, rows) {
+  const f = family(model);
+  if (!f) return null;
+  const mine = measuredRows(role, f, rows);
+  if (mine.length) return { amount: mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length, measured: true, n: mine.length };
+  const guess = reasonedPrice(role, model);
+  return guess == null ? null : { amount: guess, measured: false };
+}
+
 // A price tag: measured from this machine's own past runs when there are any,
 // and labelled as reasoned when there are not. `rows` is the parsed contents of
 // costs.jsonl. `tier` and `profile` are accepted so callers need not know
@@ -124,12 +136,32 @@ function measuredRows(role, fam, rows) {
 export function priceTag(role, model, rows, tier, profile) {
   const f = family(model);
   if (!f) return `price tag: ${role} on an unnamed model — not priced, because nothing here knows which model it will run on`;
-  const mine = measuredRows(role, f, rows);
-  if (mine.length) {
-    const avg = mine.reduce((a, r) => a + Number(r.dollars), 0) / mine.length;
-    return `price tag: ${role} on ${f} ≈ $${avg.toFixed(2)} at list price, not subscription usage (measured here, n=${mine.length})`;
-  }
-  const guess = reasonedPrice(role, model);
-  if (guess == null) return `price tag: ${role} on ${f} — no figure yet, measured or reasoned`;
-  return `price tag: ${role} on ${f} ≈ $${guess.toFixed(2)} at list price, not subscription usage (reasoned ${REASONED_AS_OF}, not yet measured here)`;
+  const fig = figureFor(role, model, rows);
+  if (!fig) return `price tag: ${role} on ${f} — no figure yet, measured or reasoned`;
+  return fig.measured
+    ? `price tag: ${role} on ${f} ≈ $${fig.amount.toFixed(2)} at list price, not subscription usage (measured here, n=${fig.n})`
+    : `price tag: ${role} on ${f} ≈ $${fig.amount.toFixed(2)} at list price, not subscription usage (reasoned ${REASONED_AS_OF}, not yet measured here)`;
+}
+
+// 2.6: the low end of "2.6-2.7x", what five live rounds measured the helper
+// path costing against a solo build of the same small app
+// (docs/audits/2026-09-28-scoresheet-r9.md finding 5, citing
+// docs/audits/2026-09-26-live-runs-r4.md through
+// docs/audits/2026-09-28-live-runs-r9.md; the solo baseline is round 7's
+// $0.69, docs/audits/2026-09-27-live-runs-r7.md). The low end is used so the
+// printed solo figure is never smaller than what was actually measured.
+export const SOLO_RATIO = 2.6;
+
+// The price tag with a second figure: the same build done solo in this chat,
+// = the helper figure / SOLO_RATIO, rounded to the nearest 10 cents. Facts
+// only, no instruction — the card (lib/card.mjs) already tells the lead what
+// to do with the pair. Known limit: this fires on the dispatch itself, which
+// is after the lead already chose to split; the card's sentence is what fires
+// before that choice.
+export function priceTagPair(role, model, rows, tier, profile) {
+  const tag = priceTag(role, model, rows, tier, profile);
+  const fig = figureFor(role, model, rows);
+  if (!fig) return tag;
+  const solo = Math.round((fig.amount / SOLO_RATIO) * 10) / 10;
+  return `${tag}; ≈ $${solo.toFixed(2)} done in this chat (measured ratio over five live rounds)`;
 }

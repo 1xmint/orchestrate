@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dollars, family, priceTag, reasonedPrice, estimateDollars, PRICES, REASONED, PRICES_AS_OF, checked, costLabel, cacheReadShare } from './prices.mjs';
+import { dollars, family, priceTag, priceTagPair, SOLO_RATIO, reasonedPrice, estimateDollars, PRICES, REASONED, PRICES_AS_OF, checked, costLabel, cacheReadShare } from './prices.mjs';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'prices.mjs'), 'utf8');
 
@@ -121,4 +121,29 @@ test("a row priced at $0 is not a measurement: it never lowers the mean or switc
   const mixed = [...zeros, { agent: "m1", role: "orch-implementer", model: "sonnet", dollars: 1.2 }, { agent: "m2", role: "orch-implementer", model: "sonnet", dollars: 0.8 }];
   assert.equal(estimateDollars("orch-implementer", "sonnet", mixed), 1.0, "the mean is over the rows that measured something");
   assert.match(priceTag("orch-implementer", "sonnet", mixed, "pro", null), /≈ \$1\.00 .*\(measured here, n=2\)/);
+});
+
+// ---- priceTagPair: the solo/helper pair (round-9 audit Part C item 3) -----
+
+test('SOLO_RATIO is pinned at 2.6, the low end of five live rounds\' 2.6-2.7x', () => {
+  assert.equal(SOLO_RATIO, 2.6);
+});
+
+test('priceTagPair appends the solo figure — the helper figure divided by SOLO_RATIO, rounded to the nearest dime', () => {
+  // reasoned orch-implementer/sonnet is $1.50; 1.50 / 2.6 = 0.5769... -> $0.60.
+  const tag = priceTagPair('orch-implementer', 'sonnet', [], 'pro', null);
+  assert.match(tag, /price tag: orch-implementer on sonnet ≈ \$1\.50 at list price, not subscription usage \(reasoned/);
+  assert.match(tag, /≈ \$0\.60 done in this chat \(measured ratio over five live rounds\)/);
+});
+
+test('priceTagPair uses the measured figure, not the reasoned one, when there is a measurement', () => {
+  const rows = [{ agent: 'a1', role: 'orch-implementer', model: 'sonnet', dollars: 2.6 }];
+  const tag = priceTagPair('orch-implementer', 'sonnet', rows, 'pro', null);
+  assert.match(tag, /≈ \$2\.60 at list price.*measured here, n=1/);
+  assert.match(tag, /≈ \$1\.00 done in this chat/);
+});
+
+test('priceTagPair falls back to the plain tag when there is no figure to pair (no model, or nothing priced)', () => {
+  assert.equal(priceTagPair('orch-implementer', '', [], 'pro', null), priceTag('orch-implementer', '', [], 'pro', null));
+  assert.doesNotMatch(priceTagPair('mystery-role', 'opus', [], 'pro', null), /done in this chat/);
 });
