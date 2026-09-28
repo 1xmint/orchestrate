@@ -39,15 +39,14 @@ costs and is good at), `routing.md` (which model, by plan, who reviews),
 fan-out, fork, teams, `/goal`, waiting), `hosts.md` (what the Agent tool can
 and cannot do).
 
-Five of the nine hooks this plugin ships are mechanical rails you never see:
+Four of the eight hooks this plugin ships are mechanical rails you never see:
 `guard-agent.mjs` refuses a credential-shaped packet and records every
 dispatch against its run; `ledger.mjs` saves the return whole and indexes it;
-`turn-check.mjs` and `precompact-check.mjs` ask for an honest Pickup line
-before a turn ends and before compaction erases it, only for a bound
-coordinated run; `postcompact-check.mjs` restores it right after. The other
-four: `router.mjs` writes the first-prompt card and answers typed commands;
+`turn-check.mjs` asks for an honest Pickup line before a turn ends, only for a
+bound coordinated run; `postcompact-check.mjs` keeps a helper's summary. The
+other four: `router.mjs` writes the first-prompt card and answers typed commands;
 `guard-bash.mjs` asks before a destructive shell command runs;
-`context-check.mjs` samples context at tool boundaries between prompts;
+`context-check.mjs` samples context between prompts and asks for a checkpoint;
 `persist-check.mjs` keeps a turn going on request while real work continues
 (stops in `lanes.md`). Wait on CI or an agent with `Monitor`, never by ending
 the turn. Nothing mechanical decides what a task deserves.

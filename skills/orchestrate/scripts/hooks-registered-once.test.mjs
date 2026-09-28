@@ -82,11 +82,11 @@ test('no event lists the same script twice within itself', () => {
   }
 });
 
-test('the Stop and PreCompact hooks that used to live only in SKILL.md frontmatter are registered in hooks.json', () => {
+test('the Stop hook that used to live only in SKILL.md frontmatter is registered in hooks.json, and nothing runs on PreCompact', () => {
   const json = JSON.parse(readFileSync(HOOKS_JSON, 'utf8'));
   const regs = registrationsFromHooksJson(json);
   assert.ok(regs.some(r => r.event === 'Stop' && r.script === 'turn-check.mjs'), 'turn-check.mjs must run on Stop');
-  assert.ok(regs.some(r => r.event === 'PreCompact' && r.script === 'precompact-check.mjs'), 'precompact-check.mjs must run on PreCompact');
+  assert.ok(!regs.some(r => r.event === 'PreCompact'), 'a PreCompact block reaches nobody under autocompact; the context notice asks instead');
 });
 
 test('guard-bash.mjs is registered on PreToolUse for both Bash and PowerShell — a Windows host routes shell commands through the PowerShell tool instead of Bash, and the guard payload/logic covers both', () => {
@@ -104,7 +104,6 @@ test('every known hook script this plugin ships is registered somewhere', () => 
   const expected = [
     'router.mjs', 'guard-agent.mjs', 'guard-bash.mjs', 'context-check.mjs',
     'persist-check.mjs', 'turn-check.mjs', 'ledger.mjs', 'postcompact-check.mjs',
-    'precompact-check.mjs',
   ];
   for (const script of expected) {
     assert.ok(registered.has(script), `${script} is not registered anywhere in hooks.json`);

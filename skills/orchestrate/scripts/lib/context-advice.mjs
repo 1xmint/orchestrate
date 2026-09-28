@@ -137,7 +137,16 @@ export function adviseContext(reading, policy = loadPolicy()) {
   return { action: 'none', key: key('none'), why: `${k(reading.tokens)} is below ${k(checkpointAt)}` };
 }
 
-const CHECKPOINT_WHAT = 'the goal, decisions made, files changed, verification results, outstanding work, and the next action';
+// A path under the home folder as `~/...` with forward slashes, so a notice
+// never carries the account name; any other path comes back as it is.
+export function shortPath(path, home = homedir()) {
+  const norm = p => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
+  const p = norm(path);
+  const h = home ? norm(home) : '';
+  return h && p.toLowerCase().startsWith(`${h.toLowerCase()}/`) ? `~${p.slice(h.length)}` : p;
+}
+
+const CHECKPOINT_WHAT ='the goal, decisions made, files changed, verification results, outstanding work, and the next action';
 
 // Which switch to recommend when the conversation is full: compact by default,
 // a fresh conversation only when compacting has stopped paying.
@@ -179,10 +188,10 @@ function nextEvent(reading, policy) {
 }
 
 // One line of facts about the conversation's size: this is the single shape
-// behind the checkpoint notice, the compact notice, and the periodic tick —
-// they differ only in when they fire, never in what they say. No instruction
-// words: what a reader does with the numbers is theirs to decide.
-function factLine(reading, policy, ctx = {}) {
+// behind the checkpoint notice, the compact notice, and the periodic tick.
+// No instruction words here: the one ask, for a missing checkpoint, is added
+// by `contextNotice` alone, so it is said once per epoch and never on a tick.
+function factLine(reading, policy, ctx = {}, cp = undefined) {
   const { session = null, editCounter = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null, now = Date.now() } = ctx;
   const parts = [];
   const window = reportedWindow(reading, policy);
@@ -191,7 +200,7 @@ function factLine(reading, policy, ctx = {}) {
   if (n) parts.push(`compacted ${n}×`);
   const next = nextEvent(reading, policy);
   if (next) parts.push(`next: ${next.label} ${k1(next.at)}`);
-  const cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
+  if (cp === undefined) cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
   parts.push(cp ? `newest checkpoint: ${cp.path}, ${ageStr(cp.mtimeMs, now)}` : 'newest checkpoint: none');
   if (Number.isFinite(editCounter)) parts.push(`${editCounter} tool call${editCounter === 1 ? '' : 's'} since your last edit`);
   return `[orchestrate · context] ${parts.join(' · ')}`;
@@ -207,8 +216,16 @@ export function contextNotice(reading, advice, ctx = {}) {
   const policy = ctx.policy || loadPolicy();
   switch (advice.action) {
     case 'checkpoint':
-    case 'compact':
-      return factLine(reading, policy, ctx);
+    case 'compact': {
+      // With no checkpoint for this epoch, this is the one place the lead is
+      // asked for one: a PreCompact block reaches nobody under autocompact.
+      const { session = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null } = ctx;
+      const cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
+      const line = factLine(reading, policy, ctx, cp);
+      if (cp) return line;
+      if (advice.action === 'compact') return `${line} · compaction will summarise without a checkpoint`;
+      return `${line} · write the checkpoint now (goal, decisions, files changed, verification, next action) to ${shortPath(checkpointPath(session, reading, dir), ctx.home)}`;
+    }
     case 'investigate': {
       const c = reading.compaction || {};
       const was = c.preTokens != null && c.postTokens != null ? ` (compaction took it from ${k1(c.preTokens)} to ${k1(c.postTokens)})` : '';

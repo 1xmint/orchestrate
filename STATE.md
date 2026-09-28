@@ -75,6 +75,15 @@ The context reader now lives only in its three modules (`lib/context-scan.mjs`,
 file; the `lib/context.mjs` re-export file is gone and every caller imports
 the module that owns the name.
 
+The PreCompact block is gone (`precompact-check.mjs` and its test deleted,
+unregistered from `hooks/hooks.json` and the script install, which now also
+removes an older install's entry). Round 8 showed its reason reached nobody
+under automatic compaction, and under a manual `/compact` it showed the user
+an order. The context notice asks instead, where the lead reads it: at the
+checkpoint line with no checkpoint for this compaction epoch, it says to
+write one now and names the path, once per epoch; at the compact line with
+none, it says compaction will summarise without one.
+
 ## v0.16.1 — a review that can stop the merge, 2026-09-21
 
 Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` (replaced the

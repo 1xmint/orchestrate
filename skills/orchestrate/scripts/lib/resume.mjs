@@ -99,7 +99,7 @@ export function continueIntent(text) {
 }
 
 // The newest checkpoint file this previous session wrote, if any — same
-// layout precompact-check.mjs and lib/context-advice.mjs read from.
+// layout lib/context-advice.mjs reads from.
 export function latestCheckpointFor(sessionId) {
   try {
     const dir = join(CONTEXT_DIR, sanitizeId(sessionId));

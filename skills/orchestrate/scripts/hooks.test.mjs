@@ -12,7 +12,6 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseReturn, sumUsage, describeDispatch, returnFilename, costLine, appendCost, readCosts, latestPerAgent, COSTS_MAX } from './ledger.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
-import { decide as precompactDecide, unboundDecision } from './precompact-check.mjs';
 import { decide, eventId, markSeen } from './guard-agent.mjs';
 import { trimLog, runSpend } from './lib/tier.mjs';
 
@@ -24,14 +23,6 @@ function sandbox() {
   mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
   return home;
 }
-
-test('precompact unbound blocks once per epoch then proceeds', () => {
-  const reading = { compaction: { uuid: 'e1' } };
-  const one = unboundDecision({ session: 's', reading, prev: {}, checkpoint: false });
-  assert.equal(one.block, true);
-  assert.match(one.reason, /checkpoint/);
-  assert.equal(unboundDecision({ session: 's', reading, prev: { blockedFor: 'e1' }, checkpoint: false }).block, false);
-});
 
 function run(name, payload, home, extraEnv = {}) {
   const r = spawnSync(process.execPath, [script(name)], {
@@ -950,102 +941,6 @@ test('turn check: no dispatch, a written Pickup, and a re-entrant call all stay 
   assert.equal(run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's11', cwd: written.dir }, home).stdout.trim(), '');
 
   assert.equal(run('turn-check.mjs', { hook_event_name: 'Stop', session_id: 's11', cwd: written.dir, stop_hook_active: true }, home).stdout.trim(), '');
-});
-
-// ---------------------------------------------------------------- precompact --
-// WS3: the one unguarded hole in the relay design — a long lead auto-compacts
-// mid-run with a stale Pickup line, and the compacted context has no way back
-// to where the run was. Same question as the Stop check, reused rather than
-// re-implemented, fired one lifecycle point earlier.
-
-test('precompact: the pure decision — no run, no dispatch, and a stale Pickup', () => {
-  assert.equal(precompactDecide({ run: null, lastDispatchAt: null, prev: {} }), null);
-  assert.equal(precompactDecide({ run: { open: true, runMd: '/x/RUN.md' }, lastDispatchAt: null, prev: {} }), null, 'direct work has no ledger to keep current');
-});
-
-test('precompact: a bound run with a stale Pickup blocks compaction once, and names the file', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  bind(home, 'spc1', repo);
-  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
-  const state = JSON.parse(readFileSync(join(sessions, 'spc1.json'), 'utf8'));
-  state.lastDispatchAt = new Date().toISOString();
-  writeFileSync(join(sessions, 'spc1.json'), JSON.stringify(state));
-
-  const first = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1', cwd: repo.dir, trigger: 'auto' }, home);
-  assert.equal(first.json.decision, 'block');
-  assert.deepEqual(Object.keys(first.json).sort(), ['decision', 'reason'], 'PreCompact only documents decision + reason');
-  assert.match(first.json.reason, /Pickup/);
-  const relRunMd = '.orchestrator/runs/20260909-fixture/RUN.md';
-  assert.ok(first.json.reason.includes(relRunMd), 'it names the file to edit, relative to the project');
-  assert.doesNotMatch(first.json.reason, /[A-Za-z]:[\\/]|\bUsers\b/, 'no absolute machine path');
-
-  // Never twice for the same unwritten text: PreCompact commonly fires because
-  // context is already low, and refusing forever risks the overflow this hook
-  // exists to prevent.
-  const second = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1', cwd: repo.dir, trigger: 'auto' }, home);
-  assert.equal(second.stdout.trim(), '', 'it blocks once, not in a loop, and lets compaction proceed');
-});
-
-test('precompact: agent_id present (a subagent compacting its own transcript) is never blocked, even with a stale Pickup', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  bind(home, 'spc1b', repo);
-  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
-  const state = JSON.parse(readFileSync(join(sessions, 'spc1b.json'), 'utf8'));
-  state.lastDispatchAt = new Date().toISOString();
-  writeFileSync(join(sessions, 'spc1b.json'), JSON.stringify(state));
-  const out = run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc1b', cwd: repo.dir, trigger: 'auto', agent_id: 'agent-1' }, home);
-  assert.equal(out.stdout.trim(), '', "a subagent is not the lead's Pickup line to demand");
-});
-
-test('precompact: a written Pickup, or no dispatch yet, never blocks', () => {
-  const home = sandbox();
-  const written = fixtureRepo({ pickup: 'continue from the reviewer FAIL' });
-  bind(home, 'spc2', written);
-  const sessions = join(home, '.claude', 'orchestrate', 'sessions');
-  const state = JSON.parse(readFileSync(join(sessions, 'spc2.json'), 'utf8'));
-  state.lastDispatchAt = new Date().toISOString();
-  writeFileSync(join(sessions, 'spc2.json'), JSON.stringify(state));
-  assert.equal(run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc2', cwd: written.dir }, home).stdout.trim(), '');
-
-  const quiet = fixtureRepo();
-  bind(home, 'spc3', quiet); // bound, but nothing dispatched yet
-  assert.equal(run('precompact-check.mjs', { hook_event_name: 'PreCompact', session_id: 'spc3', cwd: quiet.dir }, home).stdout.trim(), '');
-});
-
-// v0.15.0: an unbound session used to compact with nothing saved, and the 472k
-// session in STATE.md lost its thread that way. It now gets one block per
-// compaction epoch naming where to write the checkpoint, then compaction proceeds.
-test('precompact: a session with no bound run is asked for a checkpoint once, then proceeds', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  const input = { hook_event_name: 'PreCompact', session_id: 'spc4', cwd: repo.dir };
-  const first = run('precompact-check.mjs', input, home);
-  const block = JSON.parse(first.stdout);
-  assert.equal(block.decision, 'block');
-  assert.deepEqual(Object.keys(block).sort(), ['decision', 'reason']);
-  // The checkpoint lives under this plugin's own home-directory folder, not
-  // inside the fixture repo (`cwd`) — named relative to home, with no drive
-  // letter or account name.
-  assert.match(block.reason, /~\/\.claude\/orchestrate\/context\/.+checkpoint-.+\.md/);
-  assert.doesNotMatch(block.reason, /[A-Za-z]:[\\/]|\bUsers\b/, 'no absolute machine path');
-  assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '');
-});
-
-// 9-14-0002: the same honesty fix as persist-check.mjs's Stop block — a plan
-// file the host wrote this epoch, in Plan mode, is a real checkpoint too.
-test('precompact: no bound run, but a plan file touched this epoch, is a real checkpoint', () => {
-  const home = sandbox();
-  const repo = fixtureRepo();
-  const plansDir = join(home, '.claude', 'plans');
-  mkdirSync(plansDir, { recursive: true });
-  const transcript = join(repo.dir, 't.jsonl');
-  const started = new Date(Date.now() - 3600000).toISOString();
-  writeFileSync(transcript, JSON.stringify({ type: 'user', timestamp: started, message: { role: 'user', content: 'go' } }) + '\n');
-  writeFileSync(join(plansDir, 'fresh.md'), '# plan\n');
-  const input = { hook_event_name: 'PreCompact', session_id: 'spc5', cwd: repo.dir, transcript_path: transcript, permission_mode: 'plan' };
-  assert.equal(run('precompact-check.mjs', input, home).stdout.trim(), '', 'a fresh plan file stands in for the checkpoint');
 });
 
 // context-check.mjs: the PostToolUse(Agent) result is the fastest signal that

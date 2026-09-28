@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// postcompact-check.mjs — a PostCompact hook: the read-side companion to
-// precompact-check.mjs's write-side warning. A helper compacts on its own
+// postcompact-check.mjs — a PostCompact hook. A helper compacts on its own
 // when its window fills (claude-code.md, "Helper compaction"), and nothing outside
 // it can trigger that compaction or shape its result — but the host still
 // hands the compacted summary to a hook that fires inside the helper
@@ -17,11 +16,9 @@
 // lands, and turns them into one fact the lead sees.
 //
 // Lead-side PostCompact (no `agent_id`) does nothing: the lead is not this
-// hook's job, and precompact-check.mjs's unbound-session checkpoint already
-// covers that compaction.
+// hook's job; context-check.mjs asks the lead for a checkpoint before it.
 //
-// It never fails the compaction on its own errors; exit 0 always, same rule
-// as precompact-check.mjs.
+// It never fails the compaction on its own errors; exit 0 always.
 
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
