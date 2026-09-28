@@ -30,7 +30,7 @@ const win = w => w && Number.isFinite(Number(w.used_percentage))
 // names the provider, the account and the session it came from: plan usage is
 // per provider account, and a snapshot that cannot say whose it is must not
 // stop anyone's work. Context size is per session and is kept apart from it
-// (lib/context.mjs), never in this file.
+// (lib/context-scan.mjs), never in this file.
 export const QUOTA_V = 2;
 
 export function snapshotFrom(statusJson, now = Date.now(), account = null) {

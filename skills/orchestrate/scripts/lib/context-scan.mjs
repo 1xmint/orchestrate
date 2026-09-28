@@ -1,8 +1,27 @@
 // lib/context-scan.mjs — turns transcript bytes into one measurement.
 //
-// This is the reading half of lib/context.mjs (see that file's own header for
-// the states a reading can be in and why transcript bytes and the last usage
-// record in the tail are not trusted alone). Everything here is either a pure
+// The context reader is three modules, and every hook, the router and the
+// on-demand report read context through them, so they cannot disagree:
+//   lib/context-scan.mjs    transcript scanning: text in, a reading out (this file)
+//   lib/context-advice.mjs  what to do about a reading, and how to say it
+//   lib/context-store.mjs   the on-disk record per session/agent, and paths
+//
+// Two earlier signals are gone. Transcript bytes: compaction keeps the file,
+// so a size warning kept firing after the context had shrunk to a summary.
+// The last usage record anywhere in the tail: a scan that walked past a
+// compaction boundary reported a 311k reading after a 17k summary.
+//
+// What counts as a measurement: the input side of the most recent real model
+// response (uncached input plus cache reads plus cache writes), which is what
+// the next step re-reads. Cumulative session totals are never context.
+//
+// States:
+//   measured     a response after the last compaction carried usage
+//   provisional  a compaction happened and no response has reported usage since;
+//                the boundary's own post-compaction figure is shown, not trusted
+//   unknown      nothing current: no usage, null usage, or a stale reading
+//
+// No network, no child processes, never throws. Everything here is either a pure
 // function over transcript text, or a read of the transcript file itself and
 // of the small per-session "what did the status line last report" file. It
 // does not touch the on-disk store (lib/context-store.mjs) or advice

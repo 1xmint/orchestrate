@@ -1,6 +1,6 @@
 // lib/context-advice.mjs — what to do about a reading, and how to say it.
 //
-// This is the advice half of lib/context.mjs: pure functions over a reading
+// This is the advice half of the context reader: pure functions over a reading
 // (from lib/context-scan.mjs) and the policy, plus the small amount of disk
 // reading needed to say whether a checkpoint already exists. It does not
 // write anything, and it does not know about the per-session store; that is

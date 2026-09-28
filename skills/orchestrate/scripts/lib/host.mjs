@@ -9,7 +9,8 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { findSessionTranscript, readContext } from './context.mjs';
+import { readContext } from './context-scan.mjs';
+import { findSessionTranscript } from './context-store.mjs';
 
 export function compareVersions(a, b) {
   const pa = String(a || '').split(/[.-]/).map(n => parseInt(n, 10));

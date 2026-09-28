@@ -30,7 +30,8 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
 import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
-import { sampleContext, markAnnounced, markTicked, checkpointPath, contextEpoch, hasCheckpoint, thresholds, switchAdvice } from './lib/context.mjs';
+import { checkpointPath, contextEpoch, hasCheckpoint, thresholds, switchAdvice } from './lib/context-advice.mjs';
+import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
 import { classifyClaim, lastAssistantText, contradicts, countedPaths } from './lib/commit-claim.mjs';
 
@@ -39,7 +40,7 @@ import { classifyClaim, lastAssistantText, contradicts, countedPaths } from './l
 // not a model judging a model (deleted once as "certain cost, zero benefit",
 // STATE.md v0.8.0). Context size is not judged here: transcript bytes survive
 // compaction, so a byte threshold kept warning about a conversation that had
-// already been compacted. The shared reader (lib/context.mjs) decides, and its
+// already been compacted. The shared reader (lib/context-advice.mjs) decides, and its
 // notice rides along only when its advice changes.
 export const PERSIST_STEP_CAP = 25;
 export const PERSIST_SCAN_CAP = 262144;

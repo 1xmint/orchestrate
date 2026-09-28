@@ -34,7 +34,7 @@ import {
   DIR, readJson, writeJsonAtomic, FAMILY_ORDER, AGENT_NAMES,
   SESSIONS_DIR, PROFILE_PATH,
 } from './lib/tier.mjs';
-import { sampleContext, storedContext } from './lib/context.mjs';
+import { sampleContext, storedContext } from './lib/context-store.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
 import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport } from './lib/listing.mjs';
@@ -75,7 +75,7 @@ export { limitsFromTail, LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, PROFILE
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 // ---- local context ----------------------------------------------------------
-// The lead's own cost per step comes from the shared reader (lib/context.mjs),
+// The lead's own cost per step comes from the shared reader (lib/context-store.mjs),
 // said only when its advice changes. A compaction starts a new epoch there, so
 // advice given before it is never repeated against the compacted conversation.
 export function contextLine(input, { force = false } = {}) {

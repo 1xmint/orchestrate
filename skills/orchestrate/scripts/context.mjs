@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // context.mjs — the on-demand context report. Reads a transcript with the same
-// reader every hook uses (lib/context.mjs) and says how big the conversation is
+// reader every hook uses (lib/context-scan.mjs) and says how big the conversation is
 // now, how fresh that figure is, what compaction did, and what to do next.
 // Read-only: it does not change what the hooks have announced.
 //
@@ -13,7 +13,9 @@
 import { readdirSync, existsSync, statSync } from 'node:fs';
 import { join, basename, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readContext, adviseContext, formatReading, agentTranscriptPath, storedContext, findSessionTranscript, CONTEXT_DIR } from './lib/context.mjs';
+import { readContext, CONTEXT_DIR } from './lib/context-scan.mjs';
+import { adviseContext, formatReading } from './lib/context-advice.mjs';
+import { agentTranscriptPath, storedContext, findSessionTranscript } from './lib/context-store.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { latestTranscript } from './measure.mjs';
 

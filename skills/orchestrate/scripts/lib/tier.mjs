@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
-import { lastMeasuredTokens } from './context.mjs';
+import { lastMeasuredTokens } from './context-store.mjs';
 
 export const HOME = homedir();
 export const DIR = join(HOME, '.claude', 'orchestrate');
@@ -204,7 +204,7 @@ export function selfModel(transcriptPath) {
 }
 
 // How many tokens the conversation re-reads on each step right now. One reader
-// owns this (lib/context.mjs): the input side of the last real response after
+// owns this (lib/context-store.mjs): the input side of the last real response after
 // the last compaction, or null when that is not currently known. It used to
 // walk past compaction boundaries and report a pre-compaction size.
 export function lastContextTokens(transcriptPath) {

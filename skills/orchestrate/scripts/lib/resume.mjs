@@ -6,7 +6,7 @@
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { CONTEXT_DIR } from './context.mjs';
+import { CONTEXT_DIR } from './context-scan.mjs';
 import { sanitizeId } from './tier.mjs';
 import { formatAgo } from './handoff.mjs';
 import { pickupSection, pickupWritten } from '../turn-check.mjs';
@@ -99,7 +99,7 @@ export function continueIntent(text) {
 }
 
 // The newest checkpoint file this previous session wrote, if any — same
-// layout precompact-check.mjs and lib/context.mjs read from.
+// layout precompact-check.mjs and lib/context-advice.mjs read from.
 export function latestCheckpointFor(sessionId) {
   try {
     const dir = join(CONTEXT_DIR, sanitizeId(sessionId));

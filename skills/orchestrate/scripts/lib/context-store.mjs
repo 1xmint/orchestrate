@@ -2,7 +2,7 @@
 // and per agent, under ~/.claude/orchestrate/context/, and the paths used to
 // find a transcript in the first place.
 //
-// This is the store half of lib/context.mjs: it samples a transcript
+// This is the store half of the context reader: it samples a transcript
 // incrementally (reading only the bytes added since the last sample), keeps
 // the running "advice already announced" and "tool calls since the last edit"
 // state, and writes it back. The scanning and advice logic it calls live in

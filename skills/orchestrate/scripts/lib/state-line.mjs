@@ -6,7 +6,7 @@
 
 import { AGENT_NAMES, DIR, readJson } from './tier.mjs';
 import { loadPolicy } from './policy.mjs';
-import { thresholds } from './context.mjs';
+import { thresholds } from './context-advice.mjs';
 import { CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR } from './quota.mjs';
 import { join } from 'node:path';
 
@@ -73,7 +73,7 @@ export function actionableLine(ctx) {
   return '';
 }
 
-// One policy number decides each cut, read from lib/context.mjs's own
+// One policy number decides each cut, read from lib/context-advice.mjs's own
 // thresholds() rather than a private copy: checkpointAt and compactAt (or a
 // known smaller window's share of it) are the only two bands there are.
 export function contextBand(reading, policy = loadPolicy()) {

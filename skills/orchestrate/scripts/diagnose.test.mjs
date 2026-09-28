@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { diagnose, humanDiagnosis, redactHome, registeredHooks } from './diagnose.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { thresholds } from './lib/context.mjs';
+import { thresholds } from './lib/context-advice.mjs';
 
 const NOW = Date.parse('2026-09-14T12:00:00Z');
 const assistant = (id, tokens, min) => JSON.stringify({

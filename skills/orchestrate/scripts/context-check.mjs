@@ -4,7 +4,7 @@
 // The router only runs when the user types, and a long autonomous stretch can
 // grow the conversation by hundreds of thousands of tokens between prompts. So
 // this samples at each tool boundary, reading only the bytes added since the
-// last sample (lib/context.mjs), and says something only when the advice
+// last sample (lib/context-store.mjs), and says something only when the advice
 // changes: checkpoint, compact at the next safe boundary, or investigate a
 // conversation that stayed large after compaction. It also notices a change of
 // permission mode (lib/modes.mjs), which is how Plan-mode approval reaches the
@@ -22,7 +22,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { resolve as resolvePath, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sampleContext, agentTranscriptPath, markAnnounced, storedAdvisedKey } from './lib/context.mjs';
+import { sampleContext, agentTranscriptPath, markAnnounced, storedAdvisedKey } from './lib/context-store.mjs';
 import { modeNote, modeOf } from './lib/modes.mjs';
 import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, segmentTurns } from './lib/workers.mjs';
 import { loadSession, saveSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
@@ -87,7 +87,7 @@ export function stepWork(work, launchRoot, path) {
 // by the caller, since only it knows what "now" and "the file's mtime" mean
 // for this run.
 // Work calls: the tools a lead uses to actually do things, between dispatches.
-// Distinct from lib/context.mjs's EDIT_TOOLS, which counts only file edits for
+// Distinct from lib/context-scan.mjs's EDIT_TOOLS, which counts only file edits for
 // the "tool calls since your last edit" line — this counts reading and
 // searching too, because a long solo stretch of Read/Grep/Glob is the same
 // failure as a long stretch of Edit/Bash (challenge.md D1).
