@@ -33,7 +33,7 @@ import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 import { checkpointPath, contextEpoch, hasCheckpoint, thresholds, switchAdvice } from './lib/context-advice.mjs';
 import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
-import { classifyClaim, lastAssistantText, contradicts, countedPaths } from './lib/commit-claim.mjs';
+import { classifyClaim, lastAssistantText, contradicts, countedPaths, namesAllPaths } from './lib/commit-claim.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -158,7 +158,7 @@ function gitPorcelain(cwd) {
     const r = spawnSync('git', ['status', '--porcelain'], { cwd, timeout: 3000, encoding: 'utf8' });
     if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return null;
     const files = countedPaths(r.stdout.split('\n').map(l => l.trimEnd()).filter(Boolean).map(l => l.slice(3).trim()));
-    return { count: files.length, files: files.slice(0, 3) };
+    return { count: files.length, files: files.slice(0, 3), allFiles: files };
   } catch { return null; }
 }
 
@@ -175,13 +175,19 @@ function commitsSince(cwd, startHead) {
   } catch { return null; }
 }
 
+// Appended to every block reason: the block replaces nothing the lead has
+// already said, but a headless caller's `result` is whatever the lead sends
+// next, so a one-line reply to this block silently becomes the report the
+// user gets (round-9 audit finding 2, live run 1). Under 60 B added.
+const RESEND_NOTE = ' Resend the whole report; it becomes what the user sees.';
+
 function commitClaimReason(claim, git, commitsSinceStart) {
   if (claim === 'not-committed') {
     const commitNote = commitsSinceStart ? ` and ${commitsSinceStart} commit${commitsSinceStart === 1 ? '' : 's'} since this session started` : '';
-    return `Before you finish: your last message says nothing is committed, but git status shows a clean tree${commitNote}. Tell the user exactly what is committed and what is not, from git status, then finish.`;
+    return `Before you finish: your last message says nothing is committed, but git status shows a clean tree${commitNote}. Tell the user exactly what is committed and what is not, from git status, then finish.${RESEND_NOTE}`;
   }
   const names = git.files.length ? ` (${git.files.join(', ')})` : '';
-  return `Before you finish: your last message says the work is committed, but git status shows ${git.count} file${git.count === 1 ? '' : 's'} not committed${names}. Say which files are not committed, then finish.`;
+  return `Before you finish: your last message says the work is committed, but git status shows ${git.count} file${git.count === 1 ? '' : 's'} not committed${names}. Say which files are not committed, then finish.${RESEND_NOTE}`;
 }
 
 // Checks the closing message's claim about `git commit` against what the
@@ -203,6 +209,10 @@ function checkCommitClaim(input, state) {
   if (!git) return null;
   const commitsSinceStart = commitsSince(input.cwd, state && state.startHead);
   if (!contradicts(claim, git.count, commitsSinceStart)) return null;
+  // The message already names every file git status lists (by basename) — it
+  // is consistent with the status it describes, whatever claim it also makes,
+  // so nothing here contradicts it (round-9 audit finding 2, live run 1).
+  if (namesAllPaths(text, git.allFiles)) return null;
   const claimHash = createHash('sha256').update(text).digest('hex').slice(0, 16);
   if (state && state.commitClaimBlocked === claimHash) return null;
   const st = state || { session_id: input.session_id };

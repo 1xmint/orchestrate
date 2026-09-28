@@ -177,6 +177,52 @@ test('a committed claim over a dirty tree is blocked and names the files', () =>
   assert.match(out.reason, /shows 1 file not committed \(c\.txt\)/);
 });
 
+test('a committed claim over a dirty tree names the resend sentence in the reason', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  writeFileSync(join(dir, 'c.txt'), 'three\n');
+  const transcript_path = writeTranscript(home, 'All committed.');
+  writeSession(home, 'sess-3r', { startHead });
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-3r', cwd: dir, transcript_path }, home);
+  const out = JSON.parse(r.stdout);
+  assert.match(out.reason, /Resend the whole report; it becomes what the user sees\./);
+});
+
+// Round-9 audit finding 2: the lead's message named the untracked file, but
+// the check missed a "did not <verb list> commit" wording and blocked it
+// anyway (199 B). All four wordings below are now consistent with the status
+// (0 B, no block) once the message names the untracked file.
+const didNotCommitWordings = [
+  'Everything is committed. I did not commit notes.txt.',
+  'Everything is committed. I did not touch, add, or commit notes.txt.',
+  'Everything is committed. I did not add, stage, or commit notes.txt.',
+  'Everything is committed. I did not touch, stage, change, or commit notes.txt.',
+];
+for (const [i, text] of didNotCommitWordings.entries()) {
+  test(`finding-2 wording ${i + 1} over an untracked notes.txt is not blocked (0 B)`, () => {
+    const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+    const { dir, startHead } = makeRepo();
+    writeFileSync(join(dir, 'notes.txt'), 'mine\n');
+    const transcript_path = writeTranscript(home, text);
+    writeSession(home, `sess-fw-${i}`, { startHead });
+    const r = run({ hook_event_name: 'Stop', session_id: `sess-fw-${i}`, cwd: dir, transcript_path }, home);
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout.trim(), '');
+  });
+}
+
+test('a committed claim that does not name the untracked file is still blocked', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  writeFileSync(join(dir, 'notes.txt'), 'mine\n');
+  const transcript_path = writeTranscript(home, 'Everything is committed.');
+  writeSession(home, 'sess-fw-block', { startHead });
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-fw-block', cwd: dir, transcript_path }, home);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /notes\.txt/);
+});
+
 // Round 8's probe: a Stop carrying only last_assistant_message (no
 // transcript_path) printed nothing, because the check read the transcript alone.
 test('a committed claim in last_assistant_message is checked without a transcript', () => {

@@ -10,11 +10,24 @@
 const NOT_COMMITTED_PHRASES = [
   'not committed', "haven't committed", 'have not committed',
   'nothing is committed', 'uncommitted', 'not yet committed',
-  'left uncommitted', "didn't commit", 'did not commit',
+  'left uncommitted',
 ];
 
+// "did not <verb list> commit", e.g. "did not touch, add, or commit
+// notes.txt" — a list of verbs between the negation and "commit" is still a
+// not-committed claim, not just the bare "did not commit" wording (round-9
+// audit finding 2: the literal-phrase list missed this and let a true
+// sentence get blocked).
+const NEG_STEM = "(?:did\\s+not|didn't|have\\s+not|haven't|has\\s+not|hasn't)";
+const CLAIM_VERB = '(?:touch|add|stage|change|commit)';
+const notCommittedListRe = new RegExp(
+  `${NEG_STEM}\\s+(?:${CLAIM_VERB}\\s*,?\\s*)*(?:or\\s+)?commit\\b`,
+  'gi',
+);
+
 const notCommittedRe = new RegExp(
-  NOT_COMMITTED_PHRASES.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+')).join('|'),
+  NOT_COMMITTED_PHRASES.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+')).join('|')
+    + `|${notCommittedListRe.source}`,
   'gi',
 );
 
@@ -95,4 +108,20 @@ export function contradicts(claim, porcelainCount, commitsSinceStart = null) {
 const OWN_FOLDERS = /^(?:"?)(?:\.claude|\.orchestrator)(?:\/|$)/;
 export function countedPaths(paths) {
   return (Array.isArray(paths) ? paths : []).map(p => String(p || '').trim()).filter(p => p && !OWN_FOLDERS.test(p));
+}
+
+// Whether the message already names every path `countedPaths` lists, by
+// basename — a message that spells out each uncommitted file (e.g. "notes.txt
+// is the user's own untracked file") is consistent with the status it
+// describes, whatever claim it also makes, and should not be blocked (round-9
+// audit finding 2, live run 1: the lead's summary had already named
+// `notes.txt` and was blocked anyway).
+export function namesAllPaths(text, paths) {
+  const list = Array.isArray(paths) ? paths : [];
+  if (!list.length) return false;
+  const t = String(text || '').toLowerCase();
+  return list.every(p => {
+    const base = String(p || '').trim().replace(/^"|"$/g, '').split(/[\\/]/).pop();
+    return !!base && t.includes(base.toLowerCase());
+  });
 }
