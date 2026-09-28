@@ -3,7 +3,7 @@
 //   node --test skills/orchestrate/scripts/lib/commit-claim.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyClaim, lastAssistantText, contradicts, countedPaths } from './commit-claim.mjs';
+import { classifyClaim, lastAssistantText, contradicts, countedPaths, namesAllPaths } from './commit-claim.mjs';
 
 const line = rec => JSON.stringify(rec) + '\n';
 const assistantText = (...texts) => line({ type: 'assistant', message: { content: texts.map(t => ({ type: 'text', text: t })) } });
@@ -46,6 +46,22 @@ const notPhrases = [
   'I did not commit the fix.',
 ];
 for (const text of notPhrases) {
+  test(`classifyClaim reads "${text}" as not-committed`, () => {
+    assert.equal(classifyClaim(text), 'not-committed');
+  });
+}
+
+// A verb list between "did not"/"didn't" and "commit" is still a
+// not-committed claim, not only the bare "did not commit" wording (round-9
+// audit finding 2: a true sentence, "did not touch, add, or commit
+// notes.txt", was blocked because only the literal phrase matched).
+const didNotCommitListPhrases = [
+  'I did not commit notes.txt.',
+  'I did not touch, add, or commit notes.txt.',
+  'I did not add, stage, or commit notes.txt.',
+  'I did not touch, stage, change, or commit notes.txt.',
+];
+for (const text of didNotCommitListPhrases) {
   test(`classifyClaim reads "${text}" as not-committed`, () => {
     assert.equal(classifyClaim(text), 'not-committed');
   });
@@ -119,4 +135,17 @@ test('ordinary paths, including dotfiles, all count', () => {
   assert.deepEqual(countedPaths(['.gitignore', 'README.md', 'src/.claude-notes.md', 'lib/borrow.js']), ['.gitignore', 'README.md', 'src/.claude-notes.md', 'lib/borrow.js']);
   assert.deepEqual(countedPaths([]), []);
   assert.deepEqual(countedPaths(null), []);
+});
+
+// ---- namesAllPaths -------------------------------------------------------------
+
+test('namesAllPaths is true when the message names every path by basename', () => {
+  assert.equal(namesAllPaths('notes.txt is the user\'s own untracked file.', ['notes.txt']), true);
+  assert.equal(namesAllPaths('I named a.js and b.js already.', ['src/a.js', 'b.js']), true);
+});
+
+test('namesAllPaths is false when a path is missing or the list is empty', () => {
+  assert.equal(namesAllPaths('a.js is fine.', ['src/a.js', 'b.js']), false);
+  assert.equal(namesAllPaths('committed everything', []), false);
+  assert.equal(namesAllPaths('committed everything', null), false);
 });
