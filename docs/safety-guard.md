@@ -66,10 +66,14 @@ outside the local repo.
 - **From the main, interactive session:** the command is held and the
   person is asked one plain sentence — no git jargon, no task ids, no role
   names — with the option to say yes and let it run anyway.
-- **From a background helper:** there is nobody there to answer a question,
-  so the guard refuses the command outright and tells the helper to report
-  back to the lead instead of retrying. A hook payload carries `agent_id`
-  only when it fires inside a helper's own call; that field is the signal.
+- **From a background helper:** Claude Code surfaces a background helper's
+  permission prompt in the main session, so in `"default"`, `"acceptEdits"`
+  and `"plan"` the helper gets the same plain question the main session
+  would. In any other mode, or when the payload names no mode, nobody can
+  say yes, so the guard refuses the command outright, says the question
+  cannot be answered here, and tells the helper to report back what it was
+  about to run instead of retrying. A hook payload carries `agent_id` only
+  when it fires inside a helper's own call; that field is the signal.
 - **From a session with nobody able to see an interactive prompt at all:**
   the guard also refuses outright, naming the mode in plain words in the
   reason, rather than asking. Three `permission_mode` values put a session in
