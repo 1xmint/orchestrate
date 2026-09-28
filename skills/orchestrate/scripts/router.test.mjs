@@ -187,6 +187,19 @@ test('`router status` replies with the full state line and sends no card', () =>
   assert.match(after, /orchestrate is loaded/, 'the card is still owed after a status request');
 });
 
+// `router status` is a prompt the user types, not a command-line argument.
+// Round 8 ran `router.mjs status` with `{}` on stdin and got 0 B: the argument
+// is not a command and `{}` names no hook event, so silence is intended.
+test('`router.mjs status` on the command line with `{}` prints nothing; the prompt is the way in', () => {
+  const home = makeHome();
+  const r = spawnSync(process.execPath, [ROUTER, 'status'], {
+    input: '{}', encoding: 'utf8', windowsHide: true,
+    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '', CLAUDE_EFFORT: '' },
+  });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout, '');
+});
+
 test('a hook firing inside a subagent (agent_id present) prints nothing on UserPromptSubmit, and prints the card without it', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const inside = prompt(home, repo, 'add a --json flag to the status command and test it', { agent_id: 'agent-1' });

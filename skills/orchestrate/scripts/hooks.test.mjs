@@ -287,6 +287,14 @@ test('guard: the packet notice names a missing PROGRESS line on an author-role d
   }, home);
   assert.doesNotMatch(reviewer.stdout, /no PROGRESS line/, 'a reviewer returns a verdict, not partial work');
 
+  for (const [i, role] of ['orch-researcher', 'orch-browser'].entries()) {
+    const readOnly = run('guard-agent.mjs', {
+      hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: `s5r${i}`, cwd: home,
+      tool_input: { subagent_type: role, model: 'haiku', prompt: `TASK: 9-9-001${i}\nfind it` },
+    }, home);
+    assert.doesNotMatch(readOnly.stdout, /no PROGRESS line/, `${role} is short read-only work, so the warning is noise`);
+  }
+
   const planMode = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's6', cwd: home, permission_mode: 'plan',
     tool_input: { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-9-0005\nfind it' },
