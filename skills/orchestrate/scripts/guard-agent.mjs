@@ -495,8 +495,19 @@ function main() {
   // Past here it is one real dispatch, and the side effects run once for it.
   // This hook can be registered twice (skill frontmatter plus settings.json).
   if (repeat) return;
+  // The solo/helper pair (round-9 audit Part C item 3): read before
+  // recordDispatch pushes this dispatch, so "first" means no earlier
+  // orch-implementer row, not "no earlier row including this one". Gated to
+  // the first orch-implementer dispatch of a session with no run ledger
+  // open, once — a later dispatch, or one made once a ledger is open, gets
+  // today's tag only.
+  let priorDispatches = [];
+  try { const s = loadSession(input.session_id) || {}; priorDispatches = Array.isArray(s.dispatches) ? s.dispatches : []; } catch {}
+  const isFirstImplementer = normalizeRole(ti.subagent_type) === 'orch-implementer'
+    && !priorDispatches.some(row => normalizeRole(row.agent) === 'orch-implementer');
+  const noLedgerOpen = !resolveRunObj(input, ti, { forBudget: true });
   recordDispatch(input, ti);
-  let tag = tagFor(ti);
+  let tag = tagFor(ti, { pair: isFirstImplementer && noLedgerOpen });
   const size = String(ti.prompt || '').length;
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = progressFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
