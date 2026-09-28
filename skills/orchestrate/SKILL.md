@@ -235,9 +235,9 @@ file — a cold resume re-writes the agent's whole grown context at full price.
 move for a hard-to-check finding and a round boundary, and the guard's exact
 refusal list.
 
-A return that used every turn its role allows is **partial**, whatever it
-says; dispatch only the remaining work as a fresh, smaller packet from its
-PROGRESS file and branch — never keep resuming a large helper.
+A return that used every turn is **partial** whatever it says; if what is
+left is small, SendMessage it now while it is warm, as above; otherwise a
+fresh, smaller packet from its PROGRESS file and branch.
 
 Every dispatch arrives with a price tag from the guard, in list-price dollars.
 Say it once, before the spend, when large enough to matter — never a running

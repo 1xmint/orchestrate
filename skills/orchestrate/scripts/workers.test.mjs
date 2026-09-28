@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { workflowDecision, PLAN_READ_ROLES } from './guard-agent.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 const ALL = AGENT_NAMES.length;
-import { runningNative, transcriptTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal, recordCodexOk, freshCodexOk, CODEX_OK_FRESH_MS } from './lib/workers.mjs';
+import { runningNative, transcriptTurns, segmentTurns, concurrencyDecision, lockedWorktreeIn, lockHolder, cappedNote, packetFromMarkdown, helperFiles, markExhausted, exhaustedFor, registerWorker, runningExternal, recordCodexOk, freshCodexOk, CODEX_OK_FRESH_MS } from './lib/workers.mjs';
 import { modeTransition, modeNote, PLAN_NOTE, APPROVED_NOTE } from './lib/modes.mjs';
 import { cappedReturn, roleMaxTurns, sumUsage } from './ledger.mjs';
 import { loadPolicy, setPolicyValue, sizeBudget, DEFAULT_POLICY } from './lib/policy.mjs';
@@ -361,6 +361,23 @@ test('transcriptTurns counts one turn per model message, however many records it
   assert.equal(transcriptTurns(join(dir, 'missing.jsonl')), 0);
 });
 
+test('segmentTurns counts the whole transcript and the turns since the last resume', () => {
+  const fixture = join(HERE, 'fixtures', 'resumed-helper-transcript.jsonl');
+  assert.deepEqual(segmentTurns(fixture), { total: 28, segment: 8 });
+  assert.deepEqual(segmentTurns(join(HERE, 'missing.jsonl')), { total: 0, segment: 0 });
+});
+
+test('running helpers: a resumed helper stays running while its current segment is under the cap, even though its whole transcript is over it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-resumed-'));
+  const tr = join(dir, 'agent.jsonl');
+  const rl = readFileSync(join(HERE, 'fixtures', 'resumed-helper-transcript.jsonl'), 'utf8');
+  writeFileSync(tr, rl);
+  const files = new Map([['tu_a', { agentId: 'agent-a', mtimeMs: NOW, path: tr }]]);
+  const dispatches = [{ agent: 'orch-implementer', task: '1', at: ago(3), toolUseId: 'tu_a' }];
+  const live = runningNative(dispatches, { files, now: NOW, staleMin: 10, capOf: () => 20 });
+  assert.deepEqual(live.map(w => w.task), ['1'], 'segment is 8, under the cap of 20, even though the transcript ran 28 turns total');
+});
+
 test('helper transcripts are found by the tool call that started them', () => {
   const dir = mkdtempSync(join(tmpdir(), 'orch-helpers-'));
   const lead = join(dir, 'sess.jsonl');
@@ -452,12 +469,26 @@ test('capped returns are partial, and the recovery note is said once', () => {
   assert.deepEqual(cappedReturn(50, 50, 'DONE'), { capped: true, status: 'PARTIAL', claimed: 'DONE' });
   assert.deepEqual(cappedReturn(12, 50, 'DONE'), { capped: false, status: 'DONE', claimed: 'DONE' });
   assert.equal(cappedReturn(274, null, null).capped, false, 'no cap known, nothing inferred');
-  const state = { returned: [{ agent: 'orch-implementer', task: '9-14-0002', capped: true, turns: 50, progress: '/r/progress/9-14-0002.md' }, { agent: 'orch-reviewer', task: '3' }] };
+  const state = { returned: [{ agent: 'orch-implementer', task: '9-14-0002', capped: true, turns: 50, cap: 20, progress: '/r/progress/9-14-0002.md' }, { agent: 'orch-reviewer', task: '3' }] };
   const note = cappedNote(state);
-  assert.match(note, /orch-implementer 9-14-0002 \(50 turns, progress \/r\/progress\/9-14-0002\.md\)/);
-  assert.match(note, /only the remaining work as a fresh, smaller packet/);
-  assert.match(note, /Do not resume the stopped helper/);
+  assert.match(note, /orch-implementer 9-14-0002 \(used all 20 turns it is allowed, progress \/r\/progress\/9-14-0002\.md\)/, 'names the cap, not the 50-turn count');
+  assert.match(note, /a fresh, smaller packet from its progress file and branch/);
+  assert.match(note, /if what is left is small, SendMessage it now while it is warm/);
   assert.equal(cappedNote(state), '', 'once');
+});
+
+test('cappedNote falls back to the turn count when an older return recorded no cap', () => {
+  const state = { returned: [{ agent: 'orch-implementer', task: '5', capped: true, turns: 100 }] };
+  assert.match(cappedNote(state), /orch-implementer 5 \(100 turns\)/);
+});
+
+test('a helper resumed once after its cap: pricing sums the whole transcript, but the cap decision uses only the current segment', () => {
+  const fixture = join(HERE, 'fixtures', 'resumed-helper-transcript.jsonl');
+  const usage = sumUsage(fixture);
+  assert.equal(usage.turns, 28, 'pricing still sums the whole transcript');
+  const { segment } = segmentTurns(fixture);
+  assert.equal(segment, 8, 'only 8 turns ran since the resume');
+  assert.deepEqual(cappedReturn(segment, 20, 'DONE'), { capped: false, status: 'DONE', claimed: 'DONE' }, 'the whole-transcript total of 28 would have wrongly called this capped against a cap of 20');
 });
 
 test('the packet template reads into the provider-neutral shape', () => {

@@ -67,6 +67,41 @@ export function transcriptTurns(path) {
   return ids.size;
 }
 
+// Turns since the helper was last resumed, alongside the whole-transcript
+// total. A background helper that hit its cap and was continued by
+// SendMessage keeps its one SubagentStop for the whole run, so counting the
+// total against the cap calls a helper that ran 8 more turns "capped" at 28.
+// The boundary is structural, not the exact wording of the resume message,
+// which a later Claude Code may change: a user record whose message.content
+// is a string, or an array holding a block of type "text" (a tool_result
+// block does not count). The very first user message starts the first
+// segment, same as any later one.
+export function segmentTurns(path) {
+  const total = new Set();
+  let segment = new Set();
+  let anon = 0;
+  try {
+    for (const line of readFileSync(path, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      if (o && o.type === 'user') {
+        const c = o.message && o.message.content;
+        const hasText = typeof c === 'string' || (Array.isArray(c) && c.some(b => b && b.type === 'text'));
+        if (hasText) segment = new Set();
+        continue;
+      }
+      if (!line.includes('"usage"')) continue;
+      const m = o && o.message;
+      if (m && m.usage) {
+        const id = m.id || `anon-${anon++}`;
+        total.add(id);
+        segment.add(id);
+      }
+    }
+  } catch {}
+  return { total: total.size, segment: segment.size };
+}
+
 export const roleOf = a => String(a || 'general-purpose').replace(/^[\w-]+:/, '');
 
 // Helper transcripts for a session, keyed by the tool call that started them.
@@ -139,8 +174,11 @@ export function nativeAgent(dispatches, files, agentId) {
 // SubagentStop cannot be relied on to arrive with anything to match against.
 //
 // Pure except that it reads the transcript of a helper that otherwise looks
-// alive, to see whether its turns ran out.
-export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin, capOf = roleMaxTurns, turnsOf = transcriptTurns } = {}) {
+// alive, to see whether its turns ran out. Compared against the cap by
+// `segment` (turns since its last resume), not the whole-transcript total: a
+// helper resumed once by SendMessage after hitting its cap is still running
+// until its current segment reaches the cap again.
+export function runningNative(dispatches, { returned = [], files = new Map(), now = Date.now(), staleMin = loadPolicy().workers.staleMin, capOf = roleMaxTurns, turnsOf = p => segmentTurns(p).segment } = {}) {
   const back = new Set((returned || []).map(r => r && r.agentId).filter(Boolean));
   const backTu = new Set((returned || []).map(r => r && r.toolUseId).filter(Boolean));
   const loose = (returned || []).filter(r => r && !r.agentId && !r.toolUseId).map(r => ({ ...r, used: false }));
@@ -171,15 +209,18 @@ export function runningNative(dispatches, { returned = [], files = new Map(), no
 
 // Helpers that stopped at their turn cap, from the ledger's return records,
 // said once each (marks them shown on the state object passed in). A capped
-// return is partial whatever it claims; the recovery is a fresh, smaller packet
-// for what is left, never resuming the stopped helper, which re-reads its whole
-// large context on every further step.
+// return is partial whatever it claims. The wording names the cap, not the
+// turn count: a resumed helper's transcript can run well past its role's
+// cap (its earlier segment already spent), so "used 28 turns" reads as
+// nothing wrong when the cap is 20 — "used all 20 turns it is allowed" says
+// what actually happened. If a return recorded no cap, the turn count is
+// still said, so nothing is lost.
 export function cappedNote(state) {
   const list = (state && Array.isArray(state.returned) ? state.returned : []).filter(r => r && r.capped && !r.cappedShown);
   if (!list.length) return '';
   for (const r of list) r.cappedShown = true;
-  const shown = list.slice(-4).map(r => `${r.agent}${r.task ? ` ${r.task}` : ''} (${r.turns} turns${r.progress ? `, progress ${r.progress}` : ''})`).join('; ');
-  return `[orchestrate · partial] stopped at the turn cap, so partial: ${shown}. Check what its evidence shows is done, then send only the remaining work as a fresh, smaller packet from its progress file and branch. Do not resume the stopped helper.`;
+  const shown = list.slice(-4).map(r => `${r.agent}${r.task ? ` ${r.task}` : ''} (${r.cap != null ? `used all ${r.cap} turns it is allowed` : `${r.turns} turns`}${r.progress ? `, progress ${r.progress}` : ''})`).join('; ');
+  return `[orchestrate · partial] stopped at the turn cap, so partial: ${shown}. Check what its evidence shows is done; if what is left is small, SendMessage it now while it is warm, otherwise send it as a fresh, smaller packet from its progress file and branch.`;
 }
 
 // ---- external workers --------------------------------------------------------

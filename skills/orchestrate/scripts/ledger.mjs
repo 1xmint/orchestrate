@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
-import { roleMaxTurns } from './lib/workers.mjs';
+import { roleMaxTurns, segmentTurns } from './lib/workers.mjs';
 import { checkReturn } from './lib/report.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
 import { addSuggestion } from './suggest.mjs';
@@ -419,7 +419,14 @@ function main() {
   const r = parseReturn(text);
   if (r.suggest) { try { addSuggestion(r.suggest, { source: r.task || r.run || null }); } catch {} }
   const usage = sumUsage(input.agent_transcript_path);
-  const cap = cappedReturn(usage.turns, roleMaxTurns(agentType), r.status);
+  // Compared against the cap by segment (turns since the helper was last
+  // resumed), not the whole-transcript total: a helper resumed once by
+  // SendMessage after hitting its cap, then finished in a few more turns, is
+  // not "capped" just because its whole transcript is long. Pricing above
+  // still sums the whole transcript — every turn it ran cost money.
+  const segment = segmentTurns(input.agent_transcript_path).segment;
+  const maxTurns = roleMaxTurns(agentType);
+  const cap = cappedReturn(segment, maxTurns, r.status);
   r.status = silent && !cap.capped ? 'PARTIAL' : cap.status;
   const noEvidence = evidenceDowngrade(r.status, text);
   r.status = noEvidence.status;
@@ -444,7 +451,7 @@ function main() {
 
   try {
     mkdirSync(dir, { recursive: true });
-    const capNote = cap.capped ? ` · stopped at its ${usage.turns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
+    const capNote = cap.capped ? ` · stopped at its ${maxTurns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
     const evidenceNote = noEvidence.note ? ` · ${noEvidence.note}` : '';
     const reviewNote = review.note ? ` · ${review.note}` : '';
     const compact = compactFact(dir, agentId);
@@ -482,7 +489,7 @@ function main() {
       // toolUseId is the id of the Agent call that started this helper, the
       // same one guard-agent.mjs stored on the dispatch row, so the worker
       // count can pair the two directly even when no transcript file exists.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}) });
       saveSession(state);
     }
   } catch {}
