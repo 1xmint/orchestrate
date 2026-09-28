@@ -22,6 +22,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { resolve as resolvePath, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { sampleContext, agentTranscriptPath, markAnnounced, storedAdvisedKey } from './lib/context-store.mjs';
 import { modeNote, modeOf } from './lib/modes.mjs';
 import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, segmentTurns } from './lib/workers.mjs';
@@ -92,6 +93,11 @@ export function stepWork(work, launchRoot, path) {
 // searching too, because a long solo stretch of Read/Grep/Glob is the same
 // failure as a long stretch of Edit/Bash (challenge.md D1).
 export const WORK_CALL_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell', 'Read', 'Grep', 'Glob']);
+
+// The real settings.json, for the one figure that has to reflect what the
+// host actually does (lib/context-advice.mjs's resolveAutocompactWindow):
+// read only here, by the running hook, never by a pure function or a test.
+const SETTINGS_PATH = join(homedir(), '.claude', 'settings.json');
 
 // One PostToolUse's effect on the "work calls since your last dispatch" count:
 // a dispatch (Agent/Task, or a Bash/PowerShell running codex-worker) resets it
@@ -201,7 +207,7 @@ export function check(input) {
     { const s = loadSession(session); if (s && trackWork(s, input)) { try { saveSession(s); } catch {} } }
     const t = input.agent_transcript_path || agentTranscriptPath(input.transcript_path, agent);
     if (t) {
-      const sample = sampleContext({ transcriptPath: t, session, agent, announce: false });
+      const sample = sampleContext({ transcriptPath: t, session, agent, announce: false, settingsPath: SETTINGS_PATH, env: process.env });
       const state = loadSession(session) || {};
       const owner = nativeAgent(Array.isArray(state.dispatches) ? state.dispatches : [], helperFiles(input.transcript_path), agent);
       const role = owner ? owner.role : 'default';
@@ -235,7 +241,7 @@ export function check(input) {
   let contextLine = '';
   if (input.transcript_path) {
     const bound = (state && state.run && state.run.runMd) || null;
-    const r = sampleContext({ transcriptPath: input.transcript_path, session, runMd: bound, permissionMode: modeOf(input) });
+    const r = sampleContext({ transcriptPath: input.transcript_path, session, runMd: bound, permissionMode: modeOf(input), settingsPath: SETTINGS_PATH, env: process.env });
     contextLine = r.notice;
   }
   const fact = workCallsFact(workCalls, loadPolicy().lead.workCallsEvery);

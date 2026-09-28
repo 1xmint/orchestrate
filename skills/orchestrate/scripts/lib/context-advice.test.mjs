@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
   thresholds, adviseContext, contextEpoch, checkpointPath, hasCheckpoint, newestCheckpoint,
-  switchAdvice, contextNotice, contextTick, formatReading, shortPath,
+  switchAdvice, contextNotice, contextTick, formatReading, shortPath, resolveAutocompactWindow,
 } from './context-advice.mjs';
 import { toReading } from './context-scan.mjs';
 import { loadPolicy } from './policy.mjs';
@@ -85,6 +85,40 @@ test('the advice key carries the compaction epoch, so a compaction resets it', (
   const before = adviseContext(measured(1000), policy()).key;
   const after = adviseContext(measured(1000, { compaction: { uuid: 'abc', at: now() }, responsesSinceCompaction: 9 }), policy()).key;
   assert.notEqual(before, after);
+});
+
+test('a reading that lands short of checkpointAt still asks when the last growth would cross compactAt', () => {
+  const p = policy();
+  const r = measured(119904, { lastDelta: 38904 });
+  assert.equal(r.tokens < p.context.checkpointAt, true, 'fixture is below the checkpoint mark on its own');
+  const a = adviseContext(r, p);
+  assert.equal(a.action, 'checkpoint');
+  assert.match(a.why, /would reach/);
+});
+
+test('the same short reading with a small last growth does not ask', () => {
+  const p = policy();
+  const r = measured(119904, { lastDelta: 500 });
+  assert.equal(adviseContext(r, p).action, 'none');
+});
+
+test('resolveAutocompactWindow: the environment beats settings.json, which beats the policy default', () => {
+  const p = policy();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-adv-settings-'));
+  const settingsPath = join(dir, 'settings.json');
+  writeFileSync(settingsPath, JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '190000' } }));
+  assert.equal(resolveAutocompactWindow(p, {}), p.context.autocompactDefault, 'no env, no settings: the policy default');
+  assert.equal(resolveAutocompactWindow(p, { settingsPath }), 190000, 'settings.json read when no env value');
+  assert.equal(
+    resolveAutocompactWindow(p, { env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '210000' }, settingsPath }),
+    210000,
+    'the environment wins over settings.json',
+  );
+  // Order does not matter: settings.json is only consulted once the env is checked and found empty.
+  assert.equal(
+    resolveAutocompactWindow(p, { settingsPath, env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '210000' } }),
+    210000,
+  );
 });
 
 // ---- checkpoints ------------------------------------------------------------------

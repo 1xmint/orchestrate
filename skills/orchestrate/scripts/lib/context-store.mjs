@@ -60,7 +60,7 @@ export function agentTranscriptPath(leadTranscript, agentId) {
 // Returns { reading, advice, changed, notice } where `notice` is non-empty only
 // when the advice differs from the last advice this store announced, and
 // `announce` records it as announced.
-export function sampleContext({ transcriptPath, session = null, agent = null, policy = loadPolicy(), now = Date.now(), force = false, dir = CONTEXT_DIR, announce = true, runMd = null, permissionMode = null } = {}) {
+export function sampleContext({ transcriptPath, session = null, agent = null, policy = loadPolicy(), now = Date.now(), force = false, dir = CONTEXT_DIR, announce = true, runMd = null, permissionMode = null, settingsPath = null, env = undefined } = {}) {
   const p = storePath(session, agent, dir);
   const prev = readStore(p);
   let size = 0;
@@ -101,7 +101,15 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
   const isNew = epoch !== 'none' && (!before || contextEpoch(before) !== epoch);
   reading.compactions = (before ? Number(before.compactions) || 0 : 0) + (isNew ? 1 : 0);
 
-  const noticeCtx = { policy, session, editCounter, dir, now, runMd, permissionMode };
+  // The growth from the previous reading to this one, in the same epoch only
+  // (a fresh epoch has nothing to compare against): what adviseContext uses to
+  // catch a turn that would otherwise skip clean over the checkpoint band.
+  const prevTokens = !isNew && before && before.state === 'measured' && Number.isFinite(before.tokens) ? before.tokens : null;
+  reading.lastDelta = prevTokens != null && reading.state === 'measured' && Number.isFinite(reading.tokens)
+    ? Math.max(0, reading.tokens - prevTokens)
+    : 0;
+
+  const noticeCtx = { policy, session, editCounter, dir, now, runMd, permissionMode, settingsPath, env };
   const advice = adviseContext(reading, policy);
   const lastKey = prev ? prev.advisedKey || null : null;
   const changed = advice.key !== lastKey;
