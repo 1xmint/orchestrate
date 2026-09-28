@@ -25,7 +25,8 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession } from './lib/tier.mjs';
 import { pickupSection, pickupHash, shouldBlock } from './turn-check.mjs';
-import { readContext, checkpointPath, contextEpoch, hasCheckpoint } from './lib/context.mjs';
+import { readContext } from './lib/context-scan.mjs';
+import { checkpointPath, contextEpoch, hasCheckpoint } from './lib/context-advice.mjs';
 import { modeOf } from './lib/modes.mjs';
 
 const STORE = () => join(DIR, 'precompact-checks.json');

@@ -6,8 +6,8 @@
 // claims about an exact optimal point. Each one is a number the user can change
 // with `profile.mjs --policy key=value`.
 //
-// Self-contained (no import from tier.mjs), so lib/context.mjs can use it and
-// tier.mjs can use lib/context.mjs without a cycle.
+// Self-contained (no import from tier.mjs), so the context modules can use it and
+// tier.mjs can use lib/context-store.mjs without a cycle.
 
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';

@@ -133,7 +133,7 @@ const body = template
 
 // The host's own plan file, when the user was in Plan mode this session and
 // wrote one: a `Plan:` line so the run and the plan point at each other, and
-// the checkpoint check (lib/context.mjs) can treat a fresh plan as a real
+// the checkpoint check (lib/context-advice.mjs) can treat a fresh plan as a real
 // checkpoint. No fresh plan file, no line.
 const plan = freshPlanFile(sessionStartMs(opts['session-id']));
 const withPlan = plan ? body.replace('\n## Done when', `\nPlan: ${plan}\n\n## Done when`) : body;

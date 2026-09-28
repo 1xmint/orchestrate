@@ -44,7 +44,7 @@ test('installing twice registers each hook once and keeps the user\'s own', () =
   assert.deepEqual(s.hooks.PreToolUse[0], mine, 'the user\'s hook is untouched');
   assert.equal(s.effortLevel, 'low');
   const skill = join(home, '.claude', 'skills', 'orchestrate');
-  for (const f of ['scripts/context-check.mjs', 'scripts/codex-worker.mjs', 'scripts/lib/context.mjs', 'assets/worker-report.schema.json']) {
+  for (const f of ['scripts/context-check.mjs', 'scripts/codex-worker.mjs', 'scripts/lib/context-store.mjs', 'assets/worker-report.schema.json']) {
     assert.ok(existsSync(join(skill, f)), `${f} is installed`);
   }
 });

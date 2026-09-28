@@ -2,7 +2,7 @@
 
 Resume point for building the `orchestrate` skill.
 
-## Unreleased — the scoresheet audit, and rules that can be measured, 2026-09-24
+## Unreleased (after v0.16.1) — the scoresheet audit, and rules that can be measured, 2026-09-24
 
 A scored audit (`docs/scoresheet-audit-prompt.md`, report
 `docs/audits/2026-09-24-scoresheet-r1.md`) put the plugin at 49/100 for its
@@ -69,6 +69,11 @@ what is left is small, otherwise a fresh smaller packet. And the command guard
 lets the lead delete its own helper's worktree branch with the unforced
 `git branch -d`, which git refuses while the branch is unmerged, so nothing
 can be lost; the forced delete, and deleting any other branch, still ask.
+
+The context reader now lives only in its three modules (`lib/context-scan.mjs`,
+`lib/context-advice.mjs`, `lib/context-store.mjs`), each with its own test
+file; the `lib/context.mjs` re-export file is gone and every caller imports
+the module that owns the name.
 
 ## v0.16.1 — a review that can stop the merge, 2026-09-21
 

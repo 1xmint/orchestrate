@@ -13,11 +13,9 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import {
-  readContext, sampleContext, adviseContext, contextNotice, scanSlice, inputSide, thresholds,
-  storedContext, markAnnounced, agentTranscriptPath, contextTick, formatReading, writeStatusCapacity, statusCapacity, checkpointPath,
-  stepEditCounter,
-} from './lib/context.mjs';
+import { readContext, scanSlice, inputSide, writeStatusCapacity, statusCapacity, stepEditCounter } from './lib/context-scan.mjs';
+import { adviseContext, contextNotice, thresholds, contextTick, formatReading, checkpointPath } from './lib/context-advice.mjs';
+import { sampleContext, storedContext, markAnnounced, agentTranscriptPath } from './lib/context-store.mjs';
 import { loadPolicy, setPolicyValue } from './lib/policy.mjs';
 import { persistDecision } from './persist-check.mjs';
 import { stepWorkCalls, workCallsFact } from './context-check.mjs';

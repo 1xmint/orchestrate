@@ -448,7 +448,7 @@ export async function runWorker(opts, deps = {}) {
   let native = [];
   if (session && !deps.skipNative) {
     try {
-      const { findSessionTranscript } = await import('./lib/context.mjs');
+      const { findSessionTranscript } = await import('./lib/context-store.mjs');
       const state = loadSession(session) || {};
       native = runningNative(state.dispatches || [], { returned: state.returned || [], files: helperFiles(findSessionTranscript(session)), staleMin: policy.workers.staleMin });
     } catch { native = []; }

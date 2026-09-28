@@ -24,7 +24,7 @@ import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HOME, DIR, readJson, writeJsonAtomic, currentAccount } from './lib/tier.mjs';
-import { writeStatusCapacity } from './lib/context.mjs';
+import { writeStatusCapacity } from './lib/context-scan.mjs';
 import { QUOTA_PATH, snapshotFrom, resetClock } from './lib/quota.mjs';
 import { readSettings, backupSettings, writeSettings, commandFor } from './lib/settings.mjs';
 
