@@ -513,7 +513,7 @@ test('every plugin hook names a script that exists, through the plugin root', ()
   const root = join(SKILL, '..', '..');
   const hooks = JSON.parse(readFileSync(join(root, 'hooks', 'hooks.json'), 'utf8')).hooks;
   const events = Object.keys(hooks);
-  assert.deepEqual(events.sort(), ['PostCompact', 'PostToolUse', 'PreCompact', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
+  assert.deepEqual(events.sort(), ['PostCompact', 'PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
   // The Stop hooks are the persist loop first (the direct work it exists for
   // rarely loads the skill, so it must stay a no-op for an unarmed session) and
   // then the Pickup-line check, which only speaks for a bound run.
@@ -530,12 +530,13 @@ test('every plugin hook names a script that exists, through the plugin root', ()
     }
   }
   // Every hook is registered here and nowhere else (hooks-registered-once
-  // .test.mjs proves the skill frontmatter carries none). turn-check and
-  // precompact-check speak only for a session bound to a run, so registering
-  // them plugin-wide costs an unbound session nothing. return-check is retired.
+  // .test.mjs proves the skill frontmatter carries none). turn-check speaks
+  // only for a session bound to a run, so registering it plugin-wide costs an
+  // unbound session nothing. return-check and precompact-check are retired:
+  // the context notice asks for the checkpoint instead of a compaction block.
   const all = JSON.stringify(hooks);
   assert.match(all, /turn-check\.mjs/);
-  assert.match(all, /precompact-check\.mjs/);
+  assert.doesNotMatch(all, /precompact-check|PreCompact/);
   assert.doesNotMatch(all, /return-check/);
 });
 

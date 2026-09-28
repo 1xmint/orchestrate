@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
   thresholds, adviseContext, contextEpoch, checkpointPath, hasCheckpoint, newestCheckpoint,
-  switchAdvice, contextNotice, contextTick, formatReading,
+  switchAdvice, contextNotice, contextTick, formatReading, shortPath,
 } from './context-advice.mjs';
 import { toReading } from './context-scan.mjs';
 import { loadPolicy } from './policy.mjs';
@@ -133,6 +133,43 @@ test('contextNotice says the size at checkpoint and compact, explains investigat
   const small = measured(1000);
   assert.equal(contextNotice(small, adviseContext(small, p), ctx), '');
   assert.equal(contextNotice(null, null, ctx), '');
+});
+
+test('with no checkpoint, the checkpoint notice asks for one and names the path; with one, it does not', () => {
+  const p = policy();
+  const home = mkdtempSync(join(tmpdir(), 'orch-adv-home-'));
+  const dir = join(home, '.claude', 'orchestrate', 'context');
+  const session = '0b7e5f1c-3a2d-4c8e-9f10-1234567890ab';
+  const { checkpointAt } = thresholds(null, p);
+  const r = measured(checkpointAt, { compaction: { uuid: 'e1d2c3b4-a5f6-4789-8abc-def012345678', at: new Date(Date.now() - 60000).toISOString() }, compactions: 3 });
+  const ctx = { policy: p, session, dir, home, editCounter: 123 };
+  const ask = contextNotice(r, adviseContext(r, p), ctx);
+  assert.match(ask, /write the checkpoint now \(goal, decisions, files changed, verification, next action\) to ~\/\.claude\/orchestrate\/context\/0b7e5f1c-[^ ]*\/checkpoint-e1d2c3b4-[^ ]*\.md$/);
+  assert.ok(!ask.includes(home.replace(/\\/g, '/')) && !ask.includes(home), 'no machine path in the notice');
+  assert.ok(Buffer.byteLength(ask) < 400, `under 400 B, got ${Buffer.byteLength(ask)}`);
+  const path = checkpointPath(session, r, dir);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, 'goal: x\n');
+  const has = contextNotice(r, adviseContext(r, p), ctx);
+  assert.doesNotMatch(has, /write the checkpoint/);
+  assert.match(has, /newest checkpoint: /);
+});
+
+test('at the compact line with no checkpoint, one clause says compaction will summarise without one', () => {
+  const p = policy();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-adv-'));
+  const { compactAt } = thresholds(null, p);
+  const r = measured(compactAt);
+  const text = contextNotice(r, adviseContext(r, p), { policy: p, session: 's1', dir, plansDir: dir });
+  assert.match(text, / · compaction will summarise without a checkpoint$/);
+  assert.doesNotMatch(text, /write the checkpoint/);
+  assert.ok(Buffer.byteLength(text) < 400);
+});
+
+test('shortPath writes a home path as ~/ with forward slashes and leaves others alone', () => {
+  assert.equal(shortPath('/h/u/.claude/x.md', '/h/u'), '~/.claude/x.md');
+  assert.equal(shortPath('C:\\Users\\u\\.claude\\x.md', 'C:\\Users\\u'), '~/.claude/x.md');
+  assert.equal(shortPath('/tmp/x.md', '/h/u'), '/tmp/x.md');
 });
 
 test('contextTick keys by epoch and step, and is silent for an unknown reading', () => {

@@ -81,6 +81,20 @@ test('advice is announced once: the same advice on the next sample carries no no
   assert.equal(again.notice, '');
 });
 
+test('the checkpoint ask is said once per epoch, and again after a compaction', () => {
+  const { dir } = tempHome();
+  const { checkpointAt } = thresholds(null, policy());
+  const lines = [assistantLine({ input_tokens: checkpointAt }, 'a')];
+  const p = transcript(lines);
+  const first = sampleContext({ transcriptPath: p, session: 's1', policy: policy(), dir });
+  assert.match(first.notice, /write the checkpoint now .* to .*checkpoint-s1\.md$/);
+  const again = sampleContext({ transcriptPath: p, session: 's1', policy: policy(), dir });
+  assert.equal(Buffer.byteLength(again.notice), 0, 'second call in the same epoch says nothing');
+  writeFileSync(p, [...lines, boundaryLine('e7'), assistantLine({ input_tokens: checkpointAt }, 'b')].join(''));
+  const after = sampleContext({ transcriptPath: p, session: 's1', policy: policy(), dir });
+  assert.match(after.notice, /write the checkpoint now .* to .*checkpoint-e7\.md$/, 'a new epoch asks again, for its own file');
+});
+
 test('an unannounced sample records nothing until markAnnounced and markTicked are called', () => {
   const { dir } = tempHome();
   const { checkpointAt } = thresholds(null, policy());

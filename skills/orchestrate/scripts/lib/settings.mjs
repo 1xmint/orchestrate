@@ -117,9 +117,7 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
     // The Pickup check belongs with the other money-mechanics hooks under
     // `--with-hook`, rather than a third flag nobody would think to pass.
     out.push({ event: 'Stop', matcher: null, command: commandFor(join(scriptsDir, 'turn-check.mjs')), timeout: 10 });
-    out.push({ event: 'PreCompact', matcher: null, command: commandFor(join(scriptsDir, 'precompact-check.mjs')), timeout: 10 });
-    // Unlike precompact-check.mjs, this one is safe to register plugin-wide
-    // (hooks/hooks.json does the same): it only ever acts inside a helper
+    // Registered plugin-wide too (hooks/hooks.json): it only ever acts inside a helper
     // whose session is already bound to a run, and does nothing otherwise.
     out.push({ event: 'PostCompact', matcher: null, command: commandFor(join(scriptsDir, 'postcompact-check.mjs')), timeout: 10 });
   }
@@ -131,9 +129,13 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
 // it, so nobody is left running a retired check forever. Matched on the first
 // line of its prompt, which is what `stripOurs` compares.
 export const RETIRED_PROMPTS = ['You are checking one reply from a coding assistant.'];
+// The same for a retired script, matched on its basename. The PreCompact
+// checkpoint block reached nobody under autocompact; the context notice asks
+// for the checkpoint instead.
+export const RETIRED_SCRIPTS = ['precompact-check.mjs'];
 
 export function applyRegistrations(settings, entries) {
-  const basenames = [...new Set(entries.map(e => commandBasename(e.command)).filter(Boolean))];
+  const basenames = [...new Set([...entries.map(e => commandBasename(e.command)).filter(Boolean), ...RETIRED_SCRIPTS])];
   const prompts = [...entries.filter(e => e.type === 'prompt').map(e => e.prompt), ...RETIRED_PROMPTS];
   const removed = stripOurs(settings, basenames, prompts);
   for (const e of entries) addHook(settings, e.event, e.matcher, e.command, e.timeout, e);

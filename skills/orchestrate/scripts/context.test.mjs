@@ -131,7 +131,7 @@ test('there is no escalated "hard" tier past compactAt: a conversation far past 
   const advice = adviseContext(reading, policy);
   assert.equal(advice.action, 'compact');
   const text = contextNotice(reading, advice, { policy, dir: mkdtempSync(join(tmpdir(), 'ctx-far-')) });
-  assert.match(text, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · newest checkpoint: none$`));
+  assert.match(text, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · newest checkpoint: none · compaction will summarise without a checkpoint$`));
   assert.doesNotMatch(text, /next:/, 'both size events are already behind it');
   assert.doesNotMatch(text, ORDERS);
   assert.match(checkpointPath('s', reading), /checkpoint-epoch-1\.md$/);
@@ -372,8 +372,8 @@ test('compact by default; a fresh conversation only after repeated compactions',
   assert.doesNotMatch(twice.notice, ORDERS);
   // No escalated "hard" tier: far past compactAt the line has the same shape.
   const far = Math.max(compactAt, policy.context.autocompactDefault) + 100000;
-  assert.match(at(far, 2).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · compacted 2× · newest checkpoint: none$`));
-  assert.match(at(far, 0).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · newest checkpoint: none$`));
+  assert.match(at(far, 2).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · compacted 2× · newest checkpoint: none · compaction will summarise without a checkpoint$`));
+  assert.match(at(far, 0).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · newest checkpoint: none · compaction will summarise without a checkpoint$`));
   const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: big, compactions: 2 } });
   assert.match(stop.why, /fresh conversation that resumes from the checkpoint/);
 });

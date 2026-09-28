@@ -93,17 +93,6 @@
           }
         ]
       }
-    ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/precompact-check.mjs\"",
-            "timeout": 10
-          }
-        ]
-      }
     ]
   }
 }
