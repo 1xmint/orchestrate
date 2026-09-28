@@ -44,6 +44,15 @@ test('git push --delete and the :branch shorthand are stopped', () => {
   assert.equal(decide('git push origin :a').kind, 'ask');
 });
 
+test('a helper worktree branch may be deleted with -d once merged; -D, other names, and mixed lists still stop', () => {
+  assert.equal(decide('git branch -d worktree-agent-abc123').kind, 'pass');
+  assert.equal(decide('git branch --delete worktree-agent-abc123 worktree-agent-0f9e').kind, 'pass');
+  assert.equal(decide('git branch -D worktree-agent-abc123').kind, 'ask');
+  assert.equal(decide('git branch -d main').kind, 'ask');
+  assert.equal(decide('git branch -d worktree-agent-abc123 feature').kind, 'ask');
+  assert.equal(decide('git branch -d worktree-agent-abc123 && git branch -D main').kind, 'ask');
+});
+
 test('deleting a branch three ways is stopped, and a merged -d cannot be told apart cheaply so it is stopped too', () => {
   assert.equal(decide('git branch -D x').kind, 'ask');
   assert.equal(decide('git branch -d x').kind, 'ask');

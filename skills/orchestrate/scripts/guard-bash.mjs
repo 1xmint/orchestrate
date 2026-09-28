@@ -146,7 +146,12 @@ const RULES = [
   },
   {
     name: 'branch-delete-local',
-    test: cmd => /\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd),
+    // One shape passes: the whole command is `git branch -d` (or --delete) of
+    // helper worktree branches only, the ones Claude Code itself names
+    // worktree-agent-<hex>. Git refuses -d while a branch is unmerged, so that
+    // cleanup cannot lose work. -D, and -d of any other name, still ask.
+    test: cmd => (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
+      && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd),
     reason: `This would permanently delete a branch. ${ASK_TAIL}`,
   },
   {

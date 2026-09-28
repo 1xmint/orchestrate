@@ -58,6 +58,18 @@ round-4 report names each with the reason. The live run in round 4 also
 showed the lead building directly instead of sending a helper; the card rule
 is followed by the model, not enforced, and that stays a known gap.
 
+Round 8's live runs (`docs/audits/2026-09-27-live-runs-r8.md`) reached the
+paths the earlier rounds never did. Three changes came out of it. A helper's
+turns are counted per segment, since the last user message that carries text,
+because Claude Code itself tells the lead to message a capped background
+helper and a resumed helper's transcript then holds two segments; the
+whole-transcript count had marked a finished return partial. The resume rule
+now says one thing everywhere: message the helper while its cache is warm if
+what is left is small, otherwise a fresh smaller packet. And the command guard
+lets the lead delete its own helper's worktree branch with the unforced
+`git branch -d`, which git refuses while the branch is unmerged, so nothing
+can be lost; the forced delete, and deleting any other branch, still ask.
+
 ## v0.16.1 — a review that can stop the merge, 2026-09-21
 
 Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` (replaced the
