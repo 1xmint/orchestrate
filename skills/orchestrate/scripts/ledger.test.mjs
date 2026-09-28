@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendCost, sumCosts, parseReturn, lintRunRow, evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE } from './ledger.mjs';
+import { appendCost, sumCosts, parseReturn, lintRunRow, lintLedger, evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE } from './ledger.mjs';
 
 function tmpFile() {
   const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-'));
@@ -61,6 +61,47 @@ test('a well-formed RUN.md row passes the lint unchanged', () => {
   const r = lintRunRow(header, row);
   assert.equal(r.ok, true);
   assert.equal(r.cells.length, 7);
+});
+
+// A small ledger in the real layout: task table, then the sections below it.
+const HEAD = '| id | phase | blocks on | owns | role · model | task | acceptance evidence | attempts | result |\n|---|---|---|---|---|---|---|---|---|';
+const ledger = (rows, below = '') =>
+  `# Run r\n\n## Tasks\n\n${HEAD}\n${rows.join('\n')}\n\nPhases: ...\n\n## Decisions\n- a decision\n${below}\n## Pickup\n\nPickup prompt: x\n`;
+const row = (id, phase, blocks = '—') => `| ${id} | ${phase} | ${blocks} | a.mjs | implementer · sonnet | t | e | 0 | — |`;
+
+test('lintLedger: a clean ledger prints nothing', () => {
+  const text = ledger([row('9-1-0001', '✅ done 2026-01-01'), row('9-1-0002', '⏳ dispatched 2026-01-02', '0001')]);
+  assert.deepEqual(lintLedger(text), []);
+});
+
+test('lintLedger: a task row pasted below the table is named with its line', () => {
+  const text = ledger([row('9-1-0001', '✅ done 2026-01-01')], row('9-1-0002', '✅ done 2026-01-01') + '\n');
+  const p = lintLedger(text);
+  assert.equal(p.length, 1);
+  assert.match(p[0], /9-1-0002 sits outside the task table \(line \d+\)/);
+});
+
+test('lintLedger: a row with the wrong column count inside the table is named', () => {
+  const short = '| 9-1-0003 | ✅ done | implementer · sonnet | base abc, worktree | ~$2 | wave-9.md |';
+  const p = lintLedger(ledger([row('9-1-0001', '✅ done 2026-01-01'), short]));
+  assert.equal(p.length, 1);
+  assert.match(p[0], /9-1-0003 has 6 columns, the table header has 9/);
+});
+
+test('lintLedger: a row still dispatched days after the newest row is named', () => {
+  const p = lintLedger(ledger([row('9-1-0001', '⏳ dispatched 2026-01-01'), row('9-1-0002', '✅ done 2026-01-04')]));
+  assert.equal(p.length, 1);
+  assert.match(p[0], /9-1-0001 still says "⏳ dispatched 2026-01-01", 3 days older/);
+});
+
+test('lintLedger: a dispatched row a later done row blocks on is named, whatever its age', () => {
+  const p = lintLedger(ledger([row('9-1-0001', '⏳ dispatched'), row('9-1-0002', '✅ done', '0001')]));
+  assert.equal(p.length, 1);
+  assert.match(p[0], /9-1-0001 still says "⏳ dispatched" but 9-1-0002, which blocks on it, is done/);
+});
+
+test('lintLedger: a row dispatched the same day as the newest row is not stale', () => {
+  assert.deepEqual(lintLedger(ledger([row('9-1-0001', '⏳ dispatched 2026-01-04'), row('9-1-0002', '✅ done 2026-01-04')])), []);
 });
 
 test('a row with a shifted or missing cell is refused, naming the task id', () => {

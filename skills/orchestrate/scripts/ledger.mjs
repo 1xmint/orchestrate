@@ -345,6 +345,61 @@ export function lintRunRow(headerLine, rowLine) {
   return { ok: true, cells: row };
 }
 
+// The whole ledger, not one row. lintRunRow above only ever checked a row it
+// was handed against a header it was handed, and nothing handed it the real
+// file: a row pasted below the Decisions section, with its columns shifted,
+// and a row left "dispatched" for days all passed because no check looked at
+// where a row sat or how old its open phase was. readRun() reads every
+// id-shaped line anywhere in the file by column position, so a row outside the
+// table is read as if it were in it, with the wrong cells.
+//
+// Returns one plain sentence per problem, and nothing for a clean ledger.
+const TASK_ROW = /^\|\s*\d+-\d+-\d{4}[a-z]?\s*\|/;
+const OPEN_PHASE = /dispatched|⏳|🔨|running|📋|planned/i;
+const DONE_PHASE = /✅|done|merged/i;
+export const STALE_OPEN_DAYS = 2;
+
+export function lintLedger(text) {
+  const lines = String(text || '').split('\n');
+  const headerAt = lines.findIndex(l => /^\|\s*id\s*\|/i.test(l));
+  const problems = [];
+  if (headerAt < 0) return problems;
+  // The task table is the header and the unbroken run of `|` lines under it.
+  let end = headerAt + 1;
+  while (end < lines.length && /^\s*\|/.test(lines[end])) end++;
+  const header = lines[headerAt];
+  const cols = tableCells(header).map(c => c.toLowerCase());
+  const phaseAt = cols.indexOf('phase');
+  const blocksAt = cols.indexOf('blocks on');
+  const rows = [];
+  lines.forEach((line, i) => {
+    if (!TASK_ROW.test(line)) return;
+    const id = tableCells(line)[0];
+    if (i < headerAt || i >= end) { problems.push(`row ${id} sits outside the task table (line ${i + 1}); move it into the table`); return; }
+    const r = lintRunRow(header, line);
+    if (!r.ok) { problems.push(r.reason.replace(/: refused, not written$/, '')); return; }
+    rows.push({ id, cells: r.cells });
+  });
+  // A phase still open while the run has moved on: dated at least
+  // STALE_OPEN_DAYS before the newest date in the table, or named in a later
+  // row's `blocks on` while that later row is already done.
+  const dateOf = s => { const m = /(\d{4}-\d{2}-\d{2})/.exec(s); return m ? Date.parse(m[1]) : null; };
+  const newest = Math.max(0, ...rows.map(r => dateOf(r.cells.join(' ')) || 0));
+  const short = id => (/-(\d+[a-z]?)$/.exec(id) || [])[1] || id;
+  rows.forEach((r, i) => {
+    const phase = phaseAt >= 0 ? r.cells[phaseAt] : '';
+    if (!OPEN_PHASE.test(phase) || DONE_PHASE.test(phase)) return;
+    const when = dateOf(phase);
+    const days = when && newest ? Math.floor((newest - when) / 86400000) : 0;
+    const dependent = blocksAt < 0 ? null : rows.slice(i + 1).find(o =>
+      DONE_PHASE.test(o.cells[phaseAt] || '') &&
+      (o.cells[blocksAt] || '').split(/[\s,]+/).some(b => b && (b === r.id || b === short(r.id))));
+    if (dependent) problems.push(`row ${r.id} still says "${phase}" but ${dependent.id}, which blocks on it, is done; record what happened to ${r.id}`);
+    else if (days >= STALE_OPEN_DAYS) problems.push(`row ${r.id} still says "${phase}", ${days} days older than the newest row; record what happened to it`);
+  });
+  return problems;
+}
+
 export const INDEX_NAME = 'returns.jsonl';
 
 // The association, appended as one line. Append-only, so two hooks finishing at
@@ -501,7 +556,16 @@ function main() {
 }
 
 // Only when run as a hook, not when a test imports the pure functions above.
+// `node ledger.mjs --lint path/to/RUN.md` checks a ledger by hand: silent and
+// exit 0 when clean, one line per problem and exit 1 when not.
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  if (process.argv[2] === '--lint') {
+    let problems;
+    try { problems = lintLedger(readFileSync(process.argv[3], 'utf8')); }
+    catch (e) { process.stdout.write(`cannot read ${process.argv[3] || '(no path given)'}\n`); process.exit(1); }
+    if (problems.length) process.stdout.write(problems.join('\n') + '\n');
+    process.exit(problems.length ? 1 : 0);
+  }
   try { main(); } catch {}
   process.exit(0);
 }
