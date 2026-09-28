@@ -50,7 +50,7 @@ BLOCKS ON: <ids>                  when another task must land first
 BUILDS ON: <path>                 second opinion: go deeper where it is thin
                                   or wrong; return agreed/disputed/added
 WHERE: repo <path>  base <branch @ sha>  branch <agent/<id>-<slug>>
-       worktree: <yes | no>  run dir <absolute path in the main checkout>
+       worktree: <yes | no, default yes>  run dir <absolute path in the main checkout>
 OWNS: <globs>                     when another task runs at the same time; an
                                   agent can't see other worktrees, so a shared
                                   file becomes a merge conflict

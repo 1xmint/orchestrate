@@ -133,6 +133,23 @@ function isProcessKill(cmd) {
   return false;
 }
 
+// The lead's whole clean-up pair for a finished helper worktree: remove the
+// worktree folder, then delete its now-unreferenced branch. Passes only as
+// one exact two-command shape — `git worktree remove <path>` joined by `&&`
+// or `;` to `git branch -d`/`--delete worktree-agent-<hex>` — with no force
+// flag on either half and the path under `.claude/worktrees/`. Anything else
+// (a `--force`/`-D`, a path elsewhere, extra commands) fails the match and
+// falls through to the ordinary branch-delete rule below, unchanged.
+const WORKTREE_CLEANUP_CHAIN_RE = /^\s*git\s+worktree\s+remove\s+(\S+)\s*(?:&&|;)\s*git\s+branch\s+(-d|--delete)\s+worktree-agent-[0-9a-f]+\s*$/;
+
+function isSafeWorktreeCleanupChain(cmd) {
+  const m = WORKTREE_CLEANUP_CHAIN_RE.exec(cmd);
+  if (!m) return false;
+  const path = m[1];
+  if (path.startsWith('-')) return false;
+  return normSlashes(path).toLowerCase().includes('.claude/worktrees/');
+}
+
 const RULES = [
   {
     name: 'branch-delete-remote',
@@ -150,8 +167,11 @@ const RULES = [
     // helper worktree branches only, the ones Claude Code itself names
     // worktree-agent-<hex>. Git refuses -d while a branch is unmerged, so that
     // cleanup cannot lose work. -D, and -d of any other name, still ask.
+    // A second shape also passes: that same delete chained after removing the
+    // worktree folder it belonged to — see isSafeWorktreeCleanupChain above.
     test: cmd => (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
-      && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd),
+      && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd)
+      && !isSafeWorktreeCleanupChain(cmd),
     reason: `This would permanently delete a branch. ${ASK_TAIL}`,
   },
   {
