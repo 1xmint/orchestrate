@@ -59,7 +59,7 @@ test('inputSide: uncached input plus cache reads and writes; all-null usage is n
 });
 
 test('a compaction boundary ends the scan: an old 311k reading never survives a 17k summary', () => {
-  const { p } = file([user('go', 0), assistant(250000, { min: 1 }), assistant(311000, { min: 2 }), boundary(311000, 17000, 3), summary(3)]);
+  const { p, dir } = file([user('go', 0), assistant(250000, { min: 1 }), assistant(311000, { min: 2 }), boundary(311000, 17000, 3), summary(3)]);
   const r = readContext(p, { now: NOW, policy, capacity: null });
   assert.equal(r.state, 'provisional');
   assert.equal(r.tokens, 17000);
@@ -67,7 +67,13 @@ test('a compaction boundary ends the scan: an old 311k reading never survives a 
   assert.equal(r.compaction.preTokens, 311000);
   const a = adviseContext(r, policy);
   assert.equal(a.action, 'none', 'nothing to say until a response measures it');
-  assert.equal(contextNotice(r, a), '');
+  // The scan itself says nothing new here, but the first reading after a
+  // boundary with no checkpoint on disk still asks once — this is the only
+  // place a lead running under autocompact ever hears that the conversation
+  // was just summarised. Pass a scratch dir so this never reads the real
+  // ~/.claude/orchestrate/context.
+  const notice = contextNotice(r, a, { dir: join(dir, 'notices') });
+  assert.match(notice, /the conversation was just summarised; before anything else, write the checkpoint now/);
 });
 
 test('retained history: after compaction the first new response is the measurement', () => {
@@ -253,6 +259,35 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   // The completed line is read whole from where the last complete line ended.
   const s9 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s9.reading.tokens, cp + 15000);
+});
+
+test('the first reading after a compaction with no checkpoint on disk asks once, then falls silent', () => {
+  const { p, store } = file([assistant(311000, { min: 1 }), boundary(311000, 17000, 2), summary(2)]);
+  const s1 = sampleContext({ transcriptPath: p, session: 'sess-cp', policy, now: NOW, dir: store });
+  assert.equal(s1.reading.state, 'provisional');
+  assert.match(s1.notice, /the conversation was just summarised; before anything else, write the checkpoint now/);
+  // Sampling again with nothing new: the advice key has not changed, so the
+  // ask is not repeated (the once-per-epoch rule already in context-store.mjs).
+  const s2 = sampleContext({ transcriptPath: p, session: 'sess-cp', policy, now: NOW, dir: store, force: true });
+  assert.doesNotMatch(s2.notice, /just summarised/);
+});
+
+test('the hook script reads settings.json and the environment from the paths it is given, never a default', () => {
+  // Sanity check on the production wiring in context-check.mjs: run the real
+  // hook against a fresh HOME/USERPROFILE (never the real ~/.claude), and
+  // confirm it exits cleanly and prints nothing when there is nothing to say
+  // — the quiet path this task must not disturb.
+  const home = mkdtempSync(join(tmpdir(), 'orch-ctx-home-'));
+  const { p } = file([assistant(1000, { min: 1 })]);
+  const script = join(HERE, 'context-check.mjs');
+  const payload = { hook_event_name: 'PostToolUse', transcript_path: p, session_id: 'sess-quiet', tool_name: 'Read', cwd: dirname(p) };
+  const run = spawnSync(process.execPath, [script], {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '' },
+  });
+  assert.equal(run.status, 0);
+  assert.equal((run.stdout || '').trim(), '', 'a small reading says nothing');
 });
 
 test('an unannounced sample is said later; markAnnounced records delivery', () => {

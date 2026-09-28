@@ -11,6 +11,25 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadPolicy } from './policy.mjs';
 import { CONTEXT_DIR, JUST_COMPACTED_RESPONSES, idPart, readRange } from './context-scan.mjs';
+import { readSettings, parseAutocompact } from './settings.mjs';
+
+// The autocompact window a notice reports, in the order that actually governs
+// the host: the environment (a child run can override it per-process, and
+// settings.json is not the whole story there), then settings.json (what
+// orchestrate itself wrote), then the policy default. Neither `env` nor
+// `settingsPath` is read unless a caller supplies it — the real hook passes
+// its own process.env and the real settings path; a caller that omits them
+// (every test, and any other pure call) never sees this machine's own values.
+export function resolveAutocompactWindow(policy, { env = {}, settingsPath = null } = {}) {
+  const fromEnv = parseAutocompact(env && env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, { allowOff: true });
+  if (fromEnv) return fromEnv;
+  if (settingsPath) {
+    const settings = readSettings(settingsPath);
+    const fromSettings = parseAutocompact(settings && settings.env && settings.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW, { allowOff: true });
+    if (fromSettings) return fromSettings;
+  }
+  return policy.context.autocompactDefault;
+}
 
 export function thresholds(reading, policy = loadPolicy()) {
   const c = policy.context;
@@ -134,6 +153,16 @@ export function adviseContext(reading, policy = loadPolicy()) {
   const fresh = (Number(reading.compactions) || 0) >= policy.context.freshAfterCompactions;
   if (reading.tokens >= compactAt) return { action: 'compact', fresh, key: key('compact'), why: `${k(reading.tokens)} is at or above ${k(compactAt)}` };
   if (reading.tokens >= checkpointAt) return { action: 'checkpoint', key: key('checkpoint'), why: `${k(reading.tokens)} is at or above ${k(checkpointAt)}` };
+  // A reading below both lines can still be the last one the lead ever sees
+  // in this band: a turn that adds as much again as it just added would land
+  // past the compact line in one step, with the checkpoint ask never having
+  // fired (the band it would have fired in is stepped over, not landed in).
+  // `lastDelta` is the growth from the previous reading to this one, 0 when
+  // there is no previous reading in this epoch (lib/context-store.mjs sets it).
+  const lastDelta = Number(reading.lastDelta) || 0;
+  if (lastDelta > 0 && reading.tokens + lastDelta >= compactAt) {
+    return { action: 'checkpoint', key: key('checkpoint'), why: `${k(reading.tokens)} plus the last growth of ${k(lastDelta)} would reach ${k(compactAt)}` };
+  }
   return { action: 'none', key: key('none'), why: `${k(reading.tokens)} is below ${k(checkpointAt)}` };
 }
 
@@ -169,18 +198,18 @@ function ageStr(mtimeMs, now) {
 // The window this line reports against: the known capacity, or the
 // autocompact point the plugin already knows about (`policy.context.
 // autocompactDefault`), whichever is available. Null when neither is known.
-function reportedWindow(reading, policy) {
+function reportedWindow(reading, policy, ctx = {}) {
   if (reading && reading.capacity) return reading.capacity;
-  const auto = policy.context.autocompactDefault;
+  const auto = resolveAutocompactWindow(policy, ctx);
   return auto === 'off' ? null : auto;
 }
 
 // The next thing that will happen at a size: the compact line (`thresholds()`)
-// or autocompact (`policy.context.autocompactDefault`), whichever is lower and
+// or autocompact (`resolveAutocompactWindow`), whichever is lower and
 // not yet passed. Null once both are behind the current size.
-function nextEvent(reading, policy) {
+function nextEvent(reading, policy, ctx = {}) {
   const { compactAt } = thresholds(reading, policy);
-  const auto = policy.context.autocompactDefault;
+  const auto = resolveAutocompactWindow(policy, ctx);
   const candidates = [{ label: 'compact', at: compactAt }];
   if (auto !== 'off') candidates.push({ label: 'autocompact', at: auto });
   const ahead = candidates.filter(c => reading.tokens < c.at).sort((a, b) => a.at - b.at);
@@ -194,11 +223,11 @@ function nextEvent(reading, policy) {
 function factLine(reading, policy, ctx = {}, cp = undefined) {
   const { session = null, editCounter = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null, now = Date.now() } = ctx;
   const parts = [];
-  const window = reportedWindow(reading, policy);
+  const window = reportedWindow(reading, policy, ctx);
   parts.push(`${k1(reading.tokens)}${window ? ` of ${k1(window)}` : ''}`);
   const n = Number(reading.compactions) || 0;
   if (n) parts.push(`compacted ${n}×`);
-  const next = nextEvent(reading, policy);
+  const next = nextEvent(reading, policy, ctx);
   if (next) parts.push(`next: ${next.label} ${k1(next.at)}`);
   if (cp === undefined) cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
   parts.push(cp ? `newest checkpoint: ${cp.path}, ${ageStr(cp.mtimeMs, now)}` : 'newest checkpoint: none');
@@ -214,6 +243,20 @@ function factLine(reading, policy, ctx = {}, cp = undefined) {
 export function contextNotice(reading, advice, ctx = {}) {
   if (!reading || !advice) return '';
   const policy = ctx.policy || loadPolicy();
+  // Right after a compaction, before anything else: a PreCompact block reaches
+  // nobody under autocompact, so this is the one place the lead hears that the
+  // conversation was just summarised. Fires once (the once-per-epoch key in
+  // lib/context-store.mjs does not change again until either a response is
+  // measured or the size itself earns a notice) and only while nothing else
+  // is already saying something and no checkpoint exists for this epoch.
+  if (advice.action === 'none' && reading.compaction && reading.responsesSinceCompaction === 0) {
+    const { session = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null } = ctx;
+    const cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
+    if (!cp) {
+      const line = factLine(reading, policy, ctx, cp);
+      return `${line} · the conversation was just summarised; before anything else, write the checkpoint now (goal, decisions, files changed, verification, next action) to ${shortPath(checkpointPath(session, reading, dir), ctx.home)}`;
+    }
+  }
   switch (advice.action) {
     case 'checkpoint':
     case 'compact': {
