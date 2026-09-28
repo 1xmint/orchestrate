@@ -53,6 +53,31 @@ test('a helper worktree branch may be deleted with -d once merged; -D, other nam
   assert.equal(decide('git branch -d worktree-agent-abc123 && git branch -D main').kind, 'ask');
 });
 
+test('the worktree-remove-then-branch-delete cleanup chain passes for a helper worktree, in auto and default', () => {
+  const chain = 'git worktree remove .claude/worktrees/worktree-agent-abc123 && git branch -d worktree-agent-abc123';
+  assert.equal(decide(chain).kind, 'pass');
+  assert.equal(decide(chain, { headless: true, mode: 'auto' }).kind, 'pass');
+  assert.equal(decide(chain, { subagent: true }).kind, 'pass');
+  // `;` joins the same way as `&&`, and --delete is the long form of -d.
+  const chainSemi = 'git worktree remove .claude/worktrees/worktree-agent-abc123 ; git branch --delete worktree-agent-abc123';
+  assert.equal(decide(chainSemi).kind, 'pass');
+});
+
+test('a forced worktree cleanup chain still asks or denies, same as today', () => {
+  const forcedWorktree = 'git worktree remove --force .claude/worktrees/worktree-agent-abc123 && git branch -d worktree-agent-abc123';
+  assert.equal(decide(forcedWorktree).kind, 'ask');
+  assert.equal(decide(forcedWorktree, { headless: true, mode: 'auto' }).kind, 'deny');
+  const forcedBranch = 'git worktree remove .claude/worktrees/worktree-agent-abc123 && git branch -D worktree-agent-abc123';
+  assert.equal(decide(forcedBranch).kind, 'ask');
+  assert.equal(decide(forcedBranch, { headless: true, mode: 'auto' }).kind, 'deny');
+});
+
+test('a worktree cleanup chain with the path outside .claude/worktrees/ still asks or denies', () => {
+  const outside = 'git worktree remove ../elsewhere/worktree-agent-abc123 && git branch -d worktree-agent-abc123';
+  assert.equal(decide(outside).kind, 'ask');
+  assert.equal(decide(outside, { headless: true, mode: 'auto' }).kind, 'deny');
+});
+
 test('deleting a branch three ways is stopped, and a merged -d cannot be told apart cheaply so it is stopped too', () => {
   assert.equal(decide('git branch -D x').kind, 'ask');
   assert.equal(decide('git branch -d x').kind, 'ask');

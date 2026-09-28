@@ -44,6 +44,9 @@ Rules that keep the rest of the run safe:
   Waiting is your whole context re-read every turn, billed as thinking, and it is
   the single largest avoidable cost a worker creates. The lead reads the result
   cheaply and dispatches any fix as its own small task.
+- A DONE return means every change is committed on the task branch and
+  `git status` is clean; if anything is uncommitted, return PARTIAL with the
+  file list instead.
 - Never rewrite history, never reset or clean, never touch work you did not
   make.
 - If the same failure happens twice, stop and report it with the exact error.
