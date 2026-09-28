@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, progressWorktreeNote, AUTHOR_ROLES, claimOrDeny, codexFact } from './guard-agent.mjs';
+import { modelDecision, taskKey, grantCheck, FORK_MAX_CONTEXT, progressFact, progressWorktreeNote, AUTHOR_ROLES, RESUME_ROLES,claimOrDeny, codexFact } from './guard-agent.mjs';
 import { normalizeRole, estimateDollars } from './lib/prices.mjs';
 import { snapshotFrom, readQuota } from './lib/quota.mjs';
 import { recordCodexOk, markExhausted, CODEX_OK_FRESH_MS } from './lib/workers.mjs';
@@ -60,7 +60,7 @@ const pro = { tier: 'pro' };
 
 test('progressFact: a plain fact for an author-role packet with no PROGRESS line, absent for reviewer and in plan mode', () => {
   const reason = 'no PROGRESS line: a capped return will have nothing to resume from';
-  for (const role of AUTHOR_ROLES) {
+  for (const role of RESUME_ROLES) {
     assert.equal(progressFact(role, 'TASK: 1\nfind it', false), reason, `${role} names the missing line`);
     assert.equal(progressFact(`orchestrate:${role}`, 'TASK: 1\nfind it', false), reason, 'a plugin-namespaced role is still recognised');
     assert.equal(progressFact(role, 'TASK: 1\nPROGRESS: /r/p.md\nfind it', false), '', 'said nothing once the line is there');
@@ -69,6 +69,14 @@ test('progressFact: a plain fact for an author-role packet with no PROGRESS line
   assert.equal(progressFact('orch-reviewer', 'TASK: 1\nfind it', false), '', 'a reviewer returns a verdict, not partial work');
   assert.equal(progressFact('orch-coordinator', 'TASK: 1\nfind it', false), '', 'the coordinator packet is the lead\'s business');
   assert.equal(progressFact('Explore', 'x', false), '', 'a built-in sweeper is not an author role');
+});
+
+test('progressFact: silent for the short read-only roles, which a fresh dispatch simply redoes', () => {
+  assert.deepEqual([...RESUME_ROLES].sort(), ['orch-debugger', 'orch-implementer', 'orch-planner']);
+  for (const role of ['orch-researcher', 'orch-browser', 'orchestrate:orch-researcher']) {
+    assert.equal(progressFact(role, 'TASK: 1\nfind it', false), '', `${role} gets no PROGRESS warning`);
+  }
+  assert.ok(AUTHOR_ROLES.has('orch-researcher'), 'still an author role for the worktree note');
 });
 
 test('progressFact: a prompt that only points at a packet file is checked against that file', () => {

@@ -177,6 +177,20 @@ test('a committed claim over a dirty tree is blocked and names the files', () =>
   assert.match(out.reason, /shows 1 file not committed \(c\.txt\)/);
 });
 
+// Round 8's probe: a Stop carrying only last_assistant_message (no
+// transcript_path) printed nothing, because the check read the transcript alone.
+test('a committed claim in last_assistant_message is checked without a transcript', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  writeFileSync(join(dir, 'c.txt'), 'three\n');
+  writeSession(home, 'sess-3m', { startHead });
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-3m', cwd: dir, last_assistant_message: 'Everything is committed and the login page works.' }, home);
+  assert.equal(r.status, 0);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /shows 1 file not committed \(c\.txt\)/);
+});
+
 test("a committed claim is not blocked when only the plugin's own folders are untracked", () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
   const { dir, startHead } = makeRepo();

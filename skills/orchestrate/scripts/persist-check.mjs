@@ -190,8 +190,11 @@ function commitClaimReason(claim, git, commitsSinceStart) {
 // docs/audits/2026-09-27-scoresheet-r6.md top-five item 1 and row 11).
 function checkCommitClaim(input, state) {
   if (input.stop_hook_active || !input.cwd) return null;
-  const tail = input.transcript_path ? readTail(input.transcript_path, PERSIST_SCAN_CAP) : '';
-  const text = lastAssistantText(tail);
+  // The Stop payload's own last_assistant_message first: it is the closing
+  // message itself, with no dependence on the transcript having been flushed.
+  // The transcript tail is the fallback for a payload without it.
+  let text = typeof input.last_assistant_message === 'string' ? input.last_assistant_message.trim() : '';
+  if (!text) text = lastAssistantText(input.transcript_path ? readTail(input.transcript_path, PERSIST_SCAN_CAP) : '');
   if (!text) return null;
   const claim = classifyClaim(text);
   if (!claim || claim === 'mixed') return null;

@@ -312,6 +312,12 @@ function emit(obj) {
 // (its own packet is the lead's business, not a worker's).
 export const AUTHOR_ROLES = new Set(['orch-planner', 'orch-implementer', 'orch-researcher', 'orch-browser', 'orch-debugger']);
 
+// The subset whose capped return is partial work worth resuming from disk, so
+// a missing PROGRESS line is worth a warning. orch-researcher and orch-browser
+// are left out: their work is short and read-only, a fresh dispatch redoes it
+// cheaply, and a live run showed the warning there as noise.
+export const RESUME_ROLES = new Set(['orch-planner', 'orch-implementer', 'orch-debugger']);
+
 // A short prompt that only points at a packet file ("Your packet is in
 // <path>, lines ..." or "packet: <path>") carries no PROGRESS line itself
 // even when the file it names does. Cheapest match first: a bare path token
@@ -335,7 +341,7 @@ function packetPathFrom(prompt) {
 // that is right there, just not in the short prompt the guard first saw.
 export function progressFact(role, prompt, planMode, readFile = readFileSync) {
   if (planMode) return '';
-  if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
+  if (!RESUME_ROLES.has(normalizeRole(role))) return '';
   const text = String(prompt || '');
   if (/^\s*PROGRESS:\s*\S+/m.test(text)) return '';
   const packetPath = packetPathFrom(text);
