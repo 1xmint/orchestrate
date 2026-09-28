@@ -25,13 +25,25 @@ export const REVIEW_WORDS = [
 // WHEN heading, or to the end of the prompt when none of those follow. A
 // packet with no OBJECTIVE heading at all is judged on its first 600
 // characters instead, since that is usually where the ask is stated.
+// A packet's WHERE, FILES and RULES lines name paths, globs and constraints,
+// not the work itself — "run dir <absolute path in the main checkout>" is
+// the WHERE field's own template text, and a packet with no OBJECTIVE
+// heading falls back to its first 600 characters (below), which often reach
+// one of these lines. Stripped out before reviewWordMatch ever sees them, so
+// a word like "checkout" sitting in a WHERE line does not read as the task's
+// own objective.
+const FIELD_LINE = /^[ \t]*(WHERE|FILES|RULES)[ \t]*:.*$/gim;
+
 export function objectiveSection(prompt) {
   const text = String(prompt || '');
   const start = /^[ \t]*OBJECTIVE[ \t]*:?[ \t]*$/im.exec(text);
-  if (!start) return text.slice(0, 600);
-  const rest = text.slice(start.index + start[0].length);
-  const end = /^[ \t]*(CONTEXT|SCOPE|DONE WHEN)[ \t]*:?[ \t]*$/im.exec(rest);
-  return end ? rest.slice(0, end.index) : rest;
+  const section = (() => {
+    if (!start) return text.slice(0, 600);
+    const rest = text.slice(start.index + start[0].length);
+    const end = /^[ \t]*(CONTEXT|SCOPE|DONE WHEN)[ \t]*:?[ \t]*$/im.exec(rest);
+    return end ? rest.slice(0, end.index) : rest;
+  })();
+  return section.replace(FIELD_LINE, '');
 }
 
 // A negation directly ahead of a candidate match clears it: up to three

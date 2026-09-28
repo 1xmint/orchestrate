@@ -544,7 +544,11 @@ function main() {
       // toolUseId is the id of the Agent call that started this helper, the
       // same one guard-agent.mjs stored on the dispatch row, so the worker
       // count can pair the two directly even when no transcript file exists.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}) });
+      // reviewGated: this return was tagged for independent review (REVIEW:
+      // yes or an inferred word) and none has come back yet — turn-check.mjs
+      // reads this to hold the lead's finish once, without re-reading the
+      // packet or the return file.
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}) });
       saveSession(state);
     }
   } catch {}

@@ -57,6 +57,31 @@ export function shouldBlock({ pickupHash: hash, section, lastDispatchAt, prev = 
   return { block: false, why: 'no dispatch since the last check' };
 }
 
+// A task's own returned row (ledger.mjs's SubagentStop, session state
+// `returned`) carries `reviewGated: true` when it came back DONE tagged for
+// independent review with no reviewer return yet. Resolved either by a
+// reviewer dispatch this session recorded with `reviewOf` naming the same
+// task (guard-agent.mjs's recordDispatch), or by the lead's own closing
+// message saying the review was skipped, in its own words, near "review".
+// Blocks at most once per task: a task already in `blockedFor` from a prior
+// Stop is left alone whether or not it was ever resolved, the same "ask
+// once" shape as the Pickup check below — a Stop hook that re-blocks a task
+// the lead already saw once is a loop with no exit.
+const SKIP_EXPLAINED = /\bskip(?:ped|ping)?\b[^.\n]{0,80}\breview\b|\breview\b[^.\n]{0,80}\bskip(?:ped|ping)?\b/i;
+
+export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedFor }) {
+  const already = new Set(Array.isArray(blockedFor) ? blockedFor : []);
+  const gated = (Array.isArray(returned) ? returned : []).filter(r => r && r.reviewGated && r.task);
+  const skipSaid = SKIP_EXPLAINED.test(String(lastMessage || ''));
+  for (const r of gated) {
+    if (already.has(r.task)) continue;
+    const reviewed = (Array.isArray(dispatches) ? dispatches : []).some(d => d && d.reviewOf === r.task);
+    if (reviewed || skipSaid) continue;
+    return { block: true, task: r.task, blockedFor: [...already, r.task] };
+  }
+  return { block: false, task: null, blockedFor: [...already] };
+}
+
 const STORE = () => join(DIR, 'turn-checks.json');
 
 function emitBlock(reason) {
@@ -114,9 +139,27 @@ function checkHeartbeat(input) {
     return emitBlock(`orchestrate: ${hb.why}`);
   }
 
+  const state = loadSession(input.session_id) || {};
+
+  // Then the review hold: a task tagged for independent review (money, auth,
+  // destructive data, a shared contract — guard-agent.mjs) that came back
+  // DONE with none sent. Once per task, same "ask once" shape as Pickup below.
+  const rh = reviewHoldDecision({
+    returned: state.returned,
+    dispatches: state.dispatches,
+    lastMessage: input.last_assistant_message,
+    blockedFor: rec.reviewBlockedFor,
+  });
+  if (rh.block) {
+    updated.reviewBlockedFor = rh.blockedFor;
+    store[key] = updated;
+    try { writeJsonAtomic(path, store); } catch {}
+    return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
+  }
+  if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
+
   // Then Pickup honesty, only after a dispatch, only for the run this session
   // drives, exactly as before.
-  const state = loadSession(input.session_id) || {};
   const lastDispatchAt = state.lastDispatchAt || null;
   if (!lastDispatchAt) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
 
