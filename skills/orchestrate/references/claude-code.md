@@ -76,7 +76,9 @@ all, so `AGENTS.md` rules that matter to it go in the packet too.
 repo, wins). Fields used here: `name`, `description`, `model`, `tools`,
 `disallowedTools`, `maxTurns`, `isolation`, `color`, `memory` (`user` → `~/.claude/agent-memory/
 <name>/`, `project`, `local`), `hooks` (`Stop` in an agent file becomes `SubagentStop` for that
-agent). `install-agents.mjs` installs the eight and substitutes the skill's absolute path into
+agent), `omitClaudeMd` (`true` starts the subagent without the user, project and local CLAUDE.md
+files; managed policy files still load; Claude Code 2.1.271+; set on the researcher and the
+browser, which take everything from the packet). `install-agents.mjs` installs the eight and substitutes the skill's absolute path into
 their paths. New agent files appear in a running session after a minute or two; a new
 session sees them at once.
 

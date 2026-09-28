@@ -113,6 +113,16 @@ test('the researcher can use installed skills and tool servers, but cannot edit 
   }
 });
 
+test('the researcher and the browser start without the project CLAUDE.md; the code roles keep it', () => {
+  // Both take everything they need from the packet; the file only costs them
+  // context. The roles that change or judge code still need the repo's rules.
+  for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
+    const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
+    const omits = /^omitClaudeMd: true$/m.test(fm);
+    assert.equal(omits, f === 'orch-researcher.md' || f === 'orch-browser.md', f);
+  }
+});
+
 test('every description names the moment to reach for the role', () => {
   // Current models delegate on their own when a helper's description says when
   // to use it; "Used by the orchestrate skill" said who, which decides nothing.

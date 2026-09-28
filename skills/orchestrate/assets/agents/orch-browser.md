@@ -5,6 +5,7 @@ model: sonnet
 effort: low
 disallowedTools: Edit, Write, NotebookEdit, Agent, SendMessage, Artifact, Bash, WebFetch, WebSearch
 maxTurns: 80
+omitClaudeMd: true
 color: orange
 ---
 

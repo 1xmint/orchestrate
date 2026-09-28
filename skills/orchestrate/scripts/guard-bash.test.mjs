@@ -185,7 +185,7 @@ test('a kill of one known process id is not stopped', () => {
 test('a process kill by name from a helper or in headless mode is refused, not asked', () => {
   const helper = decide('taskkill //F //IM node.exe', { subagent: true });
   assert.equal(helper.kind, 'deny');
-  assert.match(helper.reason, /report back to the lead/);
+  assert.match(helper.reason, /cannot be answered here/);
   assert.doesNotMatch(helper.reason, /Say yes/);
   const headless = decide('pkill -f node', { headless: true, mode: 'auto' });
   assert.equal(headless.kind, 'deny');
@@ -373,6 +373,36 @@ test('the same command in a different session is asked fresh, not prefixed', () 
   run(bash('git push --force'), homeA);
   const inOther = run({ hook_event_name: 'PreToolUse', tool_name: 'Bash', session_id: 's2', cwd: process.cwd(), tool_input: { command: 'git push --force' } }, homeB);
   assert.doesNotMatch(inOther.json.hookSpecificOutput.permissionDecisionReason, /^Asked already:/);
+});
+
+test('a helper in a mode where a person answers prompts gets the same ask as the main session', () => {
+  for (const mode of ['default', 'acceptEdits', 'plan']) {
+    const lead = run(bash('git push --force', { permission_mode: mode }));
+    const helper = run(bash('git push --force', { permission_mode: mode, agent_id: 'helper-1' }));
+    assert.equal(helper.json.hookSpecificOutput.permissionDecision, 'ask', mode);
+    assert.equal(helper.json.hookSpecificOutput.permissionDecisionReason, lead.json.hookSpecificOutput.permissionDecisionReason, mode);
+  }
+  const ps = run(powershell('Remove-Item -Recurse -Force src', { permission_mode: 'default', agent_id: 'helper-1', cwd: '/home/user/project' }));
+  assert.equal(ps.json.hookSpecificOutput.permissionDecision, 'ask');
+});
+
+test('a helper where nobody can say yes is refused because the question cannot be answered here', () => {
+  for (const mode of ['auto', 'bypassPermissions', 'dontAsk', undefined]) {
+    const extra = { agent_id: 'helper-1', cwd: '/home/user/project' };
+    if (mode) extra.permission_mode = mode;
+    for (const r of [run(bash('git push --force', extra)), run(powershell('Remove-Item -Recurse -Force src', extra))]) {
+      assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny', String(mode));
+      const reason = r.json.hookSpecificOutput.permissionDecisionReason;
+      assert.match(reason, /cannot be answered here/);
+      assert.doesNotMatch(reason, /cannot ask|Say yes|\blead\b/);
+    }
+  }
+});
+
+test('the main session in auto mode is still refused, naming the mode', () => {
+  const r = run(bash('git push --force', { permission_mode: 'auto' }));
+  assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /auto mode, where nobody can say yes/);
 });
 
 test('the subagent deny path is unchanged by the repeat guard', () => {

@@ -5,6 +5,7 @@ model: sonnet
 effort: medium
 disallowedTools: Agent, SendMessage, Artifact, Monitor, NotebookEdit
 maxTurns: 80
+omitClaudeMd: true
 color: cyan
 memory: user
 ---

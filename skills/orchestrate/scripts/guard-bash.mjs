@@ -261,8 +261,9 @@ export function recordAsked(sessionId, command) {
 }
 
 // Deny, ask, or pass — the pure decision, given the command string and who is
-// asking. `ctx.cwd` resolves relative delete targets; `ctx.subagent` and
-// `ctx.headless` change deny-vs-ask, never which commands match.
+// asking. `ctx.cwd` resolves relative delete targets; `ctx.subagent` (a
+// helper nobody can answer) and `ctx.headless` change deny-vs-ask, never
+// which commands match.
 export function decide(command, ctx = {}) {
   const cmd = String(command || '').replace(/\s+/g, ' ').trim();
   if (!cmd) return { kind: 'pass' };
@@ -271,7 +272,7 @@ export function decide(command, ctx = {}) {
   if (!hit) return { kind: 'pass' };
 
   if (ctx.subagent) {
-    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} A background helper cannot ask, so this is refused: report back to the lead instead of retrying.` };
+    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} The question cannot be answered here, so this is refused: report back what you were about to run instead of retrying.` };
   }
   if (ctx.headless) {
     // Nobody can answer a question in this mode, so "say yes" would be a
@@ -311,6 +312,10 @@ export function isAllowed(command, cwd) {
   return loadAllowList(cwd).some(p => String(p).replace(/\s+/g, ' ').trim() === cmd);
 }
 
+// Permission modes in which a person sees and answers prompts, including a
+// helper's prompt surfaced in the main session.
+const ANSWERABLE_MODES = new Set(['default', 'acceptEdits', 'plan']);
+
 function emit(obj) {
   process.stdout.write(JSON.stringify(obj));
 }
@@ -328,13 +333,17 @@ function main() {
 
   if (isAllowed(command, input.cwd)) return;
 
-  const subagent = Boolean(input.agent_id);
   // `bypassPermissions`, `auto`, and `dontAsk` are the permission_modes where
   // nobody sees an interactive prompt at all — an "ask" would just sit there
   // with no one to answer it. A plain `-p` run that never sets one of these
   // is not distinguishable from an ordinary session in this payload, so it
   // still gets "ask" — see docs/safety-guard.md.
   const mode = input.permission_mode;
+  // The host surfaces a background helper's permission prompt in the main
+  // session, so in a mode where a person answers prompts the helper gets the
+  // same "ask" the main session would. In any other mode, or when the mode is
+  // missing, nobody can say yes and the helper is refused.
+  const subagent = Boolean(input.agent_id) && !ANSWERABLE_MODES.has(mode);
   const headless = !subagent && (mode === 'bypassPermissions' || mode === 'auto' || mode === 'dontAsk');
 
   const d = decide(command, { cwd: input.cwd, subagent, headless, mode, sessionId: input.session_id });
