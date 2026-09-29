@@ -120,7 +120,8 @@ test('progressFact: a mid-line PROGRESS and a packet path that ends a sentence b
 });
 
 test('progressWorktreeNote: a dispatch with a PROGRESS line gets the worktree fallback sentence, absent when there is no line or in plan mode', () => {
-  const note = 'if writing the progress file is refused, write the same relative path inside your own worktree instead, and say so in your return';
+  const note = 'if writing the progress file is refused, write the same relative path inside your own separate folder instead, and say so in your return';
+  assert.doesNotMatch(note, /worktree/i, 'the user reads this: a folder, not a git term');
   assert.equal(progressWorktreeNote('orch-implementer', 'TASK: 1\nPROGRESS: /r/p.md\nfind it', false), note);
   assert.equal(progressWorktreeNote('orch-implementer', 'TASK: 1\nfind it', false), '', 'no PROGRESS line, so no fallback to name');
   assert.equal(progressWorktreeNote('orch-implementer', 'TASK: 1\nPROGRESS: /r/p.md\nfind it', true), '', 'plan mode has no PROGRESS line to begin with');

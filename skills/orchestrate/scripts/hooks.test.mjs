@@ -441,6 +441,25 @@ test('guard: the credential list covers the shapes an audit fed it', () => {
   assert.equal(decide({ tool_input: { prompt: 'the token lives in the env var GITHUB_TOKEN' } }).kind, 'pass');
 });
 
+test('guard: quoted code that reads a secret from elsewhere is not a secret; a quoted literal still is', () => {
+  const passes = [
+    'password = process.env.CLUB_PASSWORD;',
+    'the line `password = process.env.CLUB_PASSWORD;` is in db.js',
+    'secret = os.environ["DB_SECRET_VALUE"]',
+    'api_key = os.getenv("SERVICE_API_KEY")',
+    'token: $SERVICE_TOKEN_VALUE',
+    'password=${DB_PASSWORD_VALUE}',
+    'password = userPassword',
+    'secret = loadSecretFromVault(name)',
+    'password = "changeme"',
+    'password = "<your password>"',
+    'password = ""',
+  ];
+  for (const s of passes) assert.equal(decide({ tool_input: { prompt: `context ${s} more` } }).kind, 'pass', s);
+  const refuses = ['password = "hunter2hunter2"', "secret: 'abcdefgh12345678'", 'api_key=abcd1234efgh5678', 'password = hunter2hunter2'];
+  for (const s of refuses) assert.equal(decide({ tool_input: { prompt: `context ${s} more` } }).kind, 'deny', s);
+});
+
 test('guard: an Opus implementer is refused with the exact retry, then allowed after a Sonnet attempt at the same task', () => {
   const home = sandbox();
   writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro' }));

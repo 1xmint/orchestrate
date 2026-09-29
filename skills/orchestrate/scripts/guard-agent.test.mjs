@@ -231,12 +231,37 @@ const leadSaid = text => ({ type: 'assistant', message: { role: 'assistant', con
 const toolUse = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'x', name: 'Agent', input: {} }] } };
 const PKT = { subagent_type: 'orch-researcher', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRead a file\nCONTEXT\nmore' };
 
-test('first helper: a lead message with no model and no check is named as such, once', () => {
+function dispatchFull(home, sid, ti, lines) {
+  const tp = join(mkdtempSync(join(tmpdir(), 'orch-guard-tr-')), 't.jsonl');
+  writeFileSync(tp, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: sid, cwd: home, transcript_path: tp, tool_use_id: `u-${Math.random()}`, tool_input: ti }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' },
+  });
+  try { return r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput : {}; } catch { return {}; }
+}
+
+test('first helper: a lead message naming no model is refused once, with the three lines owed; sent again it goes through', () => {
   const home = sandboxHome();
-  const ctx = dispatchWithTranscript(home, 's-fh-a', PKT, [userPrompt, leadSaid('I will have a builder do it in a separate copy, then commit.'), toolUse]);
-  assert.match(ctx, /first helper this session: your last message to the user names no model and no check; they are owed three plain lines/);
-  const again = dispatchWithTranscript(home, 's-fh-a', { ...PKT, prompt: `${PKT.prompt} again` }, [userPrompt, leadSaid('one more'), toolUse]);
-  assert.doesNotMatch(again, /first helper this session/);
+  const first = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('I will have a builder do it in a separate copy, then commit.'), toolUse]);
+  assert.equal(first.permissionDecision, 'deny');
+  assert.match(first.permissionDecisionReason, /the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked/);
+  const again = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('Sending it again.'), toolUse]);
+  assert.notEqual(again.permissionDecision, 'deny');
+  const later = dispatchFull(home, 's-fh-a', { ...PKT, prompt: `${PKT.prompt} again` }, [userPrompt, leadSaid('one more'), toolUse]);
+  assert.notEqual(later.permissionDecision, 'deny');
+});
+
+test('first helper: never refused twice in a session, even when the second message also names no model', () => {
+  const home = sandboxHome();
+  assert.equal(dispatchFull(home, 's-fh-e', PKT, [userPrompt, leadSaid('Working on it.'), toolUse]).permissionDecision, 'deny');
+  assert.notEqual(dispatchFull(home, 's-fh-e', PKT, [userPrompt, leadSaid('Still working on it.'), toolUse]).permissionDecision, 'deny');
+});
+
+test('first helper: a lead message that names a model is not refused', () => {
+  const o = dispatchFull(sandboxHome(), 's-fh-f', PKT, [userPrompt, leadSaid('A helper on Sonnet builds it.'), toolUse]);
+  assert.notEqual(o.permissionDecision, 'deny');
 });
 
 test('first helper: nothing said when the lead message names a model and a check', () => {
