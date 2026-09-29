@@ -34,7 +34,7 @@ export function schemaFieldNames() {
 
 // Field labels a return is split on, so an EVIDENCE section stops at the
 // next one of these rather than swallowing the rest of the return.
-const FIELD_LABELS = ['TASK', 'RUN', 'STATUS', 'ROLE', 'BRANCH', 'CHANGED', 'EVIDENCE', 'NOT VERIFIED', 'QUESTIONS', 'SUGGEST', 'VERDICT', 'FINDINGS'];
+const FIELD_LABELS = ['TASK', 'RUN', 'STATUS', 'ROLE', 'BRANCH', 'CHANGED', 'EVIDENCE', 'NOT VERIFIED', 'QUESTIONS', 'SUGGEST', 'VERDICT', 'FINDINGS', 'OUTCOME', 'PROOF', 'NOT CHECKED', 'NEEDS A DECISION', 'FULL REPORT'];
 
 function labelRe(name) {
   return new RegExp(`^\\s*${name}\\s*[:\\-–—]`, 'i');
@@ -59,10 +59,13 @@ function section(text, name) {
 // any non-empty prose under the heading ("looks good" is not evidence).
 export const EVIDENCE_LINE = /(\.test\.[a-z]+\b)|(\bnode\s+(--test|scripts\/)\S*)|(\b\d+\s*\/\s*\d+\b)|(\b\d+\s+(pass(ing|ed)?|fail(ing|ed)?)\b)|([\w.\-]+:\d+)|([\w.\-]+\/[\w./\\-]+)/i;
 
+// Helpers open with PROOF: and may carry their checks only there, so it counts
+// like EVIDENCE. An empty PROOF, or "none", has no evidence shape and does not.
 function hasEvidenceLine(text) {
-  const sec = section(text, 'EVIDENCE');
-  if (!sec) return false;
-  return sec.split('\n').some(l => l.trim() && EVIDENCE_LINE.test(l));
+  return ['EVIDENCE', 'PROOF'].some(name => {
+    const sec = section(text, name);
+    return sec ? sec.split('\n').some(l => l.trim() && EVIDENCE_LINE.test(l)) : false;
+  });
 }
 
 // checkReturn(text) -> { ok, missing, evidence, status }
