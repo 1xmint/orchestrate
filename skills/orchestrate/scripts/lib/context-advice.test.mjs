@@ -286,6 +286,23 @@ test('a checkpoint beside the transcript folder is reported as outside the plugi
   assert.equal(hasCheckpoint(session, r, { dir }), false, 'still not a checkpoint the plugin reads');
 });
 
+test('the size line prints only the host-reported window and never promises the host autocompact point', () => {
+  const p = policy();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-adv-'));
+  const env = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '100000' };
+  const tick = r => contextTick(r, p, { policy: p, dir, env }).text;
+  // Host says 180k; the setting says 100k: one source, the host's, and no second figure.
+  const known = tick(measured(140000, { capacity: 180000 }));
+  assert.match(known, / of ~180k/);
+  assert.doesNotMatch(known, /autocompact|~100k/);
+  const between = tick(measured(150000, { capacity: 180000 }));
+  assert.doesNotMatch(between, /next:/, 'past the compact line, no figure is promised for the host');
+  // Host says nothing: no window is printed, neither the setting nor a default.
+  const unknown = tick(measured(60000));
+  assert.doesNotMatch(unknown, / of ~/);
+  assert.doesNotMatch(unknown, /autocompact/);
+});
+
 test('contextTick keys by epoch and step, and is silent for an unknown reading', () => {
   const p = policy();
   const dir = mkdtempSync(join(tmpdir(), 'orch-adv-'));

@@ -211,25 +211,22 @@ function ageStr(mtimeMs, now) {
   return m < 1 ? 'just now' : m < 120 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 }
 
-// The window this line reports against: the known capacity, or the
-// autocompact point the plugin already knows about (`policy.context.
-// autocompactDefault`), whichever is available. Null when neither is known.
-function reportedWindow(reading, policy, ctx = {}) {
-  if (reading && reading.capacity) return reading.capacity;
-  const auto = resolveAutocompactWindow(policy, ctx);
-  return auto === 'off' ? null : auto;
+// The window this line reports against: the size the host itself reported for
+// this conversation, and nothing else. The autocompact setting is not a
+// capacity: in a real run with it at 100000 the host still reported ~180k and
+// compacted at 153,010, so neither the setting nor a policy default is printed
+// as if it were the window. Null when the host has not said.
+function reportedWindow(reading) {
+  return reading && reading.capacity ? reading.capacity : null;
 }
 
-// The next thing that will happen at a size: the compact line (`thresholds()`)
-// or autocompact (`resolveAutocompactWindow`), whichever is lower and
-// not yet passed. Null once both are behind the current size.
+// The next thing this plugin will do at a size: its own compact line
+// (`thresholds()`), when not yet passed. The host's own automatic compaction
+// point is not promised: it is not known (see `reportedWindow`), so no figure
+// is printed for it. Null once the compact line is behind the current size.
 function nextEvent(reading, policy, ctx = {}) {
   const { compactAt } = thresholds(reading, policy, ctx);
-  const auto = resolveAutocompactWindow(policy, ctx);
-  const candidates = [{ label: 'compact', at: compactAt }];
-  if (auto !== 'off') candidates.push({ label: 'autocompact', at: auto });
-  const ahead = candidates.filter(c => reading.tokens < c.at).sort((a, b) => a.at - b.at);
-  return ahead[0] || null;
+  return reading.tokens < compactAt ? { label: 'compact', at: compactAt } : null;
 }
 
 // One line of facts about the conversation's size: this is the single shape
@@ -239,7 +236,7 @@ function nextEvent(reading, policy, ctx = {}) {
 function factLine(reading, policy, ctx = {}, cp = undefined) {
   const { session = null, editCounter = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null, now = Date.now() } = ctx;
   const parts = [];
-  const window = reportedWindow(reading, policy, ctx);
+  const window = reportedWindow(reading);
   parts.push(`${k1(reading.tokens)}${window ? ` of ${k1(window)}` : ''}`);
   const n = Number(reading.compactions) || 0;
   if (n) parts.push(`compacted ${n}×`);

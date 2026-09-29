@@ -141,7 +141,7 @@ test('there is no escalated "hard" tier past compactAt: a conversation far past 
   const advice = adviseContext(reading, policy);
   assert.equal(advice.action, 'compact');
   const text = contextNotice(reading, advice, { policy, dir: mkdtempSync(join(tmpdir(), 'ctx-far-')) });
-  assert.match(text, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · newest checkpoint: none · compaction will summarise without a checkpoint$`));
+  assert.match(text, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} · newest checkpoint: none · compaction will summarise without a checkpoint$`));
   assert.doesNotMatch(text, /next:/, 'both size events are already behind it');
   assert.doesNotMatch(text, ORDERS);
   assert.match(checkpointPath('s', reading), /checkpoint-epoch-1\.md$/);
@@ -215,13 +215,13 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   const { p, store } = file([user('start', 0), assistant(cp - 20000, { min: 1 })]);
   const s1 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s1.reading.tokens, cp - 20000);
-  assert.match(s1.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp - 20000)} of ~\\d+k · next: compact ${kk(ca)} · newest checkpoint: none · 0 tool calls since your last edit$`), 'below the thresholds the lead still hears the measured size');
+  assert.match(s1.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp - 20000)} · next: compact ${kk(ca)} · newest checkpoint: none · 0 tool calls since your last edit$`), 'below the thresholds the lead still hears the measured size');
   assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store, force: true }).notice, '', 'once per 25k step');
 
   appendFileSync(p, `${user('x'.repeat(5000), 2)}\n${assistant(cp + 5000, { min: 3 })}\n`);
   const s2 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s2.advice.action, 'checkpoint');
-  assert.match(s2.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 5000)} of ~\\d+k · next: compact ${kk(ca)} · newest checkpoint: none`));
+  assert.match(s2.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 5000)} · next: compact ${kk(ca)} · newest checkpoint: none`));
   assert.doesNotMatch(s2.notice, ORDERS);
 
   appendFileSync(p, `${user('y'.repeat(5000), 4)}\n${assistant(cp + 8000, { min: 5 })}\n`);
@@ -232,7 +232,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   appendFileSync(p, `${user('z'.repeat(5000), 6)}\n${assistant(past, { min: 7 })}\n`);
   const s4 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s4.advice.action, 'compact');
-  assert.match(s4.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(past)} of ~\\d+k · next: autocompact ${kk(auto)} · newest checkpoint: none`));
+  assert.match(s4.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(past)} · newest checkpoint: none`));
   assert.doesNotMatch(s4.notice, ORDERS);
   assert.equal(s4.reading.compactions, 0);
 
@@ -241,7 +241,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   const s5 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s5.reading.state, 'provisional');
   assert.equal(s5.reading.compactions, 1, 'a new epoch is one more compaction');
-  assert.match(s5.notice, new RegExp(`^\\[orchestrate · context\\] ~17k of ~\\d+k · compacted 1× · next: compact ${kk(ca)}`));
+  assert.match(s5.notice, new RegExp(`^\\[orchestrate · context\\] ~17k · compacted 1× · next: compact ${kk(ca)}`));
   appendFileSync(p, `${user('w'.repeat(5000), 9)}\n${assistant(22000, { min: 10 })}\n`);
   const s6 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s6.reading.tokens, 22000);
@@ -251,7 +251,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   appendFileSync(p, `${user('v'.repeat(5000), 11)}\n${assistant(40000, { min: 12 })}\n${assistant(60000, { min: 13 })}\n${assistant(80000, { min: 14 })}\n${assistant(cp + 10000, { min: 15 })}\n`);
   const s7 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s7.advice.action, 'checkpoint');
-  assert.match(s7.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 10000)} of ~\\d+k · compacted 1× · next: compact ${kk(ca)}`));
+  assert.match(s7.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 10000)} · compacted 1× · next: compact ${kk(ca)}`));
 
   // No growth: nothing is read, and the reading stands. A half-written line
   // is not consumed and does not disturb it.
@@ -414,8 +414,8 @@ test('compact by default; a fresh conversation only after repeated compactions',
   assert.doesNotMatch(twice.notice, ORDERS);
   // No escalated "hard" tier: far past compactAt the line has the same shape.
   const far = Math.max(compactAt, policy.context.autocompactDefault) + 100000;
-  assert.match(at(far, 2).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · compacted 2× · newest checkpoint: none · compaction will summarise without a checkpoint$`));
-  assert.match(at(far, 0).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} of ~\\d+k · newest checkpoint: none · compaction will summarise without a checkpoint$`));
+  assert.match(at(far, 2).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} · compacted 2× · newest checkpoint: none · compaction will summarise without a checkpoint$`));
+  assert.match(at(far, 0).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} · newest checkpoint: none · compaction will summarise without a checkpoint$`));
   const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: big, compactions: 2 } });
   assert.match(stop.why, /fresh conversation that resumes from the checkpoint/);
 });
@@ -435,7 +435,7 @@ test('the size line names the next size event that has not passed yet', () => {
   const line = tokens => contextTick({ state: 'measured', tokens, capacity: null, compaction: null, compactions: 0 }, policy, { policy, dir }).text;
   assert.match(line(checkpointAt - 10000), new RegExp(` · next: compact ${kk(compactAt)} · `));
   assert.match(line(compactAt - 5000), new RegExp(` · next: compact ${kk(compactAt)} · `));
-  assert.match(line(Math.round((compactAt + auto) / 2)), new RegExp(` · next: autocompact ${kk(auto)} · `));
+  assert.doesNotMatch(line(Math.round((compactAt + auto) / 2)), /next:|autocompact/, "no figure is promised for the host's own compaction");
   assert.doesNotMatch(line(auto + 25000), /next:/);
   for (const t of [checkpointAt - 10000, compactAt - 5000, auto + 25000]) assert.doesNotMatch(line(t), ORDERS);
 });
