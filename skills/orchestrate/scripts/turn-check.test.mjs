@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision } from './turn-check.mjs';
+import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact } from './turn-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'turn-check.mjs');
@@ -245,6 +245,59 @@ test('reviewHoldDecision matches a live return (toolUseId null) to its dispatch 
   assert.equal(reviewHoldDecision({ returned: [live], dispatches: [disp, named], lastMessage: '', blockedFor: [] }).block, false);
   const other = { ...live, agentId: 'not-a-dispatched-agent' };
   assert.equal(reviewHoldDecision({ returned: [other], dispatches: [disp], lastMessage: '', blockedFor: [] }).block, false);
+});
+
+// ---- risky work the lead built alone ---------------------------------------------
+
+const editLine = (name, input, at = '2026-09-29T10:00:00.000Z') =>
+  JSON.stringify({ type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', name, input }] } });
+const GOAL = 'a password check on the page that shows who paid what';
+
+test('unreviewedRiskFact names sign-in when the lead edited a password check and no reviewer returned', () => {
+  const tail = editLine('Edit', { file_path: 'server.js', old_string: 'a', new_string: 'if (req.body.password !== SECRET) return deny();' });
+  const f = unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] });
+  assert.equal(f.text, 'this change touches sign-in; nobody independent has looked at it.');
+});
+
+test('unreviewedRiskFact uses the request when the edit itself is bland, and needs at least one edit', () => {
+  const bland = editLine('Write', { file_path: 'a.js', content: 'export const x = 1;' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: bland, goal: GOAL, returned: [] }).topic, 'sign-in');
+  assert.equal(unreviewedRiskFact({ transcriptTail: '', goal: GOAL, returned: [] }), null, 'no edit, nothing to say');
+});
+
+test('unreviewedRiskFact is silent for a session with no risky edit or request', () => {
+  const tail = editLine('Edit', { file_path: 'notes.js', new_string: 'const title = "hello";' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: 'a tiny notes app', returned: [] }), null);
+});
+
+test('unreviewedRiskFact is silent once a reviewer returned after the last risky edit, not before it', () => {
+  const tail = editLine('Edit', { file_path: 's.js', new_string: '// check the password here' }, '2026-09-29T10:00:00.000Z');
+  const after = { agent: 'orch-reviewer', at: '2026-09-29T10:05:00.000Z', status: 'DONE' };
+  const before = { agent: 'orch-reviewer', at: '2026-09-29T09:00:00.000Z', status: 'DONE' };
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [after] }), null);
+  assert.ok(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [before] }));
+});
+
+test('Stop: a lead-built password edit gets the one-line fact once, then the same edits are silent', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'risk-1.json'), JSON.stringify({ v: 1, session_id: 'risk-1', goal: GOAL, returned: [], dispatches: [] }));
+  const tp = join(home, 'transcript.jsonl');
+  writeFileSync(tp, editLine('Edit', { file_path: 'server.js', new_string: 'password check' }) + '\n');
+  const input = { hook_event_name: 'Stop', session_id: 'risk-1', transcript_path: tp };
+  const first = run(input, home);
+  const out = JSON.parse(first.stdout);
+  assert.equal(out.decision, 'block');
+  assert.equal(out.reason, 'orchestrate: this change touches sign-in; nobody independent has looked at it.');
+  assert.equal(run(input, home).stdout.trim(), '', 'said once');
+});
+
+test('Stop: a session with no edits and no risky request writes nothing', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const tp = join(home, 'transcript.jsonl');
+  writeFileSync(tp, '{"type":"user","message":{"content":"hi"}}\n');
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'quiet-1', transcript_path: tp }, home).stdout.trim(), '');
 });
 
 // ---- hook process: stdin/stdout contract ---------------------------------------

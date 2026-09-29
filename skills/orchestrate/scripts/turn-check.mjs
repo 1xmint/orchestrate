@@ -24,7 +24,8 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession } from './lib/tier.mjs';
+import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail } from './lib/tier.mjs';
+import { reviewWordMatch } from './lib/review-words.mjs';
 
 export function pickupSection(runMdText) {
   const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
@@ -121,6 +122,53 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   return { block: false, task: null, blockedFor: [...already] };
 }
 
+// Work the lead built alone. The hold above only reads a helper's return, so a
+// lead that edits sign-in, money or stored personal data itself and finishes
+// never meets it. This reads the lead's own transcript (helpers keep theirs
+// apart): if the request or an edit it made touches one of the plugin's review
+// words (lib/review-words.mjs, the same list that flags a brief) and no
+// reviewer has returned since its last edit, it yields one plain fact. Nothing
+// is asked for: the host can hold a finish only by blocking it, so the fact is
+// the whole reason given, and the key makes it once per set of edits.
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pricing?)$/.test(w) ? 'payments'
+  : /^(auth|authentication|authorization|login|password|credentials?|token|oauth|permission)$/.test(w) ? 'sign-in'
+  : /^(drop table|truncate|delete rows|delete records|purge|migration)$/.test(w) ? 'stored data'
+  : 'a shared contract');
+
+function editText(input) {
+  const i = input || {};
+  const parts = [i.file_path, i.notebook_path, i.new_string, i.content, i.new_source];
+  for (const e of Array.isArray(i.edits) ? i.edits : []) parts.push(e && e.new_string);
+  return parts.filter(x => typeof x === 'string').join('\n');
+}
+
+export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
+  let edits = 0; let lastEditAt = 0; let word = null; let lastRiskAt = 0; let lastRiskIdx = -1;
+  const lines = String(transcriptTail || '').split('\n');
+  lines.forEach((line, idx) => {
+    if (!line.includes('"tool_use"')) return;
+    let o; try { o = JSON.parse(line); } catch { return; }
+    const content = o && o.message && Array.isArray(o.message.content) ? o.message.content : [];
+    for (const c of content) {
+      if (!c || c.type !== 'tool_use' || !EDIT_TOOLS.has(c.name)) continue;
+      edits++;
+      const at = Date.parse(o.timestamp) || 0;
+      if (at > lastEditAt) lastEditAt = at;
+      const w = reviewWordMatch(editText(c.input));
+      if (w) { word = w; lastRiskIdx = idx; if (at > lastRiskAt) lastRiskAt = at; }
+    }
+  });
+  if (!edits) return null;
+  const goalWord = reviewWordMatch(String(goal || ''));
+  if (!word && !goalWord) return null;
+  const since = word ? lastRiskAt : lastEditAt;
+  const reviewed = (Array.isArray(returned) ? returned : []).some(r => r && /reviewer/i.test(String(r.agent || '')) && (Date.parse(r.at) || 0) >= since);
+  if (reviewed) return null;
+  const topic = TOPIC_OF(word || goalWord);
+  return { topic, key: `${word || goalWord}@${lastRiskIdx}:${edits}`, text: `this change touches ${topic}; nobody independent has looked at it.` };
+}
+
 const STORE = () => join(DIR, 'turn-checks.json');
 
 function emitBlock(reason) {
@@ -203,6 +251,18 @@ function checkHeartbeat(input) {
     return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
+
+  // Risky work the lead did itself and no reviewer has seen: one fact, once per
+  // set of edits. Quiet, and no file read beyond the transcript tail, otherwise.
+  if (input.transcript_path) {
+    const fact = unreviewedRiskFact({ transcriptTail: readTail(input.transcript_path, 1048576), goal: state.goal, returned: state.returned });
+    if (fact && rec.riskNotedFor !== fact.key) {
+      updated.riskNotedFor = fact.key;
+      store[key] = updated;
+      try { writeJsonAtomic(path, store); } catch {}
+      return emitBlock(`orchestrate: ${fact.text}`);
+    }
+  }
 
   if (!bound) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
 
