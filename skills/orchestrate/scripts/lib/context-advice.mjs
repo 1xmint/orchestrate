@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname, relative } from 'node:path';
 import { loadPolicy } from './policy.mjs';
 import { CONTEXT_DIR, JUST_COMPACTED_RESPONSES, idPart, readRange } from './context-scan.mjs';
 import { readSettings, parseAutocompact } from './settings.mjs';
@@ -139,6 +139,18 @@ export function newestCheckpoint(session, reading, { dir = CONTEXT_DIR, runMd = 
   return best;
 }
 
+// A checkpoint written beside the transcript's own folder (where a lead tends
+// to look) instead of in the folder this plugin reads. It does not count as a
+// checkpoint; it is only reported so the notice can say where to move it.
+export function misplacedCheckpoint(session, reading, { dir = CONTEXT_DIR } = {}) {
+  const t = reading && reading.transcript;
+  if (!t) return null;
+  const want = checkpointPath(session, reading, dir);
+  const p = join(dirname(t), 'orchestrate', 'context', relative(dir, want));
+  try { if (p !== want && existsSync(p)) return { path: p, moveTo: want }; } catch { /* unreadable: not found */ }
+  return null;
+}
+
 export function hasCheckpoint(session, reading, opts = {}) {
   return newestCheckpoint(session, reading, opts) != null;
 }
@@ -179,15 +191,6 @@ export function adviseContext(reading, policy = loadPolicy(), ctx = {}) {
   return { action: 'none', key: key('none'), why: `${k(reading.tokens)} is below ${k(checkpointAt)}` };
 }
 
-// A path under the home folder as `~/...` with forward slashes, so a notice
-// never carries the account name; any other path comes back as it is.
-export function shortPath(path, home = homedir()) {
-  const norm = p => String(p).replace(/\\/g, '/').replace(/\/+$/, '');
-  const p = norm(path);
-  const h = home ? norm(home) : '';
-  return h && p.toLowerCase().startsWith(`${h.toLowerCase()}/`) ? `~${p.slice(h.length)}` : p;
-}
-
 const CHECKPOINT_WHAT ='the goal, decisions made, files changed, verification results, outstanding work, and the next action';
 
 // Which switch to recommend when the conversation is full: compact by default,
@@ -208,25 +211,22 @@ function ageStr(mtimeMs, now) {
   return m < 1 ? 'just now' : m < 120 ? `${m} min ago` : `${Math.round(m / 60)} h ago`;
 }
 
-// The window this line reports against: the known capacity, or the
-// autocompact point the plugin already knows about (`policy.context.
-// autocompactDefault`), whichever is available. Null when neither is known.
-function reportedWindow(reading, policy, ctx = {}) {
-  if (reading && reading.capacity) return reading.capacity;
-  const auto = resolveAutocompactWindow(policy, ctx);
-  return auto === 'off' ? null : auto;
+// The window this line reports against: the size the host itself reported for
+// this conversation, and nothing else. The autocompact setting is not a
+// capacity: in a real run with it at 100000 the host still reported ~180k and
+// compacted at 153,010, so neither the setting nor a policy default is printed
+// as if it were the window. Null when the host has not said.
+function reportedWindow(reading) {
+  return reading && reading.capacity ? reading.capacity : null;
 }
 
-// The next thing that will happen at a size: the compact line (`thresholds()`)
-// or autocompact (`resolveAutocompactWindow`), whichever is lower and
-// not yet passed. Null once both are behind the current size.
+// The next thing this plugin will do at a size: its own compact line
+// (`thresholds()`), when not yet passed. The host's own automatic compaction
+// point is not promised: it is not known (see `reportedWindow`), so no figure
+// is printed for it. Null once the compact line is behind the current size.
 function nextEvent(reading, policy, ctx = {}) {
   const { compactAt } = thresholds(reading, policy, ctx);
-  const auto = resolveAutocompactWindow(policy, ctx);
-  const candidates = [{ label: 'compact', at: compactAt }];
-  if (auto !== 'off') candidates.push({ label: 'autocompact', at: auto });
-  const ahead = candidates.filter(c => reading.tokens < c.at).sort((a, b) => a.at - b.at);
-  return ahead[0] || null;
+  return reading.tokens < compactAt ? { label: 'compact', at: compactAt } : null;
 }
 
 // One line of facts about the conversation's size: this is the single shape
@@ -236,14 +236,15 @@ function nextEvent(reading, policy, ctx = {}) {
 function factLine(reading, policy, ctx = {}, cp = undefined) {
   const { session = null, editCounter = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null, now = Date.now() } = ctx;
   const parts = [];
-  const window = reportedWindow(reading, policy, ctx);
+  const window = reportedWindow(reading);
   parts.push(`${k1(reading.tokens)}${window ? ` of ${k1(window)}` : ''}`);
   const n = Number(reading.compactions) || 0;
   if (n) parts.push(`compacted ${n}×`);
   const next = nextEvent(reading, policy, ctx);
   if (next) parts.push(`next: ${next.label} ${k1(next.at)}`);
   if (cp === undefined) cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
-  parts.push(cp ? `newest checkpoint: ${cp.path}, ${ageStr(cp.mtimeMs, now)}` : 'newest checkpoint: none');
+  const lost = cp ? null : misplacedCheckpoint(session, reading, { dir });
+  parts.push(cp ? `newest checkpoint: ${cp.path}, ${ageStr(cp.mtimeMs, now)}` : lost ? `newest checkpoint: none in the folder this plugin reads; one is at ${lost.path}, outside it: move it to ${lost.moveTo}` : 'newest checkpoint: none');
   if (Number.isFinite(editCounter)) parts.push(`${editCounter} tool call${editCounter === 1 ? '' : 's'} since your last edit`);
   return `[orchestrate · context] ${parts.join(' · ')}`;
 }
@@ -287,7 +288,7 @@ export function contextNotice(reading, advice, ctx = {}) {
   if (postCompactionAskDue(reading, advice, ctx)) {
     const { session = null, dir = CONTEXT_DIR } = ctx;
     const line = factLine(reading, policy, ctx, null);
-    return `${line} · the conversation was just summarised; before anything else, write the checkpoint now (goal, decisions, files changed, verification, next action) to ${shortPath(checkpointPath(session, reading, dir), ctx.home)}`;
+    return `${line} · the conversation was just summarised; before anything else, write the checkpoint now (goal, decisions, files changed, verification, next action) to ${checkpointPath(session, reading, dir)}`;
   }
   switch (advice.action) {
     case 'checkpoint':
@@ -299,7 +300,7 @@ export function contextNotice(reading, advice, ctx = {}) {
       const line = factLine(reading, policy, ctx, cp);
       if (cp) return line;
       if (advice.action === 'compact') return `${line} · compaction will summarise without a checkpoint`;
-      return `${line} · write the checkpoint now (goal, decisions, files changed, verification, next action) to ${shortPath(checkpointPath(session, reading, dir), ctx.home)}`;
+      return `${line} · write the checkpoint now (goal, decisions, files changed, verification, next action) to ${checkpointPath(session, reading, dir)}`;
     }
     case 'investigate': {
       const c = reading.compaction || {};

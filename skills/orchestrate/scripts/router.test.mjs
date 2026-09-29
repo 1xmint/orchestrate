@@ -854,14 +854,14 @@ test('the size line after a compaction is not the reading from before it', () =>
   assert.ok(!out.includes('[orchestrate · context]'), 'no boundary in the file yet: the 140k reading is stale');
 });
 
-test('the size line after a compaction quotes the same window as the tool-call cards', () => {
+test('the size line after a compaction prints no window the host did not report, and never a default', () => {
   const home = makeHome(); const repo = makeRepo(false);
   writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '180000' } }));
   const t = ctxTranscript([boundaryLine('b1'), usageLine(60000, 'm1')]);
   const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-cap1', cwd: repo, transcript_path: t });
   const line = /\[orchestrate · context\][^\n]*/.exec(out);
   assert.ok(line, 'a measured reading past the boundary is printed');
-  assert.match(line[0], /of ~180k/);
-  assert.ok(!/~200k/.test(line[0]));
+  assert.doesNotMatch(line[0], / of ~/, 'the setting is not a capacity: nothing is printed as the window');
+  assert.doesNotMatch(line[0], /autocompact/);
 });
 

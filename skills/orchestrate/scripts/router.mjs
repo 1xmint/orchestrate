@@ -80,8 +80,9 @@ const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // The lead's own cost per step comes from the shared reader (lib/context-store.mjs),
 // said only when its advice changes. A compaction starts a new epoch there, so
 // advice given before it is never repeated against the compacted conversation.
-// Every card reads the window from the same places the tool-call hook does
-// (environment, then settings.json), so two cards never quote two sizes.
+// The window a size line quotes is only what the host reported for this
+// conversation; the environment and settings.json move the plugin's own
+// compact line but are never printed as the window.
 // `minCompactions`: this hook runs before the host writes its compaction
 // record, so a reading that has seen fewer compactions than that is the one
 // from before the summary, and is not printed.
