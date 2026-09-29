@@ -47,16 +47,35 @@ const CRED = new RegExp([
   'AIza[0-9A-Za-z_-]{30,}',
   'xox[baprs]-[A-Za-z0-9-]{10,}',
   'eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}', // a JWT
-  '(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token)\\s*[=:]\\s*["\']?[^\\s"\'<>]{8,}',
   '-----BEGIN [A-Z ]*PRIVATE KEY-----',
 ].join('|'));
+
+// A name followed by a value. The value is judged, not just matched: a line of
+// code that reads the secret from somewhere else is not a secret. Quoted, a
+// literal of eight or more characters is one unless it is an obvious placeholder.
+const ASSIGN = /(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token)\s*[=:]\s*(["']?)([^\s"'<>]{8,})/gi;
+const PLACEHOLDER = /^(?:x+|\*+|\.+|-+|changeme|change_me|placeholder|redacted|example|your[-_]?\w*|\$\{?\w+\}?)$/i;
+function looksLikeSecret(quote, raw) {
+  const v = raw.replace(/[;,]+$/, '');
+  if (/^\$\{?\w+\}?$/.test(v) || PLACEHOLDER.test(v)) return false;
+  if (quote) return true;
+  if (/^(?:process\.env\b|os\.environ\b|os\.getenv\b)/.test(v)) return false;
+  if (/^[A-Za-z_][A-Za-z_.]*$/.test(v)) return false;
+  if (/^[A-Za-z_][\w.]*\(/.test(v)) return false;
+  return true;
+}
+function hasCredential(prompt) {
+  if (CRED.test(prompt)) return true;
+  for (const m of prompt.matchAll(ASSIGN)) if (looksLikeSecret(m[1], m[2])) return true;
+  return false;
+}
 
 // Deny, or pass. There is no third answer.
 export function decide(input) {
   const ti = (input && input.tool_input) || {};
   const prompt = String(ti.prompt || '');
 
-  if (CRED.test(prompt)) {
+  if (hasCredential(prompt)) {
     return { kind: 'deny', reason: 'the packet contains something that looks like a credential; remove it and refer to it by name instead' };
   }
   return { kind: 'pass' };
@@ -445,7 +464,7 @@ export function progressWorktreeNote(role, prompt, planMode, readFile = readFile
     }
   }
   if (!has) return '';
-  return 'if writing the progress file is refused, write the same relative path inside your own worktree instead, and say so in your return';
+  return 'if writing the progress file is refused, write the same relative path inside your own separate folder instead, and say so in your return';
 }
 
 // A fact, not an order, said only on an orch-implementer dispatch: Codex was
@@ -552,6 +571,18 @@ function main() {
     return;
   }
 
+  // The three plain lines, before the first helper starts: when the lead's last
+  // message to the user is readable and names no model, refuse this one
+  // dispatch, once per session. The mark is the event id of the refused call,
+  // so a second registration of the same hook refuses it again, and any later
+  // dispatch (or the same helper sent again) goes through.
+  const fhr = firstHelperRefusal(input, id);
+  if (fhr) {
+    if (!repeat) recordDenial(input, ti, 'first helper: three plain lines owed');
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate guard: ${fhr}` } });
+    return;
+  }
+
   // Bind only now, after every gate that could still refuse this dispatch has
   // passed — a budget refusal must not burn the grant. The claim is atomic
   // (see claimGrantId): a second dispatch racing this one for the same grant
@@ -641,6 +672,19 @@ export function leadTextThisTurn(transcriptPath) {
     if (text) return text;
   }
   return null;
+}
+const FIRST_HELPER_REFUSAL = 'the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again unchanged';
+export function firstHelperRefusal(input, id) {
+  try {
+    if (!input.session_id || !input.transcript_path) return '';
+    const state = loadSession(input.session_id) || {};
+    if (state.firstHelperAsked) return state.firstHelperAsked === id ? FIRST_HELPER_REFUSAL : '';
+    if (Array.isArray(state.dispatches) && state.dispatches.length) return '';
+    const text = leadTextThisTurn(input.transcript_path);
+    if (text === null || /\b(haiku|sonnet|opus|fable|model)\b/i.test(text)) return '';
+    withSession(input, s => { s.firstHelperAsked = id; });
+    return FIRST_HELPER_REFUSAL;
+  } catch { return ''; }
 }
 export function firstHelperNote(transcriptPath) {
   const text = transcriptPath ? leadTextThisTurn(transcriptPath) : null;
