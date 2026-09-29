@@ -121,7 +121,15 @@ export function namesAllPaths(text, paths) {
   if (!list.length) return false;
   const t = String(text || '').toLowerCase();
   return list.every(p => {
-    const base = String(p || '').trim().replace(/^"|"$/g, '').split(/[\\/]/).pop();
+    const clean = String(p || '').trim().replace(/^"|"$/g, '');
+    // `git status --porcelain` reports an untracked directory as the
+    // directory path itself, ending in "/" — it never names the files inside.
+    // A message naming a path under that directory (e.g. "src/notes.txt" for
+    // status entry "src/") describes the same untracked content and should
+    // count, so this is satisfied by any named path that starts with it,
+    // not by the directory's own (empty) basename.
+    if (clean.endsWith('/')) return t.includes(clean.toLowerCase());
+    const base = clean.split(/[\\/]/).pop();
     return !!base && t.includes(base.toLowerCase());
   });
 }
