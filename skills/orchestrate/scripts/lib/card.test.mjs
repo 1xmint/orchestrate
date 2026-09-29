@@ -56,6 +56,13 @@ test('the card names the helper kinds, and its builder advice clears the guard o
   assert.equal(workflowDecision({}, ti(`WHERE: worktree: yes\n${packet}`), opts), null, 'with them it passes');
 });
 
+test('the card keeps risky work and a request for a helper out of the do-it-yourself rule', () => {
+  // A live lead built a password check on a payments page alone, with no
+  // second look, though the user had asked for a helper and for safety.
+  assert.match(CARD, /about eight small tool calls and the user asked for no helper;/);
+  assert.match(CARD, /Buy independent review, even of your own work, for money, auth,/);
+});
+
 test('the card carries no counter phrase — those live behind `router status`', () => {
   assert.doesNotMatch(CARD, /orch-agents|codex:|tier \w|limits today/);
 });
