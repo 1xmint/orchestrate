@@ -814,3 +814,32 @@ test('with nothing to show, a resume prints no goal line', () => {
   assert.equal(goalOf(out), null);
 });
 
+// One capacity for every card, and no reading from before the summary. The host
+// runs this hook before it writes the compaction record, so a reading with no
+// boundary in it is the pre-summary one.
+function ctxTranscript(lines) {
+  const p = join(mkdtempSync(join(tmpdir(), 'orch-ctx-t-')), 'session.jsonl');
+  writeFileSync(p, lines.join(''));
+  return p;
+}
+const usageLine = (n, id) => JSON.stringify({ type: 'assistant', message: { id, model: 'claude-sonnet-4-5', usage: { input_tokens: 10, cache_read_input_tokens: n, cache_creation_input_tokens: 0, output_tokens: 5 } } }) + '\n';
+const boundaryLine = uuid => JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid, timestamp: new Date().toISOString(), compactMetadata: { preTokens: 150000, postTokens: 60000 } }) + '\n';
+
+test('the size line after a compaction is not the reading from before it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const t = ctxTranscript([usageLine(140000, 'm1')]);
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-stale1', cwd: repo, transcript_path: t });
+  assert.ok(!out.includes('[orchestrate · context]'), 'no boundary in the file yet: the 140k reading is stale');
+});
+
+test('the size line after a compaction quotes the same window as the tool-call cards', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '180000' } }));
+  const t = ctxTranscript([boundaryLine('b1'), usageLine(60000, 'm1')]);
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-cap1', cwd: repo, transcript_path: t });
+  const line = /\[orchestrate · context\][^\n]*/.exec(out);
+  assert.ok(line, 'a measured reading past the boundary is printed');
+  assert.match(line[0], /of ~180k/);
+  assert.ok(!/~200k/.test(line[0]));
+});
+

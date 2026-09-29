@@ -80,10 +80,17 @@ const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 // The lead's own cost per step comes from the shared reader (lib/context-store.mjs),
 // said only when its advice changes. A compaction starts a new epoch there, so
 // advice given before it is never repeated against the compacted conversation.
-export function contextLine(input, { force = false } = {}) {
+// Every card reads the window from the same places the tool-call hook does
+// (environment, then settings.json), so two cards never quote two sizes.
+// `minCompactions`: this hook runs before the host writes its compaction
+// record, so a reading that has seen fewer compactions than that is the one
+// from before the summary, and is not printed.
+export function contextLine(input, { force = false, minCompactions = 0 } = {}) {
   try {
     if (!input || !input.transcript_path) return '';
-    return sampleContext({ transcriptPath: input.transcript_path, session: input.session_id || null, force }).notice || '';
+    const o = { transcriptPath: input.transcript_path, session: input.session_id || null, force, settingsPath: join(dirname(DIR), 'settings.json'), env: process.env };
+    if (minCompactions && (Number(sampleContext({ ...o, announce: false }).reading.compactions) || 0) < minCompactions) return '';
+    return sampleContext(o).notice || '';
   } catch { return ''; }
 }
 
@@ -531,7 +538,7 @@ function handleSessionStart(input) {
   // After a compaction the reading starts over from the boundary. Usually that
   // says nothing until a response measures it; a summary that is itself huge
   // says so now.
-  const size = contextLine(input, { force: true });
+  const size = contextLine(input, { force: true, minCompactions: source === 'compact' ? state.compactions : 0 });
   if (size) out.push(size);
   const mode = modeNote(state, input);
   if (mode) out.push(mode);
