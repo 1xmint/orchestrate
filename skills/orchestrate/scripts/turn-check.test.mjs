@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches } from './turn-check.mjs';
+import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches, mergedBranches } from './turn-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'turn-check.mjs');
@@ -313,6 +313,14 @@ test('Stop: a session with no edits and no risky request writes nothing', () => 
   assert.equal(run({ hook_event_name: 'Stop', session_id: 'quiet-1', transcript_path: tp }, home).stdout.trim(), '');
 });
 
+// A helper branch with one commit of its own, merged into the current branch.
+function mergeHelper(g, id) {
+  g('checkout', '-q', '-b', `worktree-agent-${id}`);
+  g('commit', '-q', '--allow-empty', '-m', `work ${id}`);
+  g('checkout', '-q', '-');
+  g('merge', '-q', '--no-ff', '-m', `merge ${id}`, `worktree-agent-${id}`);
+}
+
 // ---- helper folders left behind after a merge -------------------------------------
 
 test('leftoverHelperWorktrees counts merged helper branches whose folder still exists, once per helper', () => {
@@ -329,7 +337,7 @@ test('Stop: merged helper folders still on disk are named once with the count; n
   const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
   const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
   g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
-  for (const id of ['a1b2', 'c3d4']) { g('branch', `worktree-agent-${id}`); mkdirSync(join(repo, '.claude', 'worktrees', `agent-${id}`), { recursive: true }); }
+  for (const id of ['a1b2', 'c3d4']) { mergeHelper(g, id); mkdirSync(join(repo, '.claude', 'worktrees', `agent-${id}`), { recursive: true }); }
   const dir = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'lo-1.json'), JSON.stringify({ v: 1, session_id: 'lo-1', cwd: repo, dispatches: [], returned: [{ agentId: 'a1b2', status: 'DONE' }, { agentId: 'c3d4', status: 'DONE' }] }));
@@ -352,13 +360,48 @@ test('Stop: merged helper branches with no folder are named too', () => {
   const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
   const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
   g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
-  for (const id of ['e5f6', 'g7h8', 'i9j0']) g('branch', `worktree-agent-${id}`);
+  for (const id of ['e5f6', 'g7h8', 'i9j0']) mergeHelper(g, id);
   const dir = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'lo-3.json'), JSON.stringify({ v: 1, session_id: 'lo-3', cwd: repo, dispatches: [], returned: ['e5f6', 'g7h8', 'i9j0'].map(agentId => ({ agentId, status: 'DONE' })) }));
   const input = { hook_event_name: 'Stop', session_id: 'lo-3' };
   assert.equal(JSON.parse(run(input, home).stdout).reason, 'orchestrate: 3 helper branches are still here although their work was merged; nothing has been removed.');
   assert.equal(run(input, home).stdout.trim(), '', 'said once');
+});
+
+test('a helper branch that has not committed is not merged, even though it sits at the main tip', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
+  const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
+  g('branch', 'worktree-agent-idle1');
+  mergeHelper(g, 'done1');
+  assert.deepEqual(mergedBranches(repo), ['worktree-agent-done1']);
+});
+
+test('Stop: a returned helper whose branch has no commit and whose folder holds unsaved work is not called merged', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
+  const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
+  g('worktree', 'add', '-q', '-b', 'worktree-agent-w1w1', join(repo, '.claude', 'worktrees', 'agent-w1w1'));
+  writeFileSync(join(repo, '.claude', 'worktrees', 'agent-w1w1', 'unsaved.txt'), 'edit');
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'lo-4.json'), JSON.stringify({ v: 1, session_id: 'lo-4', cwd: repo, dispatches: [], returned: [{ agentId: 'w1w1', status: 'DONE' }] }));
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'lo-4' }, home).stdout.trim(), '');
+});
+
+test('Stop: a clean folder of a returned helper that never merged is named without the word merged', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
+  const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
+  g('worktree', 'add', '-q', '-b', 'worktree-agent-w2w2', join(repo, '.claude', 'worktrees', 'agent-w2w2'));
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'lo-5.json'), JSON.stringify({ v: 1, session_id: 'lo-5', cwd: repo, dispatches: [], returned: [{ agentId: 'w2w2', status: 'DONE' }] }));
+  const reason = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'lo-5' }, home).stdout).reason;
+  assert.equal(reason, 'orchestrate: 1 helper folder and branch are still here; nothing has been removed.');
 });
 
 test('Stop: no returned helper folder on disk, no git call and no output', () => {
