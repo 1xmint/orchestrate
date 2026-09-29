@@ -679,6 +679,17 @@ export function leadTextThisTurn(transcriptPath) {
   }
   return null;
 }
+// The hook can run before the lead's message reaches the disk: the newest entry
+// is then still the user's prompt. Look again a few times, well under a second
+// in all, before treating the message as unreadable.
+export function leadTextWithRetry(transcriptPath, { tries = 4, waitMs = 60, sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  let text = leadTextThisTurn(transcriptPath);
+  for (let i = 1; text === null && i < tries; i++) {
+    try { sleep(waitMs); } catch {}
+    text = leadTextThisTurn(transcriptPath);
+  }
+  return text;
+}
 const FIRST_HELPER_REFUSAL = 'the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again unchanged';
 export function firstHelperRefusal(input, id) {
   try {
@@ -686,14 +697,14 @@ export function firstHelperRefusal(input, id) {
     const state = loadSession(input.session_id) || {};
     if (state.firstHelperAsked) return state.firstHelperAsked === id ? FIRST_HELPER_REFUSAL : '';
     if (Array.isArray(state.dispatches) && state.dispatches.length) return '';
-    const text = leadTextThisTurn(input.transcript_path);
+    const text = leadTextWithRetry(input.transcript_path);
     if (text === null || /\b(haiku|sonnet|opus|fable|model)\b/i.test(text)) return '';
     withSession(input, s => { s.firstHelperAsked = id; });
     return FIRST_HELPER_REFUSAL;
   } catch { return ''; }
 }
 export function firstHelperNote(transcriptPath) {
-  const text = transcriptPath ? leadTextThisTurn(transcriptPath) : null;
+  const text = transcriptPath ? leadTextWithRetry(transcriptPath) : null;
   if (text === null) return FIRST_HELPER_PLAIN;
   const noModel = !/\b(haiku|sonnet|opus|fable|model)\b/i.test(text);
   const noCheck = !/\b(check|checked|checks|verif\w*|test|tests|tested|review\w*|prove\w*)\b/i.test(text);

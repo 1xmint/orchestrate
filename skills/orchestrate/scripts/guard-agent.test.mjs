@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { plainRole, missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
+import { leadTextWithRetry, plainRole, missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
 
 test('missingFact says what a building brief lacks as one line, in a fixed order', () => {
   assert.equal(missingFact('orch-implementer', 'TASK: 1\nfind it', false), 'brief lacks: what it is for, a check it is done, a PROGRESS path');
@@ -303,4 +303,20 @@ test('a brief with no task id and no headings still gets the review note and is 
   assert.equal(d.review, true);
   assert.equal(d.reviewInferred, 'password');
   assert.equal(d.task, null);
+});
+
+test('the lead message is read again when it has not reached the transcript yet', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'g-retry-'));
+  const f = join(dir, 't.jsonl');
+  const user = JSON.stringify({ type: 'user', message: { role: 'user', content: 'do it' } });
+  const lead = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Plan: sonnet builds it, tests check it.' }] } });
+  writeFileSync(f, user + '\n');
+  let sleeps = 0;
+  const text = leadTextWithRetry(f, { sleep: () => { if (++sleeps === 2) writeFileSync(f, user + '\n' + lead + '\n'); } });
+  assert.match(text, /sonnet builds it/);
+  assert.equal(sleeps, 2);
+  writeFileSync(f, user + '\n');
+  let n = 0;
+  assert.equal(leadTextWithRetry(f, { tries: 3, sleep: () => { n++; } }), null);
+  assert.equal(n, 2);
 });
