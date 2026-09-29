@@ -52,7 +52,7 @@ PROGRESS file named in the packet, updated each time one changes: a usage
 limit can stop you at any step. An `[orchestrate · size]` notice is an
 instruction to follow at once.
 
-Hand back only five lines, under 600 B: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
+Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
 
 The full report adds two lines to the packet's schema: ROOT CAUSE in one sentence, and RULED OUT listing what
 you eliminated. If two hypotheses in a row are refuted and a third is not

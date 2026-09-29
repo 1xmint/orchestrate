@@ -22,7 +22,7 @@ dependency or abstraction with no problem in front of it; a legal or licence
 question nobody raised; a decision that belongs to the owner; a fact nobody has
 checked.
 
-Hand back only five lines, under 600 B: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file. Keep VERDICT.
+Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
 
 The schema is at most twenty lines, in this order:
 

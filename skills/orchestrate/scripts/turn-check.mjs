@@ -86,6 +86,13 @@ const SKIP_EXPLAINED = /\bskip(?:ped|ping)?\b[^.\n]{0,80}\breview\b|\breview\b[^
 // is never held, and a dispatch that was not flagged is never held.
 const isReviewerRow = d => Boolean(d && (d.reviewOf || /reviewer/i.test(String(d.agent || ''))));
 
+// A reviewer dispatch counts as a look unless its return is on file with a FAIL
+// verdict. One still running, or one that passed, is a look; a returned FAIL is
+// not, and a later PASS on the same work is.
+const reviewFailed = (d, returned) => (Array.isArray(returned) ? returned : []).some(r => r && r.verdict === 'FAIL'
+  && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId)));
+const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id);
+
 function freeFormOpen(returned, dispatches) {
   const ds = Array.isArray(dispatches) ? dispatches : [];
   const out = [];
@@ -97,8 +104,9 @@ function freeFormOpen(returned, dispatches) {
       ? ds.find(x => x && x.toolUseId === r.toolUseId)
       : (r.agentId ? ds.find(x => x && x.agentId === r.agentId) : null);
     if (!d || !d.toolUseId || d.task || !d.review || isReviewerRow(d)) continue;
-    if (ds.some(x => x && x.reviewOf === d.toolUseId)) continue;
-    out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at) });
+    const looks = looksAt(ds, returned, d.toolUseId);
+    if (looks.some(x => !reviewFailed(x, returned))) continue;
+    out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at), failed: looks.length > 0 });
   }
   return out;
 }
@@ -108,19 +116,34 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   const gated = (Array.isArray(returned) ? returned : []).filter(r => r && r.reviewGated && r.task);
   const skipSaid = SKIP_EXPLAINED.test(String(lastMessage || ''));
   for (const r of gated) {
-    if (already.has(r.task)) continue;
-    const reviewed = (Array.isArray(dispatches) ? dispatches : []).some(d => d && d.reviewOf === r.task);
-    if (reviewed || skipSaid) continue;
-    return { block: true, task: r.task, blockedFor: [...already, r.task] };
+    const looks = looksAt(Array.isArray(dispatches) ? dispatches : [], returned, r.task);
+    if (looks.some(d => !reviewFailed(d, returned)) || skipSaid) continue;
+    const failed = looks.length > 0;
+    const key = failed ? `${r.task}:failed` : r.task;
+    if (already.has(key)) continue;
+    return { block: true, task: r.task, failed, blockedFor: [...already, key] };
   }
   const open = freeFormOpen(returned, dispatches);
   for (const f of open) {
-    if (already.has(f.id) || skipSaid) continue;
-    const later = open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && isReviewerRow(d) && !(d.reviewOf && dispatches.some(x => x && x.toolUseId === d.reviewOf)) && Date.parse(d.at) > (Number.isFinite(f.sentAt) ? f.sentAt : f.at));
+    const key = f.failed ? `${f.id}:failed` : f.id;
+    if (already.has(key) || skipSaid) continue;
+    const later = !f.failed && open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && isReviewerRow(d) && !(d.reviewOf && dispatches.some(x => x && x.toolUseId === d.reviewOf)) && !reviewFailed(d, returned) && Date.parse(d.at) > (Number.isFinite(f.sentAt) ? f.sentAt : f.at));
     if (later) continue;
-    return { block: true, task: f.id, freeForm: true, blockedFor: [...already, f.id] };
+    return { block: true, task: f.id, freeForm: true, failed: Boolean(f.failed), blockedFor: [...already, key] };
   }
   return { block: false, task: null, blockedFor: [...already] };
+}
+
+// A hand-back over the size the ledger keeps whole (ledger.mjs marks the return
+// with longBytes): one line of fact per helper, never repeated.
+export function longHandBackFact({ returned, noted }) {
+  const seen = new Set(Array.isArray(noted) ? noted : []);
+  for (const r of Array.isArray(returned) ? returned : []) {
+    const id = r && r.longBytes ? String(r.agentId || r.toolUseId || r.at || '') : '';
+    if (!id || seen.has(id)) continue;
+    return { id, text: `a helper's hand-back was ${r.longBytes} bytes against 600; ask for five lines.` };
+  }
+  return null;
 }
 
 // Work the lead built alone. The hold above only reads a helper's return, so a
@@ -305,10 +328,19 @@ function checkHeartbeat(input) {
     updated.reviewBlockedFor = rh.blockedFor;
     store[key] = updated;
     try { writeJsonAtomic(path, store); } catch {}
+    if (rh.failed) return emitBlock('orchestrate: the independent look found a problem; fix it and have it looked at again.');
     if (rh.freeForm) return emitBlock(`orchestrate: a brief flagged for independent review returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
     return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
+
+  const lf = longHandBackFact({ returned: state.returned, noted: rec.longNotedFor });
+  if (lf) {
+    updated.longNotedFor = [...(Array.isArray(rec.longNotedFor) ? rec.longNotedFor : []), lf.id].slice(-50);
+    store[key] = updated;
+    try { writeJsonAtomic(path, store); } catch {}
+    return emitBlock(`orchestrate: ${lf.text}`);
+  }
 
   // Risky work the lead did itself and no reviewer has seen: one fact, once per
   // set of edits. Quiet, and no file read beyond the transcript tail, otherwise.

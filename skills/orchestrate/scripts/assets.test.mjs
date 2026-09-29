@@ -296,7 +296,7 @@ test('packet.md carries a FOR line and the five-line top, ahead of the parsed la
 test('every role file tells a helper to hand back the five lines only, and why', () => {
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const text = readFileSync(join(AGENTS, f), 'utf8');
-    assert.ok(text.includes('Hand back only five lines, under 600 B:'), `${f} limits the hand-back`);
+    assert.ok(text.includes('Hand back only five lines, one short sentence each, under 600 B in all, nothing after them:'), `${f} limits the hand-back`);
     assert.ok(text.includes('The lead reads every byte, so the long report stays in that file.'), `${f} gives the reason`);
   }
   const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');
@@ -650,4 +650,18 @@ test('no role file names the old TASK/STATUS/CHANGED form as the hand-back', () 
     assert.ok(!/Return in the packet's schema/i.test(s), `${f} tells the helper to return the old form`);
     assert.ok(/five lines/.test(s), `${f} names the five-line hand-back`);
   }
+});
+
+test('no role file or packet asks for a STATUS or EVIDENCE block in the hand-back', () => {
+  for (const f of readdirSync(AGENTS).filter((n) => n.endsWith('.md'))) {
+    const s = readFileSync(join(AGENTS, f), 'utf8');
+    const para = s.split('\n\n').find((x) => x.startsWith('Hand back'));
+    assert.ok(para, `${f} has a hand-back paragraph`);
+    assert.ok(/nothing after them/.test(para), `${f} says nothing follows the five lines`);
+    assert.ok(!/STATUS|EVIDENCE|VERDICT|FINDINGS|Keep|keep/.test(para), `${f} asks for more than five lines in the hand-back`);
+  }
+  const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');
+  const ret = packet.slice(packet.indexOf('RETURN: five lines'), packet.indexOf('## Advisor packet'));
+  assert.ok(ret.startsWith('RETURN: five lines'), 'reviewer packet RETURN asks for the five lines');
+  assert.ok(/The file holds/.test(ret.replace(/\s+/g, ' ')), 'reviewer packet puts the schema in the file');
 });

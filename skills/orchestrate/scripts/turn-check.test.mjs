@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches, mergedBranches } from './turn-check.mjs';
+import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, longHandBackFact, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches, mergedBranches } from './turn-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'turn-check.mjs');
@@ -522,4 +522,74 @@ test('Stop: with no run bound, an untagged return is silent, 0 B', () => {
   const r = run({ hook_event_name: 'Stop', session_id: 'no-ledger-4', last_assistant_message: 'Done, no review needed.' }, home);
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), '');
+});
+
+// ---- a failed review is not a review ----------------------------------------
+
+const gatedDone = { task: '9-9-0001', status: 'PARTIAL', reviewGated: true };
+const revDispatch = { task: '9-9-0500', agent: 'orch-reviewer', reviewOf: '9-9-0001', toolUseId: 'tu-r1', agentId: 'ag-r1' };
+const revFail = { agent: 'reviewer', agentId: 'ag-r1', toolUseId: 'tu-r1', status: 'FAIL', verdict: 'FAIL' };
+
+test('reviewHoldDecision stays quiet while the reviewer is still running', () => {
+  const d = reviewHoldDecision({ returned: [gatedDone], dispatches: [revDispatch], lastMessage: '', blockedFor: [] });
+  assert.equal(d.block, false);
+});
+
+test('reviewHoldDecision is released by a reviewer that returned PASS', () => {
+  const d = reviewHoldDecision({
+    returned: [gatedDone, { agent: 'reviewer', agentId: 'ag-r1', toolUseId: 'tu-r1', status: 'DONE', verdict: 'PASS' }],
+    dispatches: [revDispatch], lastMessage: '', blockedFor: [] });
+  assert.equal(d.block, false);
+});
+
+test('reviewHoldDecision holds, once, when the reviewer returned FAIL', () => {
+  const returned = [gatedDone, revFail];
+  const d = reviewHoldDecision({ returned, dispatches: [revDispatch], lastMessage: '', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.failed, true);
+  assert.equal(d.task, '9-9-0001');
+  const again = reviewHoldDecision({ returned, dispatches: [revDispatch], lastMessage: '', blockedFor: d.blockedFor });
+  assert.equal(again.block, false);
+});
+
+test('reviewHoldDecision is released by a later PASS on the same work', () => {
+  const second = { ...revDispatch, toolUseId: 'tu-r2', agentId: 'ag-r2' };
+  const d = reviewHoldDecision({
+    returned: [gatedDone, revFail,
+      { agent: 'reviewer', agentId: 'ag-r2', toolUseId: 'tu-r2', status: 'DONE', verdict: 'PASS' }],
+    dispatches: [revDispatch, second], lastMessage: '', blockedFor: ['9-9-0001:failed'] });
+  assert.equal(d.block, false);
+});
+
+test('the hook tells the lead once, in one plain line, that a review failed', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'sess-failed-review.json'), JSON.stringify({
+    v: 1, session_id: 'sess-failed-review', returned: [gatedDone, revFail], dispatches: [revDispatch],
+  }));
+  const r = run({ session_id: 'sess-failed-review', cwd: home, last_assistant_message: 'Done.' }, home);
+  assert.match(r.stdout, /independent look found a problem/);
+  const r2 = run({ session_id: 'sess-failed-review', cwd: home, last_assistant_message: 'Done.' }, home);
+  assert.doesNotMatch(r2.stdout, /independent look found a problem/);
+});
+
+// ---- a long hand-back is named to the lead, once ------------------------------
+
+test('longHandBackFact names the size once per helper', () => {
+  const returned = [{ agentId: 'ag-1', longBytes: 6000 }, { agentId: 'ag-2', status: 'DONE' }];
+  const f = longHandBackFact({ returned, noted: [] });
+  assert.match(f.text, /6000 bytes against 600; ask for five lines/);
+  assert.equal(longHandBackFact({ returned, noted: [f.id] }), null);
+});
+
+test('the hook says a hand-back was long, once', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'sess-long.json'), JSON.stringify({ v: 1, session_id: 'sess-long', returned: [{ agentId: 'ag-1', longBytes: 6000 }], dispatches: [] }));
+  const a = run({ session_id: 'sess-long', cwd: home, last_assistant_message: 'Done.' }, home);
+  assert.match(a.stdout, /6000 bytes against 600/);
+  const b = run({ session_id: 'sess-long', cwd: home, last_assistant_message: 'Done.' }, home);
+  assert.doesNotMatch(b.stdout, /against 600/);
 });

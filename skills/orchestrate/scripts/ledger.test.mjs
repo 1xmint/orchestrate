@@ -12,7 +12,21 @@ import {
   appendCost, sumCosts, parseReturn, lintRunRow, lintLedger,
   evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE,
   dirtyPaths, dirtyDowngrade, dirtyNote, resolveHelperWorktree, handbackText, reviewGated,
+  recordBody, LONG_HANDBACK_BYTES,
 } from './ledger.mjs';
+
+test('recordBody keeps a short hand-back whole and cuts a long one to five lines and the byte count', () => {
+  const short = 'OUTCOME: DONE it works.\nPROOF: tests pass.\n';
+  assert.deepEqual(recordBody(short), { body: short, bytes: Buffer.byteLength(short), long: false });
+  const lines = ['OUTCOME: DONE x', 'PROOF: y', 'NOT CHECKED: z', 'NEEDS A DECISION: nothing', 'FULL REPORT: p'];
+  const long = lines.join('\n') + '\n' + 'STATUS: DONE\nEVIDENCE: ' + 'e'.repeat(LONG_HANDBACK_BYTES);
+  const r = recordBody(long);
+  assert.equal(r.long, true);
+  assert.equal(r.bytes, Buffer.byteLength(long));
+  assert.ok(r.body.startsWith(lines.join('\n') + '\n'));
+  assert.ok(!r.body.includes('EVIDENCE'));
+  assert.ok(r.body.includes(`${r.bytes} bytes against 600`));
+});
 
 function tmpFile() {
   const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-'));
@@ -206,6 +220,13 @@ test('reviewDowngrade: a REVIEW: yes task marked DONE with a matching reviewer r
   assert.equal(r.note, null);
 });
 
+test('reviewDowngrade: a reviewer return that failed does not count as reviewed; a later pass does', () => {
+  const failed = [{ reviewOf: '9-1-0034', status: 'FAIL', verdict: 'FAIL' }];
+  assert.equal(reviewDowngrade('DONE', true, '9-1-0034', failed).status, 'PARTIAL');
+  const both = [...failed, { reviewOf: '9-1-0034', status: 'DONE', verdict: 'PASS' }];
+  assert.equal(reviewDowngrade('DONE', true, '9-1-0034', both).status, 'DONE');
+});
+
 test('reviewDowngrade: a reviewer return for a different task id does not satisfy the gate', () => {
   const rows = [{ reviewOf: '9-1-0099' }];
   const r = reviewDowngrade('DONE', true, '9-1-0034', rows);
@@ -363,7 +384,8 @@ test('the filed return is the hand-back report, not the 27-byte stub, and the ro
   const tp = writeTranscript([plainLine('working'), handbackLine(report), plainLine(STUB)]);
   const { row, filed, res } = runHook(hookInput({ agent_transcript_path: tp, last_assistant_message: STUB }));
   assert.equal(res.status, 0);
-  assert.ok(filed.includes(report), 'the filed file holds the full hand-back text');
+  assert.ok(filed.includes('TASK: 9-1-0001') && !filed.includes(report), 'a long hand-back is filed as five lines');
+  assert.ok(filed.includes(`${Buffer.byteLength(report)} bytes against 600`), 'with its size');
   assert.equal(row.task, '9-1-0001');
   assert.equal(row.status, 'PARTIAL');
   assert.equal(row.evidence, true);
@@ -457,4 +479,38 @@ test('a 5 MB transcript is read from the tail in under 200 ms and still finds th
   const ms = Date.now() - t0;
   assert.equal(got, last);
   assert.ok(ms < 200, `took ${ms} ms`);
+});
+
+// The record read a hand-back's status with a reader of its own that knew only
+// STATUS lines and PASS/FAIL, so "OUTCOME: DONE" was stored with no status and
+// a FAIL followed by a trailing "STATUS: DONE" was stored as DONE.
+test('parseReturn reads the word that opens OUTCOME as the status (a five-line hand-back)', () => {
+  assert.equal(parseReturn('OUTCOME: DONE - Created lib/search.js exporting search.\nPROOF: git commit abc123.\n').status, 'DONE');
+  assert.equal(parseReturn('OUTCOME: DONE. Created lib/list.js only.\nPROOF: node -e ok.\n').status, 'DONE');
+  assert.equal(parseReturn('OUTCOME: DONE \u2014 created lib/add.js.\nPROOF: `node -e` ok.\n').status, 'DONE');
+  assert.equal(parseReturn('OUTCOME: partial - step 1 only.\nPROOF: none yet.\n').status, 'PARTIAL');
+  assert.equal(parseReturn('OUTCOME: BLOCKED - needs a key.\nPROOF: none.\n').status, 'BLOCKED');
+  // Indented under a wrapper the host adds.
+  assert.equal(parseReturn('[Subagent hand-back] text follows\n  OUTCOME: DONE - built it.\n  PROOF: node --test x.test.mjs 4 pass\n').status, 'DONE');
+});
+
+test('parseReturn: a reviewer FAIL is stored as FAIL and wins over a later STATUS line; PASS stays DONE', () => {
+  const fail = parseReturn('OUTCOME: FAIL. Auth works, but server.js:76 ships a hardcoded password.\nPROOF: node --test x.test.mjs 8 pass\nSTATUS: DONE\nEVIDENCE: read server.js:76\n');
+  assert.equal(fail.status, 'FAIL');
+  assert.equal(fail.verdict, 'FAIL');
+  const pass = parseReturn('OUTCOME: PASS. The fallback is gone.\nPROOF: node --test x.test.mjs 8 pass\nSTATUS: DONE\n');
+  assert.equal(pass.status, 'DONE');
+  assert.equal(pass.verdict, 'PASS');
+  // The old form with no OUTCOME still reads its STATUS line.
+  assert.equal(parseReturn('TASK: 9-1-0001\nSTATUS: PARTIAL\n').status, 'PARTIAL');
+});
+
+test('the record files a five-line DONE with its status, and a reviewer FAIL as FAIL', () => {
+  const done = 'OUTCOME: DONE - Created lib/search.js exporting search.\nPROOF: git commit abc1234, node --test lib/search.test.mjs 4 pass.\nNOT CHECKED: nothing.\nNEEDS A DECISION: nothing\nFULL REPORT: progress/x.md\n';
+  const a = runHook(hookInput({ last_assistant_message: done }));
+  assert.equal(a.row.status, 'DONE');
+  const fail = 'OUTCOME: FAIL. server.js:76 ships a hardcoded password.\nPROOF: node --test x.test.mjs 8 pass.\nNOT CHECKED: nothing.\nNEEDS A DECISION: nothing\nFULL REPORT: r.md\nSTATUS: DONE\nEVIDENCE: read server.js:76\n';
+  const b = runHook(hookInput({ agent_type: 'orchestrate:orch-reviewer', last_assistant_message: fail }));
+  assert.equal(b.row.status, 'FAIL');
+  assert.equal(b.row.verdict, 'FAIL');
 });

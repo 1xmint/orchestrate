@@ -45,9 +45,14 @@ export function parseReturn(text) {
   // a colon still said what it said. `exec` on a pattern without `g` returns
   // the first match in the string, so the first STATUS-shaped line anywhere
   // in the return is the one read, wherever it falls.
-  // A reviewer's five-line return has no STATUS: its OUTCOME (PASS or FAIL) says the review finished.
-  const outcome = (/^\s*OUTCOME\s*[:\-–—]\s*(PASS|FAIL)\b/im.exec(t) || [])[1] || null;
-  const status = (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || (outcome ? 'DONE' : null);
+  // A five-line hand-back opens OUTCOME with its word, and that word is its
+  // status: DONE, PARTIAL or BLOCKED as said; a reviewer's PASS is filed DONE
+  // and its FAIL is filed FAIL. It wins over any STATUS line further down (an
+  // old-form block a helper sometimes adds after the five lines).
+  const word = (/^\s*OUTCOME\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED|PASS|FAIL)\b/im.exec(t) || [])[1];
+  const outcome = word && /^(PASS|FAIL)$/i.test(word) ? word.toUpperCase() : null;
+  const said = word ? (outcome === 'PASS' ? 'DONE' : word.toUpperCase()) : null;
+  const status = said || (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
   const lines = t.trim() ? t.trim().split('\n').length : 0;
   return {
     task: taskIdIn(t, { caseInsensitive: true }),
@@ -224,13 +229,23 @@ export const NO_REVIEW_NOTE = 'done, but it was marked for an independent review
 // filing, it only lets the *next* DONE return through.
 // A reviewer's own return is never held for review: it IS the review. Only a
 // return that names no REVIEW OF can be gated by its dispatch's flag.
+export const LONG_HANDBACK_BYTES = 1200;
+// A hand-back over the limit is filed as its first five lines and its size; the
+// long form belongs in the helper's own report file.
+export function recordBody(text) {
+  const bytes = Buffer.byteLength(text);
+  if (bytes <= LONG_HANDBACK_BYTES) return { body: text, bytes, long: false };
+  const five = text.split('\n').filter(l => l.trim()).slice(0, 5).join('\n');
+  return { body: `${five}\n(the hand-back was ${bytes} bytes against 600)\n`, bytes, long: true };
+}
+
 export function reviewGated(dispatch, ret) {
   return Boolean(dispatch && dispatch.review) && !(ret && ret.reviewOf);
 }
 
 export function reviewDowngrade(status, reviewFlagged, task, indexRows, reviewInferred = null) {
   if (status !== 'DONE' || !reviewFlagged || !task) return { status, note: null };
-  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task);
+  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task && row.verdict !== 'FAIL');
   if (reviewed) return { status, note: null };
   const note = reviewInferred
     ? `done, but its objective mentions ${reviewInferred}, so it waits for an independent review that has not returned yet.`
@@ -625,6 +640,7 @@ function main() {
   if (alreadyHandled(input, agent, text)) return;
 
   const r = parseReturn(text);
+  const shortened = recordBody(text);
   if (r.suggest) { try { addSuggestion(r.suggest, { source: r.task || r.run || null }); } catch {} }
   const usage = sumUsage(input.agent_transcript_path);
   // Compared against the cap by segment (turns since the helper was last
@@ -672,7 +688,7 @@ function main() {
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
     const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${dirtyNoteText}${compactNote} -->\n\n`;
-    writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
+    writeFileSync(file, header + shortened.body + (shortened.body.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
   appendIndex(dir, {
@@ -689,7 +705,7 @@ function main() {
     ...(noEvidence.note ? { noEvidence: true } : {}),
     ...(review.note ? { reviewGated: true } : {}),
     ...(dirty.note ? { dirtyWorktree: true } : {}),
-    ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}),
+    ...(r.reviewOf || (dispatch && dispatch.reviewOf) ? { reviewOf: r.reviewOf || dispatch.reviewOf } : {}),
     verdict: r.verdict || null,
     evidence: r.evidence,
     file,
@@ -709,7 +725,7 @@ function main() {
       // yes or an inferred word) and none has come back yet — turn-check.mjs
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(shortened.long ? { longBytes: shortened.bytes } : {}), ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
       saveSession(state);
     }
   } catch {}
