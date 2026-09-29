@@ -27,17 +27,16 @@ function makeHome(agentNames = AGENT_NAMES) {
   return home;
 }
 
-test('the first substantive router prompt offers auto-compact once, after the state line, and writes nothing', () => {
+test('auto-compact is offered once, on the second substantive prompt, and writes nothing', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
   unlinkSync(marker);
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
-  assert.match(first, /Tip: this plugin works best with Claude Code's auto-compact set to 200k tokens\. Type `autocompact on`/);
+  assert.doesNotMatch(first, /Tip: this plugin works best/, 'the tip waits so the session-opening payload stays small');
+  const second = prompt(home, repo, 'another substantive prompt goes here too');
+  assert.match(second, /Tip: this plugin works best with Claude Code's auto-compact set to 200k tokens\. Type `autocompact on`/);
   assert.equal(existsSync(join(home, '.claude', 'settings.json')), false, 'the offer alone never writes settings.json');
-  const stateIdx = first.indexOf('[orchestrate]');
-  const tipIdx = first.indexOf('Tip: this plugin works best');
-  assert.ok(stateIdx >= 0 && tipIdx > stateIdx, 'the tip comes after the state line, not before it');
-  assert.equal(prompt(home, repo, 'another substantive prompt goes here too'), '', 'the marker makes later prompts cheap and silent, offer or not');
+  assert.equal(prompt(home, repo, 'a third substantive prompt for good measure'), '', 'the marker makes later prompts cheap and silent, offer or not');
 });
 
 test('a non-substantive first prompt does not spend the one-time offer', () => {
@@ -47,7 +46,9 @@ test('a non-substantive first prompt does not spend the one-time offer', () => {
   assert.equal(prompt(home, repo, 'ok'), '', 'too short to be substantive, so no tip and no marker spent');
   assert.equal(existsSync(marker), false);
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
-  assert.match(first, /Tip: this plugin works best/, 'the tip still arrives on the first substantive prompt');
+  assert.doesNotMatch(first, /Tip: this plugin works best/, 'the first substantive prompt still defers the tip');
+  const second = prompt(home, repo, 'another substantive prompt goes here too');
+  assert.match(second, /Tip: this plugin works best/, 'the tip arrives on the next substantive prompt');
 });
 
 test('a HOME whose settings.json already sets auto-compact gets no tip and no write', () => {
@@ -235,6 +236,22 @@ test('all eight role agents installed: no partial-install notice', () => {
   const home = makeHome(AGENT_NAMES); const repo = makeRepo(false);
   const first = prompt(home, repo, 'add a --json flag to the status command and test it');
   assert.doesNotMatch(first, /helper roles are installed/);
+});
+
+// Pinned: the whole first-prompt payload in a fresh home, worst case (a
+// partial install and a missing brief section both firing alongside the
+// card), stays under 2,500 B — the autocompact tip is deferred to the second
+// substantive prompt precisely so this worst case still fits.
+test('the whole first-prompt payload in a fresh home stays under 2,500 bytes', () => {
+  const home = makeHome([]); const repo = makeRepo(false);
+  const marker = join(home, '.claude', 'orchestrate', 'autocompact-default.json');
+  unlinkSync(marker);
+  const first = prompt(home, repo, 'add a --json flag to the status command and test it');
+  const bytes = Buffer.byteLength(first, 'utf8');
+  assert.ok(bytes <= 2500, `first payload is ${bytes} bytes, cap 2500`);
+  assert.doesNotMatch(first, /Tip: this plugin/, 'the tip is deferred off the first payload');
+  assert.match(first, /helper roles are installed/, 'the install notice is part of the worst case measured');
+  assert.match(first, /no "What this is for" section/, 'the brief-missing note is part of the worst case measured');
 });
 
 test('the wording of a message never produces an instruction', () => {
