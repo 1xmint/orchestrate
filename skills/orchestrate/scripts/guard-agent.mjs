@@ -634,6 +634,7 @@ function main() {
     const fh = firstHelperNote(input.transcript_path);
     if (fh) tag = `${tag ? `${tag}; ` : ''}${fh}`;
   }
+  if (asksForPastedContents(ti.prompt)) tag = `${tag ? `${tag}; ` : ''}this brief asks for contents to be pasted back: the hand-back is five lines, so ask for a file path instead`;
   const rw = /reviewer/i.test(String(ti.subagent_type || '')) ? null : inferredReviewWord(ti.prompt);
   if (rw && !/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || ''))) {
     const task = taskIdIn(ti.prompt) || 'this task';
@@ -689,6 +690,10 @@ export function leadTextWithRetry(transcriptPath, { tries = 4, waitMs = 60, slee
     text = leadTextThisTurn(transcriptPath);
   }
   return text;
+}
+// A brief that asks for contents or output to come back in the hand-back.
+export function asksForPastedContents(prompt) {
+  return /\b(exact contents|paste|full output|report back the file)\b/i.test(String(prompt || ''));
 }
 const FIRST_HELPER_REFUSAL = 'the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again unchanged';
 export function firstHelperRefusal(input, id) {

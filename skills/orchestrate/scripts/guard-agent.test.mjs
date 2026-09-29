@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { leadTextWithRetry, plainRole, missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
+import { asksForPastedContents, leadTextWithRetry, plainRole, missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
 
 test('missingFact says what a building brief lacks as one line, in a fixed order', () => {
   assert.equal(missingFact('orch-implementer', 'TASK: 1\nfind it', false), 'brief lacks: what it is for, a check it is done, a PROGRESS path');
@@ -319,4 +319,14 @@ test('the lead message is read again when it has not reached the transcript yet'
   let n = 0;
   assert.equal(leadTextWithRetry(f, { tries: 3, sleep: () => { n++; } }), null);
   assert.equal(n, 2);
+});
+
+test('a brief that asks for pasted contents gets a note to ask for a file path; one that does not, none', () => {
+  const home = sandboxHome();
+  const a = dispatch(home, 's-paste', { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-1-0101\nOBJECTIVE\nList the settings\nRETURN: paste the full output of the run' });
+  assert.match(a.stdout, /the hand-back is five lines, so ask for a file path instead/);
+  const b = dispatch(home, 's-nopaste', { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-1-0102\nOBJECTIVE\nList the settings\nRETURN: five lines and a file path' });
+  assert.doesNotMatch(b.stdout, /hand-back is five lines/);
+  assert.equal(asksForPastedContents('report back the file'), true);
+  assert.equal(asksForPastedContents('the pasted server code is below'), false);
 });
