@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import {
   thresholds, adviseContext, contextEpoch, checkpointPath, hasCheckpoint, newestCheckpoint,
-  switchAdvice, contextNotice, contextTick, formatReading, shortPath, resolveAutocompactWindow,
+  switchAdvice, contextNotice, contextTick, formatReading,resolveAutocompactWindow,
   postCompactionAskDue,
 } from './context-advice.mjs';
 import { toReading } from './context-scan.mjs';
@@ -211,10 +211,11 @@ test('with no checkpoint, the checkpoint notice asks for one and names the path;
   const r = measured(checkpointAt, { compaction: { uuid: 'e1d2c3b4-a5f6-4789-8abc-def012345678', at: new Date(Date.now() - 60000).toISOString() }, compactions: 3 });
   const ctx = { policy: p, session, dir, home, editCounter: 123 };
   const ask = contextNotice(r, adviseContext(r, p), ctx);
-  assert.match(ask, /write the checkpoint now \(goal, decisions, files changed, verification, next action\) to ~\/\.claude\/orchestrate\/context\/0b7e5f1c-[^ ]*\/checkpoint-e1d2c3b4-[^ ]*\.md$/);
-  assert.ok(!ask.includes(home.replace(/\\/g, '/')) && !ask.includes(home), 'no machine path in the notice');
-  assert.ok(Buffer.byteLength(ask) < 400, `under 400 B, got ${Buffer.byteLength(ask)}`);
+  assert.match(ask, /write the checkpoint now \(goal, decisions, files changed, verification, next action\) to /);
   const path = checkpointPath(session, r, dir);
+  assert.ok(ask.endsWith(`to ${path}`), 'the ask carries the absolute path the plugin reads, not a ~/ form');
+  assert.ok(!ask.includes('~/'), 'no ~/ form');
+  assert.ok(Buffer.byteLength(ask) < 700, `under 700 B, got ${Buffer.byteLength(ask)}`);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, 'goal: x\n');
   const has = contextNotice(r, adviseContext(r, p), ctx);
@@ -265,10 +266,24 @@ test('the post-compaction ask never fires when a checkpoint already exists for t
   assert.doesNotMatch(contextNotice(r, adviseContext(r, p), { policy: p, session: 's1', dir }), /just summarised/);
 });
 
-test('shortPath writes a home path as ~/ with forward slashes and leaves others alone', () => {
-  assert.equal(shortPath('/h/u/.claude/x.md', '/h/u'), '~/.claude/x.md');
-  assert.equal(shortPath('C:\\Users\\u\\.claude\\x.md', 'C:\\Users\\u'), '~/.claude/x.md');
-  assert.equal(shortPath('/tmp/x.md', '/h/u'), '/tmp/x.md');
+test('a checkpoint beside the transcript folder is reported as outside the plugin folder, with where to move it', () => {
+  const p = policy();
+  const home = mkdtempSync(join(tmpdir(), 'orch-adv-home-'));
+  const dir = join(home, '.claude', 'orchestrate', 'context');
+  const session = '0b7e5f1c-3a2d-4c8e-9f10-1234567890ab';
+  const transcript = join(home, '.claude', 'projects', 'proj', `${session}.jsonl`);
+  const { checkpointAt } = thresholds(null, p);
+  const r = measured(checkpointAt, { transcript });
+  const want = checkpointPath(session, r, dir);
+  const wrong = join(dirname(transcript), 'orchestrate', 'context', session, `checkpoint-${session}.md`);
+  mkdirSync(dirname(wrong), { recursive: true });
+  writeFileSync(wrong, 'goal: x\n');
+  const text = contextNotice(r, adviseContext(r, p), { policy: p, session, dir });
+  assert.doesNotMatch(text, /newest checkpoint: none$|newest checkpoint: none ·/);
+  assert.ok(text.includes(`one is at ${wrong}`), 'names where it is');
+  assert.ok(text.includes(`move it to ${want}`), 'names where to move it');
+  assert.match(text, /outside it/);
+  assert.equal(hasCheckpoint(session, r, { dir }), false, 'still not a checkpoint the plugin reads');
 });
 
 test('contextTick keys by epoch and step, and is silent for an unknown reading', () => {
