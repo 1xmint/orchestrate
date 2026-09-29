@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlinkSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,7 +120,7 @@ function run(home, payload) {
     input: JSON.stringify(payload), encoding: 'utf8', windowsHide: true,
     // CLAUDE_EFFORT is cleared so a test run inside a Claude Code session does
     // not hand the router that session's own effort.
-    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '', CLAUDE_EFFORT: '' },
+    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '', CLAUDE_EFFORT: '', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '' },
   });
   assert.equal(r.status, 0, `exit ${r.status}: ${r.stderr}`);
   const out = r.stdout.trim();
@@ -195,7 +195,7 @@ test('`router.mjs status` on the command line with `{}` prints nothing; the prom
   const home = makeHome();
   const r = spawnSync(process.execPath, [ROUTER, 'status'], {
     input: '{}', encoding: 'utf8', windowsHide: true,
-    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '', CLAUDE_EFFORT: '' },
+    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '', CLAUDE_EFFORT: '', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '' },
   });
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
@@ -441,11 +441,33 @@ test('SessionStart compact with no bound run names the checkpoint file, not its 
   const long = 'checkpoint text '.repeat(200); // well over any per-notice cap
   const cpPath = join(dir, 'checkpoint-e1.md');
   writeFileSync(cpPath, long);
+  const t = join(mkdtempSync(join(tmpdir(), 'orch-cp-t-')), 'session.jsonl');
+  writeFileSync(t, JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid: 'e1', timestamp: new Date().toISOString(), compactMetadata: { preTokens: 150000, postTokens: 20000 } }) + '\n');
 
-  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo });
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo, transcript_path: t });
   assert.match(out, /\[orchestrate · compacted\] checkpoint: /);
   assert.ok(out.includes(cpPath), 'names the file');
   assert.ok(!out.includes('checkpoint text checkpoint text'), 'never injects the file\'s own text');
+});
+
+test('the compacted line names no checkpoint that is old or has no boundary to belong to', () => {
+  const stale = (file, mtimeAgoMs, uuid) => {
+    const home = makeHome(); const repo = makeRepo(false);
+    const sid = 's-cpstale';
+    const dir = join(home, '.claude', 'orchestrate', 'context', sid);
+    mkdirSync(dir, { recursive: true });
+    const cp = join(dir, file);
+    writeFileSync(cp, 'x');
+    const when = new Date(Date.now() - mtimeAgoMs);
+    utimesSync(cp, when, when);
+    const t = join(mkdtempSync(join(tmpdir(), 'orch-cp-t-')), 'session.jsonl');
+    writeFileSync(t, uuid ? JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid, timestamp: new Date().toISOString(), compactMetadata: { preTokens: 1, postTokens: 1 } }) + '\n' : '');
+    return run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo, transcript_path: t });
+  };
+  const said = /\[orchestrate · compacted\] checkpoint note follows at first action/;
+  assert.match(stale('checkpoint-e1.md', 5 * 60000, 'e1'), said, 'written five minutes ago');
+  assert.match(stale('checkpoint-e1.md', 1000, null), said, 'no boundary visible yet');
+  assert.doesNotMatch(stale('checkpoint-e1.md', 1000, 'e1'), /follows at first action/);
 });
 
 // unreturned/unreturnedNote's own direct-call test moved to lib/recover.test.mjs.

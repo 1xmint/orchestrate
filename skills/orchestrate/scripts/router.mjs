@@ -26,7 +26,7 @@
 import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
@@ -35,7 +35,7 @@ import {
   SESSIONS_DIR, PROFILE_PATH,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext } from './lib/context-store.mjs';
-import { readContext } from './lib/context-scan.mjs';
+import { readContext, idPart } from './lib/context-scan.mjs';
 import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
 import { readGoal, goalLine, goalDue, markShown } from './lib/goal.mjs';
 import { modeNote } from './lib/modes.mjs';
@@ -105,6 +105,22 @@ export function leadNote(self, tier, now = Date.now(), path = LEAD_NOTE_PATH) {
   if (seen[key] && now - Number(seen[key]) < 7 * 86400000) return '';
   try { writeJsonAtomic(path, { ...seen, [key]: now }); } catch {}
   return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. For quota-first work, high or medium is the better default. Mention it to the user once: it takes effect in a new session, because switching mid-session re-reads everything uncached.`;
+}
+
+// The id of the newest compaction boundary this hook can see in the transcript.
+function newestBoundaryId(input) {
+  try {
+    const c = readContext(input.transcript_path, { session: input.session_id }).compaction;
+    return c && c.uuid ? idPart(c.uuid) : null;
+  } catch { return null; }
+}
+
+// A checkpoint file counts as this compaction's when its name carries the
+// newest visible boundary's id and it was written in the last two minutes.
+function checkpointIsFresh(path, boundaryId, now = Date.now()) {
+  try {
+    return Boolean(boundaryId) && basename(path).includes(boundaryId) && now - statSync(path).mtimeMs <= 120000;
+  } catch { return false; }
 }
 
 function gatherContext(input, state) {
@@ -515,8 +531,12 @@ function handleSessionStart(input) {
     // whole context cost of a compaction; the lead reads the file when it
     // needs it. `latestCheckpointFor` finds whichever checkpoint is newest —
     // the plugin's own snapshot just written, or one the lead wrote itself.
+    // The host writes the boundary record after this hook, so the newest
+    // boundary visible here can be the previous compaction's. The path is
+    // named only when it belongs to that boundary and was written in the last
+    // two minutes; otherwise the note is promised for the first action.
     const cp = snapshotPath || latestCheckpointFor(input.session_id);
-    if (cp) out.push(`[orchestrate · compacted] checkpoint: ${cp}`);
+    out.push(`[orchestrate · compacted] ${cp && checkpointIsFresh(cp, newestBoundaryId(input)) ? `checkpoint: ${cp}` : 'checkpoint note follows at first action'}`);
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
   }
