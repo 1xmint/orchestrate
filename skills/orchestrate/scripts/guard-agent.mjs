@@ -552,6 +552,18 @@ function main() {
     return;
   }
 
+  // The three plain lines, before the first helper starts: when the lead's last
+  // message to the user is readable and names no model, refuse this one
+  // dispatch, once per session. The mark is the event id of the refused call,
+  // so a second registration of the same hook refuses it again, and any later
+  // dispatch (or the same helper sent again) goes through.
+  const fhr = firstHelperRefusal(input, id);
+  if (fhr) {
+    if (!repeat) recordDenial(input, ti, 'first helper: three plain lines owed');
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate guard: ${fhr}` } });
+    return;
+  }
+
   // Bind only now, after every gate that could still refuse this dispatch has
   // passed — a budget refusal must not burn the grant. The claim is atomic
   // (see claimGrantId): a second dispatch racing this one for the same grant
@@ -641,6 +653,19 @@ export function leadTextThisTurn(transcriptPath) {
     if (text) return text;
   }
   return null;
+}
+const FIRST_HELPER_REFUSAL = 'the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again unchanged';
+export function firstHelperRefusal(input, id) {
+  try {
+    if (!input.session_id || !input.transcript_path) return '';
+    const state = loadSession(input.session_id) || {};
+    if (state.firstHelperAsked) return state.firstHelperAsked === id ? FIRST_HELPER_REFUSAL : '';
+    if (Array.isArray(state.dispatches) && state.dispatches.length) return '';
+    const text = leadTextThisTurn(input.transcript_path);
+    if (text === null || /\b(haiku|sonnet|opus|fable|model)\b/i.test(text)) return '';
+    withSession(input, s => { s.firstHelperAsked = id; });
+    return FIRST_HELPER_REFUSAL;
+  } catch { return ''; }
 }
 export function firstHelperNote(transcriptPath) {
   const text = transcriptPath ? leadTextThisTurn(transcriptPath) : null;
