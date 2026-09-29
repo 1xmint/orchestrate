@@ -95,6 +95,12 @@ export function decide(input) {
 // copies the whole conversation into every step it takes. Fable on a plan that
 // does not include it spends the user's money. And near the user's plan limit,
 // a new helper is the one that gets cut off mid-edit.
+// What a helper does, in words a person can read; role ids never go in a note.
+const PLAIN_ROLES = { 'orch-implementer': 'a builder', 'orch-reviewer': 'a reviewer', 'orch-researcher': 'a researcher', 'orch-debugger': 'a fault-finder', 'orch-planner': 'a planner', 'orch-advisor': 'an advisor', 'orch-browser': 'a browser helper', 'orch-coordinator': 'a coordinator', Explore: 'a finder', 'general-purpose': 'a general helper', claude: 'a general helper', fork: 'a fork' };
+export function plainRole(role) {
+  const r = normalizeRole(String(role || 'claude'));
+  return PLAIN_ROLES[r] || (/^orch-/.test(r) ? 'a helper' : r);
+}
 export const EXECUTORS = new Set(['orch-implementer', 'orch-researcher', 'orch-browser']);
 export const SWEEPERS = new Set(['Explore', 'general-purpose', 'claude']);
 // A verdict from a model weaker than Opus cannot be banked (STATE.md v0.16.1).
@@ -233,12 +239,12 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
   }
 
   if (JUDGES.has(role) && f && rank(model) > rank('opus')) {
-    return { prefix: 'model', reason: `${role} on ${f} gives a verdict nobody can rely on: it exists to catch what the author's model missed. Resend with model: "opus". If Opus is out for now, hold the merge and tell the user; a weaker review is not a pass.` };
+    return { prefix: 'model', reason: `${plainRole(role)} on ${f} gives a verdict nobody can rely on: it exists to catch what the author's model missed. Resend with model: "opus". If Opus is out for now, hold the merge and tell the user; a weaker review is not a pass.` };
   }
 
   if (SWEEPERS.has(role)) {
-    if (!f) return { prefix: 'model', reason: `${role} runs on this conversation's own model unless one is named. Resend with model: "haiku" for a read-only sweep, or "sonnet" if it must reason — or do a small search yourself with Grep and Glob.` };
-    if (rank(model) < rank('sonnet')) return { prefix: 'model', reason: `${role} on ${f} is a sweep on a judgment model. Resend with model: "sonnet" or "haiku".` };
+    if (!f) return { prefix: 'model', reason: `${plainRole(role)} runs on this conversation's own model unless one is named. Resend with model: "haiku" for a read-only sweep, or "sonnet" if it must reason — or do a small search yourself with Grep and Glob.` };
+    if (rank(model) < rank('sonnet')) return { prefix: 'model', reason: `${plainRole(role)} on ${f} is a sweep on a judgment model. Resend with model: "sonnet" or "haiku".` };
     return null;
   }
 
@@ -257,7 +263,7 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
         return g.bind ? { grantBind: g.bind, at: userModel.at, family: f } : null;
       }
       if (g && g.deny) return { prefix: 'model', reason: g.reason };
-      return { prefix: 'model', reason: `${role} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id.` };
+      return { prefix: 'model', reason: `${plainRole(role)} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id.` };
     }
   }
   return null;
@@ -434,7 +440,7 @@ export function dispatchNote(ti, { pair = false, dollars = false } = {}) {
       const t = estimateWording(tagFor(ti, { pair }));
       return ph && !ph.startsWith('about the usual') && t.includes('≈ $') ? `${t}; ${ph}` : t;
     }
-    return ph ? `helper size: ${role} on ${family(model)}, ${ph}${pair ? `; a solo build in this chat is about 1/${SOLO_RATIO} of it` : ''}` : '';
+    return ph ? `helper size: ${plainRole(role)} on ${family(model)}, ${ph}${pair ? `; a solo build in this chat is about 1/${SOLO_RATIO} of it` : ''}` : '';
   } catch { return ''; }
 }
 
@@ -628,10 +634,11 @@ function main() {
     const fh = firstHelperNote(input.transcript_path);
     if (fh) tag = `${tag ? `${tag}; ` : ''}${fh}`;
   }
+  if (asksForPastedContents(ti.prompt)) tag = `${tag ? `${tag}; ` : ''}this brief asks for contents to be pasted back: the hand-back is five lines, so ask for a file path instead`;
   const rw = /reviewer/i.test(String(ti.subagent_type || '')) ? null : inferredReviewWord(ti.prompt);
   if (rw && !/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || ''))) {
     const task = taskIdIn(ti.prompt) || 'this task';
-    tag = `${tag ? `${tag}; ` : ''}this task will wait for an independent review because its objective mentions ${rw}; to send one, dispatch orch-reviewer on opus with REVIEW OF: ${task}`;
+    tag = `${tag ? `${tag}; ` : ''}this task will wait for an independent review because its objective mentions ${rw}; to send one, send a reviewer on opus with REVIEW OF: ${task}`;
   }
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
@@ -673,6 +680,21 @@ export function leadTextThisTurn(transcriptPath) {
   }
   return null;
 }
+// The hook can run before the lead's message reaches the disk: the newest entry
+// is then still the user's prompt. Look again a few times, well under a second
+// in all, before treating the message as unreadable.
+export function leadTextWithRetry(transcriptPath, { tries = 4, waitMs = 60, sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
+  let text = leadTextThisTurn(transcriptPath);
+  for (let i = 1; text === null && i < tries; i++) {
+    try { sleep(waitMs); } catch {}
+    text = leadTextThisTurn(transcriptPath);
+  }
+  return text;
+}
+// A brief that asks for contents or output to come back in the hand-back.
+export function asksForPastedContents(prompt) {
+  return /\b(exact contents|paste|full output|report back the file)\b/i.test(String(prompt || ''));
+}
 const FIRST_HELPER_REFUSAL = 'the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again unchanged';
 export function firstHelperRefusal(input, id) {
   try {
@@ -680,14 +702,14 @@ export function firstHelperRefusal(input, id) {
     const state = loadSession(input.session_id) || {};
     if (state.firstHelperAsked) return state.firstHelperAsked === id ? FIRST_HELPER_REFUSAL : '';
     if (Array.isArray(state.dispatches) && state.dispatches.length) return '';
-    const text = leadTextThisTurn(input.transcript_path);
+    const text = leadTextWithRetry(input.transcript_path);
     if (text === null || /\b(haiku|sonnet|opus|fable|model)\b/i.test(text)) return '';
     withSession(input, s => { s.firstHelperAsked = id; });
     return FIRST_HELPER_REFUSAL;
   } catch { return ''; }
 }
 export function firstHelperNote(transcriptPath) {
-  const text = transcriptPath ? leadTextThisTurn(transcriptPath) : null;
+  const text = transcriptPath ? leadTextWithRetry(transcriptPath) : null;
   if (text === null) return FIRST_HELPER_PLAIN;
   const noModel = !/\b(haiku|sonnet|opus|fable|model)\b/i.test(text);
   const noCheck = !/\b(check|checked|checks|verif\w*|test|tests|tested|review\w*|prove\w*)\b/i.test(text);

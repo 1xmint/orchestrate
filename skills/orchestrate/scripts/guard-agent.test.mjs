@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
+import { asksForPastedContents, leadTextWithRetry, plainRole, missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
 
 test('missingFact says what a building brief lacks as one line, in a fixed order', () => {
   assert.equal(missingFact('orch-implementer', 'TASK: 1\nfind it', false), 'brief lacks: what it is for, a check it is done, a PROGRESS path');
@@ -102,13 +102,22 @@ test('an explicit REVIEW: yes still sets review:true with no reviewInferred word
   assert.equal(d.reviewInferred, undefined);
 });
 
+test('a dispatch note names the helper by what it does, never by role id', () => {
+  const home = sandboxHome();
+  const { stdout } = dispatch(home, 's-plain', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-1-0100\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
+  assert.match(stdout, /helper size: a builder on sonnet/);
+  assert.doesNotMatch(stdout, /orch-(implementer|reviewer)/);
+  assert.equal(plainRole('orch-debugger'), 'a fault-finder');
+  assert.equal(plainRole('orchestrate:orch-planner'), 'a planner');
+});
+
 test('an inferred review adds a plain-language additionalContext note naming the word and how to dispatch a reviewer', () => {
   const home = sandboxHome();
   const sid = 's-note';
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-1-0099\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
   assert.match(ctx, /will wait for an independent review because its objective mentions payment/);
-  assert.match(ctx, /dispatch orch-reviewer on opus with REVIEW OF: 9-1-0099/);
+  assert.match(ctx, /send a reviewer on opus with REVIEW OF: 9-1-0099/);
 });
 
 test('a reviewer dispatch is never itself flagged for review, whatever its brief mentions', () => {
@@ -196,7 +205,7 @@ test('the first orch-implementer dispatch of a session bound to an open run ledg
 test('on a subscription the first implementer dispatch is told its size against a solo build, with no dollar sign', () => {
   const { json } = dispatch(sandboxHome('pro'), 's-pair-sub', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /helper size: orch-implementer on sonnet, about the usual size for this kind of helper; a solo build in this chat is about 1\/2\.6 of it/);
+  assert.match(ctx, /helper size: a builder on sonnet, about the usual size for this kind of helper; a solo build in this chat is about 1\/2\.6 of it/);
   assert.doesNotMatch(ctx, /\$/);
 });
 
@@ -278,4 +287,46 @@ test('first helper: with no transcript at all the plain fact is sent, and the di
   const { json } = dispatch(sandboxHome(), 's-fh-d', PKT);
   assert.equal(json.hookSpecificOutput.permissionDecision, undefined);
   assert.match(json.hookSpecificOutput.additionalContext, /first helper this session: the user is owed three plain lines first/);
+});
+
+// ---- a brief with no task id and no headings (a real run: a password check) ----
+
+const NO_HEADINGS_BRIEF = `Repo: a small club server (clean).\n\nFull current contents:\n\n\`\`\`js\n${'const members = [];\n'.repeat(40)}\`\`\`\n\nTask: add a password check so only people who know the password can see /members.\n\nReport back what you changed.`;
+
+test('a brief with no task id and no headings still gets the review note and is recorded as risky work', () => {
+  const home = sandboxHome();
+  const sid = 's-no-headings';
+  const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: NO_HEADINGS_BRIEF });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.match(ctx, /will wait for an independent review because its objective mentions password/);
+  const d = lastDispatch(home, sid);
+  assert.equal(d.review, true);
+  assert.equal(d.reviewInferred, 'password');
+  assert.equal(d.task, null);
+});
+
+test('the lead message is read again when it has not reached the transcript yet', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'g-retry-'));
+  const f = join(dir, 't.jsonl');
+  const user = JSON.stringify({ type: 'user', message: { role: 'user', content: 'do it' } });
+  const lead = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Plan: sonnet builds it, tests check it.' }] } });
+  writeFileSync(f, user + '\n');
+  let sleeps = 0;
+  const text = leadTextWithRetry(f, { sleep: () => { if (++sleeps === 2) writeFileSync(f, user + '\n' + lead + '\n'); } });
+  assert.match(text, /sonnet builds it/);
+  assert.equal(sleeps, 2);
+  writeFileSync(f, user + '\n');
+  let n = 0;
+  assert.equal(leadTextWithRetry(f, { tries: 3, sleep: () => { n++; } }), null);
+  assert.equal(n, 2);
+});
+
+test('a brief that asks for pasted contents gets a note to ask for a file path; one that does not, none', () => {
+  const home = sandboxHome();
+  const a = dispatch(home, 's-paste', { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-1-0101\nOBJECTIVE\nList the settings\nRETURN: paste the full output of the run' });
+  assert.match(a.stdout, /the hand-back is five lines, so ask for a file path instead/);
+  const b = dispatch(home, 's-nopaste', { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-1-0102\nOBJECTIVE\nList the settings\nRETURN: five lines and a file path' });
+  assert.doesNotMatch(b.stdout, /hand-back is five lines/);
+  assert.equal(asksForPastedContents('report back the file'), true);
+  assert.equal(asksForPastedContents('the pasted server code is below'), false);
 });

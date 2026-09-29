@@ -145,7 +145,7 @@ test('guard: one dispatch delivered twice is recorded once', () => {
   };
   const first = run('guard-agent.mjs', payload, home);
   const second = run('guard-agent.mjs', payload, home);
-  assert.match(first.stdout, /helper size: orch-/);
+  assert.match(first.stdout, /helper size: an? \w+/);
   assert.equal(second.stdout.trim(), '', 'the second registration of the same hook says nothing');
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sd.json'), 'utf8'));
   assert.equal(state.dispatches.length, 1);
@@ -176,8 +176,8 @@ test('guard: two sessions do not overwrite each other in one global slot', () =>
   });
   const a = run('guard-agent.mjs', mk('sf1'), home);
   const b = run('guard-agent.mjs', mk('sf2'), home);
-  assert.match(a.stdout, /helper size: orch-/);
-  assert.match(b.stdout, /helper size: orch-/, 'a different session is a different event');
+  assert.match(a.stdout, /helper size: an? \w+/);
+  assert.match(b.stdout, /helper size: an? \w+/, 'a different session is a different event');
   for (const s of ['sf1', 'sf2']) {
     const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${s}.json`), 'utf8'));
     assert.equal(state.dispatches.length, 1, s);
@@ -213,7 +213,7 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's2', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\ndo it' },
   }, home);
-  assert.match(out.stdout, /helper size: orch-implementer on sonnet/);
+  assert.match(out.stdout, /helper size: a builder on sonnet/);
   assert.doesNotMatch(out.stdout, /\$|at list price/, 'a subscription is shown a size, not a dollar figure');
   assert.doesNotMatch(out.stdout, /% of a/, 'no share of a week: nothing here has measured one');
   assert.doesNotMatch(out.stdout, /permissionDecision/, "the user's own approval prompt is untouched");
@@ -284,7 +284,7 @@ test('guard: with no ceiling, or "Ceiling: none", nothing is refused over cost a
     const out = dispatchAgainstBudget(text, sid);
     assert.doesNotMatch(out.stdout, /permissionDecision.*deny|orchestrate budget/, `not refused: ${text || '(no section)'}`);
     assert.doesNotMatch(out.stdout, /\$/, 'no dollar sign on a subscription with no ceiling');
-    assert.match(out.stdout, /helper size: orch-implementer on sonnet, .*for this kind of helper/);
+    assert.match(out.stdout, /helper size: a builder on sonnet, .*for this kind of helper/);
   }
 });
 
@@ -365,7 +365,7 @@ test('guard: a Plan dispatch that names no model is recorded as inherited and no
   }, home);
   // No model named, and Plan has no agent file of its own, so there is no
   // price figure to give: no additionalContext at all.
-  assert.doesNotMatch(String(out.json && out.json.hookSpecificOutput && out.json.hookSpecificOutput.additionalContext || ''), /helper size: orch-/);
+  assert.doesNotMatch(String(out.json && out.json.hookSpecificOutput && out.json.hookSpecificOutput.additionalContext || ''), /helper size: an? \w+/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit');
   assert.equal(state.dispatches[0].modelFrom, 'inherit');
@@ -380,7 +380,7 @@ test('guard: an orch-implementer dispatch that names no model is recorded and pr
   // The role's own file names sonnet, so a tag prints even though the
   // dispatch itself named nothing; this is the first implementer dispatch of
   // the session with no ledger, so the solo/helper pair prints too.
-  assert.match(out.json.hookSpecificOutput.additionalContext, /helper size: orch-implementer on sonnet/);
+  assert.match(out.json.hookSpecificOutput.additionalContext, /helper size: a builder on sonnet/);
   assert.match(out.json.hookSpecificOutput.additionalContext, /solo build in this chat/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9b.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'sonnet');
@@ -409,7 +409,7 @@ test('guard: a dispatch outside any repo is not gated on a stranger repo\'s ceil
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 1\ndo it' },
   }, home);
   assert.doesNotMatch(out.stdout, /permissionDecision.*deny/, 'not denied against a repo this dispatch never named');
-  assert.match(out.stdout, /helper size: orch-/, 'the dispatch still goes through and is still priced');
+  assert.match(out.stdout, /helper size: an? \w+/, 'the dispatch still goes through and is still priced');
 });
 
 test('guard: the run a packet names travels with the dispatch record', () => {

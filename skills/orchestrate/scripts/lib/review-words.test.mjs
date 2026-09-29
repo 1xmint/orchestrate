@@ -19,9 +19,10 @@ test('objectiveSection: runs to the end of the prompt when no closing heading fo
   assert.equal(objectiveSection(prompt).trim(), 'Rename a CSS class');
 });
 
-test('objectiveSection: the first 600 characters when there is no OBJECTIVE heading at all', () => {
+test('objectiveSection: the whole text, minus fenced code, when there is no OBJECTIVE heading at all', () => {
   const prompt = `x${'y'.repeat(700)}`;
-  assert.equal(objectiveSection(prompt), prompt.slice(0, 600));
+  assert.equal(objectiveSection(prompt), prompt);
+  assert.equal(objectiveSection('a\n```\ncode\n```\nb'), 'a\n\nb');
 });
 
 test('objectiveSection: stops at SCOPE or DONE WHEN too, not only CONTEXT', () => {
@@ -81,4 +82,27 @@ test('inferredReviewWord: a FILES or RULES line naming a review word is not tagg
 test('inferredReviewWord: the same word in the actual objective text still matches', () => {
   const prompt = 'TASK: 1\nWHY: add Stripe payment capture\nWHERE: repo x  run dir in the main checkout\nDO:\n1. build it';
   assert.equal(inferredReviewWord(prompt), 'payment');
+});
+
+// ---- a brief with no OBJECTIVE heading (a real run: the ask came after pasted code) ----
+
+const PASTED = 'const members = [];\n'.repeat(40);
+const NO_HEADINGS = `Repo: a small club server (clean).\n\nFull current contents:\n\n\`\`\`js\n${PASTED}\`\`\`\n\nTask: add a password check so only people who know the password can see /members.\n\nReport back what you changed.`;
+
+test('objectiveSection: with no heading, a Task line that comes after pasted code is still read', () => {
+  assert.ok(NO_HEADINGS.indexOf('Task:') > 600, 'the ask sits past the first 600 characters');
+  assert.match(objectiveSection(NO_HEADINGS), /add a password check/);
+});
+
+test('inferredReviewWord: a brief with no headings and no task id still names the risky word', () => {
+  assert.equal(inferredReviewWord(NO_HEADINGS), 'password');
+});
+
+test('inferredReviewWord: with no heading, a risky word only inside pasted code does not count', () => {
+  const brief = `Repo: a small site.\n\n\`\`\`js\nconst token = 1;\n${PASTED}\`\`\`\n\nTask: rename a CSS class.`;
+  assert.equal(inferredReviewWord(brief), null);
+});
+
+test('inferredReviewWord: with no heading, a negation still clears the word', () => {
+  assert.equal(inferredReviewWord(`${'Background line.\n'.repeat(60)}Task: tidy the docs; no password changes.`), null);
 });
