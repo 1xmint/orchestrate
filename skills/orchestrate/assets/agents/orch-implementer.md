@@ -64,6 +64,8 @@ Rules that keep the rest of the run safe:
   that is enforced, not just asked for — so nothing here is a channel around
   the lead. Report by returning, not by any other means.
 
+Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+
 Return in the packet's schema: TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED,
 and QUESTIONS only if something blocks. Keep it short by leaving things out,
 not by cutting the evidence: long logs go to the run folder path in the packet

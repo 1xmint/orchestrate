@@ -22,7 +22,9 @@ dependency or abstraction with no problem in front of it; a legal or licence
 question nobody raised; a decision that belongs to the owner; a fact nobody has
 checked.
 
-Return at most twenty lines, in this order:
+Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+
+The schema is at most twenty lines, in this order:
 
 VERDICT: ON COURSE, CHANGE COURSE or CAN'T TELL
 BECAUSE: one or two sentences, naming the file or line that decides it

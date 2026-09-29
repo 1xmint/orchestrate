@@ -44,6 +44,8 @@ Your rails are fixed:
   PARTIAL, stop dispatching and integrating and hand off immediately. An
   `[orchestrate · size]` notice is an instruction to follow at once.
 
+Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+
 Return one compact summary, not one message per child:
 
 ```
