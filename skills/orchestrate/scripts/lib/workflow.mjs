@@ -29,7 +29,9 @@ export const WORKTREE_ISOLATED_ROLES = new Set(['orch-implementer', 'orch-debugg
 // reads this rather than naming the role itself, since router.mjs is kept free
 // of agent/role names (see router.test.mjs).
 export const UNCAPPED_GATE_ROLE = 'orch-implementer';
-const SHARED_CHECKOUT_RE = /project root|shared checkout|do not use a separate worktree|work directly in the (repo|checkout)|same checkout/i;
+// Needs words that mean working in the shared checkout; a file merely located
+// "in the project root" does not count.
+const SHARED_CHECKOUT_RE = /\b(work|working|edit|editing|write|writing|run|running)\s+(directly\s+)?(in|inside|from)\s+the\s+(project root|shared checkout|main checkout)|do not use a separate worktree|work directly in the (repo|checkout)|same checkout as/i;
 
 export const nestedReason = 'this nested dispatch cannot be attributed to a recorded coordinator parent, so it is denied';
 
@@ -56,7 +58,7 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
     if (/^\s*PROGRESS:/m.test(prompt)) return { prefix: 'plan', reason: 'the host is in Plan mode: helpers write no progress files. Remove the PROGRESS line and ask for findings returned inline; only the lead maintains the plan.' };
   }
 
-  if (WORKTREE_ISOLATED_ROLES.has(role) && !/worktree:\s*yes/i.test(prompt)) {
+  if (WORKTREE_ISOLATED_ROLES.has(role) && ti.isolation !== 'worktree' && !/worktree:\s*yes/i.test(prompt)) {
     if (/worktree:\s*no/i.test(prompt) || SHARED_CHECKOUT_RE.test(prompt)) {
       return { prefix: 'workers', reason: `${role} always works in its own worktree and branch; a packet that sends it into the shared checkout makes it write outside the repo or refuse. Say WHERE: … worktree: yes and merge its branch when it returns.` };
     }
@@ -74,7 +76,7 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
     const tail = missingNames.length
       ? ` ${installed} of ${AGENT_NAMES.length} role agent files are installed; missing: ${missingNames.map(n => `${n}.md`).join(', ')}.`
       : '';
-    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orch-implementer (model "sonnet") to change code, orch-researcher or Explore (model "haiku") to find things, orch-planner when you cannot yet name the steps, orch-debugger for a failure that survived one attempt, orch-reviewer before shipping something expensive to get wrong, orch-advisor before committing to a direction, orch-browser when only a real browser settles it. Or do a small task yourself.${tail}` };
+    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. To build, send orch-implementer (model "sonnet", it runs in its own worktree: WHERE … worktree: yes); to find things, orch-researcher or Explore (model "haiku"); orch-planner, orch-debugger, orch-reviewer, orch-advisor or orch-browser for the rest. Or do a small task yourself.${tail}` };
   }
 
   const locked = lockedWorktreeIn(prompt, external);

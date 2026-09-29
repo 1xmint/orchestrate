@@ -78,6 +78,20 @@ test('a worktree-isolated role that does say worktree: yes clears the isolation 
   assert.equal(d, null);
 });
 
+test('a brief that only says where a file lives is not refused, with or without isolation set', () => {
+  const prompt = 'Build the tool. Put a file called notes.json in the project root.';
+  assert.equal(workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', isolation: 'worktree', prompt }, { policy: policy() }), null);
+  assert.equal(workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', prompt }, { policy: policy() }), null);
+});
+
+test('a brief that really says to work in the shared checkout is still refused', () => {
+  for (const prompt of ['Work directly in the project root.', 'Edit in the shared checkout.', 'Do not use a separate worktree.']) {
+    const d = workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', prompt }, { policy: policy() });
+    assert.ok(d, prompt);
+    assert.match(d.reason, /always works in its own worktree/);
+  }
+});
+
 // ---- locked worktree and concurrency -----------------------------------------
 
 test('a packet naming a worktree a live Codex worker holds is denied', () => {
@@ -133,6 +147,13 @@ test('8 of 8 installed: refused as before, no missing-files sentence needed', ()
 test('policy.workers.generalPurpose = allow overrides the gate even with orch-implementer installed', () => {
   const allow = { ...policy, workers: { ...policy.workers, generalPurpose: 'allow' } };
   assert.equal(workflowDecision({}, ti(), { policy: allow, installed: AGENT_NAMES.length, missing: NONE_MISSING }), null);
+});
+
+test('the general-purpose refusal names the build helper and says it runs in its own worktree', () => {
+  const d = workflowDecision({}, ti(), { policy: fullPolicy, installed: AGENT_NAMES.length, missing: NONE_MISSING });
+  assert.match(d.reason, /To build, send orch-implementer/);
+  assert.match(d.reason, /worktree: yes/);
+  assert.doesNotMatch(d.reason, /\n/);
 });
 
 test('claude is treated the same as general-purpose', () => {
