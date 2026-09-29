@@ -256,16 +256,28 @@ test('first helper: a lead message naming no model is refused once, with the thr
   const first = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('I will have a builder do it in a separate copy, then commit.'), toolUse]);
   assert.equal(first.permissionDecision, 'deny');
   assert.match(first.permissionDecisionReason, /the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked/);
-  const again = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('Sending it again.'), toolUse]);
+  assert.doesNotMatch(first.permissionDecisionReason, /unchanged/);
+  const again = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('Here are the three lines: Sonnet builds it, and I test it.'), toolUse]);
   assert.notEqual(again.permissionDecision, 'deny');
   const later = dispatchFull(home, 's-fh-a', { ...PKT, prompt: `${PKT.prompt} again` }, [userPrompt, leadSaid('one more'), toolUse]);
   assert.notEqual(later.permissionDecision, 'deny');
 });
 
-test('first helper: never refused twice in a session, even when the second message also names no model', () => {
+test('first helper: helpers sent together are all refused while no model is named, up to three, then never', () => {
   const home = sandboxHome();
-  assert.equal(dispatchFull(home, 's-fh-e', PKT, [userPrompt, leadSaid('Working on it.'), toolUse]).permissionDecision, 'deny');
-  assert.notEqual(dispatchFull(home, 's-fh-e', PKT, [userPrompt, leadSaid('Still working on it.'), toolUse]).permissionDecision, 'deny');
+  const t = [userPrompt, leadSaid('Working on it.'), toolUse];
+  for (let i = 0; i < 3; i++) {
+    assert.equal(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} ${i}` }, t).permissionDecision, 'deny', `helper ${i} is refused`);
+  }
+  assert.notEqual(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} 4` }, t).permissionDecision, 'deny', 'the fourth goes through');
+  assert.notEqual(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} 5` }, t).permissionDecision, 'deny');
+});
+
+test('first helper: once a message names a model, no later helper is refused', () => {
+  const home = sandboxHome();
+  assert.equal(dispatchFull(home, 's-fh-g', PKT, [userPrompt, leadSaid('Working on it.'), toolUse]).permissionDecision, 'deny');
+  assert.notEqual(dispatchFull(home, 's-fh-g', PKT, [userPrompt, leadSaid('Sonnet builds it.'), toolUse]).permissionDecision, 'deny');
+  assert.notEqual(dispatchFull(home, 's-fh-g', { ...PKT, prompt: `${PKT.prompt} x` }, [userPrompt, leadSaid('Nothing more.'), toolUse]).permissionDecision, 'deny');
 });
 
 test('first helper: a lead message that names a model is not refused', () => {
@@ -287,6 +299,27 @@ test('first helper: with no transcript at all the plain fact is sent, and the di
   const { json } = dispatch(sandboxHome(), 's-fh-d', PKT);
   assert.equal(json.hookSpecificOutput.permissionDecision, undefined);
   assert.match(json.hookSpecificOutput.additionalContext, /first helper this session: the user is owed three plain lines first/);
+});
+
+// ---- a made-up test value is not a secret --------------------------------
+
+test('a quoted value that is plainly made up for a test is not refused; a real-looking one still is', () => {
+  const home = sandboxHome();
+  const send = (n, line) => (dispatch(home, `s-cred-${n}`, { ...PKT, prompt: `${PKT.prompt}\nuse ${line} in the tests` }).json || {}).hookSpecificOutput || {};
+  const passes = [
+    "process.env.CLUB_PASSWORD = 'test-pass'",
+    'password = "Example-Value-1"',
+    "secret = 'my_placeholder_value'",
+    'password = "DUMMYDUMMY"',
+    "api_key = 'fake-key-123'",
+    'password = "sample-password"',
+    'password = "ChangeMe123"',
+    'password = "xxxxxxxxxxxx"',
+    'password = "0000000000"',
+  ];
+  passes.forEach((l, i) => assert.notEqual(send(`p${i}`, l).permissionDecision, 'deny', l));
+  const refuses = ['password = "hunter2hunter2"', "secret: 'abcdefgh12345678'", "process.env.CLUB_PASSWORD = 'Zk9-qT4vLm2x'", 'api_key=abcd1234efgh5678'];
+  refuses.forEach((l, i) => assert.equal(send(`r${i}`, l).permissionDecision, 'deny', l));
 });
 
 // ---- a brief with no task id and no headings (a real run: a password check) ----
