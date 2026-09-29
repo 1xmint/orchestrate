@@ -20,7 +20,8 @@
 // set-shaped recommendations) fired on two failed fetches as readily as on two
 // real sources.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -169,6 +170,29 @@ export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
   return { topic, key: `${word || goalWord}@${lastRiskIdx}:${edits}`, text: `this change touches ${topic}; nobody independent has looked at it.` };
 }
 
+// Helper folders left behind. A helper that works in its own worktree leaves a
+// folder `<cwd>/.claude/worktrees/agent-<id>` and a branch `worktree-agent-<id>`.
+// After the lead merges, both stay unless someone removes them, and the person
+// who asked is never told. Counts this session's helpers whose folder still
+// exists and whose branch is already merged into the current one. It only
+// counts; it removes nothing.
+export function leftoverHelperWorktrees({ cwd, returned, merged, exists }) {
+  const seen = new Set();
+  for (const r of Array.isArray(returned) ? returned : []) {
+    const id = r && r.agentId ? String(r.agentId) : '';
+    if (!id || seen.has(id) || !/^[A-Za-z0-9]+$/.test(id)) continue;
+    if (!(merged || []).includes(`worktree-agent-${id}`)) continue;
+    if (exists(join(String(cwd), '.claude', 'worktrees', `agent-${id}`))) seen.add(id);
+  }
+  return seen.size;
+}
+
+function mergedBranches(cwd) {
+  try {
+    return execFileSync('git', ['branch', '--merged', 'HEAD', '--format=%(refname:short)'], { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).split('\n').map(s => s.trim()).filter(Boolean);
+  } catch { return []; }
+}
+
 const STORE = () => join(DIR, 'turn-checks.json');
 
 function emitBlock(reason) {
@@ -261,6 +285,21 @@ function checkHeartbeat(input) {
       store[key] = updated;
       try { writeJsonAtomic(path, store); } catch {}
       return emitBlock(`orchestrate: ${fact.text}`);
+    }
+  }
+
+  // Helper folders and branches still there after their work was merged: one
+  // fact with the count, once per count. Nothing is removed. The git call is
+  // made only when a returned helper's own folder still exists.
+  const cwd = state.cwd || input.cwd;
+  const folders = cwd && Array.isArray(state.returned) && state.returned.some(r => r && r.agentId && existsSync(join(String(cwd), '.claude', 'worktrees', `agent-${r.agentId}`)));
+  if (folders) {
+    const n = leftoverHelperWorktrees({ cwd, returned: state.returned, merged: mergedBranches(cwd), exists: existsSync });
+    if (n && rec.leftoverNotedFor !== n) {
+      updated.leftoverNotedFor = n;
+      store[key] = updated;
+      try { writeJsonAtomic(path, store); } catch {}
+      return emitBlock(`orchestrate: ${n} helper ${n === 1 ? 'folder and branch are' : 'folders and branches are'} still here although their work was merged.`);
     }
   }
 

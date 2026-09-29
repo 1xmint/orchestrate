@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact } from './turn-check.mjs';
+import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact, leftoverHelperWorktrees } from './turn-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'turn-check.mjs');
@@ -298,6 +298,41 @@ test('Stop: a session with no edits and no risky request writes nothing', () => 
   const tp = join(home, 'transcript.jsonl');
   writeFileSync(tp, '{"type":"user","message":{"content":"hi"}}\n');
   assert.equal(run({ hook_event_name: 'Stop', session_id: 'quiet-1', transcript_path: tp }, home).stdout.trim(), '');
+});
+
+// ---- helper folders left behind after a merge -------------------------------------
+
+test('leftoverHelperWorktrees counts merged helper branches whose folder still exists, once per helper', () => {
+  const returned = [{ agentId: 'a1' }, { agentId: 'a1' }, { agentId: 'b2' }, { agentId: 'c3' }, { agentId: null }];
+  const merged = ['main', 'worktree-agent-a1', 'worktree-agent-b2'];
+  const exists = p => !p.includes('agent-b2');
+  assert.equal(leftoverHelperWorktrees({ cwd: '/r', returned, merged, exists }), 1);
+  assert.equal(leftoverHelperWorktrees({ cwd: '/r', returned, merged, exists: () => true }), 2, 'c3 is not merged');
+  assert.equal(leftoverHelperWorktrees({ cwd: '/r', returned: [], merged, exists: () => true }), 0);
+});
+
+test('Stop: merged helper folders still on disk are named once with the count; nothing is removed', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
+  const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
+  for (const id of ['a1b2', 'c3d4']) { g('branch', `worktree-agent-${id}`); mkdirSync(join(repo, '.claude', 'worktrees', `agent-${id}`), { recursive: true }); }
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'lo-1.json'), JSON.stringify({ v: 1, session_id: 'lo-1', cwd: repo, dispatches: [], returned: [{ agentId: 'a1b2', status: 'DONE' }, { agentId: 'c3d4', status: 'DONE' }] }));
+  const input = { hook_event_name: 'Stop', session_id: 'lo-1' };
+  assert.equal(JSON.parse(run(input, home).stdout).reason, 'orchestrate: 2 helper folders and branches are still here although their work was merged.');
+  assert.equal(run(input, home).stdout.trim(), '', 'said once');
+  assert.equal(readFileSync(join(repo, '.git', 'HEAD'), 'utf8').length > 0, true);
+  assert.ok(g('branch', '--list', 'worktree-agent-a1b2').stdout.includes('a1b2'), 'branch left in place');
+});
+
+test('Stop: no returned helper folder on disk, no git call and no output', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'lo-2.json'), JSON.stringify({ v: 1, session_id: 'lo-2', cwd: home, dispatches: [], returned: [{ agentId: 'zz99', status: 'DONE' }] }));
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'lo-2' }, home).stdout.trim(), '');
 });
 
 // ---- hook process: stdin/stdout contract ---------------------------------------
