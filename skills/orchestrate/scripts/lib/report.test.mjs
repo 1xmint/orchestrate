@@ -45,6 +45,20 @@ test('DONE with an EVIDENCE line that is just prose is missing evidence', () => 
   assert.deepEqual(r.missing, ['evidence']);
 });
 
+test('DONE whose only proof is under PROOF: is not marked unverified', () => {
+  const text = 'OUTCOME: done\nPROOF: node --test lib/x.test.mjs gave 4 pass, 0 fail\nNOT CHECKED: nothing\nTASK: 9-1-0001\nSTATUS: DONE\n';
+  const r = checkReturn(text);
+  assert.equal(r.ok, true);
+  assert.equal(r.evidence, true);
+});
+
+test('an empty PROOF:, or one that says none, is not evidence, and a path in another field is not either', () => {
+  for (const proof of ['PROOF:\nNOT CHECKED: see lib/x.mjs', 'PROOF: none\nNOT CHECKED: lib/x.mjs:4', 'PROOF: None.\n']) {
+    const r = checkReturn(`OUTCOME: done\n${proof}\nTASK: 9-1-0001\nSTATUS: DONE\n`);
+    assert.deepEqual(r.missing, ['evidence'], proof);
+  }
+});
+
 test('DONE with a blank EVIDENCE line is missing evidence', () => {
   const text = 'TASK: 9-1-0001\nSTATUS: DONE\nEVIDENCE:\nNOT VERIFIED: nothing\n';
   const r = checkReturn(text);

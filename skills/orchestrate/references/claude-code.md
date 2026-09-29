@@ -57,6 +57,11 @@ than the session's own working directory. Two other stops in the same session ar
 before it treats a stop as a return; without that check the lead's own messages were being
 filed under `returns/`.
 
+Seen in recorded runs, 2026-09-28: a background helper's last message is a short stub; the
+report is in its hand-back call (`SubagentHandback`). The host runs the session-start and
+post-compaction hooks before it writes the compaction boundary record, so at that moment
+the newest boundary a hook can read is the previous compaction's.
+
 **Which host.** The desktop app runs its own embedded engine: on one machine its
 transcripts said 2.1.270 while the terminal `claude --version` said 2.1.209.
 Capabilities are read from the running session's transcript records and hook

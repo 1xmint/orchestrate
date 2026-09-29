@@ -63,6 +63,29 @@ test('the worktree-remove-then-branch-delete cleanup chain passes for a helper w
   assert.equal(decide(chainSemi).kind, 'pass');
 });
 
+test('a lead\'s clean-up of several helper worktrees passes: quoted paths, a read-only list between, task/ branches', () => {
+  const three = 'git worktree remove ".claude/worktrees/agent-a1" C:\\repo\\.claude\\worktrees\\agent-b2 .claude/worktrees/agent-c3 && git worktree list && git branch -d worktree-agent-a1 worktree-agent-b2 task/0103-small-faults';
+  assert.equal(decide(three).kind, 'pass');
+  assert.equal(decide(three, { headless: true, mode: 'auto' }).kind, 'pass');
+  assert.equal(decide('git worktree remove \'.claude/worktrees/x\' ; git branch -d task/0103.a_b').kind, 'pass');
+});
+
+test('the wider clean-up still refuses anything that could lose work or reach elsewhere', () => {
+  const tail = ' && git branch -d worktree-agent-abc123';
+  for (const bad of [
+    'git worktree remove .claude/worktrees/../../src' + tail,
+    'git worktree remove .claude/worktrees/a elsewhere/b' + tail,
+    'git worktree remove .claude/worktrees/a && git branch -d main',
+    'git worktree remove .claude/worktrees/a && git branch -d worktree-agent-abc123 feature',
+    'git worktree remove .claude/worktrees/a && git branch -D task/x',
+    'git worktree remove .claude/worktrees/a && git branch -d task/x --force',
+    'git worktree remove .claude/worktrees/a && git branch -d task/x && rm -rf src',
+    'git worktree remove .claude/worktrees/a && git branch -d task/x | cat',
+    'git worktree remove .claude/worktrees/a && git branch -d task/x & git branch -D y',
+    'git worktree remove .claude/worktrees/a && git branch -d $(git branch)',
+  ]) assert.notEqual(decide(bad).kind, 'pass', bad);
+});
+
 test('a forced worktree cleanup chain still asks or denies, same as today', () => {
   const forcedWorktree = 'git worktree remove --force .claude/worktrees/worktree-agent-abc123 && git branch -d worktree-agent-abc123';
   assert.equal(decide(forcedWorktree).kind, 'ask');
