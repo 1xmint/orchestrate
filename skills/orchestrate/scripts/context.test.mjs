@@ -215,13 +215,13 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   const { p, store } = file([user('start', 0), assistant(cp - 20000, { min: 1 })]);
   const s1 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s1.reading.tokens, cp - 20000);
-  assert.match(s1.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp - 20000)} · next: compact ${kk(ca)} · newest checkpoint: none · 0 tool calls since your last edit$`), 'below the thresholds the lead still hears the measured size');
+  assert.match(s1.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp - 20000)} · newest checkpoint: none · 0 tool calls since your last edit$`), 'below the thresholds the lead still hears the measured size');
   assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store, force: true }).notice, '', 'once per 25k step');
 
   appendFileSync(p, `${user('x'.repeat(5000), 2)}\n${assistant(cp + 5000, { min: 3 })}\n`);
   const s2 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s2.advice.action, 'checkpoint');
-  assert.match(s2.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 5000)} · next: compact ${kk(ca)} · newest checkpoint: none`));
+  assert.match(s2.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 5000)} · newest checkpoint: none`));
   assert.doesNotMatch(s2.notice, ORDERS);
 
   appendFileSync(p, `${user('y'.repeat(5000), 4)}\n${assistant(cp + 8000, { min: 5 })}\n`);
@@ -241,7 +241,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   const s5 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s5.reading.state, 'provisional');
   assert.equal(s5.reading.compactions, 1, 'a new epoch is one more compaction');
-  assert.match(s5.notice, new RegExp(`^\\[orchestrate · context\\] ~17k · compacted 1× · next: compact ${kk(ca)}`));
+  assert.match(s5.notice, new RegExp(`^\\[orchestrate · context\\] ~17k · compacted 1× · last tidy-up at ${kk(past)} · newest`));
   appendFileSync(p, `${user('w'.repeat(5000), 9)}\n${assistant(22000, { min: 10 })}\n`);
   const s6 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s6.reading.tokens, 22000);
@@ -251,7 +251,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   appendFileSync(p, `${user('v'.repeat(5000), 11)}\n${assistant(40000, { min: 12 })}\n${assistant(60000, { min: 13 })}\n${assistant(80000, { min: 14 })}\n${assistant(cp + 10000, { min: 15 })}\n`);
   const s7 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s7.advice.action, 'checkpoint');
-  assert.match(s7.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 10000)} · compacted 1× · next: compact ${kk(ca)}`));
+  assert.match(s7.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp + 10000)} · compacted 1× · last tidy-up at ${kk(past)} · newest`));
 
   // No growth: nothing is read, and the reading stands. A half-written line
   // is not consumed and does not disturb it.
@@ -427,24 +427,26 @@ test('the size line can be turned off, and only speaks for a measured size', () 
   assert.equal(sampleContext({ transcriptPath: p2, session: 'u', policy, now: NOW, dir: s2 }).notice, '', 'no usage yet: nothing to say');
 });
 
-test('the size line names the next size event that has not passed yet', () => {
+test('the size line promises no figure before a tidy-up, and after one says where it happened', () => {
   const { checkpointAt, compactAt } = thresholds(null, policy);
   const auto = policy.context.autocompactDefault;
-  assert.ok(compactAt < auto, 'the compact line comes before autocompact');
   const dir = mkdtempSync(join(tmpdir(), 'ctx-next-'));
-  const line = tokens => contextTick({ state: 'measured', tokens, capacity: null, compaction: null, compactions: 0 }, policy, { policy, dir }).text;
-  assert.match(line(checkpointAt - 10000), new RegExp(` · next: compact ${kk(compactAt)} · `));
-  assert.match(line(compactAt - 5000), new RegExp(` · next: compact ${kk(compactAt)} · `));
-  assert.doesNotMatch(line(Math.round((compactAt + auto) / 2)), /next:|autocompact/, "no figure is promised for the host's own compaction");
-  assert.doesNotMatch(line(auto + 25000), /next:/);
-  for (const t of [checkpointAt - 10000, compactAt - 5000, auto + 25000]) assert.doesNotMatch(line(t), ORDERS);
+  const line = (tokens, extra = {}) => contextTick({ state: 'measured', tokens, capacity: null, compaction: null, compactions: 0, ...extra }, policy, { policy, dir }).text;
+  for (const t of [checkpointAt - 10000, compactAt - 5000, Math.round((compactAt + auto) / 2), auto + 25000]) {
+    assert.doesNotMatch(line(t), /next:|tidy-up|autocompact/, `no figure for a future tidy-up at ${t}`);
+    assert.doesNotMatch(line(t), ORDERS);
+  }
+  const after = line(30000, { compaction: { uuid: 'e1', preTokens: 152896, postTokens: 17000 }, compactions: 1 });
+  assert.match(after, / · compacted 1× · last tidy-up at ~153k · /);
+  assert.doesNotMatch(after, /next:/);
+  assert.doesNotMatch(line(30000, { compaction: { uuid: 'e1' }, compactions: 1 }), /tidy-up/, 'no size recorded, no figure');
 });
 
 test('the size line names the newest checkpoint, its age, and the tool calls since the last edit', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ctx-newest-'));
   const reading = { state: 'measured', tokens: 90000, capacity: 200000, compaction: { uuid: 'e1' }, compactions: 1 };
   const bare = contextTick(reading, policy, { policy, session: 'nc', dir, editCounter: 8, now: NOW }).text;
-  assert.match(bare, /^\[orchestrate · context\] ~90k of ~200k · compacted 1× · next: .* · newest checkpoint: none · 8 tool calls since your last edit$/);
+  assert.match(bare, /^\[orchestrate · context\] ~90k of ~200k · compacted 1× · newest checkpoint: none · 8 tool calls since your last edit$/);
   const cp = checkpointPath('nc', reading, dir);
   mkdirSync(join(cp, '..'), { recursive: true });
   writeFileSync(cp, '# checkpoint\n');
