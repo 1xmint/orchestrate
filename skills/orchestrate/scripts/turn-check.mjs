@@ -74,6 +74,29 @@ export function shouldBlock({ pickupHash: hash, section, lastDispatchAt, prev = 
 // the lead already saw once is a loop with no exit.
 const SKIP_EXPLAINED = /\bskip(?:ped|ping)?\b[^.\n]{0,80}\breview\b|\breview\b[^.\n]{0,80}\bskip(?:ped|ping)?\b/i;
 
+// A brief with no task id has no id for the ledger to hold it on, so its own
+// return never carries reviewGated. It is held here instead, keyed on the id of
+// the dispatch call (toolUseId), which the dispatch record and the return share:
+// a return for a dispatch flagged for review, that came back DONE, is held until
+// a reviewer's REVIEW OF names that id, or, when it is the only such return
+// still open, until a reviewer is dispatched after it. With two or more open,
+// only the explicit id clears one; nothing is guessed. A reviewer's own return
+// is never held, and a dispatch that was not flagged is never held.
+const isReviewerRow = d => Boolean(d && (d.reviewOf || /reviewer/i.test(String(d.agent || ''))));
+
+function freeFormOpen(returned, dispatches) {
+  const ds = Array.isArray(dispatches) ? dispatches : [];
+  const out = [];
+  for (const r of Array.isArray(returned) ? returned : []) {
+    if (!r || r.task || r.status !== 'DONE' || !r.toolUseId) continue;
+    const d = ds.find(x => x && x.toolUseId === r.toolUseId);
+    if (!d || d.task || !d.review || isReviewerRow(d)) continue;
+    if (ds.some(x => x && x.reviewOf === r.toolUseId)) continue;
+    out.push({ id: r.toolUseId, at: Date.parse(r.at) });
+  }
+  return out;
+}
+
 export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedFor }) {
   const already = new Set(Array.isArray(blockedFor) ? blockedFor : []);
   const gated = (Array.isArray(returned) ? returned : []).filter(r => r && r.reviewGated && r.task);
@@ -83,6 +106,13 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
     const reviewed = (Array.isArray(dispatches) ? dispatches : []).some(d => d && d.reviewOf === r.task);
     if (reviewed || skipSaid) continue;
     return { block: true, task: r.task, blockedFor: [...already, r.task] };
+  }
+  const open = freeFormOpen(returned, dispatches);
+  for (const f of open) {
+    if (already.has(f.id) || skipSaid) continue;
+    const later = open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && !d.reviewOf && /reviewer/i.test(String(d.agent || '')) && Date.parse(d.at) > f.at);
+    if (later) continue;
+    return { block: true, task: f.id, freeForm: true, blockedFor: [...already, f.id] };
   }
   return { block: false, task: null, blockedFor: [...already] };
 }
@@ -165,6 +195,7 @@ function checkHeartbeat(input) {
     updated.reviewBlockedFor = rh.blockedFor;
     store[key] = updated;
     try { writeJsonAtomic(path, store); } catch {}
+    if (rh.freeForm) return emitBlock(`orchestrate: a brief flagged for independent review returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
     return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;

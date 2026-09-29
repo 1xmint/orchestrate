@@ -145,7 +145,7 @@ test('guard: one dispatch delivered twice is recorded once', () => {
   };
   const first = run('guard-agent.mjs', payload, home);
   const second = run('guard-agent.mjs', payload, home);
-  assert.match(first.stdout, /price tag/);
+  assert.match(first.stdout, /estimate before work, this helper/);
   assert.equal(second.stdout.trim(), '', 'the second registration of the same hook says nothing');
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sd.json'), 'utf8'));
   assert.equal(state.dispatches.length, 1);
@@ -176,8 +176,8 @@ test('guard: two sessions do not overwrite each other in one global slot', () =>
   });
   const a = run('guard-agent.mjs', mk('sf1'), home);
   const b = run('guard-agent.mjs', mk('sf2'), home);
-  assert.match(a.stdout, /price tag/);
-  assert.match(b.stdout, /price tag/, 'a different session is a different event');
+  assert.match(a.stdout, /estimate before work, this helper/);
+  assert.match(b.stdout, /estimate before work, this helper/, 'a different session is a different event');
   for (const s of ['sf1', 'sf2']) {
     const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${s}.json`), 'utf8'));
     assert.equal(state.dispatches.length, 1, s);
@@ -213,8 +213,8 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's2', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\ndo it' },
   }, home);
-  assert.match(out.stdout, /price tag: orch-implementer on sonnet/);
-  assert.match(out.stdout, /list price, not subscription usage/);
+  assert.match(out.stdout, /estimate before work, this helper: orch-implementer on sonnet/);
+  assert.match(out.stdout, /at list price/);
   assert.doesNotMatch(out.stdout, /% of a/, 'no share of a week: nothing here has measured one');
   assert.doesNotMatch(out.stdout, /permissionDecision/, "the user's own approval prompt is untouched");
   assert.equal(out.status, 0);
@@ -264,33 +264,33 @@ test('guard: the packet notice names a missing PROGRESS line on an author-role d
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's3', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0002\ndo it' },
   }, home);
-  assert.match(noProgress.stdout, /no PROGRESS line: a capped return will have nothing to resume from/);
+  assert.match(noProgress.stdout, /brief lacks: .*a PROGRESS path/);
 
   const withProgress = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's4', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0003\nPROGRESS: /r/progress/1.md\ndo it' },
   }, home);
-  assert.doesNotMatch(withProgress.stdout, /no PROGRESS line/);
+  assert.doesNotMatch(withProgress.stdout, /a PROGRESS path/);
 
   const reviewer = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's5', cwd: home,
     tool_input: { subagent_type: 'orch-reviewer', model: 'opus', prompt: 'TASK: 9-9-0004\nreview it' },
   }, home);
-  assert.doesNotMatch(reviewer.stdout, /no PROGRESS line/, 'a reviewer returns a verdict, not partial work');
+  assert.doesNotMatch(reviewer.stdout, /a PROGRESS path/, 'a reviewer returns a verdict, not partial work');
 
   for (const [i, role] of ['orch-researcher', 'orch-browser'].entries()) {
     const readOnly = run('guard-agent.mjs', {
       hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: `s5r${i}`, cwd: home,
       tool_input: { subagent_type: role, model: 'haiku', prompt: `TASK: 9-9-001${i}\nfind it` },
     }, home);
-    assert.doesNotMatch(readOnly.stdout, /no PROGRESS line/, `${role} is short read-only work, so the warning is noise`);
+    assert.doesNotMatch(readOnly.stdout, /a PROGRESS path/, `${role} is short read-only work, so the warning is noise`);
   }
 
   const planMode = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's6', cwd: home, permission_mode: 'plan',
     tool_input: { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-9-0005\nfind it' },
   }, home);
-  assert.doesNotMatch(planMode.stdout, /no PROGRESS line/, 'Plan mode already forbids the line');
+  assert.doesNotMatch(planMode.stdout, /a PROGRESS path/, 'Plan mode already forbids the line');
 });
 
 test('guard: an attributable coordinator child is recorded with its parent', () => {
@@ -330,7 +330,7 @@ test('guard: a Plan dispatch that names no model is recorded as inherited and no
   }, home);
   // No model named, and Plan has no agent file of its own, so there is no
   // price figure to give: no additionalContext at all.
-  assert.doesNotMatch(String(out.json && out.json.hookSpecificOutput && out.json.hookSpecificOutput.additionalContext || ''), /price tag/);
+  assert.doesNotMatch(String(out.json && out.json.hookSpecificOutput && out.json.hookSpecificOutput.additionalContext || ''), /estimate before work, this helper/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit');
   assert.equal(state.dispatches[0].modelFrom, 'inherit');
@@ -345,7 +345,7 @@ test('guard: an orch-implementer dispatch that names no model is recorded and pr
   // The role's own file names sonnet, so a tag prints even though the
   // dispatch itself named nothing; this is the first implementer dispatch of
   // the session with no ledger, so the solo/helper pair prints too.
-  assert.match(out.json.hookSpecificOutput.additionalContext, /price tag: orch-implementer on sonnet/);
+  assert.match(out.json.hookSpecificOutput.additionalContext, /estimate before work, this helper: orch-implementer on sonnet/);
   assert.match(out.json.hookSpecificOutput.additionalContext, /done in this chat/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9b.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'sonnet');
@@ -374,7 +374,7 @@ test('guard: a dispatch outside any repo is not gated on a stranger repo\'s ceil
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 1\ndo it' },
   }, home);
   assert.doesNotMatch(out.stdout, /permissionDecision.*deny/, 'not denied against a repo this dispatch never named');
-  assert.match(out.stdout, /price tag/, 'the dispatch still goes through and is still priced');
+  assert.match(out.stdout, /estimate before work, this helper/, 'the dispatch still goes through and is still priced');
 });
 
 test('guard: the run a packet names travels with the dispatch record', () => {

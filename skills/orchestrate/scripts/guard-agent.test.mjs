@@ -13,6 +13,40 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { missingFact, estimateWording } from './guard-agent.mjs';
+
+test('missingFact says what a building brief lacks as one line, in a fixed order', () => {
+  assert.equal(missingFact('orch-implementer', 'TASK: 1\nfind it', false), 'brief lacks: what it is for, a check it is done, a PROGRESS path');
+  assert.equal(missingFact('orch-implementer', 'FOR: a person ships a flag\nPROGRESS: /r/p.md', false), 'brief lacks: a check it is done');
+  assert.equal(missingFact('orch-debugger', 'FOR: x\nDONE WHEN\n- test passes', false), 'brief lacks: a PROGRESS path');
+  assert.equal(missingFact('orch-implementer', 'FOR: x\nDONE WHEN (evidence)\n- t\nPROGRESS: /r/p.md', false), '');
+});
+
+test('missingFact is no longer than the PROGRESS sentence it replaces, and silent where that was', () => {
+  const worst = missingFact('orch-implementer', 'TASK: 1', false);
+  assert.ok(Buffer.byteLength(worst) <= Buffer.byteLength('no PROGRESS line: a capped return will have nothing to resume from'));
+  assert.equal(missingFact('orch-implementer', 'TASK: 1', true), '', 'plan mode');
+  assert.equal(missingFact('orch-reviewer', 'TASK: 1', false), '');
+  assert.equal(missingFact('orch-researcher', 'TASK: 1', false), '');
+});
+
+test('missingFact reads fields from a packet file the prompt points at', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-missing-'));
+  const p = join(dir, 'packet.md');
+  writeFileSync(p, 'FOR: a person\nDONE WHEN\n- ok\nPROGRESS: /r/p.md\n');
+  assert.equal(missingFact('orch-implementer', `Your packet is the file ${p}. Follow it.`, false), '');
+});
+
+test('estimateWording says an estimate, before the work, for this helper, and never as a price tag', () => {
+  const tag = 'price tag: orch-implementer on sonnet ≈ $1.50 at list price, not subscription usage (reasoned 2026-09-09, not yet measured here)';
+  const out = estimateWording(tag);
+  assert.match(out, /^estimate before work, this helper: orch-implementer on sonnet ≈ \$1\.50 at list price/);
+  assert.doesNotMatch(out, /price tag|cost/);
+  assert.ok(Buffer.byteLength(out) <= Buffer.byteLength(tag));
+  const unpriced = 'price tag: r on s — no figure yet, measured or reasoned';
+  assert.equal(estimateWording(unpriced), unpriced, 'a tag with no figure is left alone');
+});
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GUARD = join(HERE, 'guard-agent.mjs');
 
@@ -101,7 +135,7 @@ test('the first orch-implementer dispatch of a session with no run ledger open c
   const sid = 's-pair-first';
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /price tag: orch-implementer on sonnet ≈ \$1\.50/);
+  assert.match(ctx, /estimate before work, this helper: orch-implementer on sonnet ≈ \$1\.50/);
   assert.match(ctx, /≈ \$0\.60 done in this chat \(measured ratio over five live rounds\)/);
 });
 
@@ -111,7 +145,7 @@ test('a second orch-implementer dispatch in the same session gets today\'s tag o
   dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: y\nOBJECTIVE\nRename another CSS class\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /price tag: orch-implementer on sonnet ≈ \$1\.50/);
+  assert.match(ctx, /estimate before work, this helper: orch-implementer on sonnet ≈ \$1\.50/);
   assert.doesNotMatch(ctx, /done in this chat/);
 });
 
@@ -120,7 +154,7 @@ test('a dispatch with no REVIEW-triggering context but a role other than orch-im
   const sid = 's-pair-role';
   const { json } = dispatch(home, sid, { subagent_type: 'orch-researcher', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRead a file\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /price tag: orch-researcher on sonnet/);
+  assert.match(ctx, /estimate before work, this helper: orch-researcher on sonnet/);
   assert.doesNotMatch(ctx, /done in this chat/);
 });
 
@@ -144,6 +178,6 @@ test('the first orch-implementer dispatch of a session bound to an open run ledg
   });
   const json = r.stdout.trim() ? JSON.parse(r.stdout) : null;
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /price tag: orch-implementer on sonnet/);
+  assert.match(ctx, /estimate before work, this helper: orch-implementer on sonnet/);
   assert.doesNotMatch(ctx, /done in this chat/);
 });

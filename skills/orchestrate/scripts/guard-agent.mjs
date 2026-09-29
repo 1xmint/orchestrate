@@ -358,6 +358,38 @@ export function progressFact(role, prompt, planMode, readFile = readFileSync) {
   return 'no PROGRESS line: a capped return will have nothing to resume from';
 }
 
+// What a building brief lacks, said as one fact in a fixed order: what the job
+// is for (the FOR: line), a way to check it is done (DONE WHEN), a PROGRESS
+// path. Same roles and same file-reading rule as progressFact, which it builds
+// on; a fact, never an order. Replaces the PROGRESS-only sentence in the note.
+export function missingFact(role, prompt, planMode, readFile = readFileSync) {
+  if (planMode) return '';
+  if (!RESUME_ROLES.has(normalizeRole(role))) return '';
+  const text = String(prompt || '');
+  let file = null;
+  const packetPath = packetPathFrom(text);
+  const has = re => {
+    if (re.test(text)) return true;
+    if (packetPath && file === null) { try { file = String(readFile(packetPath, 'utf8')); } catch { file = ''; } }
+    return Boolean(file) && re.test(file);
+  };
+  const lacks = [];
+  if (!has(/(^|\s)FOR:\s*\S/)) lacks.push('what it is for');
+  if (!has(/(^|\s)DONE WHEN\b/)) lacks.push('a check it is done');
+  if (progressFact(role, prompt, planMode, readFile)) lacks.push('a PROGRESS path');
+  return lacks.length ? `brief lacks: ${lacks.join(', ')}` : '';
+}
+
+// A price is an estimate made before the work, never money spent. priceTag (in
+// lib/prices.mjs) words it as a "price tag"; a live run had the lead repeat that
+// to the user as what each helper had cost. Said here as what it is, for this
+// one helper, at list price; a tag with no figure is left as it was.
+export function estimateWording(tag) {
+  const t = String(tag || '');
+  if (!t.includes('≈ $')) return t;
+  return t.replace(/^price tag: /, 'estimate before work, this helper: ').replace(', not subscription usage', '');
+}
+
 // The opposite fact from progressFact: a packet that does name a PROGRESS
 // path, for a helper that may be working in its own worktree and so cannot
 // write under the main checkout the path is written relative to. Said once,
@@ -477,7 +509,7 @@ function main() {
   // stop the compliance evidence says actually works.
   const b = budgetDecision(input, ti);
   if (b) {
-    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate budget: this ${String(ti.subagent_type || 'dispatch')} is about $${b.est} at list price, and run ${b.runId} has already spent about $${b.already}, so it would cross the $${b.ceiling} ceiling (${costLabel()}). Raise the ceiling in the run's Budget section, or stop — nothing tightens or lifts it on its own.` } });
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate budget: this ${String(ti.subagent_type || 'dispatch')} is estimated at $${b.est} at list price, and run ${b.runId} has spent about $${b.already}, so it would cross the $${b.ceiling} ceiling (${costLabel()}). Raise the ceiling in the run's Budget section, or stop — nothing tightens or lifts it on its own.` } });
     return;
   }
 
@@ -512,10 +544,10 @@ function main() {
     && !priorDispatches.some(row => normalizeRole(row.agent) === 'orch-implementer');
   const noLedgerOpen = !resolveRunObj(input, ti, { forBudget: true });
   recordDispatch(input, ti);
-  let tag = tagFor(ti, { pair: isFirstImplementer && noLedgerOpen });
+  let tag = estimateWording(tagFor(ti, { pair: isFirstImplementer && noLedgerOpen }));
   const size = String(ti.prompt || '').length;
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
-  const pf = progressFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
+  const pf = missingFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
   const pw = progressWorktreeNote(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pw) tag = `${tag ? `${tag}; ` : ''}${pw}`;
