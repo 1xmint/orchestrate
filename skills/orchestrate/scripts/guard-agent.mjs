@@ -698,7 +698,10 @@ export function leadTextWithRetry(transcriptPath, { tries = 4, waitMs = 60, slee
 export function asksForPastedContents(prompt) {
   return /\b(exact contents|paste|full output|report back the file)\b/i.test(String(prompt || ''));
 }
-const FIRST_HELPER_REFUSAL = 'the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again';
+// A model is named by its name, or by the word with a describing word before
+// it ("a cheaper model"). The bare word is not enough: "update the data model".
+export const NAMES_MODEL_RE = /\b(haiku|sonnet|opus|fable)\b|\b(cheap\w*|small\w*|fast\w*|quick\w*|light\w*|strong\w*|larg\w*|bigg\w*|mid\w*|same|top|best|capable)\s+model\b/i;
+const FIRST_HELPER_REFUSAL ='the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again';
 export function firstHelperRefusal(input, id) {
   try {
     if (!input.session_id || !input.transcript_path) return '';
@@ -710,7 +713,7 @@ export function firstHelperRefusal(input, id) {
     if (Array.isArray(state.dispatches) && state.dispatches.length) return '';
     const text = leadTextWithRetry(input.transcript_path);
     if (text === null) return '';
-    if (/\b(haiku|sonnet|opus|fable|model)\b/i.test(text)) {
+    if (NAMES_MODEL_RE.test(text)) {
       withSession(input, s => { s.firstHelperDone = true; });
       return '';
     }
@@ -721,7 +724,7 @@ export function firstHelperRefusal(input, id) {
 export function firstHelperNote(transcriptPath) {
   const text = transcriptPath ? leadTextWithRetry(transcriptPath) : null;
   if (text === null) return FIRST_HELPER_PLAIN;
-  const noModel = !/\b(haiku|sonnet|opus|fable|model)\b/i.test(text);
+  const noModel = !NAMES_MODEL_RE.test(text);
   const noCheck = !/\b(check|checked|checks|verif\w*|test|tests|tested|review\w*|prove\w*)\b/i.test(text);
   if (!noModel && !noCheck) return '';
   const lacks = noModel && noCheck ? 'names no model and no check' : noModel ? 'names no model' : 'names no check';
