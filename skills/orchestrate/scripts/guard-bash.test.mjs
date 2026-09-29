@@ -306,8 +306,8 @@ test('a process kill by name from a helper or in headless mode is refused, not a
   assert.doesNotMatch(helper.reason, /Say yes/);
   const headless = decide('pkill -f node', { headless: true, mode: 'auto' });
   assert.equal(headless.kind, 'deny');
-  assert.match(headless.reason, /auto mode, where nobody can say yes/);
-  assert.doesNotMatch(headless.reason, /Say yes/);
+  assert.match(headless.reason, /nobody is present to say yes/);
+  assert.doesNotMatch(headless.reason, /Say yes|auto mode|allow-bash|\.json/);
 });
 
 test('a process kill by name sent as a PowerShell tool call is stopped too', () => {
@@ -374,7 +374,8 @@ test('an unsafe Bash rm -rf under bypassPermissions is denied, not silently allo
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
   // Nobody can answer in this mode, so the reason must not invite a "yes".
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /allow-bash\.json/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /allow-bash|\.json|mode/i);
 });
 
 test('an unsafe PowerShell Remove-Item under bypassPermissions is denied, not silently allowed', () => {
@@ -423,17 +424,19 @@ test('a session with no one able to answer an interactive prompt (bypassPermissi
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
 });
 
-test('auto mode has nobody to answer an ask, so it is denied with the mode named', () => {
+test('auto mode has nobody to answer an ask, so it is denied in plain words with no mode named', () => {
   const r = run(bash('git push --force', { permission_mode: 'auto' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /auto mode/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /auto mode|allow-bash|\.json/i);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
 });
 
-test('dontAsk mode has nobody to answer an ask, so it is denied with the mode named', () => {
+test('dontAsk mode has nobody to answer an ask, so it is denied in plain words with no mode named', () => {
   const r = run(bash('git push --force', { permission_mode: 'dontAsk' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /dontAsk mode/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /dontAsk|allow-bash|\.json/i);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
 });
 
@@ -516,10 +519,41 @@ test('a helper where nobody can say yes is refused because the question cannot b
   }
 });
 
-test('the main session in auto mode is still refused, naming the mode', () => {
+test('the main session in auto mode is still refused, in plain words with no mode or file named', () => {
   const r = run(bash('git push --force', { permission_mode: 'auto' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /auto mode, where nobody can say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+});
+
+test('every refusal where nobody can say yes is plain: no mode, no file name, and a way that works', () => {
+  const cmds = ['git push --force', 'git push origin --delete x', 'git branch -D x', 'rm -rf src', 'git clean -fd', 'npm publish', 'vercel --prod', 'pkill -f node', 'stripe charges create --amount=1000'];
+  for (const c of cmds) {
+    const d = decide(c, { headless: true, mode: 'auto' });
+    assert.equal(d.kind, 'deny', c);
+    assert.doesNotMatch(d.reason, /\bmode\b|allow-bash|\.json|\.orchestrator|Say yes to continue/i, c);
+    if (!/branch -D/.test(c)) assert.match(d.reason, /nobody is present to say yes/, c);
+    if (!/branch -D/.test(c)) assert.match(d.reason, /tell the user|run it themselves/, c);
+  }
+});
+
+test('a helper folder with unsaved changes is refused in plain words: save first, remove without force, or leave it', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orch-wt-plain-'));
+  const sh = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  sh(['init', '-q'], root);
+  const wt = join(root, '.claude', 'worktrees', 'agent-abc123');
+  mkdirSync(wt, { recursive: true });
+  sh(['init', '-q'], wt);
+  writeFileSync(join(wt, 'unsaved.txt'), 'work');
+  for (const c of ['git worktree remove --force .claude/worktrees/agent-abc123', 'git worktree remove .claude/worktrees/agent-abc123 --force && git worktree list']) {
+    const d = decide(c, { cwd: root, headless: true, mode: 'auto' });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /never saved to git/);
+    assert.match(d.reason, /commit/);
+    assert.match(d.reason, /copy the files into the main folder/);
+    assert.match(d.reason, /without force/);
+    assert.match(d.reason, /leave the folder where it is and tell the user/);
+    assert.doesNotMatch(d.reason, /\bmode\b|allow-bash|\.json|Say yes to continue/i, c);
+  }
 });
 
 test('the subagent deny path is unchanged by the repeat guard', () => {
