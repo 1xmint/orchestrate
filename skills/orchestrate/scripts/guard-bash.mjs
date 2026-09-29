@@ -133,21 +133,42 @@ function isProcessKill(cmd) {
   return false;
 }
 
-// The lead's whole clean-up pair for a finished helper worktree: remove the
-// worktree folder, then delete its now-unreferenced branch. Passes only as
-// one exact two-command shape — `git worktree remove <path>` joined by `&&`
-// or `;` to `git branch -d`/`--delete worktree-agent-<hex>` — with no force
-// flag on either half and the path under `.claude/worktrees/`. Anything else
-// (a `--force`/`-D`, a path elsewhere, extra commands) fails the match and
-// falls through to the ordinary branch-delete rule below, unchanged.
-const WORKTREE_CLEANUP_CHAIN_RE = /^\s*git\s+worktree\s+remove\s+(\S+)\s*(?:&&|;)\s*git\s+branch\s+(-d|--delete)\s+worktree-agent-[0-9a-f]+\s*$/;
+// The lead's clean-up of finished helper worktrees: remove each worktree
+// folder, then delete its now-unreferenced branch. Passes only when the whole
+// line is commands joined by `&&` or `;`, each one of:
+//   git worktree remove <path>...     no flag; every path under .claude/worktrees/, no ..
+//   git worktree list                 read-only
+//   git branch -d|--delete <name>...  worktree-agent-<hex> or task/<slug> only
+// with at least one branch delete. A path may be quoted. No force flag on
+// either half: git refuses -d on an unmerged branch by itself, and --force on
+// the worktree would discard uncommitted work. Anything else (a -D, a path
+// elsewhere, a pipe, another kind of command) fails the match and falls
+// through to the ordinary branch-delete rule below, unchanged.
+const CLEANUP_BRANCH_RE = /^(?:worktree-agent-[0-9a-f]+|task\/[A-Za-z0-9._-]+)$/;
+const unquote = t => (/^(["']).*\1$/.test(t) ? t.slice(1, -1) : t);
 
 function isSafeWorktreeCleanupChain(cmd) {
-  const m = WORKTREE_CLEANUP_CHAIN_RE.exec(cmd);
-  if (!m) return false;
-  const path = m[1];
-  if (path.startsWith('-')) return false;
-  return normSlashes(path).toLowerCase().includes('.claude/worktrees/');
+  if (/[|<>`$(){}]|(?<!&)&(?!&)/.test(cmd)) return false;
+  let deletes = 0;
+  for (const seg of cmd.split(/&&|;/)) {
+    const t = seg.trim().split(/\s+/);
+    if (t[0] !== 'git') return false;
+    if (t[1] === 'worktree' && t[2] === 'list' && t.length === 3) continue;
+    if (t[1] === 'worktree' && t[2] === 'remove' && t.length > 3) {
+      for (const raw of t.slice(3)) {
+        const path = normSlashes(unquote(raw)).toLowerCase();
+        if (path.startsWith('-') || path.split('/').includes('..') || !path.includes('.claude/worktrees/')) return false;
+      }
+      continue;
+    }
+    if (t[1] === 'branch' && (t[2] === '-d' || t[2] === '--delete') && t.length > 3) {
+      if (!t.slice(3).every(n => CLEANUP_BRANCH_RE.test(n))) return false;
+      deletes++;
+      continue;
+    }
+    return false;
+  }
+  return deletes > 0;
 }
 
 const RULES = [
