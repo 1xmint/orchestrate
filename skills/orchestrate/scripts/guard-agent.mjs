@@ -22,7 +22,7 @@ import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, readTail } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { roleModel, helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
 import { family, normalizeRole, costLabel, estimateDollars, SOLO_RATIO } from './lib/prices.mjs';
@@ -593,7 +593,11 @@ function main() {
   if (pw) tag = `${tag ? `${tag}; ` : ''}${pw}`;
   const cf = codexFact(ti.subagent_type);
   if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
-  const rw = inferredReviewWord(ti.prompt);
+  if (priorDispatches.length === 0) {
+    const fh = firstHelperNote(input.transcript_path);
+    if (fh) tag = `${tag ? `${tag}; ` : ''}${fh}`;
+  }
+  const rw = /reviewer/i.test(String(ti.subagent_type || '')) ? null : inferredReviewWord(ti.prompt);
   if (rw && !/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || ''))) {
     const task = taskIdIn(ti.prompt) || 'this task';
     tag = `${tag ? `${tag}; ` : ''}this task will wait for an independent review because its objective mentions ${rw}; to send one, dispatch orch-reviewer on opus with REVIEW OF: ${task}`;
@@ -611,10 +615,48 @@ function withSession(input, fn) {
   } catch {}
 }
 
+// First helper of a session: the person is owed three plain lines (what the job
+// needs, who does it on which model and why, how it is checked) before helpers
+// start. One fact, said once. Where the lead's latest message to the user can
+// be read from the transcript this turn, say what it lacks, and say nothing
+// when it has both a model and a check. Where it cannot be read, say the
+// unconditional version. The tail is scanned back to the last real user
+// prompt only, so an older turn's message is never mistaken for this one's.
+const FIRST_HELPER_PLAIN = 'first helper this session: the user is owed three plain lines first: what the job needs, who does it on what model and why, and how it is checked';
+export function leadTextThisTurn(transcriptPath) {
+  const lines = readTail(transcriptPath, 131072).split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].trim();
+    if (!l || l[0] !== '{') continue;
+    let o; try { o = JSON.parse(l); } catch { continue; }
+    const m = o && o.message;
+    if (!m || (o.type !== 'assistant' && o.type !== 'user')) continue;
+    if (o.type === 'user') {
+      const c = m.content;
+      if (Array.isArray(c) && c.length && c.every(b => b && b.type === 'tool_result')) continue;
+      return null;
+    }
+    if (!Array.isArray(m.content)) continue;
+    const text = m.content.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n').trim();
+    if (text) return text;
+  }
+  return null;
+}
+export function firstHelperNote(transcriptPath) {
+  const text = transcriptPath ? leadTextThisTurn(transcriptPath) : null;
+  if (text === null) return FIRST_HELPER_PLAIN;
+  const noModel = !/\b(haiku|sonnet|opus|fable|model)\b/i.test(text);
+  const noCheck = !/\b(check|checked|checks|verif\w*|test|tests|tested|review\w*|prove\w*)\b/i.test(text);
+  if (!noModel && !noCheck) return '';
+  const lacks = noModel && noCheck ? 'names no model and no check' : noModel ? 'names no model' : 'names no check';
+  return `first helper this session: your last message to the user ${lacks}; they are owed three plain lines (what the job needs, who does it on what model and why, how it is checked)`;
+}
+
 // One line per dispatch in the session state, for the ledger. Never throws; a
 // missing session file just means no router ran here.
 function recordDispatch(input, ti) {
-  const reviewWord = inferredReviewWord(ti.prompt);
+  const isReviewer = /reviewer/i.test(String(ti.subagent_type || ''));
+  const reviewWord = isReviewer ? null : inferredReviewWord(ti.prompt);
   withSession(input, state => {
     state.dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
     if (state.dispatches.length > 200) state.dispatches = state.dispatches.slice(-200);
@@ -644,7 +686,7 @@ function recordDispatch(input, ti) {
       // same gate is also reached without an explicit REVIEW: yes line, when
       // the packet's own OBJECTIVE mentions one of REVIEW_WORDS (reviewWord
       // below) — reviewInferred records which word tripped it.
-      ...(/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || '')) ? { review: true } : {}),
+      ...(!isReviewer && /^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || '')) ? { review: true } : {}),
       ...(reviewWord ? { review: true, reviewInferred: reviewWord } : {}),
       // A reviewer's own packet names the task it reviews under "REVIEW OF:"
       // (packet.md). Recorded on the reviewer's own dispatch row so

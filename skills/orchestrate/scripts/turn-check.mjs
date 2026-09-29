@@ -98,7 +98,7 @@ function freeFormOpen(returned, dispatches) {
       : (r.agentId ? ds.find(x => x && x.agentId === r.agentId) : null);
     if (!d || !d.toolUseId || d.task || !d.review || isReviewerRow(d)) continue;
     if (ds.some(x => x && x.reviewOf === d.toolUseId)) continue;
-    out.push({ id: d.toolUseId, at: Date.parse(r.at) });
+    out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at) });
   }
   return out;
 }
@@ -116,7 +116,7 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   const open = freeFormOpen(returned, dispatches);
   for (const f of open) {
     if (already.has(f.id) || skipSaid) continue;
-    const later = open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && !d.reviewOf && /reviewer/i.test(String(d.agent || '')) && Date.parse(d.at) > f.at);
+    const later = open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && isReviewerRow(d) && !(d.reviewOf && dispatches.some(x => x && x.toolUseId === d.reviewOf)) && Date.parse(d.at) > (Number.isFinite(f.sentAt) ? f.sentAt : f.at));
     if (later) continue;
     return { block: true, task: f.id, freeForm: true, blockedFor: [...already, f.id] };
   }
@@ -183,6 +183,19 @@ export function leftoverHelperWorktrees({ cwd, returned, merged, exists }) {
     if (!id || seen.has(id) || !/^[A-Za-z0-9]+$/.test(id)) continue;
     if (!(merged || []).includes(`worktree-agent-${id}`)) continue;
     if (exists(join(String(cwd), '.claude', 'worktrees', `agent-${id}`))) seen.add(id);
+  }
+  return seen.size;
+}
+
+// Helper branches already merged whose folder is gone: the branch alone is
+// still left over, and the person is told the same way. Counts only.
+export function leftoverHelperBranches({ cwd, returned, merged, exists }) {
+  const seen = new Set();
+  for (const r of Array.isArray(returned) ? returned : []) {
+    const id = r && r.agentId ? String(r.agentId) : '';
+    if (!id || seen.has(id) || !/^[A-Za-z0-9]+$/.test(id)) continue;
+    if (!(merged || []).includes(`worktree-agent-${id}`)) continue;
+    if (!exists(join(String(cwd), '.claude', 'worktrees', `agent-${id}`))) seen.add(id);
   }
   return seen.size;
 }
@@ -292,14 +305,20 @@ function checkHeartbeat(input) {
   // fact with the count, once per count. Nothing is removed. The git call is
   // made only when a returned helper's own folder still exists.
   const cwd = state.cwd || input.cwd;
-  const folders = cwd && Array.isArray(state.returned) && state.returned.some(r => r && r.agentId && existsSync(join(String(cwd), '.claude', 'worktrees', `agent-${r.agentId}`)));
-  if (folders) {
-    const n = leftoverHelperWorktrees({ cwd, returned: state.returned, merged: mergedBranches(cwd), exists: existsSync });
+  const anyHelper = cwd && Array.isArray(state.returned) && state.returned.some(r => r && r.agentId);
+  if (anyHelper) {
+    const merged = mergedBranches(cwd);
+    const f = leftoverHelperWorktrees({ cwd, returned: state.returned, merged, exists: existsSync });
+    const b = leftoverHelperBranches({ cwd, returned: state.returned, merged, exists: existsSync });
+    const n = f + b;
     if (n && rec.leftoverNotedFor !== n) {
       updated.leftoverNotedFor = n;
       store[key] = updated;
       try { writeJsonAtomic(path, store); } catch {}
-      return emitBlock(`orchestrate: ${n} helper ${n === 1 ? 'folder and branch are' : 'folders and branches are'} still here although their work was merged.`);
+      const what = f && b ? `${f} helper ${f === 1 ? 'folder' : 'folders'} and ${f + b} helper ${f + b === 1 ? 'branch are' : 'branches are'}`
+        : f ? `${f} helper ${f === 1 ? 'folder and branch are' : 'folders and branches are'}`
+          : `${b} helper ${b === 1 ? 'branch is' : 'branches are'}`;
+      return emitBlock(`orchestrate: ${what} still here although their work was merged; nothing has been removed.`);
     }
   }
 

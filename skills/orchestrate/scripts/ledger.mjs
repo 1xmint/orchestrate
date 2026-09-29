@@ -45,13 +45,15 @@ export function parseReturn(text) {
   // a colon still said what it said. `exec` on a pattern without `g` returns
   // the first match in the string, so the first STATUS-shaped line anywhere
   // in the return is the one read, wherever it falls.
-  const status = (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
+  // A reviewer's five-line return has no STATUS: its OUTCOME (PASS or FAIL) says the review finished.
+  const outcome = (/^\s*OUTCOME\s*[:\-–—]\s*(PASS|FAIL)\b/im.exec(t) || [])[1] || null;
+  const status = (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || (outcome ? 'DONE' : null);
   const lines = t.trim() ? t.trim().split('\n').length : 0;
   return {
     task: taskIdIn(t, { caseInsensitive: true }),
     run: field(/^\s*RUN:\s*(\S+)/im),
     status,
-    evidence: /^\s*EVIDENCE:\s*\S/im.test(t),
+    evidence: /^\s*(EVIDENCE|PROOF):\s*\S/im.test(t),
     lines,
     branch: field(/^\s*BRANCH:\s*(.+)$/im),
     changed: field(/^\s*CHANGED:\s*(.+)$/im),
@@ -60,7 +62,7 @@ export function parseReturn(text) {
     suggest: field(/^\s*SUGGEST:\s*(.+)$/im),
     // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what older
     // reviewer instructions produced, and is still read.
-    verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
+    verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || (outcome ? [null, outcome] : null) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
     // A reviewer's own return names the task it reviewed under "REVIEW OF:"
     // (packet.md's Reviewer packet RETURN schema), the task id its own first
     // token. This is how a reviewer return is told from any other return —

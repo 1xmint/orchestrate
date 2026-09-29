@@ -111,6 +111,17 @@ test('an inferred review adds a plain-language additionalContext note naming the
   assert.match(ctx, /dispatch orch-reviewer on opus with REVIEW OF: 9-1-0099/);
 });
 
+test('a reviewer dispatch is never itself flagged for review, whatever its brief mentions', () => {
+  const home = sandboxHome();
+  const sid = 's-reviewer';
+  const { json } = dispatch(home, sid, { subagent_type: 'orch-reviewer', model: 'opus', prompt: 'TASK: 9-1-0100\nREVIEW OF: 9-1-0099\nOBJECTIVE\nCheck the Stripe payment capture\nCONTEXT\nmore' });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.doesNotMatch(ctx, /will wait for an independent review/);
+  const d = lastDispatch(home, sid);
+  assert.equal(d.review, undefined);
+  assert.equal(d.reviewInferred, undefined);
+});
+
 test('an explicit REVIEW: yes dispatch gets no duplicate inferred-review sentence', () => {
   const home = sandboxHome();
   const sid = 's-no-dup';
@@ -199,4 +210,47 @@ test('a dollar figure is shown only with a ceiling set or pay-per-use billing', 
   assert.equal(dollarsShown({ budget: { ceiling: 5 } }), true);
   assert.equal(dollarsShown({ budget: { ceiling: null } }), false);
   assert.equal(dollarsShown(null), false);
+});
+
+// ---- the first helper of a session brings three plain lines ----------------
+
+function dispatchWithTranscript(home, sid, ti, lines) {
+  const tp = join(mkdtempSync(join(tmpdir(), 'orch-guard-tr-')), 't.jsonl');
+  writeFileSync(tp, lines.map(l => JSON.stringify(l)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: sid, cwd: home, transcript_path: tp, tool_use_id: `u-${Math.random()}`, tool_input: ti }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' },
+  });
+  let json = null;
+  try { json = r.stdout.trim() ? JSON.parse(r.stdout) : null; } catch {}
+  return (json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext) || '';
+}
+const userPrompt = { type: 'user', message: { role: 'user', content: 'build it' } };
+const leadSaid = text => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+const toolUse = { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'x', name: 'Agent', input: {} }] } };
+const PKT = { subagent_type: 'orch-researcher', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRead a file\nCONTEXT\nmore' };
+
+test('first helper: a lead message with no model and no check is named as such, once', () => {
+  const home = sandboxHome();
+  const ctx = dispatchWithTranscript(home, 's-fh-a', PKT, [userPrompt, leadSaid('I will have a builder do it in a separate copy, then commit.'), toolUse]);
+  assert.match(ctx, /first helper this session: your last message to the user names no model and no check; they are owed three plain lines/);
+  const again = dispatchWithTranscript(home, 's-fh-a', { ...PKT, prompt: `${PKT.prompt} again` }, [userPrompt, leadSaid('one more'), toolUse]);
+  assert.doesNotMatch(again, /first helper this session/);
+});
+
+test('first helper: nothing said when the lead message names a model and a check', () => {
+  const ctx = dispatchWithTranscript(sandboxHome(), 's-fh-b', PKT, [userPrompt, leadSaid('The job needs a search. A helper on Sonnet builds it because it is routine. I check it by running the tests.'), toolUse]);
+  assert.doesNotMatch(ctx, /first helper this session/);
+});
+
+test('first helper: an older turn\'s message is not mistaken for this turn\'s; the plain fact is sent', () => {
+  const ctx = dispatchWithTranscript(sandboxHome(), 's-fh-c', PKT, [leadSaid('Sonnet builds it and I test it.'), userPrompt, toolUse]);
+  assert.match(ctx, /first helper this session: the user is owed three plain lines first: what the job needs, who does it on what model and why, and how it is checked/);
+});
+
+test('first helper: with no transcript at all the plain fact is sent, and the dispatch is not refused', () => {
+  const { json } = dispatch(sandboxHome(), 's-fh-d', PKT);
+  assert.equal(json.hookSpecificOutput.permissionDecision, undefined);
+  assert.match(json.hookSpecificOutput.additionalContext, /first helper this session: the user is owed three plain lines first/);
 });
