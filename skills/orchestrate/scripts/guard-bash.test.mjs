@@ -100,6 +100,30 @@ test('the small branch delete passes anywhere in a chain when every other part p
   ]) assert.notEqual(decide(bad, {}).kind, 'pass', bad);
 });
 
+test('the small branch delete passes with several names, error text folded in, and joined by ; or ||', () => {
+  // The shape a live run sent: three names, the second delete, a listing, `2>&1` after the deletes.
+  const live = 'cd "C:\\work\\project" && git branch -d worktree-agent-a606aaeefecf71f19 worktree-agent-a6e2177a3c2231b73 worktree-agent-ab498e8 2>&1; git branch -d worktree-agent-ab512b9e04631df94 2>&1; git branch -a';
+  for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }]) {
+    assert.equal(decide(live, opts).kind, 'pass', JSON.stringify(opts));
+    assert.equal(decide('git branch -d worktree-agent-a1 2>&1', opts).kind, 'pass');
+    assert.equal(decide('git branch -d worktree-agent-a1 worktree-agent-b2; git branch -d task/x; git branch', opts).kind, 'pass');
+    assert.equal(decide('git branch -d worktree-agent-a1 || git branch -a', opts).kind, 'pass');
+  }
+  // The clean chain: helper folder removal, the small delete, a harmless command.
+  assert.equal(decide('git worktree remove .claude/worktrees/agent-a1 2>&1 && git branch -d worktree-agent-a1 2>&1; git status', { headless: true, mode: 'auto' }).kind, 'pass');
+  // Still refused: a forced delete, --force, a write to a file, a pipe, another part that would not pass alone.
+  for (const bad of [
+    'git branch -D worktree-agent-a1 2>&1; git branch',
+    'git branch -d worktree-agent-a1 --force 2>&1',
+    'git branch -d worktree-agent-a1 > out.txt',
+    'git branch -d worktree-agent-a1 2>&1 | cat',
+    'git branch -d worktree-agent-a1 2>&1; rm -rf src',
+    'git branch -d worktree-agent-a1 2>&1 || git push --force',
+    'git branch -d worktree-agent-a1 2>&1; git branch -D x',
+    'git branch -d worktree-agent-a1 2>&1; git branch -d main',
+  ]) assert.notEqual(decide(bad, { headless: true, mode: 'auto' }).kind, 'pass', bad);
+});
+
 test('a forced branch delete after a safe folder removal is refused in plain words: no mode, no file name, the small form named', () => {
   const chain = 'git worktree remove .claude/worktrees/agent-abc123 && git branch -D worktree-agent-abc123 && node --test | tail';
   for (const opts of [{ headless: true, mode: 'auto' }, { subagent: true }]) {

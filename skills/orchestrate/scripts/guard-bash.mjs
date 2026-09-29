@@ -214,7 +214,10 @@ function isSafeWorktreeCleanupChain(cmd) {
 // plain: helper or task branch names only, no shell tricks.
 const CHAIN_META_RE = /[|<>`$(){}]|(?<!&)&(?!&)/;
 const CHAIN_TRICKS_RE =/[`<>]|\$\(|(?<!&)&(?!&)/;
-const segmentsOf = cmd => cmd.split(/&&|;/).map(s => s.trim()).filter(Boolean);
+const segmentsOf = cmd => cmd.split(/&&|;|\|\|/).map(s => s.trim()).filter(Boolean);
+// `2>&1` only folds error text into the normal output; it writes nothing and
+// hides nothing, so it never decides whether a delete is safe.
+const withoutStderrJoin = cmd => cmd.replace(/\s2>&1(?=\s|;|&|\||$)/g, '');
 const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && /\s(-D|-d|--delete|--force-delete)(\s|$)/.test(seg);
 function isPlainBranchDelete(seg, flags) {
   const t = seg.split(/\s+/);
@@ -225,7 +228,8 @@ function isPlainBranchDelete(seg, flags) {
 function segmentPasses(seg) {
   return !(RULES.find(r => r.test(seg)) || rmRule(seg) || psRemoveRule(seg));
 }
-function chainRestIsSafe(cmd, flags) {
+function chainRestIsSafe(raw, flags) {
+  const cmd = withoutStderrJoin(raw);
   const segs = segmentsOf(cmd);
   if (segs.length < 2 || CHAIN_TRICKS_RE.test(cmd)) return false;
   let deletes = 0;
@@ -269,10 +273,13 @@ const RULES = [
     // cleanup cannot lose work. -D, and -d of any other name, still ask.
     // A second shape also passes: that same delete chained after removing the
     // worktree folder it belonged to — see isSafeWorktreeCleanupChain above.
-    test: cmd => (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
-      && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd)
-      && !isSafeWorktreeCleanupChain(cmd)
-      && !isSafeBranchDeleteInChain(cmd),
+    test: raw => {
+      const cmd = withoutStderrJoin(raw);
+      return (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
+        && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd)
+        && !isSafeWorktreeCleanupChain(cmd)
+        && !isSafeBranchDeleteInChain(cmd);
+    },
     reason: `This would permanently delete a branch. ${ASK_TAIL}`,
   },
   {
