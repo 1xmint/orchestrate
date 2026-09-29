@@ -93,12 +93,10 @@ test('the coordinator owns one bounded wave and one graded return', () => {
   assert.match(text, /Never turn the return into a question for the user/);
 });
 
-test('memory is on the two roles that gain from it, and off the two that would be steered by it', () => {
-  const has = n => /^memory: user$/m.test(readFileSync(join(AGENTS, `${n}.md`), 'utf8'));
-  assert.ok(has('orch-reviewer'), 'a reviewer should remember repo standards');
-  assert.ok(has('orch-researcher'), 'a researcher should remember sources');
-  assert.ok(!has('orch-implementer'), 'a stale note must not steer a change');
-  assert.ok(!has('orch-debugger'), 'a stale note must not steer a diagnosis');
+test('no role asks for a memory folder outside the project', () => {
+  for (const n of ['orch-reviewer', 'orch-researcher', 'orch-implementer', 'orch-debugger']) {
+    assert.doesNotMatch(readFileSync(join(AGENTS, `${n}.md`), 'utf8'), /^memory:/m, `${n} must not set a memory scope`);
+  }
 });
 
 test('the researcher can use installed skills and tool servers, but cannot edit code or dispatch', () => {
