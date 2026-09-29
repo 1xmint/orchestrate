@@ -272,7 +272,8 @@ test('the wording of a message never produces an instruction', () => {
     'fix the auth bug in session.ts, client.ts, router.ts, api.ts, db.ts and web.ts',
   ];
   for (const m of messages) {
-    const out = prompt(home, repo, m, { session_id: 's-quiet' });
+    // The tenth prompt of a session carries the goal, a fact and not an instruction.
+    const out = prompt(home, repo, m, { session_id: 's-quiet' }).replace(/\[orchestrate · goal\] [^\n]*/, '');
     assert.equal(out, '', `the router stayed out of it: ${m}`);
   }
 });
@@ -760,5 +761,56 @@ test('a second "continue" in the same session does not repeat the handoff line',
   assert.match(first, /Your last session in this folder/);
   const second = prompt(home, repo, 'continue', { session_id: 'sess-new', prompt_id: 'p2' });
   assert.doesNotMatch(second, /Your last session in this folder/);
+});
+
+// ---- the goal note ----------------------------------------------------------
+const GOAL_LINE = /\[orchestrate · goal\] /;
+function goalOf(out) { const m = /\[orchestrate · goal\] [^\n]*/.exec(out); return m ? m[0] : null; }
+function writeNote(repo, text) {
+  mkdirSync(join(repo, '.orchestrator'), { recursive: true });
+  writeFileSync(join(repo, '.orchestrator', 'goal.md'), text);
+}
+
+test('the goal shows on the tenth prompt only, then ten later, and adds nothing between', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  writeNote(repo, 'Get the invoice export working for the accountant.\nShe can open the file in Excel.\n');
+  const sid = 's-goal10';
+  const outs = [];
+  for (let i = 1; i <= 20; i++) outs.push(prompt(home, repo, `substantive request number ${i} about the invoice export`, { session_id: sid }));
+  const shown = outs.map((o, i) => (GOAL_LINE.test(o) ? i + 1 : 0)).filter(Boolean);
+  assert.deepEqual(shown, [10, 20]);
+  const line = goalOf(outs[9]);
+  assert.match(line, /Get the invoice export working for the accountant\. Done looks like: She can open the file in Excel\./);
+  assert.match(line, /\(written (just now|\d+ min ago)\)$/);
+  assert.ok(Buffer.byteLength(line) <= 350);
+  assert.equal(outs[10], '', 'a prompt where nothing is due adds 0 bytes');
+});
+
+test('after a compaction with no run the goal text is printed, not only a path', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  writeNote(repo, 'Get the invoice export working.\nThe accountant can open it.\n');
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-goalc', cwd: repo });
+  assert.match(goalOf(out), /Get the invoice export working\. Done looks like: The accountant can open it\./);
+});
+
+test('after a compaction with no run and no note the first request is shown, labelled not confirmed', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  prompt(home, repo, 'add a --json flag to the status command and test it', { session_id: 's-goalf' });
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-goalf', cwd: repo });
+  assert.match(goalOf(out), /first request, not confirmed: add a --json flag/);
+});
+
+test('after a compaction with a run the goal is printed once, by the run excerpt, not twice', () => {
+  const home = makeHome(); const repo = makeRepo(true);
+  writeNote(repo, 'A note that the ledger outranks.\nDone.\n');
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-goalr', cwd: repo });
+  assert.equal(goalOf(out), null);
+  assert.equal((out.match(/Finish the tidy command/g) || []).length, 1);
+});
+
+test('with nothing to show, a resume prints no goal line', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = run(home, { hook_event_name: 'SessionStart', source: 'resume', session_id: 's-goaln', cwd: repo });
+  assert.equal(goalOf(out), null);
 });
 

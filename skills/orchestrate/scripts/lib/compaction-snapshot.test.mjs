@@ -148,6 +148,34 @@ test('a bound run\'s Goal line wins over the session\'s first user prompt', () =
   assert.match(body, /Goal: Ship the widget-gadget bridge\./);
 });
 
+test('the goal note wins over the first user text, and a long one is clipped at a word boundary', () => {
+  const home = makeHome();
+  const dir = join(home, 'store');
+  const proj = join(home, 'proj');
+  mkdirSync(join(proj, '.orchestrator'), { recursive: true });
+  writeFileSync(join(proj, '.orchestrator', 'goal.md'), `${'alpha bravo charlie '.repeat(20)}\n`);
+  const transcriptPath = writeTranscript(home, twoBoundaryTranscript());
+  const session = 's-note';
+  const reading = readContext(transcriptPath, { session });
+  const body = readFileSync(writeCompactionSnapshot({ session, reading, transcriptPath, ctx: { dir, cwd: proj } }), 'utf8');
+  const goal = /Goal: (.*)/.exec(body)[1];
+  assert.match(goal, /^alpha bravo charlie/);
+  assert.doesNotMatch(body, /do the thing: fix the widget\n\nLast/);
+  assert.match(goal, /(alpha|bravo|charlie)…$/, 'ends at a whole word');
+  assert.ok(Buffer.byteLength(goal) <= 300);
+});
+
+test('when the goal and the last message are the same text it is written once', () => {
+  const home = makeHome();
+  const dir = join(home, 'store');
+  const transcriptPath = writeTranscript(home, [user('fix the widget please'), assistantText('ok'), boundary('b1')].join(''));
+  const session = 's-same';
+  const reading = readContext(transcriptPath, { session });
+  const body = readFileSync(writeCompactionSnapshot({ session, reading, transcriptPath, ctx: { dir } }), 'utf8');
+  assert.equal((body.match(/fix the widget please/g) || []).length, 1);
+  assert.match(body, /Last message before compaction: the same as the goal above/);
+});
+
 test('copies the file to <run dir>/checkpoints/<same name> when a run is bound', () => {
   const home = makeHome();
   const dir = join(home, 'store');
