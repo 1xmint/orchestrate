@@ -378,6 +378,18 @@ test('no shipped file turns a price into a share of a subscription week', () => 
   assert.match(routing, /Never a running total/);
 });
 
+test('the lead thinks in the open before the first helper, and closing numbers come from proof', () => {
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  assert.match(skill, /Before the first helper of a job, write the user three plain lines: what the job needs/);
+  assert.match(skill, /saying it lets them correct it before money is spent/);
+  assert.match(skill, /Copy each number, and each claim that a check ran, from a proof line/);
+  assert.match(skill, /say what was not run as not run/);
+  assert.match(skill, /Two closing messages carried figures that did not exist/);
+  const routing = flat(readFileSync(join(SKILL, 'references', 'routing.md'), 'utf8'));
+  assert.match(routing, /is the hard part deciding what to do, or typing it/);
+  assert.match(routing, /often cheaper than the stronger model doing both/);
+});
+
 test('the run ledger keeps the goal above the task table', () => {
   // What a resuming session has to recover. Task history is long, mostly
   // finished, and on disk; these four are the run itself.

@@ -93,6 +93,19 @@ sources that disagree and must be reconciled, choosing a direction.
 Not when something else can check the answer: a tight packet with strong tests,
 a sweep, an extraction, a mechanical change.
 
+### Thinking before the first dispatch
+
+Three questions worth answering about this job: is the hard part deciding what
+to do, or typing it; what does a mistake cost, and who would notice; can the
+result be checked by running it. A hard decision with an expensive mistake
+points to a stronger model, a plan, and a review written before the build.
+Easy typing with a check that runs points to a faster model and no plan.
+
+A plan from a stronger model followed by a build from a faster one is often
+cheaper than the stronger model doing both: the build is most of the tokens,
+the plan most of the judgment. The three lines the user sees are the answers
+in plain words, so a wrong read of the job is corrected before money is spent.
+
 ## Saying the price
 
 The guard prints a price tag on every dispatch that names a model: list-price
