@@ -35,6 +35,12 @@ test('the card has the user pick before a small build is split across helpers', 
   assert.match(CARD, /Before splitting a small build across helpers, tell the user it has cost about two to three times doing it alone, and let them pick\./);
 });
 
+test('the card asks for the three plain lines before the first helper, with the reason', () => {
+  // A live lead that never opened the skill said one sentence and dispatched;
+  // the card is the text every lead does see.
+  assert.match(CARD, /Before the first helper, tell the user in three plain lines what the job needs, who does it on what model and why, and how it is checked, so they can correct it first\./);
+});
+
 test('the card carries no counter phrase — those live behind `router status`', () => {
   assert.doesNotMatch(CARD, /orch-agents|codex:|tier \w|limits today/);
 });
