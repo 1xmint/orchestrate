@@ -48,8 +48,8 @@ test('a helper worktree branch may be deleted with -d once merged; -D, other nam
   assert.equal(decide('git branch -d worktree-agent-abc123').kind, 'pass');
   assert.equal(decide('git branch --delete worktree-agent-abc123 worktree-agent-0f9e').kind, 'pass');
   assert.equal(decide('git branch -D worktree-agent-abc123').kind, 'ask');
-  assert.equal(decide('git branch -d main').kind, 'ask');
-  assert.equal(decide('git branch -d worktree-agent-abc123 feature').kind, 'ask');
+  assert.equal(decide('git branch -d main').kind, 'pass');
+  assert.equal(decide('git branch -d worktree-agent-abc123 feature').kind, 'pass');
   assert.equal(decide('git branch -d worktree-agent-abc123 && git branch -D main').kind, 'ask');
 });
 
@@ -75,8 +75,6 @@ test('the wider clean-up still refuses anything that could lose work or reach el
   for (const bad of [
     'git worktree remove .claude/worktrees/../../src' + tail,
     'git worktree remove .claude/worktrees/a elsewhere/b' + tail,
-    'git worktree remove .claude/worktrees/a && git branch -d main',
-    'git worktree remove .claude/worktrees/a && git branch -d worktree-agent-abc123 feature',
     'git worktree remove .claude/worktrees/a && git branch -D task/x',
     'git worktree remove .claude/worktrees/a && git branch -d task/x --force',
     'git worktree remove .claude/worktrees/a && git branch -d task/x && rm -rf src',
@@ -94,7 +92,6 @@ test('the small branch delete passes anywhere in a chain when every other part p
   for (const bad of [
     'git branch -d worktree-agent-abc123 && rm -rf src',
     'git branch -d worktree-agent-abc123 && git push origin --force',
-    'git branch -d main && node --test',
     'node --test | git branch -d worktree-agent-abc123 && echo hi',
     'git branch -d worktree-agent-abc123 && echo $(git branch -D x)',
   ]) assert.notEqual(decide(bad, {}).kind, 'pass', bad);
@@ -120,7 +117,7 @@ test('the small branch delete passes with several names, error text folded in, a
     'git branch -d worktree-agent-a1 2>&1; rm -rf src',
     'git branch -d worktree-agent-a1 2>&1 || git push --force',
     'git branch -d worktree-agent-a1 2>&1; git branch -D x',
-    'git branch -d worktree-agent-a1 2>&1; git branch -d main',
+    'git branch -d worktree-agent-a1 2>&1; git branch -D main',
   ]) assert.notEqual(decide(bad, { headless: true, mode: 'auto' }).kind, 'pass', bad);
 });
 
@@ -170,9 +167,9 @@ test('a worktree cleanup chain with the path outside .claude/worktrees/ still as
   assert.equal(decide(outside, { headless: true, mode: 'auto' }).kind, 'deny');
 });
 
-test('deleting a branch three ways is stopped, and a merged -d cannot be told apart cheaply so it is stopped too', () => {
+test('a forced or remote branch delete is stopped, and the small -d passes for any name', () => {
   assert.equal(decide('git branch -D x').kind, 'ask');
-  assert.equal(decide('git branch -d x').kind, 'ask');
+  assert.equal(decide('git branch -d x').kind, 'pass');
   assert.equal(decide('git push origin --delete a b c').kind, 'ask');
 });
 
@@ -633,4 +630,33 @@ test('50 invocations of the guard’s own decision average under 100ms each', ()
   // eslint-disable-next-line no-console
   console.log(`guard-bash decide(): ${N} invocations, ${avg.toFixed(3)}ms average`);
   assert.ok(avg < 100, `expected under 100ms average, got ${avg.toFixed(3)}ms`);
+});
+
+test('the small delete passes for any branch name, several names, and in a chain, never with a force flag', () => {
+  for (const ok of [
+    'git branch -d feature/login',
+    'git branch --delete release-1.2 main',
+    'git branch -d a b c',
+    'git branch -d my-feature && git status',
+    'git status; git branch -d fix/x 2>&1',
+  ]) assert.equal(decide(ok, { headless: true, mode: 'auto' }).kind, 'pass', ok);
+  for (const bad of [
+    'git branch -D feature',
+    'git branch --force -d feature',
+    'git branch -d feature --force',
+    'git branch -d feature -f',
+    'git branch -d --force feature',
+    'git branch -f -d feature',
+    'git branch -d feature && git branch -D other',
+    'git branch --delete --force feature',
+    'git branch -d $(git branch)',
+    'git branch -d feature > out.txt',
+  ]) assert.notEqual(decide(bad, { headless: true, mode: 'auto' }).kind, 'pass', bad);
+});
+
+test('a refused branch delete never names a form that is itself refused', () => {
+  const d = decide('git branch -D feature', { headless: true, mode: 'auto' });
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /git branch -d <name>/);
+  assert.doesNotMatch(d.reason, /helper branches/);
 });

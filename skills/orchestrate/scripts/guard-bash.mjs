@@ -148,6 +148,10 @@ function isProcessKill(cmd) {
 // elsewhere, a pipe, another kind of command) fails the match and falls
 // through to the ordinary branch-delete rule below, unchanged.
 const CLEANUP_BRANCH_RE = /^(?:worktree-agent-[0-9a-f]+|task\/[A-Za-z0-9._-]+)$/;
+// Any branch name for the small delete: git refuses it while work is unmerged,
+// so the name does not matter. Never a flag, never shell syntax.
+const SMALL_DELETE_NAME_RE = /^[A-Za-z0-9._\/@+-]+$/;
+const isSmallDeleteName = n => SMALL_DELETE_NAME_RE.test(n) && !n.startsWith('-');
 const unquote = t => (/^(["']).*\1$/.test(t) ? t.slice(1, -1) : t);
 
 const FORCE_FLAGS = new Set(['-f', '-ff', '--force']);
@@ -199,7 +203,7 @@ function isSafeWorktreeCleanupChain(cmd) {
       continue;
     }
     if (t[1] === 'branch' && (t[2] === '-d' || t[2] === '--delete') && t.length > 3) {
-      if (!t.slice(3).every(n => CLEANUP_BRANCH_RE.test(n))) return false;
+      if (!t.slice(3).every(isSmallDeleteName)) return false;
       deletes++;
       continue;
     }
@@ -222,7 +226,7 @@ const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && /\s(-D|-d|--del
 function isPlainBranchDelete(seg, flags) {
   const t = seg.split(/\s+/);
   return t[0] === 'git' && t[1] === 'branch' && flags.includes(t[2]) && t.length > 3 && !/[|<>`$(){}&]/.test(seg)
-    && t.slice(3).every(n => CLEANUP_BRANCH_RE.test(n));
+    && t.slice(3).every(isSmallDeleteName);
 }
 // Whether a part passes on its own (no rule of this guard stops it).
 function segmentPasses(seg) {
@@ -276,7 +280,7 @@ const RULES = [
     test: raw => {
       const cmd = withoutStderrJoin(raw);
       return (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
-        && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd)
+        && !isPlainBranchDelete(cmd.trim(), ['-d', '--delete'])
         && !isSafeWorktreeCleanupChain(cmd)
         && !isSafeBranchDeleteInChain(cmd);
     },
@@ -402,10 +406,10 @@ export function decide(command, ctx = {}) {
   // A branch delete that nobody can approve: say in plain words what is refused
   // and what works instead, with nothing about modes or files to repeat.
   if (hit.name === 'branch-delete-local' && (ctx.subagent || ctx.headless)) {
-    const small = 'The small form works for helper branches: git branch -d <name>. Git itself refuses it if the work was never merged.';
-    return { kind: 'deny', reason: isChainSafeExceptForcedDelete(cmd)
+    const small = 'Deleting with the lowercase flag works for any branch that has been merged: git branch -d <name>. Git itself refuses it if the work was never merged.';
+    return { kind: 'deny', reason: (isChainSafeExceptForcedDelete(cmd)
       ? `The helper folders can be removed, but the forced branch delete cannot. ${small}`
-      : `This branch delete is refused, because it can throw away work that was never merged. ${small}` };
+      : `This branch delete is refused, because it can throw away work that was never merged. ${small}`) };
   }
 
   if (ctx.subagent || ctx.headless) {
