@@ -95,8 +95,10 @@ test('a brief that really says to work in the shared checkout is still refused',
 // ---- locked worktree and concurrency -----------------------------------------
 
 test('a packet naming a worktree a live Codex worker holds is denied', () => {
-  const external = [{ provider: 'codex', task: 'task-1', pid: 123, worktree: 'C:/repo/worktree-a' }];
-  const d = workflowDecision({}, { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'work in C:/repo/worktree-a please' }, { policy: policy(), external });
+  // A path that is absolute on the machine running the test.
+  const wt = process.platform === 'win32' ? 'C:/repo/worktree-a' : '/repo/worktree-a';
+  const external = [{ provider: 'codex', task: 'task-1', pid: 123, worktree: wt }];
+  const d = workflowDecision({}, { subagent_type: 'orch-researcher', model: 'haiku', prompt: `work in ${wt} please` }, { policy: policy(), external });
   assert.match(d.reason, /Codex worker/);
 });
 
