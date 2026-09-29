@@ -206,6 +206,13 @@ test('reviewDowngrade: a REVIEW: yes task marked DONE with a matching reviewer r
   assert.equal(r.note, null);
 });
 
+test('reviewDowngrade: a reviewer return that failed does not count as reviewed; a later pass does', () => {
+  const failed = [{ reviewOf: '9-1-0034', status: 'FAIL', verdict: 'FAIL' }];
+  assert.equal(reviewDowngrade('DONE', true, '9-1-0034', failed).status, 'PARTIAL');
+  const both = [...failed, { reviewOf: '9-1-0034', status: 'DONE', verdict: 'PASS' }];
+  assert.equal(reviewDowngrade('DONE', true, '9-1-0034', both).status, 'DONE');
+});
+
 test('reviewDowngrade: a reviewer return for a different task id does not satisfy the gate', () => {
   const rows = [{ reviewOf: '9-1-0099' }];
   const r = reviewDowngrade('DONE', true, '9-1-0034', rows);

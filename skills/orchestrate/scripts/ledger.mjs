@@ -235,7 +235,7 @@ export function reviewGated(dispatch, ret) {
 
 export function reviewDowngrade(status, reviewFlagged, task, indexRows, reviewInferred = null) {
   if (status !== 'DONE' || !reviewFlagged || !task) return { status, note: null };
-  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task);
+  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task && row.verdict !== 'FAIL');
   if (reviewed) return { status, note: null };
   const note = reviewInferred
     ? `done, but its objective mentions ${reviewInferred}, so it waits for an independent review that has not returned yet.`
@@ -694,7 +694,7 @@ function main() {
     ...(noEvidence.note ? { noEvidence: true } : {}),
     ...(review.note ? { reviewGated: true } : {}),
     ...(dirty.note ? { dirtyWorktree: true } : {}),
-    ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}),
+    ...(r.reviewOf || (dispatch && dispatch.reviewOf) ? { reviewOf: r.reviewOf || dispatch.reviewOf } : {}),
     verdict: r.verdict || null,
     evidence: r.evidence,
     file,
@@ -714,7 +714,7 @@ function main() {
       // yes or an inferred word) and none has come back yet — turn-check.mjs
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
       saveSession(state);
     }
   } catch {}
