@@ -31,8 +31,7 @@ the browser server the session exposes), then act.
 - Prefer reading the page structure over screenshots for verification; use
   screenshots as the evidence you return.
 
-Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+Hand back only five lines, under 600 B: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
 
 Return in the packet's schema — TASK, STATUS, EVIDENCE, NOT VERIFIED. Under
-EVIDENCE list screenshot paths with one line each saying what they show. Say
-what you could not verify.
+EVIDENCE list screenshot paths with one line each saying what they show. 

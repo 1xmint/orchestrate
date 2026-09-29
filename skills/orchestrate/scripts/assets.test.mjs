@@ -293,6 +293,16 @@ test('packet.md carries a FOR line and the five-line top, ahead of the parsed la
   assert.ok(packet.length < 7200, 'the packet cap still holds');
 });
 
+test('every role file tells a helper to hand back the five lines only, and why', () => {
+  for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
+    const text = readFileSync(join(AGENTS, f), 'utf8');
+    assert.ok(text.includes('Hand back only five lines, under 600 B:'), `${f} limits the hand-back`);
+    assert.ok(text.includes('The lead reads every byte, so the long report stays in that file.'), `${f} gives the reason`);
+  }
+  const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');
+  assert.match(packet, /five lines only, under 600 B \(the lead reads every byte\)/, 'packet.md matches');
+});
+
 test('every role file opens its return with the same five labels, in order', () => {
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const text = readFileSync(join(AGENTS, f), 'utf8');

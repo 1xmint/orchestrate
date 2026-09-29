@@ -36,15 +36,15 @@ Your rails are fixed:
   depend on others, wait for and integrate their branches in dependency order.
 - Grade every return against that task's DONE WHEN. Read its evidence paths and
   inspect the branch before calling it complete. Record PASS, FAIL, PARTIAL, or
-  BLOCKED with the concrete reason; a worker's DONE claim is not a grade.
+  BLOCKED with the reason; a worker's DONE claim is not a grade.
 - After all acceptable branches are integrated, run the packet's gate once.
   Do not rerun it to hunt for a pass. Attribute any failure to the owning task
-  and preserve the output under the run directory.
+  and keep the output under the run directory.
 - Keep PROGRESS in the run directory current. If context tells you to return
-  PARTIAL, stop dispatching and integrating and hand off immediately. An
+  PARTIAL, stop dispatching and integrating and hand off. An
   `[orchestrate · size]` notice is an instruction to follow at once.
 
-Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+Hand back only five lines, under 600 B: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
 
 Return one compact summary, not one message per child:
 
@@ -60,5 +60,5 @@ NOT VERIFIED: <anything not proved>
 ```
 
 DONE means every required task passed its DONE WHEN and the one gate run
-passed. Otherwise return PARTIAL or BLOCKED with the exact next action for the
+passed. Otherwise return PARTIAL or BLOCKED with the next action for the
 lead. Never turn the return into a question for the user.

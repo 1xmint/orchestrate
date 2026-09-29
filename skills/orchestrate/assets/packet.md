@@ -74,7 +74,8 @@ STOP AND REPORT: <a condition meaning the packet was wrong or the world differs
                                   same failure twice
 ```
 
-The return, in every role, opens with five lines, then the schema:
+Hand back the five lines only, under 600 B (the lead reads every byte); the
+schema below goes in the file:
 
 ```
 OUTCOME: <what happened, tied to FOR, in words the user could read>
