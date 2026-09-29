@@ -145,7 +145,7 @@ test('guard: one dispatch delivered twice is recorded once', () => {
   };
   const first = run('guard-agent.mjs', payload, home);
   const second = run('guard-agent.mjs', payload, home);
-  assert.match(first.stdout, /estimate before work, this helper/);
+  assert.match(first.stdout, /helper size: orch-/);
   assert.equal(second.stdout.trim(), '', 'the second registration of the same hook says nothing');
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 'sd.json'), 'utf8'));
   assert.equal(state.dispatches.length, 1);
@@ -176,8 +176,8 @@ test('guard: two sessions do not overwrite each other in one global slot', () =>
   });
   const a = run('guard-agent.mjs', mk('sf1'), home);
   const b = run('guard-agent.mjs', mk('sf2'), home);
-  assert.match(a.stdout, /estimate before work, this helper/);
-  assert.match(b.stdout, /estimate before work, this helper/, 'a different session is a different event');
+  assert.match(a.stdout, /helper size: orch-/);
+  assert.match(b.stdout, /helper size: orch-/, 'a different session is a different event');
   for (const s of ['sf1', 'sf2']) {
     const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${s}.json`), 'utf8'));
     assert.equal(state.dispatches.length, 1, s);
@@ -213,8 +213,8 @@ test('guard: a dispatch is recorded and priced, and never approved', () => {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's2', cwd: home,
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\ndo it' },
   }, home);
-  assert.match(out.stdout, /estimate before work, this helper: orch-implementer on sonnet/);
-  assert.match(out.stdout, /at list price/);
+  assert.match(out.stdout, /helper size: orch-implementer on sonnet/);
+  assert.doesNotMatch(out.stdout, /\$|at list price/, 'a subscription is shown a size, not a dollar figure');
   assert.doesNotMatch(out.stdout, /% of a/, 'no share of a week: nothing here has measured one');
   assert.doesNotMatch(out.stdout, /permissionDecision/, "the user's own approval prompt is untouched");
   assert.equal(out.status, 0);
@@ -256,6 +256,41 @@ test('guard: the over-ceiling denial names the ceiling and the cost label', () =
 
   assert.match(out.stdout, /orchestrate budget:.*ceiling/);
   assert.match(out.stdout, /modelled from list prices; your plan may bill differently/);
+});
+
+// A bound run whose Budget section says `budgetText`, already carrying a very
+// large recorded spend; one orch-implementer dispatch against it.
+function dispatchAgainstBudget(budgetText, sid, tier) {
+  const home = sandbox();
+  if (tier) writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier }));
+  const dir = mkdtempSync(join(tmpdir(), 'orch-repo-'));
+  mkdirSync(join(dir, '.git'), { recursive: true });
+  const runDir = join(dir, '.orchestrator', 'runs', '20260910-nocap');
+  mkdirSync(join(runDir, 'returns'), { recursive: true });
+  const runMd = join(runDir, 'RUN.md');
+  writeFileSync(runMd, `# Run\n\n${budgetText}## Tasks\n\n| id | phase | role · model | task | acceptance | attempts | result |\n|---|---|---|---|---|---|---|\n| 9-9-0001 | 📋 planned | i · sonnet | do it | ev | 0 | — |\n`);
+  writeFileSync(join(runDir, 'returns', 'returns.jsonl'), JSON.stringify({ taskId: '9-9-0001', dollars: 99999 }) + '\n');
+  const sessDir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sessDir, { recursive: true });
+  writeFileSync(join(sessDir, `${sid}.json`), JSON.stringify({ v: 1, session_id: sid, run: { root: dir, runId: '20260910-nocap', runMd, boundAt: new Date().toISOString(), explicit: true } }));
+  return run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: sid, cwd: dir,
+    tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-9-0001\nPROGRESS: /r/p.md\ndo it' },
+  }, home);
+}
+
+test('guard: with no ceiling, or "Ceiling: none", nothing is refused over cost and the note has no dollar figure', () => {
+  for (const [text, sid] of [['', 'nc1'], ['## Budget\n\nCeiling: none · sessions: ~1\n\n', 'nc2']]) {
+    const out = dispatchAgainstBudget(text, sid);
+    assert.doesNotMatch(out.stdout, /permissionDecision.*deny|orchestrate budget/, `not refused: ${text || '(no section)'}`);
+    assert.doesNotMatch(out.stdout, /\$/, 'no dollar sign on a subscription with no ceiling');
+    assert.match(out.stdout, /helper size: orch-implementer on sonnet, .*for this kind of helper/);
+  }
+});
+
+test('guard: pay-per-use billing shows the list-price estimate even with no ceiling, and a set ceiling still refuses', () => {
+  assert.match(dispatchAgainstBudget('', 'nc3', 'api').stdout, /estimate before work, this helper: .*≈ \$/);
+  assert.match(dispatchAgainstBudget('## Budget\n\nCeiling: $0.01 at list price\n\n', 'nc4').stdout, /orchestrate budget:.*ceiling/);
 });
 
 test('guard: the packet notice names a missing PROGRESS line on an author-role dispatch, plainly, and not in Plan mode', () => {
@@ -330,7 +365,7 @@ test('guard: a Plan dispatch that names no model is recorded as inherited and no
   }, home);
   // No model named, and Plan has no agent file of its own, so there is no
   // price figure to give: no additionalContext at all.
-  assert.doesNotMatch(String(out.json && out.json.hookSpecificOutput && out.json.hookSpecificOutput.additionalContext || ''), /estimate before work, this helper/);
+  assert.doesNotMatch(String(out.json && out.json.hookSpecificOutput && out.json.hookSpecificOutput.additionalContext || ''), /helper size: orch-/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit');
   assert.equal(state.dispatches[0].modelFrom, 'inherit');
@@ -345,8 +380,8 @@ test('guard: an orch-implementer dispatch that names no model is recorded and pr
   // The role's own file names sonnet, so a tag prints even though the
   // dispatch itself named nothing; this is the first implementer dispatch of
   // the session with no ledger, so the solo/helper pair prints too.
-  assert.match(out.json.hookSpecificOutput.additionalContext, /estimate before work, this helper: orch-implementer on sonnet/);
-  assert.match(out.json.hookSpecificOutput.additionalContext, /done in this chat/);
+  assert.match(out.json.hookSpecificOutput.additionalContext, /helper size: orch-implementer on sonnet/);
+  assert.match(out.json.hookSpecificOutput.additionalContext, /solo build in this chat/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9b.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'sonnet');
   assert.equal(state.dispatches[0].modelFrom, 'role');
@@ -374,7 +409,7 @@ test('guard: a dispatch outside any repo is not gated on a stranger repo\'s ceil
     tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 1\ndo it' },
   }, home);
   assert.doesNotMatch(out.stdout, /permissionDecision.*deny/, 'not denied against a repo this dispatch never named');
-  assert.match(out.stdout, /estimate before work, this helper/, 'the dispatch still goes through and is still priced');
+  assert.match(out.stdout, /helper size: orch-/, 'the dispatch still goes through and is still priced');
 });
 
 test('guard: the run a packet names travels with the dispatch record', () => {

@@ -1,6 +1,6 @@
-# The ledger: budget, context advice, tracer bullets, resuming
+# The ledger: ceiling, context advice, tracer bullets, resuming
 
-`node "${CLAUDE_SKILL_DIR}/scripts/run-init.mjs" <slug> --repo <the repo the goal is about> --goal "…" --tier <t> --budget <n> --session-id <this session's id>`
+`node "${CLAUDE_SKILL_DIR}/scripts/run-init.mjs" <slug> --repo <the repo the goal is about> --goal "…" --tier <t> --session-id <this session's id>`
 writes `<repo>/.orchestrator/runs/<date>-<slug>/RUN.md`, prefills Facts with the
 repo's detected gate, and binds the run to this session so a hook's write lands
 in the right ledger. Keep its headings; a resuming session looks for them.
@@ -10,22 +10,18 @@ and why it matters, the evidence that would prove it, the constraints and what
 you are deliberately not doing, and the current approach with the next
 deliverable.
 
-## Budget of record
+## Ceiling (optional)
 
-**Always pass `--budget`**, so the run has a **budget of record** — a spend
-ceiling in list-price dollars — from its first line rather than by accident.
-`run-init.mjs`'s own default with the flag omitted is no ceiling at all, which
-means the dispatch guard never gates a thing. Estimate a number from the
-shape of the plan you can already see (how many tasks, what they roughly cost
-per `models.md`'s reasoned table) and propose it in money the user did not
-have to learn a term for: "this looks like about $40 in list-price dollars,
-which is not what your subscription bills you — want me to check in if it
-looks like going past that?" A run small enough that you would not have
-delegated more than once anyway does not need this question at all; ask only
-when the plan itself is the reason the number could get large. The dispatch
-guard refuses a subagent that would cross the ceiling and asks; it never
-invents a tighter one, and raising it in the ledger lets the next dispatch
-through. Link to the repo's own documents rather than copying them.
+A run has **no dollar ceiling by default**, and the dispatch guard then refuses
+nothing over cost and nobody is asked for a budget. On a subscription nothing
+is billed in dollars; what runs out is the session and weekly allowance, so
+spend by judgment (a large step says why it is worth its size), not by a cap.
+Set one only on pay-per-use billing, or when the user asks for a limit: pass
+`--budget <n>` (list-price dollars) or write `Ceiling: $n` in the Budget
+section, and `Ceiling: none` switches it off again. A set ceiling is enforced
+exactly as before: the guard refuses a subagent that would cross it and asks,
+never invents a tighter one, and raising it in the ledger lets the next
+dispatch through. Link to the repo's own documents rather than copying them.
 
 ## Relay, not marathon
 
