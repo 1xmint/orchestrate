@@ -35,6 +35,26 @@ test('the card has the user pick before a small build is split across helpers', 
   assert.match(CARD, /Before splitting a small build across helpers, tell the user it has cost about two to three times doing it alone, and let them pick\./);
 });
 
+test('the card asks for the three plain lines before the first helper, with the reason', () => {
+  // A live lead that never opened the skill said one sentence and dispatched;
+  // the card is the text every lead does see.
+  assert.match(CARD, /Before the first helper, tell the user in three plain lines what the job needs, who does it on what model and why, and how it is checked, so they can correct it first\./);
+});
+
+test('the card names the helper kinds, and its builder advice clears the guard on the first try', async () => {
+  // A live lead sent general-purpose three times, then orch-implementer three
+  // times with "notes.json in the project root" in the packet (read by the
+  // guard as "work in the shared checkout"); only the seventh call passed.
+  const { workflowDecision } = await import('./workflow.mjs');
+  const { loadPolicy } = await import('./policy.mjs');
+  assert.match(CARD, /Builders: orch-implementer on sonnet, own worktree \(worktree: yes\); finders: Explore or orch-researcher on haiku\./);
+  const packet = 'Build lib/add.js; notes are kept in notes.json in the project root.';
+  const ti = p => ({ subagent_type: 'orch-implementer', model: 'sonnet', prompt: p });
+  const opts = { policy: loadPolicy(null), installed: 8, missing: [] };
+  assert.ok(workflowDecision({}, ti(packet), opts), 'without the card\'s words the guard refuses this packet');
+  assert.equal(workflowDecision({}, ti(`WHERE: worktree: yes\n${packet}`), opts), null, 'with them it passes');
+});
+
 test('the card carries no counter phrase — those live behind `router status`', () => {
   assert.doesNotMatch(CARD, /orch-agents|codex:|tier \w|limits today/);
 });
