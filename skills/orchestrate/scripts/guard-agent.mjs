@@ -47,16 +47,35 @@ const CRED = new RegExp([
   'AIza[0-9A-Za-z_-]{30,}',
   'xox[baprs]-[A-Za-z0-9-]{10,}',
   'eyJ[A-Za-z0-9_-]{10,}\\.eyJ[A-Za-z0-9_-]{10,}\\.[A-Za-z0-9_-]{10,}', // a JWT
-  '(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token)\\s*[=:]\\s*["\']?[^\\s"\'<>]{8,}',
   '-----BEGIN [A-Z ]*PRIVATE KEY-----',
 ].join('|'));
+
+// A name followed by a value. The value is judged, not just matched: a line of
+// code that reads the secret from somewhere else is not a secret. Quoted, a
+// literal of eight or more characters is one unless it is an obvious placeholder.
+const ASSIGN = /(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token)\s*[=:]\s*(["']?)([^\s"'<>]{8,})/gi;
+const PLACEHOLDER = /^(?:x+|\*+|\.+|-+|changeme|change_me|placeholder|redacted|example|your[-_]?\w*|\$\{?\w+\}?)$/i;
+function looksLikeSecret(quote, raw) {
+  const v = raw.replace(/[;,]+$/, '');
+  if (/^\$\{?\w+\}?$/.test(v) || PLACEHOLDER.test(v)) return false;
+  if (quote) return true;
+  if (/^(?:process\.env\b|os\.environ\b|os\.getenv\b)/.test(v)) return false;
+  if (/^[A-Za-z_][A-Za-z_.]*$/.test(v)) return false;
+  if (/^[A-Za-z_][\w.]*\(/.test(v)) return false;
+  return true;
+}
+function hasCredential(prompt) {
+  if (CRED.test(prompt)) return true;
+  for (const m of prompt.matchAll(ASSIGN)) if (looksLikeSecret(m[1], m[2])) return true;
+  return false;
+}
 
 // Deny, or pass. There is no third answer.
 export function decide(input) {
   const ti = (input && input.tool_input) || {};
   const prompt = String(ti.prompt || '');
 
-  if (CRED.test(prompt)) {
+  if (hasCredential(prompt)) {
     return { kind: 'deny', reason: 'the packet contains something that looks like a credential; remove it and refer to it by name instead' };
   }
   return { kind: 'pass' };
