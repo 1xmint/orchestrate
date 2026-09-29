@@ -593,7 +593,7 @@ rm -rf ~/.claude/skills/orchestrate ~/.agents/skills/orchestrate ~/.claude/agent
 
 Then open `~/.claude/settings.json` and delete the hook entries naming
 `router.mjs`, `guard-agent.mjs`, `guard-bash.mjs`, `ledger.mjs`,
-`turn-check.mjs`, `precompact-check.mjs`, `postcompact-check.mjs`,
+`turn-check.mjs`, `postcompact-check.mjs`,
 `persist-check.mjs` or `context-check.mjs`. Your own
 hooks sit in the same arrays, so read before you cut; a backup from before the
 first install is in `~/.claude/orchestrate/`.
