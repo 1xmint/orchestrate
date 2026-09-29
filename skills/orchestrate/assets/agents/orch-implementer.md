@@ -66,5 +66,5 @@ Rules that keep the rest of the run safe:
 
 Hand back only five lines, under 600 B: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
 
-Return in the packet's schema: TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED,
-and QUESTIONS only if something blocks. Long logs go to the run folder path in the packet; cite the path.
+OUTCOME opens with DONE, PARTIAL or BLOCKED. The packet's schema goes in the FULL REPORT file.
+Long logs go to the run folder path in the packet; cite the path.

@@ -643,3 +643,12 @@ test('hosts.md is the short reference a lead reads; claude-code.md holds the mec
   const cc = readFileSync(ccPath, 'utf8');
   assert.match(cc, /hosts\.md/, 'claude-code.md must name hosts.md');
 });
+
+test('no role file names the old TASK/STATUS/CHANGED form as the hand-back', () => {
+  for (const f of readdirSync(AGENTS).filter((n) => n.endsWith('.md'))) {
+    const s = readFileSync(join(AGENTS, f), 'utf8');
+    assert.ok(!/Return in the packet's schema/i.test(s), `${f} tells the helper to return the old form`);
+    assert.ok(!/Return one compact summary/i.test(s), `${f} asks for a second return form`);
+    assert.ok(/five lines/.test(s), `${f} names the five-line hand-back`);
+  }
+});

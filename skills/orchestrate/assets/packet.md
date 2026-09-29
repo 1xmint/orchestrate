@@ -78,7 +78,7 @@ Hand back the five lines only, under 600 B (the lead reads every byte); the
 schema below goes in the file:
 
 ```
-OUTCOME: <what happened, tied to FOR, in words the user could read>
+OUTCOME: <DONE, PARTIAL or BLOCKED, then what happened, tied to FOR, in words the user could read>
 PROOF: <the command and its result>
 NOT CHECKED: <one line: NOT VERIFIED in brief>
 NEEDS A DECISION: <what the user or lead must do, or "nothing">
