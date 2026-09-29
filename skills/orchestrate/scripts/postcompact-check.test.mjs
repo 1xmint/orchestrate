@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -77,4 +77,40 @@ test('a helper payload for a session with no bound run is silent (nothing to fil
   const r = run({ hook_event_name: 'PostCompact', session_id: 'unbound-session', agent_id: 'helper-1', compact_summary: 'x' });
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), '');
+});
+
+// ---- lead-side snapshot: lib/compaction-snapshot.mjs -----------------------
+
+test('a lead-side payload with a compaction boundary in its transcript writes the plugin checkpoint and exits 0', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-postcompact-home-'));
+  const tdir = mkdtempSync(join(tmpdir(), 'orch-postcompact-transcript-'));
+  const transcriptPath = join(tdir, 't.jsonl');
+  const line = o => JSON.stringify(o) + '\n';
+  writeFileSync(transcriptPath, [
+    line({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'do the widget task' } }),
+    line({ type: 'assistant', message: { id: 'a1', model: 'claude-sonnet-5', usage: { input_tokens: 10 }, content: [{ type: 'text', text: 'working on it' }] } }),
+    line({ type: 'system', subtype: 'compact_boundary', uuid: 'b1', timestamp: new Date().toISOString(), compactMetadata: { trigger: 'auto', preTokens: 200000, postTokens: 20000 } }),
+  ].join(''));
+
+  const r = spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ hook_event_name: 'PostCompact', session_id: 'lead-snap-1', transcript_path: transcriptPath }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+  });
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+  const dir = join(home, '.claude', 'orchestrate', 'context', 'lead-snap-1');
+  const files = existsSync(dir) ? readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)) : [];
+  assert.equal(files.length, 1, `expected one checkpoint file, found: ${files.join(', ')}`);
+  const body = readFileSync(join(dir, files[0]), 'utf8');
+  assert.match(body, /compaction 1 \(auto\)/);
+  assert.match(body, /Goal: do the widget task/);
+});
+
+test('agent_id present keeps today\'s helper-side behaviour, never touching the context store', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-postcompact-home-'));
+  const r = run({ hook_event_name: 'PostCompact', session_id: 'unbound-session', agent_id: 'helper-1', compact_summary: 'x' }, home);
+  assert.equal(r.status, 0);
+  const dir = join(home, '.claude', 'orchestrate', 'context', 'unbound-session');
+  assert.ok(!existsSync(dir), 'the helper branch never touches the context store');
 });

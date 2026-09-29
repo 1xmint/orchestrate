@@ -35,6 +35,8 @@ import {
   SESSIONS_DIR, PROFILE_PATH,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext } from './lib/context-store.mjs';
+import { readContext } from './lib/context-scan.mjs';
+import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
 import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport } from './lib/listing.mjs';
@@ -54,7 +56,7 @@ import {
   stateHash, codexState,
 } from './lib/state-line.mjs';
 import {
-  RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt,
+  RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt, latestCheckpointFor,
   handoffLine, continueIntent, CONTINUE_WORD,
 } from './lib/resume.mjs';
 
@@ -471,6 +473,19 @@ function handleSessionStart(input) {
   // The working project is learned from touched paths since the last
   // compaction (context-check.mjs), so it is relearned after this one too.
   if (source === 'compact') { state.compactions = (state.compactions || 0) + 1; state.work = null; }
+  // Write the plugin's own checkpoint before anything below names it, so the
+  // compacted line names the file whichever hook ran first — this one, or
+  // postcompact-check.mjs on the lead side. Idempotent and silent on error.
+  let snapshotPath = null;
+  if (source === 'compact') {
+    try {
+      const reading = readContext(input.transcript_path, { session: input.session_id });
+      snapshotPath = writeCompactionSnapshot({
+        session: input.session_id, reading, transcriptPath: input.transcript_path,
+        ctx: { runMd: ctx.run && ctx.run.runMd, runDir: ctx.run && ctx.run.dir },
+      });
+    } catch { snapshotPath = null; }
+  }
   if (source === 'compact' && !state.muted) {
     out.push(compactionFact(state), cardBody());
     const brief = briefNote(ctx, state, { force: true });
@@ -481,8 +496,12 @@ function handleSessionStart(input) {
     const ex = resumeExcerpt(ctx.run.runMd);
     out.push(`[orchestrate · ${word}] run ${ctx.run.runMd}${ex ? `\n${ex}` : ' — nothing written under Goal or Pickup yet'}`);
   } else if (source === 'compact') {
-    const ex = checkpointExcerpt(input.session_id);
-    if (ex) out.push(`[orchestrate · compacted] checkpoint\n${ex}`);
+    // Name the file, never inject its text: one line naming the path is the
+    // whole context cost of a compaction; the lead reads the file when it
+    // needs it. `latestCheckpointFor` finds whichever checkpoint is newest —
+    // the plugin's own snapshot just written, or one the lead wrote itself.
+    const cp = snapshotPath || latestCheckpointFor(input.session_id);
+    if (cp) out.push(`[orchestrate · compacted] checkpoint: ${cp}`);
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
   }
