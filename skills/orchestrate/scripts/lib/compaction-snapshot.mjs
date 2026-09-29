@@ -22,16 +22,14 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, copyFil
 import { dirname, join, basename } from 'node:path';
 import { CONTEXT_DIR, isBoundary } from './context-scan.mjs';
 import { checkpointPath } from './context-advice.mjs';
-import { sectionExcerpt } from './resume.mjs';
 import { loadSession } from './tier.mjs';
 import { unreturned } from './recover.mjs';
+import { readGoal, clipWords } from './goal.mjs';
 
 const FIELD_CAP = 300;
 
-function clip(text, cap = FIELD_CAP) {
-  const t = String(text || '').replace(/\s+/g, ' ').trim();
-  return t.length > cap ? `${t.slice(0, cap - 1).trimEnd()}…` : t;
-}
+// Cut at a word boundary, never mid-word.
+function clip(text, cap = FIELD_CAP) { return clipWords(text, cap); }
 
 // The last `cap` characters of `text`, for "what it was doing" — the end of a
 // long answer is the part worth keeping, not the start.
@@ -72,6 +70,7 @@ function scanTranscript(text) {
   let boundaryCount = 0;
   let lastBoundary = null;
   let firstUserText = null;
+  let cwd = null;
   let lastUserText = null;
   let lastAssistantText = null;
   let testLine = null;
@@ -81,6 +80,7 @@ function scanTranscript(text) {
     let rec;
     try { rec = JSON.parse(line); } catch { continue; }
     if (!rec || typeof rec !== 'object') continue;
+    if (!cwd && typeof rec.cwd === 'string') cwd = rec.cwd;
     if (isBoundary(rec)) {
       boundaryCount++;
       const m = rec.compactMetadata || {};
@@ -121,7 +121,7 @@ function scanTranscript(text) {
   if (!lastBoundary) return null;
   return {
     n: lastBoundary.n, trigger: lastBoundary.trigger,
-    firstUserText,
+    firstUserText, cwd,
     lastUserText: lastBoundary.lastUserText,
     lastAssistantText: lastBoundary.lastAssistantText,
     testLine: lastBoundary.testLine,
@@ -175,17 +175,22 @@ export function writeCompactionSnapshot({ session, reading, transcriptPath, ctx 
     const found = scanTranscript(text);
     if (!found) return null;
 
+    // The open run's Goal or the lead's goal note, in the user's words, before
+    // the session's first user text. The lead-side hook passes no cwd, so the
+    // transcript's own record of it stands in.
     let goal = '';
-    if (ctx.runMd) {
-      try { goal = clip(sectionExcerpt(readFileSync(ctx.runMd, 'utf8'), ['Goal'], FIELD_CAP, { intro: false })); } catch { goal = ''; }
-    }
+    try {
+      const g = readGoal({ cwd: ctx.cwd || found.cwd, runMd: ctx.runMd });
+      if (g && g.source !== 'first-request') goal = clip(g.text, FIELD_CAP);
+    } catch { goal = ''; }
     if (!goal) goal = clip(found.firstUserText, FIELD_CAP);
 
+    const lastUser = clip(found.lastUserText, FIELD_CAP);
     const body = buildBody({
       n: found.n,
       trigger: found.trigger,
       goal,
-      lastUser: clip(found.lastUserText, FIELD_CAP),
+      lastUser: lastUser && lastUser === goal ? 'the same as the goal above' : lastUser,
       lastAssistant: clipTail(found.lastAssistantText, FIELD_CAP),
       paths: found.paths,
       testLine: found.testLine ? clip(found.testLine, 200) : null,

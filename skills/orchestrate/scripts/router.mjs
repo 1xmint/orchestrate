@@ -37,6 +37,7 @@ import {
 import { sampleContext, storedContext } from './lib/context-store.mjs';
 import { readContext } from './lib/context-scan.mjs';
 import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
+import { readGoal, goalLine, goalDue, markShown } from './lib/goal.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
 import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport } from './lib/listing.mjs';
@@ -445,6 +446,13 @@ function handlePrompt(input) {
     if (!ctx.run) out.push('If this goal is several separable tracks, or will outlive this session, open a run with a budget first (run-init.mjs --budget) so readiness and spend are tracked; for direct work, just start.');
   }
 
+  // The goal, as one fact, on every tenth prompt since it was last shown; on the
+  // others nothing is added. Compaction and resume show it in handleSessionStart.
+  if (substantive && goalDue(state)) {
+    const g = readGoal({ cwd: input.cwd, root: ctx.repoRoot, session: input.session_id, runMd: ctx.run && ctx.run.runMd, state });
+    if (g) { out.push(goalLine(g)); markShown(state, 1); }
+  }
+
   if (substantive) state.prompts++;
   saveSession(state);
   maybePrune();
@@ -482,7 +490,7 @@ function handleSessionStart(input) {
       const reading = readContext(input.transcript_path, { session: input.session_id });
       snapshotPath = writeCompactionSnapshot({
         session: input.session_id, reading, transcriptPath: input.transcript_path,
-        ctx: { runMd: ctx.run && ctx.run.runMd, runDir: ctx.run && ctx.run.dir },
+        ctx: { runMd: ctx.run && ctx.run.runMd, runDir: ctx.run && ctx.run.dir, cwd: input.cwd },
       });
     } catch { snapshotPath = null; }
   }
@@ -504,6 +512,15 @@ function handleSessionStart(input) {
     if (cp) out.push(`[orchestrate · compacted] checkpoint: ${cp}`);
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
+  }
+  // The goal, once: an open run's excerpt above already printed its Goal and Done
+  // when, so only without a run is it added here.
+  if (!state.muted) {
+    if (ctx.run) markShown(state);
+    else {
+      const g = readGoal({ cwd: input.cwd, root: ctx.repoRoot, session: input.session_id, state });
+      if (g) { out.push(goalLine(g)); markShown(state); }
+    }
   }
   // A summary can paraphrase the goal away while the loop keeps going, and in an
   // unattended loop there may be no user prompt to bring it back. Restore it
