@@ -9,12 +9,32 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   concurrencyDecision, parseResetTime, registerWorker, unregisterWorker, runningExternal,
-  markExhausted, exhaustedFor, roleOf, cappedNote, lockHolder, lockedWorktreeIn,
+  markExhausted, exhaustedFor, roleOf, cappedNote, lockHolder, lockedWorktreeIn, roleModel,
 } from './workers.mjs';
 import { loadPolicy } from './policy.mjs';
 
 const policy = () => loadPolicy(null);
 const dir = () => mkdtempSync(join(tmpdir(), 'orch-workers-'));
+
+// ---- roleModel: each role's own model, read from its agent file -----------
+
+test('roleModel reads what each of the eight orch- role files names', () => {
+  assert.equal(roleModel('orch-implementer'), 'sonnet');
+  assert.equal(roleModel('orch-researcher'), 'sonnet');
+  assert.equal(roleModel('orch-browser'), 'sonnet');
+  assert.equal(roleModel('orch-planner'), 'opus');
+  assert.equal(roleModel('orch-reviewer'), 'opus');
+  assert.equal(roleModel('orch-advisor'), 'opus');
+  assert.equal(roleModel('orch-coordinator'), 'opus');
+  assert.equal(roleModel('orch-debugger'), 'opus');
+});
+
+test('roleModel is null for a role with no agent file, and normalizes an install-prefixed role', () => {
+  assert.equal(roleModel('general-purpose'), null);
+  assert.equal(roleModel('claude'), null);
+  assert.equal(roleModel('Explore'), null);
+  assert.equal(roleModel('orchestrate:orch-implementer'), 'sonnet');
+});
 
 // ---- concurrencyDecision: pure rule -----------------------------------------
 

@@ -30,7 +30,7 @@ import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from '
 import { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
 import { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, nestedReason, workflowDecision } from './lib/workflow.mjs';
-import { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision } from './lib/spend-gate.mjs';
+import { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision, effectiveModel } from './lib/spend-gate.mjs';
 
 // Anything here means the packet is carrying a live secret. The list grew after
 // an audit fed it four shapes it did not know: an OpenAI project key, a Google
@@ -544,10 +544,14 @@ function recordDispatch(input, ti) {
     state.dispatches.push({
       at: new Date().toISOString(),
       agent: String(ti.subagent_type || 'claude'),
-      // `inherit` means the packet named no model, so the subagent ran on
-      // whatever the session was on. It is reported that way, never resolved to
-      // a guess.
-      model: String(ti.model || 'inherit'),
+      // `inherit` means the packet named no model AND the role has no file of
+      // its own (general-purpose, claude, Explore, Plan) — the subagent ran
+      // on whatever the session was on, and that is reported, never resolved
+      // to a guess. A role with its own agent file (every orch-* role) runs
+      // on that file's model whether or not the dispatch named one, so that
+      // is what gets recorded; `modelFrom` says which of the three happened.
+      model: effectiveModel(ti) || 'inherit',
+      modelFrom: ti.model ? 'dispatch' : (effectiveModel(ti) ? 'role' : 'inherit'),
       task: taskIdIn(ti.prompt),
       key: taskKey(ti.prompt),
       // Links this record to the helper's own transcript (subagents/*.meta.json
@@ -587,7 +591,8 @@ function recordDenial(input, ti, reason = 'credential-shaped text in the packet'
     state.denials.push({
       at: new Date().toISOString(),
       agent: String(ti.subagent_type || 'claude'),
-      model: String(ti.model || 'inherit'),
+      model: effectiveModel(ti) || 'inherit',
+      modelFrom: ti.model ? 'dispatch' : (effectiveModel(ti) ? 'role' : 'inherit'),
       reason,
     });
   });

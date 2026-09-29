@@ -51,6 +51,20 @@ export function roleMaxTurns(role, dir = AGENTS_DIR) {
   } catch { return null; }
 }
 
+// A role's own model, from the same agent file, for a dispatch that named
+// none: general-purpose, claude, Explore and Plan have no file here and stay
+// null (inherited, unpriced); each orch-* role's model is its own, known
+// whether or not the dispatch bothered to say so. Null for a role with no
+// file, no `model:` line, or a line that itself says `inherit`.
+export function roleModel(role, dir = AGENTS_DIR) {
+  try {
+    const fm = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(dir, `${normalizeRole(role)}.md`), 'utf8').replace(/\r\n/g, '\n'));
+    const m = fm && /^model:\s*(\S+)/m.exec(fm[1]);
+    const v = m ? m[1].trim() : null;
+    return v && v !== 'inherit' ? v : null;
+  } catch { return null; }
+}
+
 // Model turns in a helper transcript: one per distinct message that carries
 // usage, the same count the ledger prices. Zero when unreadable.
 export function transcriptTurns(path) {
