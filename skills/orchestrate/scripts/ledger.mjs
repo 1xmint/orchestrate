@@ -220,6 +220,12 @@ export const NO_REVIEW_NOTE = 'done, but it was marked for an independent review
 // return is left exactly as it was, and this never upgrades a status once
 // downgraded — a later reviewer return does not rewrite an earlier PARTIAL
 // filing, it only lets the *next* DONE return through.
+// A reviewer's own return is never held for review: it IS the review. Only a
+// return that names no REVIEW OF can be gated by its dispatch's flag.
+export function reviewGated(dispatch, ret) {
+  return Boolean(dispatch && dispatch.review) && !(ret && ret.reviewOf);
+}
+
 export function reviewDowngrade(status, reviewFlagged, task, indexRows, reviewInferred = null) {
   if (status !== 'DONE' || !reviewFlagged || !task) return { status, note: null };
   const reviewed = (indexRows || []).some(row => row && row.reviewOf === task);
@@ -544,7 +550,19 @@ export function handbackText(path) {
     if (size > len) lines.shift(); // first line of a tail read is cut mid-line
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i];
-      if (!line.trim() || !/handback/i.test(line)) continue;
+      if (!line.trim()) continue;
+      // Only the current segment counts: a user line with text is where the
+      // helper was last resumed (the rule lib/workers.mjs uses), and a
+      // hand-back before it belongs to an earlier return.
+      if (line.includes('"user"')) {
+        let u; try { u = JSON.parse(line); } catch { u = null; }
+        if (u && u.type === 'user') {
+          const uc = u.message && u.message.content;
+          if (typeof uc === 'string' || (Array.isArray(uc) && uc.some(b => b && b.type === 'text'))) break;
+          continue;
+        }
+      }
+      if (!/handback/i.test(line)) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
       const c = o && o.message && o.message.content;
       if (!Array.isArray(c)) continue;
@@ -624,7 +642,7 @@ function main() {
   // already exists in this run's own returns index. Read before this return is
   // indexed, so this return's own reviewOf (if it is itself a reviewer return)
   // never counts as reviewing itself.
-  const review = reviewDowngrade(r.status, Boolean(dispatch && dispatch.review), r.task, readReturnsIndex(dir), (dispatch && dispatch.reviewInferred) || null);
+  const review = reviewDowngrade(r.status, reviewGated(dispatch, r), r.task, readReturnsIndex(dir), (dispatch && dispatch.reviewInferred) || null);
   r.status = review.status;
 
   // Only checked when there is still a DONE to narrow: a status already

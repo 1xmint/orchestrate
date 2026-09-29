@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import {
   appendCost, sumCosts, parseReturn, lintRunRow, lintLedger,
   evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE,
-  dirtyPaths, dirtyDowngrade, dirtyNote, resolveHelperWorktree, handbackText,
+  dirtyPaths, dirtyDowngrade, dirtyNote, resolveHelperWorktree, handbackText, reviewGated,
 } from './ledger.mjs';
 
 function tmpFile() {
@@ -405,6 +405,36 @@ test('two hand-backs: the last one wins; a bad JSON line and a renamed tool and 
   assert.equal(handbackText(tp), last);
   const tp2 = writeTranscript([handbackLine(first), handbackLine(last)]);
   assert.equal(handbackText(tp2), last);
+});
+
+function userLine(text) {
+  return JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] } });
+}
+function toolResultLine() {
+  return JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_x', content: 'handback received' }] } });
+}
+
+test('a hand-back from before the helper was resumed is not filed again: the plain message after the resume is', () => {
+  const old = bigReport('9-1-0010', 'DONE');
+  const msg = 'TASK: 9-1-0010\nSTATUS: PARTIAL\nEVIDENCE: ran it again, 2 fail\n';
+  const tp = writeTranscript([handbackLine(old), toolResultLine(), plainLine(STUB), userLine('one more thing, please'), plainLine(msg)]);
+  assert.equal(handbackText(tp), '');
+  const { row, filed } = runHook(hookInput({ agent_transcript_path: tp, last_assistant_message: msg }));
+  assert.ok(filed.endsWith(msg));
+  assert.ok(!filed.includes('Detail line for the report'));
+  assert.equal(row.status, 'PARTIAL');
+  // A tool result is a user line without text: it does not end the segment.
+  const tp2 = writeTranscript([userLine('start'), handbackLine(old), toolResultLine(), plainLine(STUB)]);
+  assert.equal(handbackText(tp2), old);
+});
+
+test('a reviewer return is never held for review, whatever its dispatch was flagged', () => {
+  assert.equal(reviewGated({ review: true }, { reviewOf: '9-1-0034' }), false);
+  assert.equal(reviewGated({ review: true }, { reviewOf: null }), true);
+  assert.equal(reviewGated({ review: false }, { reviewOf: null }), false);
+  assert.equal(reviewGated(null, { reviewOf: null }), false);
+  const r = reviewDowngrade('DONE', reviewGated({ review: true }, { reviewOf: '9-1-0034' }), '9-1-0097', []);
+  assert.equal(r.status, 'DONE');
 });
 
 test('a 5 MB transcript is read from the tail in under 200 ms and still finds the hand-back', () => {
