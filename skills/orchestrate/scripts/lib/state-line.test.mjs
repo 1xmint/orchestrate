@@ -98,5 +98,6 @@ test('a long list of owed returns is trimmed like the ready one', () => {
 test('the spend phrase says helper, not subagent, and that the figure is a list-price model', () => {
   assert.equal(budgetPhrase({ budget: { ceiling: 120 }, spend: 61.55 }), ' · helper spend ~$61.6/$120 at list price');
   assert.equal(budgetPhrase({ spend: 5 }), '', 'no ceiling, no running total');
+  assert.doesNotMatch(budgetPhrase({ budget: { ceiling: null }, spend: 5 }), /\$/, 'no ceiling, no dollar sign');
   assert.doesNotMatch(budgetPhrase({ budget: { ceiling: 10 }, spend: 1 }), /subagent/);
 });

@@ -466,7 +466,7 @@ function handlePrompt(input) {
     out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);
     // The existing budget and readiness machinery only engages for a run. Point
     // at it once, for work big enough to deserve it, rather than rebuild it.
-    if (!ctx.run) out.push('If this goal is several separable tracks, or will outlive this session, open a run with a budget first (run-init.mjs --budget) so readiness and spend are tracked; for direct work, just start.');
+    if (!ctx.run) out.push('If this goal is several separable tracks, or will outlive this session, open a run first (run-init.mjs) so readiness is tracked; for direct work, just start.');
   }
 
   // The goal, as one fact, on every tenth prompt since it was last shown; on the

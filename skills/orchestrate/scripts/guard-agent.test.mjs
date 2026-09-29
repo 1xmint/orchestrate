@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { missingFact, estimateWording } from './guard-agent.mjs';
+import { missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
 
 test('missingFact says what a building brief lacks as one line, in a fixed order', () => {
   assert.equal(missingFact('orch-implementer', 'TASK: 1\nfind it', false), 'brief lacks: what it is for, a check it is done, a PROGRESS path');
@@ -50,10 +50,10 @@ test('estimateWording says an estimate, before the work, for this helper, and ne
 const HERE = dirname(fileURLToPath(import.meta.url));
 const GUARD = join(HERE, 'guard-agent.mjs');
 
-function sandboxHome() {
+function sandboxHome(tier = 'pro') {
   const home = mkdtempSync(join(tmpdir(), 'orch-guard-agent-home-'));
   mkdirSync(join(home, '.claude', 'orchestrate', 'sessions'), { recursive: true });
-  writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro' }));
+  writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: tier }));
   return home;
 }
 
@@ -131,7 +131,7 @@ test('a prose TASK line ("TASK: build the login page") holds for review under "t
 // ---- the solo/helper pair (round-9 audit Part C item 3, area 2) -----------
 
 test('the first orch-implementer dispatch of a session with no run ledger open carries both figures', () => {
-  const home = sandboxHome();
+  const home = sandboxHome('api');
   const sid = 's-pair-first';
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
@@ -140,7 +140,7 @@ test('the first orch-implementer dispatch of a session with no run ledger open c
 });
 
 test('a second orch-implementer dispatch in the same session gets today\'s tag only', () => {
-  const home = sandboxHome();
+  const home = sandboxHome('api');
   const sid = 's-pair-second';
   dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: y\nOBJECTIVE\nRename another CSS class\nCONTEXT\nmore' });
@@ -150,7 +150,7 @@ test('a second orch-implementer dispatch in the same session gets today\'s tag o
 });
 
 test('a dispatch with no REVIEW-triggering context but a role other than orch-implementer gets today\'s tag only', () => {
-  const home = sandboxHome();
+  const home = sandboxHome('api');
   const sid = 's-pair-role';
   const { json } = dispatch(home, sid, { subagent_type: 'orch-researcher', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRead a file\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
@@ -180,4 +180,23 @@ test('the first orch-implementer dispatch of a session bound to an open run ledg
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
   assert.match(ctx, /estimate before work, this helper: orch-implementer on sonnet/);
   assert.doesNotMatch(ctx, /done in this chat/);
+});
+
+test('on a subscription the first implementer dispatch is told its size against a solo build, with no dollar sign', () => {
+  const { json } = dispatch(sandboxHome('pro'), 's-pair-sub', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.match(ctx, /helper size: orch-implementer on sonnet, about the usual size for this kind of helper; a solo build in this chat is about 1\/2\.6 of it/);
+  assert.doesNotMatch(ctx, /\$/);
+});
+
+test('size is a ratio to the usual model of the role: a costlier model reads as larger, the usual one as usual, an unknown one as nothing', () => {
+  assert.equal(sizePhrase(sizeRatio('orch-implementer', 'opus', [])), 'about 2.7x the usual size for this kind of helper');
+  assert.equal(sizePhrase(sizeRatio('orch-implementer', 'sonnet', [])), 'about the usual size for this kind of helper');
+  assert.equal(sizeRatio('orch-implementer', '', []), null);
+});
+
+test('a dollar figure is shown only with a ceiling set or pay-per-use billing', () => {
+  assert.equal(dollarsShown({ budget: { ceiling: 5 } }), true);
+  assert.equal(dollarsShown({ budget: { ceiling: null } }), false);
+  assert.equal(dollarsShown(null), false);
 });

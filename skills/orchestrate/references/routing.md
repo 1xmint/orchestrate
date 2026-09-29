@@ -128,6 +128,12 @@ rather than the plan's. **Never a running total**: a counter reads as an
 allowance and invites spending up to it. `measure.mjs --latest --dollars` says
 what a finished run actually cost, when that can change the next decision.
 
+There is no dollar ceiling unless the user or pay-per-use billing sets one, so
+size is the ruler: the dispatch note says how big a helper is against the usual
+one for its kind ("about 3x the usual size"). Before a step that is large for
+its kind, say in one line why it is worth its size and what the cheaper option
+would be; the allowance, not a dollar figure, is what runs out.
+
 ## Routing table
 
 Quota first, on every plan: executors start on Sonnet with a step cap, and a

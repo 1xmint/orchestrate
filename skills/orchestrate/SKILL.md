@@ -62,9 +62,7 @@ API/Team/other) with a recommendation, then `profile.mjs --set tier=…`. Never
 guess: a wrong guess on Pro spends real money. Agents below 8/8 on a *script*
 install: `node "${CLAUDE_SKILL_DIR}/scripts/install-agents.mjs"`; until the new
 files appear, `Explore` for read-only roles and `general-purpose` for writing
-roles. Never run that installer on a plugin install: it already carries all
-eight, and the installer would create a shadowing second set. Ask once, the
-same way, for Codex's tier (Plus, Pro 5x, Pro 20x) at its first dispatch, and
+roles. Never run that installer on a plugin install: it would shadow the eight it carries. Ask once for Codex's tier (Plus, Pro 5x, Pro 20x) at its first dispatch, and
 store it with `profile.mjs --set codex.tier=…`.
 
 The user picked this session's model and effort; work at what they chose (the
@@ -178,20 +176,19 @@ approach changes, nothing when it does not.
 
 ## 4. The ledger, when there is one
 
-`node "${CLAUDE_SKILL_DIR}/scripts/run-init.mjs" <slug> --repo <the repo the goal is about> --goal "…" --tier <t> --budget <n> --session-id <this session's id>`
+`node "${CLAUDE_SKILL_DIR}/scripts/run-init.mjs" <slug> --repo <the repo the goal is about> --goal "…" --tier <t> --session-id <this session's id>`
 writes `<repo>/.orchestrator/runs/<date>-<slug>/RUN.md`, prefills Facts with the
 repo's detected gate, and binds the run to this session so a hook's write lands
 in the right ledger. Keep its headings; a resuming session looks for them, and
 fill the sections above the task table before the first dispatch.
 
-**Always pass `--budget`**, so the run has a budget of record — a spend
-ceiling in list-price dollars — from its first line rather than by accident. A
+A dollar ceiling is opt-in (`--budget <n>`), for pay-per-use billing or a user's limit; with none, nothing is refused over cost. Before a step large for its kind, say in one line why it is worth its size and the cheaper option. A
 run this size is a **relay across fresh sessions, not one marathon**: keep the
 Pickup line honest and hand off before the re-read cost of one long
 conversation outgrows any subagent. Plan as tracer bullets, each row carrying
 an id, an owner, what it blocks on, the files it owns and the evidence that
 decides it — a row missing `blocks on` or `owns` is a task nobody can pick up
-but you. `references/ledger.md` has the budget ask, context thresholds, checkpoint shape, and resume and bind commands.
+but you. `references/ledger.md` has the ceiling option, context thresholds, checkpoint shape, and resume and bind commands.
 
 ## 5. Dispatch: role agent plus packet
 

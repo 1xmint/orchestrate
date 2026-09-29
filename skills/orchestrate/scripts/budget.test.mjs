@@ -118,3 +118,8 @@ test('a real ledger named by ORCHESTRATE_REAL_LEDGER is correctly flagged as edg
   assert.ok(r, 'the ledger reads');
   assert.equal(r.edgesMissing, true, 'no blocks-on column, planned rows present: exactly the silent failure, now surfaced');
 });
+
+test('"Ceiling: none" and a missing ceiling parse as no ceiling; a number still parses', () => {
+  assert.equal(parseBudget('## Budget\n\nCeiling: none · sessions: ~1\n').ceiling, null);
+  assert.equal(parseBudget('## Budget\n\nCeiling: $5 at list price\n').ceiling, 5);
+});

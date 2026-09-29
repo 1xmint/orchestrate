@@ -128,7 +128,7 @@ const body = template
   .replaceAll('{{TIER}}', opts.tier || 'unknown')
   .replaceAll('{{HOST}}', opts.host || 'unknown')
   .replaceAll('{{PROVIDERS}}', opts.providers || 'unknown')
-  .replaceAll('{{BUDGET}}', opts.budget ? `$${String(opts.budget).replace(/^\$/, '')} at list price` : '<list-price dollars — set this with the user before the first dispatch>')
+  .replaceAll('{{BUDGET}}', opts.budget ? `$${String(opts.budget).replace(/^\$/, '')} at list price` : 'none')
   .replaceAll('{{ID_PREFIX}}', idPrefix);
 
 // The host's own plan file, when the user was in Plan mode this session and

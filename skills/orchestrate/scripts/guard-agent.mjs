@@ -24,8 +24,9 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
-import { family, normalizeRole, costLabel } from './lib/prices.mjs';
+import { roleModel, helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
+import { family, normalizeRole, costLabel, estimateDollars, SOLO_RATIO } from './lib/prices.mjs';
+import { readCosts } from './ledger.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
@@ -380,6 +381,44 @@ export function missingFact(role, prompt, planMode, readFile = readFileSync) {
   return lacks.length ? `brief lacks: ${lacks.join(', ')}` : '';
 }
 
+// Size as a ruler, in no unit: this helper's estimate over the one its role
+// usually is (the same role on the model its own agent file names, measured here
+// when there are rows, else reasoned). Null when either figure is missing.
+export function sizeRatio(role, model, rows = []) {
+  const est = estimateDollars(role, model, rows);
+  const usual = roleModel(role) ? estimateDollars(role, roleModel(role), rows) : null;
+  return est == null || !usual ? null : est / usual;
+}
+export function sizePhrase(ratio) {
+  if (ratio == null) return '';
+  return ratio >= 1.35 ? `about ${Math.round(ratio * 10) / 10}x the usual size for this kind of helper`
+    : ratio <= 0.74 ? 'smaller than the usual size for this kind of helper'
+    : 'about the usual size for this kind of helper';
+}
+
+// A dollar figure is shown only when the run names a ceiling or billing is
+// pay-per-use (tier api). Anything else, including a plan nobody could
+// identify, is treated as a subscription: no dollars, no refusal, no ask.
+export function dollarsShown(run) {
+  try { return !!(run && run.budget && run.budget.ceiling != null) || detectTier().tier === 'api'; } catch { return false; }
+}
+
+// The dispatch note: a size on a subscription, the list-price estimate (plus a
+// size when it is not the usual one) when a ceiling is set or billing is per use.
+export function dispatchNote(ti, { pair = false, dollars = false } = {}) {
+  try {
+    const role = String(ti.subagent_type || 'claude');
+    const model = effectiveModel(ti);
+    if (!model) return '';
+    const ph = sizePhrase(sizeRatio(role, model, readCosts()));
+    if (dollars) {
+      const t = estimateWording(tagFor(ti, { pair }));
+      return ph && !ph.startsWith('about the usual') && t.includes('≈ $') ? `${t}; ${ph}` : t;
+    }
+    return ph ? `helper size: ${role} on ${family(model)}, ${ph}${pair ? `; a solo build in this chat is about 1/${SOLO_RATIO} of it` : ''}` : '';
+  } catch { return ''; }
+}
+
 // A price is an estimate made before the work, never money spent. priceTag (in
 // lib/prices.mjs) words it as a "price tag"; a live run had the lead repeat that
 // to the user as what each helper had cost. Said here as what it is, for this
@@ -542,9 +581,10 @@ function main() {
   try { const s = loadSession(input.session_id) || {}; priorDispatches = Array.isArray(s.dispatches) ? s.dispatches : []; } catch {}
   const isFirstImplementer = normalizeRole(ti.subagent_type) === 'orch-implementer'
     && !priorDispatches.some(row => normalizeRole(row.agent) === 'orch-implementer');
-  const noLedgerOpen = !resolveRunObj(input, ti, { forBudget: true });
+  const openRun = resolveRunObj(input, ti, { forBudget: true });
+  const noLedgerOpen = !openRun;
   recordDispatch(input, ti);
-  let tag = estimateWording(tagFor(ti, { pair: isFirstImplementer && noLedgerOpen }));
+  let tag = dispatchNote(ti, { pair: isFirstImplementer && noLedgerOpen, dollars: dollarsShown(openRun) });
   const size = String(ti.prompt || '').length;
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = missingFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');

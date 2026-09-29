@@ -404,7 +404,9 @@ test('the run ledger keeps the goal above the task table', () => {
   assert.match(run, /Ceiling:/, 'the Budget block seeds a ceiling');
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
   assert.match(skill, /[Ff]ill the sections above the task table before the first dispatch/);
-  assert.match(skill, /budget of record/, 'the skill tells the lead to set a budget of record');
+  assert.match(skill, /dollar ceiling is opt-in/, 'the skill makes the ceiling opt-in');
+  assert.doesNotMatch(run, /before the first dispatch>/, 'the template no longer requires a budget');
+  assert.match(run, /^Ceiling: \{\{BUDGET\}\}/m);
   assert.match(skill, /Before splitting a small build across helpers, tell the user it has cost about two to three times doing it alone, and let them pick\./);
 });
 

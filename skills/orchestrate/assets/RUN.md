@@ -37,10 +37,10 @@ Next deliverable: <the next thing that will exist and be checkable>
 Ceiling: {{BUDGET}} · sessions: <~N fresh sessions you expect this to take> · set {{DATE}}
 Per wave: <optional per-wave estimate, so on-track can be told from runaway>
 
-The run's spend ceiling, agreed with the user once. The dispatch gate refuses a subagent
-that would cross it and asks; raise it here to set a new ceiling, and it will not ask again.
-Nothing tightens it on its own, so this is the user's threshold, not the tool's. `$` is list
-price — the unit `/usage` and `measure.mjs` show, not what a subscription is billed. A run
+Optional. Leave `none` on a subscription; set a dollar ceiling only on pay-per-use billing, or
+when the user asks for a limit. With `none` nothing is refused over cost and nobody is asked. A
+set ceiling is enforced: the dispatch gate refuses a subagent that would cross it and asks; raise
+it here and it will not ask again. `$` is list price, not what a subscription is billed. A run
 this size is executed as a relay across fresh sessions, not one marathon: each session does a
 wave or two, writes the Pickup line, and hands off, so the conversation never grows into the
 thing that costs the most.
