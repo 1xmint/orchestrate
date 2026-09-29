@@ -55,11 +55,16 @@ those. Everything else, including loud everyday commands like `npm test` or
   are **not** stopped. A name ends every program by that name on the
   machine, other people's servers and sessions included.
 
-`git reset --hard` with no argument is **not** stopped: on its own it only
-discards uncommitted edits in the working copy, never a commit, so there is
-nothing here it could take that a `git reflog` could not get back if it
-turned out to matter. Everything above it is either irreversible or reaches
-outside the local repo.
+Throwing away every unsaved edit at once (`git reset --hard`, `git checkout
+-- .`, `git restore .`) is stopped only when the folder holds edits that
+were never committed, because git keeps no copy of those. In a clean folder
+it passes, and so does a discard that names single files. A commit dropped
+by `git reset --hard <older commit>` is not what is guarded here: git keeps
+it for weeks and `git reflog` finds it.
+
+Options written before git's command word (`git -C <folder> push --force`)
+are taken out before any rule reads the line, so the word order cannot step
+round a check.
 
 ## What happens when one of these is about to run
 

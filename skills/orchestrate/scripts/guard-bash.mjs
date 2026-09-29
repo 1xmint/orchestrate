@@ -154,6 +154,19 @@ const SMALL_DELETE_NAME_RE = /^[A-Za-z0-9._\/@+-]+$/;
 const isSmallDeleteName = n => SMALL_DELETE_NAME_RE.test(n) && !n.startsWith('-');
 const unquote = t => (/^(["']).*\1$/.test(t) ? t.slice(1, -1) : t);
 
+// Options git takes before its command word (`git -C <folder> worktree remove`).
+// Every rule reads the line with these taken out, so the word order cannot
+// step round a check. `-C` also moves where a relative path is read from.
+const GIT_GLOBALS_RE = /\bgit((?:\s+(?:-C\s+(?:"[^"]*"|'[^']*'|\S+)|-c\s+\S+|--(?:git-dir|work-tree|namespace|exec-path|config-env)(?:=|\s+)\S+|--no-pager|--paginate|-p|-P|--no-replace-objects|--bare|--literal-pathspecs|--no-optional-locks))+)(?=\s)/g;
+export const plainGit = cmd => String(cmd || '').replace(GIT_GLOBALS_RE, 'git');
+function gitFolders(seg) {
+  const out = [];
+  for (const m of String(seg).matchAll(GIT_GLOBALS_RE)) {
+    for (const c of m[1].matchAll(/-C\s+("[^"]*"|'[^']*'|\S+)/g)) out.push(unquote(c[1]));
+  }
+  return out;
+}
+
 const FORCE_FLAGS = new Set(['-f', '-ff', '--force']);
 const isHelperPath = p => !p.split('/').includes('..') && p.includes('.claude/worktrees/');
 
@@ -171,17 +184,45 @@ function worktreeIsDirty(folder) {
 // a chain, passes only when the folder has no uncommitted changes.
 function worktreeRemoveRule(cmd, cwd) {
   for (const seg of cmd.split(/&&|;/)) {
-    const t = seg.trim().split(/\s+/);
+    const t = plainGit(seg).trim().split(/\s+/);
     if (t[0] !== 'git' || t[1] !== 'worktree' || t[2] !== 'remove') continue;
+    const base = resolvePath(cwd || process.cwd(), ...gitFolders(seg));
     for (const raw of t.slice(3)) {
       if (raw.startsWith('-')) continue;
       const path = normSlashes(unquote(raw));
       if (!isHelperPath(path.toLowerCase())) continue;
       let folder;
-      try { folder = resolvePath(cwd || process.cwd(), path); } catch { continue; }
+      try { folder = resolvePath(base, path); } catch { continue; }
       if (worktreeIsDirty(folder)) {
         return { name: 'worktree-remove-dirty', reason: `This would delete the helper folder ${path}, which still has changes that were never saved to git. ${ASK_TAIL}` };
       }
+    }
+  }
+  return null;
+}
+
+// Throwing away every unsaved edit at once (`git reset --hard`, `git checkout
+// -- .`, `git restore .`) is stopped only when there are edits to lose: git
+// keeps no copy of work that was never committed. A clean folder, or a
+// discard that names single files, passes.
+function hasUnsavedEdits(folder) {
+  try {
+    const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: folder, encoding: 'utf8', timeout: 15000 });
+    return r.status === 0 && String(r.stdout || '').trim() !== '';
+  } catch { return false; }
+}
+function discardAllRule(cmd, cwd) {
+  for (const seg of cmd.split(/&&|;|\|\|/)) {
+    const t = plainGit(seg).trim().split(/\s+/);
+    if (t[0] !== 'git') continue;
+    const rest = t.slice(2).map(unquote);
+    const whole = (t[1] === 'reset' && rest.includes('--hard'))
+      || ((t[1] === 'checkout' || t[1] === 'restore') && rest.some(a => a === '.' || a === ':/') && !rest.includes('--staged'));
+    if (!whole) continue;
+    let folder;
+    try { folder = resolvePath(cwd || process.cwd(), ...gitFolders(seg)); } catch { continue; }
+    if (hasUnsavedEdits(folder)) {
+      return { name: 'discard-unsaved', reason: `This would throw away every change in this folder that was never saved to git, with no way to get it back. ${ASK_TAIL}` };
     }
   }
   return null;
@@ -203,7 +244,7 @@ function isSafeWorktreeCleanupChain(cmd) {
       continue;
     }
     if (t[1] === 'branch' && (t[2] === '-d' || t[2] === '--delete') && t.length > 3) {
-      if (!t.slice(3).every(isSmallDeleteName)) return false;
+      if (!t.slice(3).map(unquote).every(isSmallDeleteName)) return false;
       deletes++;
       continue;
     }
@@ -226,7 +267,7 @@ const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && /\s(-D|-d|--del
 function isPlainBranchDelete(seg, flags) {
   const t = seg.split(/\s+/);
   return t[0] === 'git' && t[1] === 'branch' && flags.includes(t[2]) && t.length > 3 && !/[|<>`$(){}&]/.test(seg)
-    && t.slice(3).every(isSmallDeleteName);
+    && t.slice(3).map(unquote).every(isSmallDeleteName);
 }
 // Whether a part passes on its own (no rule of this guard stops it).
 function segmentPasses(seg) {
@@ -397,10 +438,11 @@ export function recordAsked(sessionId, command) {
 // helper nobody can answer) and `ctx.headless` change deny-vs-ask, never
 // which commands match.
 function decideOne(command, ctx = {}) {
-  const cmd = String(command || '').replace(/\s+/g, ' ').trim();
-  if (!cmd) return { kind: 'pass' };
+  const asSent = String(command || '').replace(/\s+/g, ' ').trim();
+  if (!asSent) return { kind: 'pass' };
+  const cmd = plainGit(asSent);
 
-  const hit = worktreeRemoveRule(cmd, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
+  const hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
 
   // A branch delete that nobody can approve: say in plain words what is refused
@@ -443,7 +485,7 @@ export function decide(command, ctx = {}) {
   const d = decideOne(command, ctx);
   if (d.kind !== 'deny') return d;
   const parts = String(command || '').split(/&&|;|\|/).filter(x => x.trim());
-  return parts.length > 1 ? { ...d, reason: d.reason + ' Nothing in this line ran.' } : d;
+  return parts.length > 1 ? { ...d, reason: d.reason.replace(' Nothing was run.', '') + ' Nothing in this line ran.' } : d;
 }
 
 // A project's own list of commands its user has already approved, so the

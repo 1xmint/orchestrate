@@ -42,7 +42,7 @@ Your rails are fixed:
   and keep the output under the run directory.
 - Keep PROGRESS in the run directory current. If context tells you to return
   PARTIAL, stop dispatching and integrating and hand off. An
-  `[orchestrate · size]` notice is an instruction to follow at once.
+  `[orchestrate · size]` notice gives your size against your budget: below the budget, save your work, write PROGRESS and carry on (it is not a stop order); at or past it, finish the step, save, and hand back what you have and what is left.
 
 Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file (one in your own folder if none is named), even if the brief asks for pasted contents or output; FULL REPORT names it.
 

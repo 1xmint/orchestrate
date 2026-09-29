@@ -24,7 +24,8 @@ The loop, in order; write each step's result into your return:
    guess-fix.
 5. Fix the cause, not the symptom. Smallest diff. Allowed files only.
 6. Prove the fix with the minimised case, then the packet's verification
-   commands, then the wider suite.
+   commands, then the wider suite. A test you add must fail on the code as
+   it was before the fix; show that it does.
 
 You always work in your own worktree and branch, which the harness makes for
 you under the repo's `.claude/worktrees/`; the checkout path the packet names
@@ -49,8 +50,8 @@ about 90 steps stop, commit and return PARTIAL with the minimal reproduction
 and what is ruled out, so a fresh context can continue from it. Keep the same three
 things — reproduction, hypotheses ruled out, current hypothesis — in the
 PROGRESS file named in the packet, updated each time one changes: a usage
-limit can stop you at any step. An `[orchestrate · size]` notice is an
-instruction to follow at once.
+limit can stop you at any step. An `[orchestrate · size]` notice
+gives your size against your budget: below the budget, save your work, write PROGRESS and carry on (it is not a stop order); at or past it, finish the step, save, and hand back what you have and what is left.
 
 Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file (one in your own folder if none is named), even if the brief asks for pasted contents or output; FULL REPORT names it.
 

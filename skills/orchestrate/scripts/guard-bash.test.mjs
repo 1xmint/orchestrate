@@ -161,6 +161,69 @@ test('a forced helper-folder removal passes when the folder is clean or gone, an
   assert.equal(decide(forcedBranch, { cwd: root }).kind, 'ask', '-D stays refused');
 });
 
+test('options placed before the git command word do not step round any check', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orch-wt-'));
+  const sh = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  sh(['init', '-q'], root);
+  const wt = join(root, '.claude', 'worktrees', 'agent-abc123');
+  mkdirSync(wt, { recursive: true });
+  sh(['init', '-q'], wt);
+  const forms = [
+    'git -C . worktree remove --force .claude/worktrees/agent-abc123',
+    'git --no-pager -C . worktree remove .claude/worktrees/agent-abc123',
+    'git -c core.x=1 worktree remove -f .claude/worktrees/agent-abc123 && git branch -d task/x',
+  ];
+  for (const c of forms) assert.equal(decide(c, { cwd: root }).kind, 'pass', `clean: ${c}`);
+  writeFileSync(join(wt, 'unsaved.txt'), 'work');
+  for (const c of forms) {
+    assert.equal(decide(c, { cwd: root }).kind, 'ask', c);
+    assert.equal(decide(c, { cwd: root, subagent: true }).kind, 'deny', c);
+  }
+  // -C moves where the path is read from
+  assert.equal(decide('git -C .claude worktree remove --force worktrees/agent-abc123', { cwd: root }).kind, 'pass', 'not a helper path as written');
+  assert.equal(decide('git -C sub worktree remove --force ../.claude/worktrees/agent-abc123', { cwd: root }).kind, 'pass', 'a path with .. is outside the rule, as before');
+  for (const c of ['git -C . push --force', 'git -C . branch -D feature/x', 'git --no-pager clean -fd', 'git -c a=b push origin --delete old']) {
+    assert.equal(decide(c).kind, 'ask', c);
+  }
+  assert.equal(decide('git -C . status').kind, 'pass');
+  assert.equal(decide('git -C . branch -d feature/x').kind, 'pass');
+});
+
+test('throwing away every unsaved edit is stopped only when there are edits to lose', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orch-discard-'));
+  const sh = args => spawnSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd: root, encoding: 'utf8' });
+  sh(['init', '-q']);
+  writeFileSync(join(root, 'a.txt'), 'one');
+  sh(['add', '.']); sh(['commit', '-q', '-m', 'first']);
+  const all = ['git reset --hard', 'git reset --hard HEAD', 'git checkout -- .', 'git checkout .', 'git restore .', 'git -C . reset --hard', 'git status && git reset --hard'];
+  for (const c of all) assert.equal(decide(c, { cwd: root }).kind, 'pass', `clean: ${c}`);
+  writeFileSync(join(root, 'a.txt'), 'two, never saved');
+  for (const c of all) {
+    const d = decide(c, { cwd: root });
+    assert.equal(d.kind, 'ask', c);
+    assert.match(d.reason, /never saved to git/);
+    assert.equal(decide(c, { cwd: root, subagent: true }).kind, 'deny', c);
+  }
+  for (const c of ['git checkout -- a.txt', 'git restore a.txt', 'git restore --staged .', 'git reset --soft HEAD', 'git checkout main']) {
+    assert.equal(decide(c, { cwd: root }).kind, 'pass', `one file or no loss: ${c}`);
+  }
+});
+
+test('a quoted branch name in the small delete passes; a quoted name with shell syntax does not', () => {
+  assert.equal(decide('git branch -d "feature/x"').kind, 'pass');
+  assert.equal(decide("git branch -d 'feature/x' task/y").kind, 'pass');
+  assert.equal(decide('git status && git branch -d "feature/x"').kind, 'pass');
+  assert.equal(decide('git branch -d "$(git branch --merged)"').kind, 'ask');
+  assert.equal(decide('git branch -D "feature/x"').kind, 'ask');
+});
+
+test('a refused line of several parts says once that nothing ran', () => {
+  const d = decide('git status && rm -rf uploads', { headless: true, mode: 'auto' });
+  assert.equal(d.kind, 'deny');
+  assert.equal((d.reason.match(/Nothing/g) || []).length, 1);
+  assert.match(d.reason, /Nothing in this line ran\.$/);
+});
+
 test('a worktree cleanup chain with the path outside .claude/worktrees/ still asks or denies', () => {
   const outside = 'git worktree remove ../elsewhere/worktree-agent-abc123 && git branch -d worktree-agent-abc123';
   assert.equal(decide(outside).kind, 'ask');
@@ -201,8 +264,8 @@ test('rm -rf inside the OS temp dir passes through', () => {
   assert.equal(decide(`rm -rf ${dir}`, { cwd: process.cwd() }).kind, 'pass');
 });
 
-test('git reset --hard with no argument is not blocked: it only discards uncommitted local edits in the working copy, never a commit', () => {
-  assert.equal(decide('git reset --hard').kind, 'pass');
+test('git reset --hard passes where there is nothing unsaved to lose', () => {
+  assert.equal(decide('git reset --hard', { cwd: mkdtempSync(join(tmpdir(), 'orch-clean-')) }).kind, 'pass');
 });
 
 test('npm publish, gh release create, and deploy commands are stopped', () => {

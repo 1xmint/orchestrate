@@ -173,6 +173,7 @@ function transcriptSize(p) {
 // means the prompt is shaping work, not just naming a fix — the full card
 // earns its cost there even on a short sentence.
 const BUILD_WORDS = /\b(build|make|create|add|implement|design|plan|feature|app|system|project|refactor|migrate|ship|deploy|release|integrate|wire|set ?up)\b|\band then\b/i;
+const FIX_WORDS = /\b(fix|fixes|fixing|broken|bug|crash\w*|failing|fails)\b/i;
 
 // "Small": one sentence (no sentence-ending punctuation before the very end),
 // under about 15 words, and none of BUILD_WORDS. Called only once a prompt is
@@ -181,7 +182,8 @@ function isSmallPrompt(trimmed) {
   const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length >= 15) return false;
   const withoutEnding = trimmed.replace(/[.!?]+\s*$/, '');
-  if (/[.!?]/.test(withoutEnding)) return false;
+  // A mark inside a word (a file name, a version) does not end a sentence.
+  if (/[.!?](\s|$)/.test(withoutEnding)) return false;
   return !BUILD_WORDS.test(trimmed);
 }
 
@@ -324,7 +326,11 @@ function handlePrompt(input) {
 
   // A slash command, a paste or a two-word reply is not the start of a session's
   // work, and the card is worth its tokens only on something substantive.
-  const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed) && trimmed.split(/\s+/).length >= 4;
+  // A short request that names building or fixing ("migrate to postgres",
+  // "fix login properly") is the start of work whatever its length.
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+  const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed)
+    && (wordCount >= 4 || (wordCount >= 2 && (BUILD_WORDS.test(trimmed) || FIX_WORDS.test(trimmed))));
 
   // What this session is for, recorded once so a later session in the same
   // folder can answer "continue what?" for itself.

@@ -21,6 +21,7 @@ Direction checked: <never | date and verdict>
 ## Done when
 
 - <evidence that would prove it, one line each; a command, a file, a page state>
+- Stops anyway when: <what ends the work if the measure stalls or the judge disagrees with itself>
 
 ## Constraints and non-goals
 

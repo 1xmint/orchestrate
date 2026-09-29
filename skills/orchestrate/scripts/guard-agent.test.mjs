@@ -7,7 +7,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -271,6 +271,28 @@ test('first helper: helpers sent together are all refused while no model is name
   }
   assert.notEqual(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} 4` }, t).permissionDecision, 'deny', 'the fourth goes through');
   assert.notEqual(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} 5` }, t).permissionDecision, 'deny');
+});
+
+test('first helper: three helpers sent at the same moment are all refused', async () => {
+  const home = sandboxHome();
+  const tp = join(mkdtempSync(join(tmpdir(), 'orch-guard-tr-')), 't.jsonl');
+  writeFileSync(tp, [userPrompt, leadSaid('Working on it.'), toolUse].map(l => JSON.stringify(l)).join('\n') + '\n');
+  const one = i => new Promise(done => {
+    const c = spawn(process.execPath, [GUARD], { env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' } });
+    let out = '';
+    c.stdout.on('data', d => { out += d; });
+    c.on('close', () => { try { done(JSON.parse(out).hookSpecificOutput); } catch { done({}); } });
+    c.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's-fh-par', cwd: home, transcript_path: tp, tool_use_id: `u-par-${i}`, tool_input: { ...PKT, prompt: `${PKT.prompt} ${i}` } }));
+  });
+  const all = await Promise.all([0, 1, 2].map(one));
+  all.forEach((o, i) => assert.equal(o.permissionDecision, 'deny', `helper ${i} is refused`));
+});
+
+test('first helper: the bare word "model" does not count as naming one; a described model does', () => {
+  const bare = dispatchFull(sandboxHome(), 's-fh-h', PKT, [userPrompt, leadSaid('I will update the data model and then test it.'), toolUse]);
+  assert.equal(bare.permissionDecision, 'deny');
+  const described = dispatchFull(sandboxHome(), 's-fh-i', PKT, [userPrompt, leadSaid('A helper on a cheaper model builds it, and I test it.'), toolUse]);
+  assert.notEqual(described.permissionDecision, 'deny');
 });
 
 test('first helper: once a message names a model, no later helper is refused', () => {
