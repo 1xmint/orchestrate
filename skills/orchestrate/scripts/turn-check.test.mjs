@@ -198,6 +198,41 @@ test('reviewHoldDecision leaves a task already in blockedFor alone, resolved or 
   assert.deepEqual(d.blockedFor, ['9-9-0001']);
 });
 
+// A free-form brief has no task id: the hold keys on the dispatch call's id.
+const FF_DISPATCH = { at: '2026-09-29T10:00:00.000Z', agent: 'orch-implementer', task: null, toolUseId: 'toolu_A', review: true };
+const FF_RETURN = { at: '2026-09-29T10:05:00.000Z', agent: 'orch-implementer', toolUseId: 'toolu_A', task: null, status: 'DONE' };
+
+test('reviewHoldDecision holds a flagged free-form dispatch that returned DONE with no review', () => {
+  const d = reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH], lastMessage: '', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.task, 'toolu_A');
+  assert.deepEqual(d.blockedFor, ['toolu_A']);
+});
+
+test('reviewHoldDecision lets a free-form return through once a reviewer was dispatched after it', () => {
+  const later = { at: '2026-09-29T10:10:00.000Z', agent: 'orch-reviewer', task: null, toolUseId: 'toolu_R' };
+  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH, later], lastMessage: '', blockedFor: [] }).block, false);
+  const named = { ...later, reviewOf: 'toolu_A' };
+  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH, named], lastMessage: '', blockedFor: [] }).block, false);
+});
+
+test('reviewHoldDecision does not hold an unflagged free-form dispatch, nor a reviewer\'s own return', () => {
+  const plain = { ...FF_DISPATCH }; delete plain.review;
+  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [plain], lastMessage: '', blockedFor: [] }).block, false);
+  const rev = { ...FF_DISPATCH, agent: 'orch-reviewer', reviewOf: 'toolu_Z' };
+  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [rev], lastMessage: '', blockedFor: [] }).block, false);
+});
+
+test('reviewHoldDecision with two open free-form returns does not let one unnamed reviewer clear both', () => {
+  const two = { ...FF_DISPATCH, toolUseId: 'toolu_B' };
+  const retB = { ...FF_RETURN, toolUseId: 'toolu_B' };
+  const later = { at: '2026-09-29T10:10:00.000Z', agent: 'orch-reviewer', task: null, toolUseId: 'toolu_R' };
+  const d = reviewHoldDecision({ returned: [FF_RETURN, retB], dispatches: [FF_DISPATCH, two, later], lastMessage: '', blockedFor: [] });
+  assert.equal(d.block, true);
+  const named = reviewHoldDecision({ returned: [FF_RETURN, retB], dispatches: [FF_DISPATCH, two, { ...later, reviewOf: 'toolu_A' }], lastMessage: '', blockedFor: [] });
+  assert.equal(named.task, 'toolu_B', 'only the one the reviewer named is cleared');
+});
+
 // ---- hook process: stdin/stdout contract ---------------------------------------
 
 test('a malformed JSON payload exits 0 and writes nothing', () => {
