@@ -208,6 +208,48 @@ function isSafeWorktreeCleanupChain(cmd) {
   return deletes > 0;
 }
 
+// The small delete of helper branches (`git branch -d`, which git itself refuses
+// while the work is unmerged) may sit anywhere in a chain, as long as every
+// other part of the chain would pass on its own. Each delete part must be
+// plain: helper or task branch names only, no shell tricks.
+const CHAIN_META_RE = /[|<>`$(){}]|(?<!&)&(?!&)/;
+const CHAIN_TRICKS_RE =/[`<>]|\$\(|(?<!&)&(?!&)/;
+const segmentsOf = cmd => cmd.split(/&&|;/).map(s => s.trim()).filter(Boolean);
+const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && /\s(-D|-d|--delete|--force-delete)(\s|$)/.test(seg);
+function isPlainBranchDelete(seg, flags) {
+  const t = seg.split(/\s+/);
+  return t[0] === 'git' && t[1] === 'branch' && flags.includes(t[2]) && t.length > 3 && !/[|<>`$(){}&]/.test(seg)
+    && t.slice(3).every(n => CLEANUP_BRANCH_RE.test(n));
+}
+// Whether a part passes on its own (no rule of this guard stops it).
+function segmentPasses(seg) {
+  return !(RULES.find(r => r.test(seg)) || rmRule(seg) || psRemoveRule(seg));
+}
+function chainRestIsSafe(cmd, flags) {
+  const segs = segmentsOf(cmd);
+  if (segs.length < 2 || CHAIN_TRICKS_RE.test(cmd)) return false;
+  let deletes = 0;
+  for (const seg of segs) {
+    if (isBranchDeleteSeg(seg)) {
+      if (!isPlainBranchDelete(seg, flags)) return false;
+      deletes++;
+    } else if (/^git\s+worktree\s+remove\b/.test(seg)) {
+      // A folder removal is only part of the safe shape when every path is a helper folder.
+      const t = seg.split(/\s+/);
+      if (t.length < 4 || CHAIN_META_RE.test(seg)) return false;
+      for (const raw of t.slice(3)) {
+        if (FORCE_FLAGS.has(raw)) continue;
+        const path = normSlashes(unquote(raw)).toLowerCase();
+        if (path.startsWith('-') || !isHelperPath(path)) return false;
+      }
+    } else if (!segmentPasses(seg)) return false;
+  }
+  return deletes > 0;
+}
+const isSafeBranchDeleteInChain = cmd => chainRestIsSafe(cmd, ['-d', '--delete']);
+// A chain that is safe apart from a forced (-D) branch delete.
+const isChainSafeExceptForcedDelete = cmd => chainRestIsSafe(cmd, ['-D', '--force-delete']);
+
 const RULES = [
   {
     name: 'branch-delete-remote',
@@ -229,7 +271,8 @@ const RULES = [
     // worktree folder it belonged to — see isSafeWorktreeCleanupChain above.
     test: cmd => (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
       && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd)
-      && !isSafeWorktreeCleanupChain(cmd),
+      && !isSafeWorktreeCleanupChain(cmd)
+      && !isSafeBranchDeleteInChain(cmd),
     reason: `This would permanently delete a branch. ${ASK_TAIL}`,
   },
   {
@@ -348,6 +391,15 @@ export function decide(command, ctx = {}) {
 
   const hit = worktreeRemoveRule(cmd, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
+
+  // A branch delete that nobody can approve: say in plain words what is refused
+  // and what works instead, with nothing about modes or files to repeat.
+  if (hit.name === 'branch-delete-local' && (ctx.subagent || ctx.headless)) {
+    const small = 'The small form works for helper branches: git branch -d <name>. Git itself refuses it if the work was never merged.';
+    return { kind: 'deny', reason: isChainSafeExceptForcedDelete(cmd)
+      ? `The helper folders can be removed, but the forced branch delete cannot. ${small}`
+      : `This branch delete is refused, because it can throw away work that was never merged. ${small}` };
+  }
 
   if (ctx.subagent) {
     return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} The question cannot be answered here, so this is refused: report back what you were about to run instead of retrying.` };
