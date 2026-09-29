@@ -25,9 +25,10 @@ import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } fr
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole } from './lib/prices.mjs';
-import { roleMaxTurns, segmentTurns } from './lib/workers.mjs';
+import { roleMaxTurns, segmentTurns, runningExternal } from './lib/workers.mjs';
 import { checkReturn } from './lib/report.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
 import { addSuggestion } from './suggest.mjs';
@@ -227,6 +228,79 @@ export function reviewDowngrade(status, reviewFlagged, task, indexRows, reviewIn
     ? `done, but its objective mentions ${reviewInferred}, so it waits for an independent review that has not returned yet.`
     : NO_REVIEW_NOTE;
   return { status: 'PARTIAL', note };
+}
+
+// Where the helper that just returned did its work, so a DONE return can be
+// checked for anything left uncommitted there before its worktree is thrown
+// away. Two sources, tried in order, matching WHY in the task packet:
+//   (a) the harness names an isolated helper's own worktree
+//       `<cwd>/.claude/worktrees/agent-<agent_id>` — SubagentStop's payload
+//       carries both `cwd` and `agent_id` — tried first, and only used when
+//       that directory actually exists: most dispatches share the checkout
+//       and have no such folder, which is not an error.
+//   (b) failing that, a live external (Codex) worker registered for this
+//       same task under a bound run names its own worktree too
+//       (lib/workers.mjs's registry, written by codex-worker.mjs).
+// Neither existing answers none, not a guess.
+export function resolveHelperWorktree(input, r, run) {
+  const agentId = input && (input.agent_id || input.tool_use_id);
+  if (agentId) {
+    try {
+      const p = join(String((input && input.cwd) || process.cwd()), '.claude', 'worktrees', `agent-${sanitizeId(String(agentId))}`);
+      if (existsSync(p)) return p;
+    } catch {}
+  }
+  if (run && r && r.task) {
+    try {
+      const hit = runningExternal().find(w => w.worktree && w.task === r.task);
+      if (hit && existsSync(hit.worktree)) return hit.worktree;
+    } catch {}
+  }
+  return null;
+}
+
+export const DIRTY_TIMEOUT_MS = 5000;
+
+// The paths `git status --porcelain --untracked-files=all` lists inside a
+// worktree, minus the plugin's own `.orchestrator/` folder (never the
+// helper's work) and the helper's own progress file, matched by basename
+// since it may be written relative to either the worktree or the run
+// directory. Any failure — no git on PATH, the directory not a repo, the
+// timeout above — answers an empty list, never a throw: a slow or missing
+// git must never manufacture a false PARTIAL.
+export function dirtyPaths(cwd, progressFile) {
+  try {
+    const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=all'], { cwd, timeout: DIRTY_TIMEOUT_MS, encoding: 'utf8' });
+    if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return [];
+    const prog = progressFile ? String(progressFile).replace(/\\/g, '/').split('/').pop() : null;
+    return r.stdout.split('\n').map(l => l.trimEnd()).filter(Boolean)
+      .map(l => l.slice(3).trim().replace(/^"|"$/g, ''))
+      .filter(p => p && !/^\.orchestrator(\/|$)/.test(p) && (!prog || p.replace(/\\/g, '/').split('/').pop() !== prog));
+  } catch { return []; }
+}
+
+// The note itself, in plain words: up to 8 paths, then how many more.
+export function dirtyNote(paths) {
+  const shown = paths.slice(0, 8);
+  const more = paths.length > 8 ? `, +${paths.length - 8} more` : '';
+  return `returned done with uncommitted changes in its worktree: ${shown.join(', ')}${more}; commit or copy them before the worktree is removed`;
+}
+
+// A DONE return whose helper's own worktree still holds uncommitted changes
+// is recorded PARTIAL, with the paths: the worktree is thrown away once the
+// helper is done, and whatever is not committed (or copied out) by then is
+// gone. Same shape as evidenceDowngrade and reviewDowngrade above — only
+// ever narrows DONE, never upgrades, and a PARTIAL or BLOCKED return is left
+// exactly as it was.
+//
+// Rests on one assumption: SubagentStop fires before the harness cleans up
+// an unchanged worktree, and leaves a dirty one in place long enough for
+// this check to see it. Not proven here — the next live run with a
+// deliberately dirty helper worktree is what actually verifies it.
+export function dirtyDowngrade(status, paths) {
+  if (status !== 'DONE') return { status, note: null };
+  if (!paths || !paths.length) return { status, note: null };
+  return { status: 'PARTIAL', note: dirtyNote(paths) };
 }
 
 // The run's own returns index, read fresh for each SubagentStop so a reviewer
@@ -504,14 +578,21 @@ function main() {
   const review = reviewDowngrade(r.status, Boolean(dispatch && dispatch.review), r.task, readReturnsIndex(dir), (dispatch && dispatch.reviewInferred) || null);
   r.status = review.status;
 
+  // Only checked when there is still a DONE to narrow: a status already
+  // downgraded above skips the git call entirely.
+  const worktree = r.status === 'DONE' ? resolveHelperWorktree(input, r, run) : null;
+  const dirty = dirtyDowngrade(r.status, worktree ? dirtyPaths(worktree, dispatch && dispatch.progress) : []);
+  r.status = dirty.status;
+
   try {
     mkdirSync(dir, { recursive: true });
     const capNote = cap.capped ? ` · stopped at its ${maxTurns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
     const evidenceNote = noEvidence.note ? ` · ${noEvidence.note}` : '';
     const reviewNote = review.note ? ` · ${review.note}` : '';
+    const dirtyNoteText = dirty.note ? ` · ${dirty.note}` : '';
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
-    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${compactNote} -->\n\n`;
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${dirtyNoteText}${compactNote} -->\n\n`;
     writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
@@ -528,6 +609,7 @@ function main() {
     ...(cap.capped ? { capped: true, claimed: cap.claimed } : {}),
     ...(noEvidence.note ? { noEvidence: true } : {}),
     ...(review.note ? { reviewGated: true } : {}),
+    ...(dirty.note ? { dirtyWorktree: true } : {}),
     ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}),
     verdict: r.verdict || null,
     evidence: r.evidence,
@@ -548,7 +630,7 @@ function main() {
       // yes or an inferred word) and none has come back yet — turn-check.mjs
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
       saveSession(state);
     }
   } catch {}
