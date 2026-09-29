@@ -45,9 +45,14 @@ export function parseReturn(text) {
   // a colon still said what it said. `exec` on a pattern without `g` returns
   // the first match in the string, so the first STATUS-shaped line anywhere
   // in the return is the one read, wherever it falls.
-  // A reviewer's five-line return has no STATUS: its OUTCOME (PASS or FAIL) says the review finished.
-  const outcome = (/^\s*OUTCOME\s*[:\-–—]\s*(PASS|FAIL)\b/im.exec(t) || [])[1] || null;
-  const status = (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || (outcome ? 'DONE' : null);
+  // A five-line hand-back opens OUTCOME with its word, and that word is its
+  // status: DONE, PARTIAL or BLOCKED as said; a reviewer's PASS is filed DONE
+  // and its FAIL is filed FAIL. It wins over any STATUS line further down (an
+  // old-form block a helper sometimes adds after the five lines).
+  const word = (/^\s*OUTCOME\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED|PASS|FAIL)\b/im.exec(t) || [])[1];
+  const outcome = word && /^(PASS|FAIL)$/i.test(word) ? word.toUpperCase() : null;
+  const said = word ? (outcome === 'PASS' ? 'DONE' : word.toUpperCase()) : null;
+  const status = said || (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
   const lines = t.trim() ? t.trim().split('\n').length : 0;
   return {
     task: taskIdIn(t, { caseInsensitive: true }),

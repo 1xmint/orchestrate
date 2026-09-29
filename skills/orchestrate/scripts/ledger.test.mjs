@@ -458,3 +458,37 @@ test('a 5 MB transcript is read from the tail in under 200 ms and still finds th
   assert.equal(got, last);
   assert.ok(ms < 200, `took ${ms} ms`);
 });
+
+// The record read a hand-back's status with a reader of its own that knew only
+// STATUS lines and PASS/FAIL, so "OUTCOME: DONE" was stored with no status and
+// a FAIL followed by a trailing "STATUS: DONE" was stored as DONE.
+test('parseReturn reads the word that opens OUTCOME as the status (a five-line hand-back)', () => {
+  assert.equal(parseReturn('OUTCOME: DONE - Created lib/search.js exporting search.\nPROOF: git commit abc123.\n').status, 'DONE');
+  assert.equal(parseReturn('OUTCOME: DONE. Created lib/list.js only.\nPROOF: node -e ok.\n').status, 'DONE');
+  assert.equal(parseReturn('OUTCOME: DONE \u2014 created lib/add.js.\nPROOF: `node -e` ok.\n').status, 'DONE');
+  assert.equal(parseReturn('OUTCOME: partial - step 1 only.\nPROOF: none yet.\n').status, 'PARTIAL');
+  assert.equal(parseReturn('OUTCOME: BLOCKED - needs a key.\nPROOF: none.\n').status, 'BLOCKED');
+  // Indented under a wrapper the host adds.
+  assert.equal(parseReturn('[Subagent hand-back] text follows\n  OUTCOME: DONE - built it.\n  PROOF: node --test x.test.mjs 4 pass\n').status, 'DONE');
+});
+
+test('parseReturn: a reviewer FAIL is stored as FAIL and wins over a later STATUS line; PASS stays DONE', () => {
+  const fail = parseReturn('OUTCOME: FAIL. Auth works, but server.js:76 ships a hardcoded password.\nPROOF: node --test x.test.mjs 8 pass\nSTATUS: DONE\nEVIDENCE: read server.js:76\n');
+  assert.equal(fail.status, 'FAIL');
+  assert.equal(fail.verdict, 'FAIL');
+  const pass = parseReturn('OUTCOME: PASS. The fallback is gone.\nPROOF: node --test x.test.mjs 8 pass\nSTATUS: DONE\n');
+  assert.equal(pass.status, 'DONE');
+  assert.equal(pass.verdict, 'PASS');
+  // The old form with no OUTCOME still reads its STATUS line.
+  assert.equal(parseReturn('TASK: 9-1-0001\nSTATUS: PARTIAL\n').status, 'PARTIAL');
+});
+
+test('the record files a five-line DONE with its status, and a reviewer FAIL as FAIL', () => {
+  const done = 'OUTCOME: DONE - Created lib/search.js exporting search.\nPROOF: git commit abc1234, node --test lib/search.test.mjs 4 pass.\nNOT CHECKED: nothing.\nNEEDS A DECISION: nothing\nFULL REPORT: progress/x.md\n';
+  const a = runHook(hookInput({ last_assistant_message: done }));
+  assert.equal(a.row.status, 'DONE');
+  const fail = 'OUTCOME: FAIL. server.js:76 ships a hardcoded password.\nPROOF: node --test x.test.mjs 8 pass.\nNOT CHECKED: nothing.\nNEEDS A DECISION: nothing\nFULL REPORT: r.md\nSTATUS: DONE\nEVIDENCE: read server.js:76\n';
+  const b = runHook(hookInput({ agent_type: 'orchestrate:orch-reviewer', last_assistant_message: fail }));
+  assert.equal(b.row.status, 'FAIL');
+  assert.equal(b.row.verdict, 'FAIL');
+});
