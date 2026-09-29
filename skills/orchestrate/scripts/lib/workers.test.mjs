@@ -111,8 +111,10 @@ test('cappedNote reports only unshown capped returns, then marks them shown so i
 // ---- lockedWorktreeIn / lockHolder --------------------------------------------
 
 test('lockedWorktreeIn finds an external worker whose worktree path appears in the packet text', () => {
-  const external = [{ worktree: 'C:/repo/worktree-a', pid: 1, task: 'x' }];
-  assert.ok(lockedWorktreeIn('please work in C:/repo/worktree-a now', external));
+  // A path that is absolute on the machine running the test.
+  const wt = process.platform === 'win32' ? 'C:/repo/worktree-a' : '/repo/worktree-a';
+  const external = [{ worktree: wt, pid: 1, task: 'x' }];
+  assert.ok(lockedWorktreeIn(`please work in ${wt} now`, external));
   assert.equal(lockedWorktreeIn('unrelated text', external), null);
 });
 

@@ -6,7 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
   appendCost, sumCosts, parseReturn, lintRunRow, lintLedger,
@@ -366,7 +367,7 @@ function writeTranscript(lines) {
 function runHook(input) {
   const home = mkdtempSync(join(tmpdir(), 'orch-ledger-hook-'));
   const env = { ...process.env, HOME: home, USERPROFILE: home };
-  const res = spawnSync(process.execPath, [join(import.meta.dirname, 'ledger.mjs')], { input: JSON.stringify(input), encoding: 'utf8', env });
+  const res = spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), 'ledger.mjs')], { input: JSON.stringify(input), encoding: 'utf8', env });
   const rdir = join(home, '.claude', 'orchestrate', 'returns', String(input.session_id));
   let rows = [];
   try { rows = readFileSync(join(rdir, 'returns.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
