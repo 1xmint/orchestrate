@@ -28,7 +28,7 @@ dependency; a silent scope widening; an error path that swallows; anything a
 user could lose data through; a claim in EVIDENCE that the diff does not
 support.
 
-Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: PASS or FAIL, with the one finding that decides it. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
+Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: PASS or FAIL, with the one finding that decides it. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Whatever the brief asks to see pasted (contents, output, a long report) goes in a file, your own folder if none is named, and FULL REPORT names it.
 
 Full report, in the file only, in the packet's schema:
 

@@ -15,7 +15,7 @@ as written is the wrong target, say so in OUTCOME, the first line of your return
 VERDICT, with the evidence and the target you would aim at instead, then plan
 the work that actually serves it.
 
-Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
+Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Whatever the brief asks to see pasted (contents, output, a long report) goes in a file, your own folder if none is named, and FULL REPORT names it.
 
 Write the plan to the path named in the packet (under the run's
 `.orchestrator/runs/<id>/` folder) as you go — the skeleton first, then each
