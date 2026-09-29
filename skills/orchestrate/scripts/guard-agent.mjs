@@ -322,7 +322,10 @@ export const RESUME_ROLES = new Set(['orch-planner', 'orch-implementer', 'orch-d
 // <path>, lines ..." or "packet: <path>") carries no PROGRESS line itself
 // even when the file it names does. Cheapest match first: a bare path token
 // that follows the word "packet" up to its extension.
-const PACKET_PATH_RE = /\bpacket\b[^\n,]{0,40}?([^\s,]+\.[A-Za-z0-9]+)(?=[,\s]|$)/i;
+// The path may end a sentence ("...0085.md."), so trailing punctuation is
+// left out of the token; the first "packet" in the prompt wins, which is the
+// sentence that names the file.
+const PACKET_PATH_RE = /\bpacket\b[^\n,]{0,40}?([^\s,]+?\.[A-Za-z0-9]+)(?=[.;:)]?(?:[,\s]|$))/i;
 
 function packetPathFrom(prompt) {
   const m = PACKET_PATH_RE.exec(String(prompt || ''));
@@ -343,7 +346,9 @@ export function progressFact(role, prompt, planMode, readFile = readFileSync) {
   if (planMode) return '';
   if (!RESUME_ROLES.has(normalizeRole(role))) return '';
   const text = String(prompt || '');
-  if (/^\s*PROGRESS:\s*\S+/m.test(text)) return '';
+  // Inline anywhere in the prompt, not only at a line start: a one-paragraph
+  // dispatch writes "... at the end). PROGRESS: <path> (...)" mid-line.
+  if (/(^|\s)PROGRESS:\s*\S+/.test(text)) return '';
   const packetPath = packetPathFrom(text);
   if (packetPath) {
     try {
