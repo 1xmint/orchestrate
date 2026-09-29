@@ -98,6 +98,27 @@ test('progressFact: a prompt that only points at a packet file is checked agains
   );
 });
 
+test('progressFact: a mid-line PROGRESS and a packet path that ends a sentence both count', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-packet-'));
+  const withLine = join(dir, '9-28-0085.md');
+  writeFileSync(withLine, 'TASK: 1\nPROGRESS: /r/p.md\nfind it\n');
+  assert.equal(
+    progressFact('orch-implementer', 'Read it first (at the end). PROGRESS: /r/p.md (write it at start)', false),
+    '',
+    'the line sits mid-paragraph in a one-paragraph dispatch',
+  );
+  assert.equal(
+    progressFact('orch-implementer', `Your packet is the file ${withLine}. Read it first and follow it exactly.`, false),
+    '',
+    'the full stop after the file name is not part of the path',
+  );
+  assert.equal(
+    progressFact('orch-implementer', 'TASK: 1\nsee PROGRESSIVE: no\nfind it', false),
+    'no PROGRESS line: a capped return will have nothing to resume from',
+    'a word that merely starts with PROGRESS is not the line',
+  );
+});
+
 test('progressWorktreeNote: a dispatch with a PROGRESS line gets the worktree fallback sentence, absent when there is no line or in plan mode', () => {
   const note = 'if writing the progress file is refused, write the same relative path inside your own worktree instead, and say so in your return';
   assert.equal(progressWorktreeNote('orch-implementer', 'TASK: 1\nPROGRESS: /r/p.md\nfind it', false), note);
