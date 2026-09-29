@@ -11,7 +11,7 @@ import { spawnSync } from 'node:child_process';
 import {
   appendCost, sumCosts, parseReturn, lintRunRow, lintLedger,
   evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE,
-  dirtyPaths, dirtyDowngrade, dirtyNote, resolveHelperWorktree,
+  dirtyPaths, dirtyDowngrade, dirtyNote, resolveHelperWorktree, handbackText,
 } from './ledger.mjs';
 
 function tmpFile() {
@@ -308,4 +308,115 @@ test('resolveHelperWorktree: the harness-named worktree dir is used when it exis
   mkdirSync(wt, { recursive: true });
   const r = resolveHelperWorktree({ cwd, agent_id: agentId }, { task: '9-1-0001' }, null);
   assert.equal(r, wt);
+});
+
+// ---- the helper's real report: the hand-back call, not the stub -------------
+// Fixtures are built by hand here from made-up text, in the shape a helper's
+// own transcript records a hand-back: an assistant line whose content holds a
+// tool_use block named SubagentHandback with the report in input.message.
+
+const STUB = 'Report delivered to caller.'; // 27 bytes
+
+function handbackLine(text, name = 'SubagentHandback', field = 'message') {
+  return JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_x', name, input: { [field]: text } }] } });
+}
+function plainLine(text) {
+  return JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+}
+function bigReport(task, status) {
+  const head = `TASK: ${task}\nSTATUS: ${status}\nEVIDENCE:\n$ node --test\n# pass 12\n# fail 0\n`;
+  return head + 'Detail line for the report, made up for this test.\n'.repeat(60);
+}
+function writeTranscript(lines) {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-tr-'));
+  const p = join(dir, 'agent.jsonl');
+  writeFileSync(p, lines.join('\n') + '\n');
+  return p;
+}
+// Runs the hook for real with a temp HOME, returns the filed text and index row.
+function runHook(input) {
+  const home = mkdtempSync(join(tmpdir(), 'orch-ledger-hook-'));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  const res = spawnSync(process.execPath, [join(import.meta.dirname, 'ledger.mjs')], { input: JSON.stringify(input), encoding: 'utf8', env });
+  const rdir = join(home, '.claude', 'orchestrate', 'returns', String(input.session_id));
+  let rows = [];
+  try { rows = readFileSync(join(rdir, 'returns.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
+  const row = rows[rows.length - 1] || null;
+  const filed = row ? readFileSync(row.file, 'utf8') : null;
+  return { res, row, filed };
+}
+function hookInput(extra) {
+  return { session_id: 'sess-hb-' + Math.random().toString(16).slice(2), agent_type: 'orchestrate:orch-implementer', agent_id: 'a' + Math.random().toString(16).slice(2, 10), cwd: tmpdir(), ...extra };
+}
+
+test('the filed return is the hand-back report, not the 27-byte stub, and the row has a task and a status', () => {
+  const report = bigReport('9-1-0001', 'PARTIAL');
+  assert.ok(Buffer.byteLength(report) > 3000);
+  const tp = writeTranscript([plainLine('working'), handbackLine(report), plainLine(STUB)]);
+  const { row, filed, res } = runHook(hookInput({ agent_transcript_path: tp, last_assistant_message: STUB }));
+  assert.equal(res.status, 0);
+  assert.ok(filed.includes(report), 'the filed file holds the full hand-back text');
+  assert.equal(row.task, '9-1-0001');
+  assert.equal(row.status, 'PARTIAL');
+  assert.equal(row.evidence, true);
+});
+
+test('no hand-back in the transcript: the filed text is the last plain message', () => {
+  const msg = 'TASK: 9-1-0002\nSTATUS: PARTIAL\nEVIDENCE: ran it, 3 pass\n';
+  const tp = writeTranscript([plainLine('hello'), plainLine(msg)]);
+  const { row, filed } = runHook(hookInput({ agent_transcript_path: tp, last_assistant_message: msg }));
+  assert.ok(filed.endsWith(msg));
+  assert.equal(row.task, '9-1-0002');
+});
+
+test('DONE in the hand-back with a dirty helper worktree is downgraded to PARTIAL', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'orch-ledger-lead-'));
+  const agentId = 'dirty' + Math.random().toString(16).slice(2, 8);
+  const wt = join(cwd, '.claude', 'worktrees', `agent-${agentId}`);
+  mkdirSync(wt, { recursive: true });
+  const git = (...a) => spawnSync('git', a, { cwd: wt, encoding: 'utf8' });
+  git('init', '-q'); git('config', 'user.email', 'x@x.com'); git('config', 'user.name', 'x');
+  writeFileSync(join(wt, 'a.txt'), 'one\n'); git('add', 'a.txt'); git('commit', '-q', '-m', 'first');
+  writeFileSync(join(wt, 'left-behind.txt'), 'x\n');
+  const tp = writeTranscript([handbackLine(bigReport('9-1-0003', 'DONE')), plainLine(STUB)]);
+  const { row } = runHook(hookInput({ cwd, agent_id: agentId, agent_transcript_path: tp, last_assistant_message: STUB }));
+  assert.equal(row.status, 'PARTIAL');
+  assert.equal(row.dirtyWorktree, true);
+});
+
+test('a missing or unreadable transcript path falls back to the last plain message, never throws', () => {
+  const msg = 'TASK: 9-1-0004\nSTATUS: BLOCKED\nEVIDENCE: none\n';
+  const a = runHook(hookInput({ agent_transcript_path: join(tmpdir(), 'no-such-dir', 'x.jsonl'), last_assistant_message: msg }));
+  assert.equal(a.res.status, 0);
+  assert.ok(a.filed.endsWith(msg));
+  const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-dirpath-'));
+  const b = runHook(hookInput({ agent_transcript_path: dir, last_assistant_message: msg }));
+  assert.ok(b.filed.endsWith(msg));
+  const c = runHook(hookInput({ last_assistant_message: msg }));
+  assert.ok(c.filed.endsWith(msg));
+  assert.equal(handbackText(undefined), '');
+  assert.equal(handbackText(dir), '');
+});
+
+test('two hand-backs: the last one wins; a bad JSON line and a renamed tool and field are tolerated', () => {
+  const first = bigReport('9-1-0005', 'PARTIAL');
+  const last = bigReport('9-1-0006', 'BLOCKED');
+  const tp = writeTranscript([handbackLine(first), 'not json {handback', handbackLine(last, 'mcp__x__subagent_handback', 'report_text')]);
+  assert.equal(handbackText(tp), last);
+  const tp2 = writeTranscript([handbackLine(first), handbackLine(last)]);
+  assert.equal(handbackText(tp2), last);
+});
+
+test('a 5 MB transcript is read from the tail in under 200 ms and still finds the hand-back', () => {
+  const filler = plainLine('x'.repeat(4000));
+  const lines = [handbackLine('TASK: 9-1-0007\nold report that sits beyond the tail window, made up')];
+  for (let i = 0; i < 1300; i++) lines.push(filler);
+  const last = bigReport('9-1-0008', 'PARTIAL');
+  lines.push(handbackLine(last), plainLine(STUB));
+  const tp = writeTranscript(lines);
+  const t0 = Date.now();
+  const got = handbackText(tp);
+  const ms = Date.now() - t0;
+  assert.equal(got, last);
+  assert.ok(ms < 200, `took ${ms} ms`);
 });

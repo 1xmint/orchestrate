@@ -21,7 +21,7 @@
 //
 // It never blocks and never fails a stop.
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -517,6 +517,53 @@ function alreadyHandled(input, agent, text) {
   return false;
 }
 
+// A background helper hands its report back through a hand-back tool call, and
+// its last plain message is only a stub ("Report delivered to caller."). Filing
+// the stub left task and status null, so no downgrade could ever fire. Read the
+// LAST hand-back call from the tail of the helper's own transcript and use its
+// text. The tool is not in the host's documents, so its shape may change: match
+// the name loosely (contains "handback", any case, any prefix), and if the
+// expected `message` field is absent take the first string field over 40 bytes.
+// Anything unexpected returns '' and the caller keeps last_assistant_message.
+const HANDBACK_TAIL_BYTES = 2 * 1024 * 1024;
+export function handbackText(path) {
+  let fd = null;
+  try {
+    if (!path || typeof path !== 'string') return '';
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size;
+    const len = Math.min(size, HANDBACK_TAIL_BYTES);
+    const buf = Buffer.alloc(len);
+    let got = 0;
+    while (got < len) {
+      const n = readSync(fd, buf, got, len - got, size - len + got);
+      if (n <= 0) break;
+      got += n;
+    }
+    const lines = buf.subarray(0, got).toString('utf8').split('\n');
+    if (size > len) lines.shift(); // first line of a tail read is cut mid-line
+    for (let i = lines.length - 1; i >= 0; i--) {
+      const line = lines[i];
+      if (!line.trim() || !/handback/i.test(line)) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      const c = o && o.message && o.message.content;
+      if (!Array.isArray(c)) continue;
+      for (let j = c.length - 1; j >= 0; j--) {
+        const b = c[j];
+        if (!b || b.type !== 'tool_use' || !/handback/i.test(String(b.name || ''))) continue;
+        const inp = b.input;
+        if (!inp || typeof inp !== 'object') continue;
+        if (typeof inp.message === 'string' && inp.message.trim()) return inp.message;
+        const f = Object.values(inp).find(v => typeof v === 'string' && Buffer.byteLength(v) > 40);
+        if (f) return f;
+      }
+    }
+  } catch {} finally {
+    if (fd !== null) { try { closeSync(fd); } catch {} }
+  }
+  return '';
+}
+
 function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
@@ -525,6 +572,8 @@ function main() {
   if (!input || typeof input !== 'object') return;
 
   let text = String(input.last_assistant_message || '');
+  const handed = handbackText(input.agent_transcript_path);
+  if (handed.trim()) text = handed;
 
   // Only a subagent's stop is a return, and only `agent_type` proves it is one.
   // `agent_id` does not: stops that are not subagent returns arrive carrying an
