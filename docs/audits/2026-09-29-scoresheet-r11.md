@@ -36,6 +36,8 @@ grown.
 
 ## The parts
 
+- [First attempt](2026-09-29-scoresheet-r11-part-0.md): one helper, stopped after the
+  required reading; no area scored.
 - [Part A](2026-09-29-scoresheet-r11-part-a.md): Safety, with 41 commands
   probed in three modes.
 - [Part B](2026-09-29-scoresheet-r11-part-b.md): no probes run; code read
