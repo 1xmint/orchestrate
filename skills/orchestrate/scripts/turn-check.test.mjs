@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches, mergedBranches, anyHelperRunning } from './turn-check.mjs';
+import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact, leftoverHelpers, leftoverText, mergedBranches, anyHelperRunning } from './turn-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'turn-check.mjs');
@@ -325,13 +325,25 @@ function mergeHelper(g, id) {
 
 // ---- helper folders left behind after a merge -------------------------------------
 
-test('leftoverHelperWorktrees counts merged helper branches whose folder still exists, once per helper', () => {
+test('leftoverHelpers counts folders and branches separately, from what git lists', () => {
   const returned = [{ agentId: 'a1' }, { agentId: 'a1' }, { agentId: 'b2' }, { agentId: 'c3' }, { agentId: null }];
-  const merged = ['main', 'worktree-agent-a1', 'worktree-agent-b2'];
-  const exists = p => !p.includes('agent-b2');
-  assert.equal(leftoverHelperWorktrees({ cwd: '/r', returned, merged, exists }), 1);
-  assert.equal(leftoverHelperWorktrees({ cwd: '/r', returned, merged, exists: () => true }), 2, 'c3 is not merged');
-  assert.equal(leftoverHelperWorktrees({ cwd: '/r', returned: [], merged, exists: () => true }), 0);
+  const merged = ['worktree-agent-a1', 'worktree-agent-b2'];
+  const dirOf = id => `/r/.claude/worktrees/agent-${id}`;
+  const base = { cwd: '/r', returned, merged, exists: () => true };
+  // a1: folder and branch; b2: branch only (folder not listed); c3: unmerged, nothing listed.
+  assert.deepEqual(leftoverHelpers({ ...base, known: [dirOf('a1')], branches: ['worktree-agent-a1', 'worktree-agent-b2'] }), { folders: 1, branches: 2, allMerged: true });
+  // the incident: branches already gone, one folder git still lists
+  assert.deepEqual(leftoverHelpers({ ...base, known: [dirOf('a1')], branches: [] }), { folders: 1, branches: 0, allMerged: true });
+  // a folder on disk that git no longer knows is not counted
+  assert.deepEqual(leftoverHelpers({ ...base, known: [], branches: [] }), { folders: 0, branches: 0, allMerged: true });
+  assert.deepEqual(leftoverHelpers({ ...base, returned: [], known: [dirOf('a1')], branches: ['worktree-agent-a1'] }), { folders: 0, branches: 0, allMerged: true });
+});
+
+test('leftoverText words the note by what is left', () => {
+  assert.equal(leftoverText({ folders: 1, branches: 0 }), '1 helper folder is still here');
+  assert.equal(leftoverText({ folders: 0, branches: 2 }), '2 helper branches are still here');
+  assert.equal(leftoverText({ folders: 2, branches: 1 }), '2 helper folders and 1 branch are still here');
+  assert.equal(leftoverText({ folders: 1, branches: 1 }), '1 helper folder and 1 branch are still here');
 });
 
 test('Stop: merged helper folders still on disk are named once with the count; nothing is removed', () => {
@@ -339,22 +351,29 @@ test('Stop: merged helper folders still on disk are named once with the count; n
   const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
   const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
   g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
-  for (const id of ['a1b2', 'c3d4']) { mergeHelper(g, id); mkdirSync(join(repo, '.claude', 'worktrees', `agent-${id}`), { recursive: true }); }
+  for (const id of ['a1b2', 'c3d4']) { mergeHelper(g, id); g('worktree', 'add', '-q', join(repo, '.claude', 'worktrees', `agent-${id}`), `worktree-agent-${id}`); }
   const dir = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'lo-1.json'), JSON.stringify({ v: 1, session_id: 'lo-1', cwd: repo, dispatches: [], returned: [{ agentId: 'a1b2', status: 'DONE' }, { agentId: 'c3d4', status: 'DONE' }] }));
   const input = { hook_event_name: 'Stop', session_id: 'lo-1' };
-  assert.equal(JSON.parse(run(input, home).stdout).reason, 'orchestrate: 2 helper folders and branches are still here although their work was merged; nothing has been removed.');
+  assert.equal(JSON.parse(run(input, home).stdout).reason, 'orchestrate: 2 helper folders and 2 branches are still here although their work was merged; nothing has been removed.');
   assert.equal(run(input, home).stdout.trim(), '', 'said once');
   assert.equal(readFileSync(join(repo, '.git', 'HEAD'), 'utf8').length > 0, true);
   assert.ok(g('branch', '--list', 'worktree-agent-a1b2').stdout.includes('a1b2'), 'branch left in place');
 });
 
-test('leftoverHelperBranches counts merged helper branches whose folder is gone', () => {
-  const returned = [{ agentId: 'a1' }, { agentId: 'b2' }, { agentId: 'c3' }];
-  const merged = ['worktree-agent-a1', 'worktree-agent-b2'];
-  assert.equal(leftoverHelperBranches({ cwd: '/r', returned, merged, exists: p => p.includes('agent-a1') }), 1);
-  assert.equal(leftoverHelperBranches({ cwd: '/r', returned, merged, exists: () => false }), 2);
+test('Stop: branches already gone and one folder left is counted as one folder, not folder and branch', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
+  const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
+  g('worktree', 'add', '-q', '--detach', join(repo, '.claude', 'worktrees', 'agent-k1k1'));
+  mkdirSync(join(repo, '.claude', 'worktrees', 'agent-u2u2'), { recursive: true });
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'lo-6.json'), JSON.stringify({ v: 1, session_id: 'lo-6', cwd: repo, dispatches: [], returned: [{ agentId: 'k1k1', status: 'DONE' }, { agentId: 'u2u2', status: 'DONE' }] }));
+  const reason = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'lo-6' }, home).stdout).reason;
+  assert.equal(reason, 'orchestrate: 1 helper folder is still here; nothing has been removed.');
 });
 
 test('Stop: merged helper branches with no folder are named too', () => {
@@ -403,7 +422,7 @@ test('Stop: a clean folder of a returned helper that never merged is named witho
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'lo-5.json'), JSON.stringify({ v: 1, session_id: 'lo-5', cwd: repo, dispatches: [], returned: [{ agentId: 'w2w2', status: 'DONE' }] }));
   const reason = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'lo-5' }, home).stdout).reason;
-  assert.equal(reason, 'orchestrate: 1 helper folder and branch are still here; nothing has been removed.');
+  assert.equal(reason, 'orchestrate: 1 helper folder and 1 branch are still here; nothing has been removed.');
 });
 
 test('Stop: no returned helper folder on disk, no git call and no output', () => {
@@ -600,7 +619,7 @@ test('Stop: merged helper folders are not named while another helper is still wo
   const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
   const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
   g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
-  mergeHelper(g, 'a1b2'); mkdirSync(join(repo, '.claude', 'worktrees', 'agent-a1b2'), { recursive: true });
+  mergeHelper(g, 'a1b2'); g('worktree', 'add', '-q', join(repo, '.claude', 'worktrees', 'agent-a1b2'), 'worktree-agent-a1b2');
   const dir = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(dir, { recursive: true });
   const dispatches = [{ toolUseId: 'tu-1', agentId: 'a1b2', at: new Date().toISOString() }, { toolUseId: 'tu-2', at: new Date().toISOString() }];
