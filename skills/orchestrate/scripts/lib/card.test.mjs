@@ -51,7 +51,8 @@ test('the card names the helper kinds, and its builder advice clears the guard o
   const packet = 'Build lib/add.js; notes are kept in notes.json in the project root.';
   const ti = p => ({ subagent_type: 'orch-implementer', model: 'sonnet', prompt: p });
   const opts = { policy: loadPolicy(null), installed: 8, missing: [] };
-  assert.ok(workflowDecision({}, ti(packet), opts), 'without the card\'s words the guard refuses this packet');
+  assert.equal(workflowDecision({}, ti(packet), opts), null, 'where a file lives is not an order to work in the shared checkout');
+  assert.ok(workflowDecision({}, ti(`Work directly in the project root. ${packet}`), opts), 'a brief that says to work in the shared checkout is still refused');
   assert.equal(workflowDecision({}, ti(`WHERE: worktree: yes\n${packet}`), opts), null, 'with them it passes');
 });
 
