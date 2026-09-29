@@ -356,8 +356,7 @@ test('Stop: merged helper folders still on disk are named once with the count; n
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'lo-1.json'), JSON.stringify({ v: 1, session_id: 'lo-1', cwd: repo, dispatches: [], returned: [{ agentId: 'a1b2', status: 'DONE' }, { agentId: 'c3d4', status: 'DONE' }] }));
   const input = { hook_event_name: 'Stop', session_id: 'lo-1' };
-  assert.equal(JSON.parse(run(input, home).stdout).reason, 'orchestrate: 2 helper folders and 2 branches are still here although their work was merged; nothing has been removed.');
-  assert.equal(run(input, home).stdout.trim(), '', 'said once');
+  assert.equal(run(input, home).stdout.trim(), '', 'the stop path never raises the leftover note');
   assert.equal(readFileSync(join(repo, '.git', 'HEAD'), 'utf8').length > 0, true);
   assert.ok(g('branch', '--list', 'worktree-agent-a1b2').stdout.includes('a1b2'), 'branch left in place');
 });
@@ -372,8 +371,7 @@ test('Stop: branches already gone and one folder left is counted as one folder, 
   const dir = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'lo-6.json'), JSON.stringify({ v: 1, session_id: 'lo-6', cwd: repo, dispatches: [], returned: [{ agentId: 'k1k1', status: 'DONE' }, { agentId: 'u2u2', status: 'DONE' }] }));
-  const reason = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'lo-6' }, home).stdout).reason;
-  assert.equal(reason, 'orchestrate: 1 helper folder is still here; nothing has been removed.');
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'lo-6' }, home).stdout.trim(), '');
 });
 
 test('Stop: merged helper branches with no folder are named too', () => {
@@ -386,8 +384,7 @@ test('Stop: merged helper branches with no folder are named too', () => {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'lo-3.json'), JSON.stringify({ v: 1, session_id: 'lo-3', cwd: repo, dispatches: [], returned: ['e5f6', 'g7h8', 'i9j0'].map(agentId => ({ agentId, status: 'DONE' })) }));
   const input = { hook_event_name: 'Stop', session_id: 'lo-3' };
-  assert.equal(JSON.parse(run(input, home).stdout).reason, 'orchestrate: 3 helper branches are still here although their work was merged; nothing has been removed.');
-  assert.equal(run(input, home).stdout.trim(), '', 'said once');
+  assert.equal(run(input, home).stdout.trim(), '');
 });
 
 test('a helper branch that has not committed is not merged, even though it sits at the main tip', () => {
@@ -421,8 +418,7 @@ test('Stop: a clean folder of a returned helper that never merged is named witho
   const dir = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'lo-5.json'), JSON.stringify({ v: 1, session_id: 'lo-5', cwd: repo, dispatches: [], returned: [{ agentId: 'w2w2', status: 'DONE' }] }));
-  const reason = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'lo-5' }, home).stdout).reason;
-  assert.equal(reason, 'orchestrate: 1 helper folder and 1 branch are still here; nothing has been removed.');
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'lo-5' }, home).stdout.trim(), '');
 });
 
 test('Stop: no returned helper folder on disk, no git call and no output', () => {
@@ -627,5 +623,5 @@ test('Stop: merged helper folders are not named while another helper is still wo
   const input = { hook_event_name: 'Stop', session_id: 'run-1' };
   assert.equal(run(input, home).stdout.trim(), '', 'a helper is still working: quiet');
   writeFileSync(join(dir, 'run-1.json'), JSON.stringify({ v: 1, session_id: 'run-1', cwd: repo, dispatches, returned: [{ agentId: 'a1b2', toolUseId: 'tu-1', status: 'DONE' }, { agentId: 'z9', toolUseId: 'tu-2', status: 'DONE' }] }));
-  assert.match(JSON.parse(run(input, home).stdout).reason, /still here/, 'all returned: said');
+  assert.equal(run(input, home).stdout.trim(), '', 'all returned: still not said at stop');
 });

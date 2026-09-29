@@ -364,21 +364,9 @@ function checkHeartbeat(input) {
     }
   }
 
-  // Helper folders and branches still there after their work was merged: one
-  // fact with the count, once per count, and only when no helper of this session
-  // is still running. Nothing is removed. The git call is
-  // made only when a returned helper's own folder still exists.
-  const cwd = state.cwd || input.cwd;
-  const left = leftoverNote({ cwd, returned: state.returned, dispatches: state.dispatches });
-  if (left) {
-    const n = left.folders + left.branches;
-    if (rec.leftoverNotedFor !== n) {
-      updated.leftoverNotedFor = n;
-      store[key] = updated;
-      try { writeJsonAtomic(path, store); } catch {}
-      return emitBlock(`orchestrate: ${left.text}${left.allMerged ? ' although their work was merged' : ''}; nothing has been removed.`);
-    }
-  }
+  // Helper folders and branches left behind are not raised here: the note goes
+  // to the lead on its next tool call (context-check.mjs), so a closing message
+  // is never followed by an error notice.
 
   if (!bound) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
 
