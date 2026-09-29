@@ -578,10 +578,11 @@ function main() {
   }
 
   // The three plain lines, before the first helper starts: when the lead's last
-  // message to the user is readable and names no model, refuse this one
-  // dispatch, once per session. The mark is the event id of the refused call,
-  // so a second registration of the same hook refuses it again, and any later
-  // dispatch (or the same helper sent again) goes through.
+  // message to the user is readable and names no model, refuse every
+  // dispatch, up to three refusals a session, so helpers sent together are all
+  // held. The marks are the event ids of the refused calls, so a second
+  // registration of the same hook refuses the same call again without counting
+  // it; after the third, or once a message names a model, none is refused.
   const fhr = firstHelperRefusal(input, id);
   if (fhr) {
     if (!repeat) recordDenial(input, ti, 'first helper: three plain lines owed');
@@ -695,16 +696,23 @@ export function leadTextWithRetry(transcriptPath, { tries = 4, waitMs = 60, slee
 export function asksForPastedContents(prompt) {
   return /\b(exact contents|paste|full output|report back the file)\b/i.test(String(prompt || ''));
 }
-const FIRST_HELPER_REFUSAL = 'the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again unchanged';
+const FIRST_HELPER_REFUSAL = 'the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again';
 export function firstHelperRefusal(input, id) {
   try {
     if (!input.session_id || !input.transcript_path) return '';
     const state = loadSession(input.session_id) || {};
-    if (state.firstHelperAsked) return state.firstHelperAsked === id ? FIRST_HELPER_REFUSAL : '';
+    const asked = Array.isArray(state.firstHelperRefused) ? state.firstHelperRefused : [];
+    if (state.firstHelperDone) return '';
+    if (asked.includes(id)) return FIRST_HELPER_REFUSAL;
+    if (asked.length >= 3) return '';
     if (Array.isArray(state.dispatches) && state.dispatches.length) return '';
     const text = leadTextWithRetry(input.transcript_path);
-    if (text === null || /\b(haiku|sonnet|opus|fable|model)\b/i.test(text)) return '';
-    withSession(input, s => { s.firstHelperAsked = id; });
+    if (text === null) return '';
+    if (/\b(haiku|sonnet|opus|fable|model)\b/i.test(text)) {
+      withSession(input, s => { s.firstHelperDone = true; });
+      return '';
+    }
+    withSession(input, s => { s.firstHelperRefused = [...(Array.isArray(s.firstHelperRefused) ? s.firstHelperRefused : []), id]; });
     return FIRST_HELPER_REFUSAL;
   } catch { return ''; }
 }

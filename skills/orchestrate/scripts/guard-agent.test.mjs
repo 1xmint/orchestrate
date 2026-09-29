@@ -256,16 +256,28 @@ test('first helper: a lead message naming no model is refused once, with the thr
   const first = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('I will have a builder do it in a separate copy, then commit.'), toolUse]);
   assert.equal(first.permissionDecision, 'deny');
   assert.match(first.permissionDecisionReason, /the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked/);
-  const again = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('Sending it again.'), toolUse]);
+  assert.doesNotMatch(first.permissionDecisionReason, /unchanged/);
+  const again = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('Here are the three lines: Sonnet builds it, and I test it.'), toolUse]);
   assert.notEqual(again.permissionDecision, 'deny');
   const later = dispatchFull(home, 's-fh-a', { ...PKT, prompt: `${PKT.prompt} again` }, [userPrompt, leadSaid('one more'), toolUse]);
   assert.notEqual(later.permissionDecision, 'deny');
 });
 
-test('first helper: never refused twice in a session, even when the second message also names no model', () => {
+test('first helper: helpers sent together are all refused while no model is named, up to three, then never', () => {
   const home = sandboxHome();
-  assert.equal(dispatchFull(home, 's-fh-e', PKT, [userPrompt, leadSaid('Working on it.'), toolUse]).permissionDecision, 'deny');
-  assert.notEqual(dispatchFull(home, 's-fh-e', PKT, [userPrompt, leadSaid('Still working on it.'), toolUse]).permissionDecision, 'deny');
+  const t = [userPrompt, leadSaid('Working on it.'), toolUse];
+  for (let i = 0; i < 3; i++) {
+    assert.equal(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} ${i}` }, t).permissionDecision, 'deny', `helper ${i} is refused`);
+  }
+  assert.notEqual(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} 4` }, t).permissionDecision, 'deny', 'the fourth goes through');
+  assert.notEqual(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} 5` }, t).permissionDecision, 'deny');
+});
+
+test('first helper: once a message names a model, no later helper is refused', () => {
+  const home = sandboxHome();
+  assert.equal(dispatchFull(home, 's-fh-g', PKT, [userPrompt, leadSaid('Working on it.'), toolUse]).permissionDecision, 'deny');
+  assert.notEqual(dispatchFull(home, 's-fh-g', PKT, [userPrompt, leadSaid('Sonnet builds it.'), toolUse]).permissionDecision, 'deny');
+  assert.notEqual(dispatchFull(home, 's-fh-g', { ...PKT, prompt: `${PKT.prompt} x` }, [userPrompt, leadSaid('Nothing more.'), toolUse]).permissionDecision, 'deny');
 });
 
 test('first helper: a lead message that names a model is not refused', () => {
