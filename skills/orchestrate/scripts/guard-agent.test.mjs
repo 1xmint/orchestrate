@@ -301,6 +301,27 @@ test('first helper: with no transcript at all the plain fact is sent, and the di
   assert.match(json.hookSpecificOutput.additionalContext, /first helper this session: the user is owed three plain lines first/);
 });
 
+// ---- a made-up test value is not a secret --------------------------------
+
+test('a quoted value that is plainly made up for a test is not refused; a real-looking one still is', () => {
+  const home = sandboxHome();
+  const send = (n, line) => (dispatch(home, `s-cred-${n}`, { ...PKT, prompt: `${PKT.prompt}\nuse ${line} in the tests` }).json || {}).hookSpecificOutput || {};
+  const passes = [
+    "process.env.CLUB_PASSWORD = 'test-pass'",
+    'password = "Example-Value-1"',
+    "secret = 'my_placeholder_value'",
+    'password = "DUMMYDUMMY"',
+    "api_key = 'fake-key-123'",
+    'password = "sample-password"',
+    'password = "ChangeMe123"',
+    'password = "xxxxxxxxxxxx"',
+    'password = "0000000000"',
+  ];
+  passes.forEach((l, i) => assert.notEqual(send(`p${i}`, l).permissionDecision, 'deny', l));
+  const refuses = ['password = "hunter2hunter2"', "secret: 'abcdefgh12345678'", "process.env.CLUB_PASSWORD = 'Zk9-qT4vLm2x'", 'api_key=abcd1234efgh5678'];
+  refuses.forEach((l, i) => assert.equal(send(`r${i}`, l).permissionDecision, 'deny', l));
+});
+
 // ---- a brief with no task id and no headings (a real run: a password check) ----
 
 const NO_HEADINGS_BRIEF = `Repo: a small club server (clean).\n\nFull current contents:\n\n\`\`\`js\n${'const members = [];\n'.repeat(40)}\`\`\`\n\nTask: add a password check so only people who know the password can see /members.\n\nReport back what you changed.`;

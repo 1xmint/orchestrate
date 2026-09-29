@@ -55,10 +55,12 @@ const CRED = new RegExp([
 // literal of eight or more characters is one unless it is an obvious placeholder.
 const ASSIGN = /(?:password|passwd|pwd|secret|api[_-]?key|access[_-]?token)\s*[=:]\s*(["']?)([^\s"'<>]{8,})/gi;
 const PLACEHOLDER = /^(?:x+|\*+|\.+|-+|changeme|change_me|placeholder|redacted|example|your[-_]?\w*|\$\{?\w+\}?)$/i;
+// A quoted value that says it is made up for a test is not a secret.
+const MADE_UP = /test|example|placeholder|dummy|fake|sample|changeme/i;
 function looksLikeSecret(quote, raw) {
   const v = raw.replace(/[;,]+$/, '');
   if (/^\$\{?\w+\}?$/.test(v) || PLACEHOLDER.test(v)) return false;
-  if (quote) return true;
+  if (quote) return !(MADE_UP.test(v) || /^(.)\1+$/.test(v));
   if (/^(?:process\.env\b|os\.environ\b|os\.getenv\b)/.test(v)) return false;
   if (/^[A-Za-z_][A-Za-z_.]*$/.test(v)) return false;
   if (/^[A-Za-z_][\w.]*\(/.test(v)) return false;
