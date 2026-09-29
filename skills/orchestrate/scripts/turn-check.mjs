@@ -20,7 +20,7 @@
 // set-shaped recommendations) fired on two failed fetches as readily as on two
 // real sources.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
@@ -196,37 +196,57 @@ export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
   return { topic, key: `${word || goalWord}@${lastRiskIdx}:${edits}`, text };
 }
 
-// Helper folders left behind. A helper that works in its own worktree leaves a
-// folder `<cwd>/.claude/worktrees/agent-<id>` and a branch `worktree-agent-<id>`.
-// After the lead merges, both stay unless someone removes them, and the person
-// who asked is never told. Counts this session's helpers whose folder still
-// exists and whose branch is already merged into the current one. It only
-// counts; it removes nothing.
-export function leftoverHelperWorktrees({ cwd, returned, merged, exists, clean }) {
+// Helper folders and branches left behind. A helper that works in its own
+// worktree leaves a folder `<cwd>/.claude/worktrees/agent-<id>` and a branch
+// `worktree-agent-<id>`. Both stay unless someone removes them, and the person
+// who asked is never told. Counts what git reports now, for this session's
+// helpers: a folder counts only if git still lists it and it is on disk (a
+// folder git no longer knows is not counted); a branch counts only if it still
+// exists. A folder or branch counts when its work is merged, or (a folder, and
+// its branch with it) the helper returned and the folder holds nothing unsaved.
+// Removes nothing.
+//   known: folder paths git lists; branches: helper branch names git lists.
+export function leftoverHelpers({ cwd, returned, merged, exists, clean, known, branches }) {
   const seen = new Set();
+  let folders = 0, branchCount = 0, foldersMerged = 0;
+  const norm = p => { let r = String(p); try { r = realpathSync(r); } catch { r = resolvePath(r); } r = r.replace(/\\/g, '/').replace(/\/+$/, ''); return process.platform === 'win32' ? r.toLowerCase() : r; };
+  const knownSet = new Set((known || []).map(norm));
   for (const r of Array.isArray(returned) ? returned : []) {
     const id = r && r.agentId ? String(r.agentId) : '';
     if (!id || seen.has(id) || !/^[A-Za-z0-9]+$/.test(id)) continue;
+    seen.add(id);
     const dir = join(String(cwd), '.claude', 'worktrees', `agent-${id}`);
-    if (!exists(dir)) continue;
-    // Its work is in the current branch, or the helper returned and the folder
-    // holds nothing unsaved (a folder with unsaved edits is never counted).
-    if ((merged || []).includes(`worktree-agent-${id}`) || (typeof clean === 'function' && clean(dir))) seen.add(id);
+    const isMerged = (merged || []).includes(`worktree-agent-${id}`);
+    let folder = false;
+    if (exists(dir) && knownSet.has(norm(dir)) && (isMerged || (typeof clean === 'function' && clean(dir)))) { folder = true; folders++; if (isMerged) foldersMerged++; }
+    if ((branches || []).includes(`worktree-agent-${id}`) && (isMerged || folder)) branchCount++;
   }
-  return seen.size;
+  return { folders, branches: branchCount, allMerged: foldersMerged === folders };
 }
 
-// Helper branches already merged whose folder is gone: the branch alone is
-// still left over, and the person is told the same way. Counts only.
-export function leftoverHelperBranches({ cwd, returned, merged, exists }) {
-  const seen = new Set();
-  for (const r of Array.isArray(returned) ? returned : []) {
-    const id = r && r.agentId ? String(r.agentId) : '';
-    if (!id || seen.has(id) || !/^[A-Za-z0-9]+$/.test(id)) continue;
-    if (!(merged || []).includes(`worktree-agent-${id}`)) continue;
-    if (!exists(join(String(cwd), '.claude', 'worktrees', `agent-${id}`))) seen.add(id);
-  }
-  return seen.size;
+// The note's words, by what is really left: folders only, branches only, or both.
+export function leftoverText({ folders, branches }) {
+  const fw = `${folders} helper ${folders === 1 ? 'folder' : 'folders'}`;
+  const what = folders && branches ? `${fw} and ${branches} ${branches === 1 ? 'branch' : 'branches'}`
+    : folders ? fw : `${branches} helper ${branches === 1 ? 'branch' : 'branches'}`;
+  return `${what} ${folders + branches === 1 ? 'is' : 'are'} still here`;
+}
+
+// What git reports now: the folders it lists and the helper branches it lists.
+export function gitHelperState(cwd) {
+  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
+  let known = [], branches = [];
+  try { known = git(['worktree', 'list', '--porcelain']).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9).trim()); } catch {}
+  try { branches = git(['branch', '--list', '--format=%(refname:short)', 'worktree-agent-*']).split('\n').map(x => x.trim()).filter(Boolean); } catch {}
+  return { known, branches };
+}
+
+// The whole check for one session: null when nothing is left.
+export function leftoverNote({ cwd, returned, dispatches }) {
+  if (!cwd || !Array.isArray(returned) || !returned.some(r => r && r.agentId) || anyHelperRunning({ dispatches, returned })) return null;
+  const { known, branches } = gitHelperState(cwd);
+  const c = leftoverHelpers({ cwd, returned, merged: mergedBranches(cwd), exists: existsSync, clean: folderIsClean, known, branches });
+  return c.folders + c.branches ? { ...c, text: leftoverText(c) } : null;
 }
 
 // Helper branches whose work is really in the current branch: the branch has at
@@ -344,28 +364,9 @@ function checkHeartbeat(input) {
     }
   }
 
-  // Helper folders and branches still there after their work was merged: one
-  // fact with the count, once per count, and only when no helper of this session
-  // is still running. Nothing is removed. The git call is
-  // made only when a returned helper's own folder still exists.
-  const cwd = state.cwd || input.cwd;
-  const anyHelper = cwd && Array.isArray(state.returned) && state.returned.some(r => r && r.agentId) && !anyHelperRunning({ dispatches: state.dispatches, returned: state.returned });
-  if (anyHelper) {
-    const merged = mergedBranches(cwd);
-    const f = leftoverHelperWorktrees({ cwd, returned: state.returned, merged, exists: existsSync, clean: folderIsClean });
-    const fMerged = leftoverHelperWorktrees({ cwd, returned: state.returned, merged, exists: existsSync });
-    const b = leftoverHelperBranches({ cwd, returned: state.returned, merged, exists: existsSync });
-    const n = f + b;
-    if (n && rec.leftoverNotedFor !== n) {
-      updated.leftoverNotedFor = n;
-      store[key] = updated;
-      try { writeJsonAtomic(path, store); } catch {}
-      const what = f && b ? `${f} helper ${f === 1 ? 'folder' : 'folders'} and ${f + b} helper ${f + b === 1 ? 'branch are' : 'branches are'}`
-        : f ? `${f} helper ${f === 1 ? 'folder and branch are' : 'folders and branches are'}`
-          : `${b} helper ${b === 1 ? 'branch is' : 'branches are'}`;
-      return emitBlock(`orchestrate: ${what} still here${fMerged === f ? ' although their work was merged' : ''}; nothing has been removed.`);
-    }
-  }
+  // Helper folders and branches left behind are not raised here: the note goes
+  // to the lead on its next tool call (context-check.mjs), so a closing message
+  // is never followed by an error notice.
 
   if (!bound) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
 

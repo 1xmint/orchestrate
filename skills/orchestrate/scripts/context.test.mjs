@@ -555,3 +555,31 @@ test('the lead hears a long hand-back on its next tool call, once per helper', (
   assert.match(runContextCheck(edit, home), /the last hand-back was 2737 bytes against 600; in the next brief, ask for five lines and a file for the rest/);
   assert.doesNotMatch(runContextCheck(edit, home), /against 600/, 'once per helper');
 });
+
+test('the lead hears what helper folders and branches are left on its next tool call, once, never while a helper works', () => {
+  const home = ctxSandbox();
+  const repo = mkdtempSync(join(tmpdir(), 'orch-ctx-lo-'));
+  const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
+  g('worktree', 'add', '-q', '--detach', join(repo, '.claude', 'worktrees', 'agent-k1k1'));
+  g('checkout', '-q', '-b', 'worktree-agent-m2m2'); g('commit', '-q', '--allow-empty', '-m', 'work'); g('checkout', '-q', '-'); g('merge', '-q', '--no-ff', '-m', 'merge', 'worktree-agent-m2m2');
+  const sid = 'lo-ctx-1';
+  const dispatches = [{ toolUseId: 'tu-1', agentId: 'k1k1', at: new Date().toISOString() }, { toolUseId: 'tu-2', at: new Date().toISOString() }];
+  const one = { agentId: 'k1k1', toolUseId: 'tu-1', status: 'DONE' };
+  const two = { agentId: 'm2m2', toolUseId: 'tu-2', status: 'DONE' };
+  const read = { session_id: sid, tool_name: 'Read', tool_input: { file_path: '/x' } };
+  writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, cwd: repo, dispatches, returned: [one] }));
+  assert.doesNotMatch(runContextCheck(read, home), /still here/, 'a helper is still working: quiet');
+  writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, cwd: repo, dispatches, returned: [one, two] }));
+  assert.match(runContextCheck(read, home), /1 helper folder and 1 branch are still here; remove them or tell the user they are there before you finish/);
+  assert.doesNotMatch(runContextCheck(read, home), /still here/, 'once per session');
+});
+
+test('nothing left, nothing said', () => {
+  const home = ctxSandbox();
+  const repo = mkdtempSync(join(tmpdir(), 'orch-ctx-lo-'));
+  spawnSync('git', ['-C', repo, 'init', '-q']);
+  const sid = 'lo-ctx-2';
+  writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, cwd: repo, dispatches: [], returned: [{ agentId: 'zz99', status: 'DONE' }] }));
+  assert.doesNotMatch(runContextCheck({ session_id: sid, tool_name: 'Read', tool_input: { file_path: '/x' } }, home), /still here/);
+});

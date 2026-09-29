@@ -28,6 +28,7 @@ import { modeNote, modeOf } from './lib/modes.mjs';
 import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, segmentTurns } from './lib/workers.mjs';
 import { loadSession, saveSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
 import { loadPolicy, sizeBudget } from './lib/policy.mjs';
+import { leftoverNote, anyHelperRunning } from './turn-check.mjs';
 
 // ---- the working project ----------------------------------------------------
 // Which repo and folder this session is actually touching, learned from the
@@ -268,7 +269,22 @@ export function check(input) {
     if (workCallsChanged) state.workCalls = { count: workCalls };
     const workChanged = trackWork(state, input);
     const returnChanged = markDispatchReturn(state, input);
-    if ((state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
+    // Helper folders and branches left behind: once every helper of the session
+    // has returned and something is left, said once, as a fact, while the lead
+    // can still act on it. Nothing is removed.
+    let leftoverTold = false;
+    // The git look is taken once per number of returns, not on every tool call.
+    const nReturned = Array.isArray(state.returned) ? state.returned.length : 0;
+    if (!state.leftoverTold && nReturned && state.leftoverSeen !== nReturned && !anyHelperRunning({ dispatches: state.dispatches, returned: state.returned })) {
+      state.leftoverSeen = nReturned;
+      leftoverTold = true;
+      const left = leftoverNote({ cwd: state.cwd || input.cwd, returned: state.returned, dispatches: state.dispatches });
+      if (left) {
+        out.push(`[orchestrate · context] ${left.text}; remove them or tell the user they are there before you finish.`);
+        state.leftoverTold = true;
+      }
+    }
+    if (leftoverTold ||(state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
   } else if (workCallsChanged) {
     try { saveSession({ v: 1, session_id: session, started: new Date().toISOString(), workCalls: { count: workCalls } }); } catch {}
   }
