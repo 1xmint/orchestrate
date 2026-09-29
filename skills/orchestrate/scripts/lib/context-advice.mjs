@@ -220,13 +220,14 @@ function reportedWindow(reading) {
   return reading && reading.capacity ? reading.capacity : null;
 }
 
-// The next thing this plugin will do at a size: its own compact line
-// (`thresholds()`), when not yet passed. The host's own automatic compaction
-// point is not promised: it is not known (see `reportedWindow`), so no figure
-// is printed for it. Null once the compact line is behind the current size.
-function nextEvent(reading, policy, ctx = {}) {
-  const { compactAt } = thresholds(reading, policy, ctx);
-  return reading.tokens < compactAt ? { label: 'compact', at: compactAt } : null;
+// Where the conversation was last tidied up, said only after one has been
+// seen in this session and only when the host recorded the size it happened
+// at. Before any tidy-up no figure is printed: the size the host will tidy up
+// at is not known (see `reportedWindow`), and a promised figure was wrong in
+// real runs (about 135k said, about 153k happened).
+function lastTidyUp(reading) {
+  const c = reading && reading.compaction;
+  return c && Number.isFinite(c.preTokens) ? c.preTokens : null;
 }
 
 // One line of facts about the conversation's size: this is the single shape
@@ -240,8 +241,8 @@ function factLine(reading, policy, ctx = {}, cp = undefined) {
   parts.push(`${k1(reading.tokens)}${window ? ` of ${k1(window)}` : ''}`);
   const n = Number(reading.compactions) || 0;
   if (n) parts.push(`compacted ${n}×`);
-  const next = nextEvent(reading, policy, ctx);
-  if (next) parts.push(`next: ${next.label} ${k1(next.at)}`);
+  const tidied = n ? lastTidyUp(reading) : null;
+  if (tidied != null) parts.push(`last tidy-up at ${k1(tidied)}`);
   if (cp === undefined) cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
   const lost = cp ? null : misplacedCheckpoint(session, reading, { dir });
   parts.push(cp ? `newest checkpoint: ${cp.path}, ${ageStr(cp.mtimeMs, now)}` : lost ? `newest checkpoint: none in the folder this plugin reads; one is at ${lost.path}, outside it: move it to ${lost.moveTo}` : 'newest checkpoint: none');

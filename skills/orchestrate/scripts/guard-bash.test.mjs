@@ -86,13 +86,29 @@ test('the wider clean-up still refuses anything that could lose work or reach el
   ]) assert.notEqual(decide(bad).kind, 'pass', bad);
 });
 
-test('a forced worktree cleanup chain still asks or denies, same as today', () => {
-  const forcedWorktree = 'git worktree remove --force .claude/worktrees/worktree-agent-abc123 && git branch -d worktree-agent-abc123';
-  assert.equal(decide(forcedWorktree).kind, 'ask');
-  assert.equal(decide(forcedWorktree, { headless: true, mode: 'auto' }).kind, 'deny');
+test('a forced helper-folder removal passes when the folder is clean or gone, and stops naming the folder when it has unsaved changes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orch-wt-'));
+  const sh = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8' });
+  sh(['init', '-q'], root);
+  const wt = join(root, '.claude', 'worktrees', 'agent-abc123');
+  mkdirSync(wt, { recursive: true });
+  sh(['init', '-q'], wt);
+  const gone = 'git worktree remove --force .claude/worktrees/agent-gone';
+  assert.equal(decide(gone, { cwd: root }).kind, 'pass', 'a missing folder is clean');
+  const forced = 'git worktree remove --force .claude/worktrees/agent-abc123';
+  assert.equal(decide(forced, { cwd: root }).kind, 'pass', 'clean folder');
+  const chain = forced + ' && git branch -d worktree-agent-abc123';
+  assert.equal(decide(chain, { cwd: root }).kind, 'pass');
+  assert.equal(decide('git worktree remove -f .claude/worktrees/agent-abc123 && git branch -d task/x', { cwd: root }).kind, 'pass');
+  writeFileSync(join(wt, 'unsaved.txt'), 'work');
+  for (const c of [forced, chain, 'git worktree remove .claude/worktrees/agent-abc123']) {
+    const d = decide(c, { cwd: root });
+    assert.equal(d.kind, 'ask', c);
+    assert.match(d.reason, /\.claude\/worktrees\/agent-abc123/);
+    assert.equal(decide(c, { cwd: root, headless: true, mode: 'auto' }).kind, 'deny', c);
+  }
   const forcedBranch = 'git worktree remove .claude/worktrees/worktree-agent-abc123 && git branch -D worktree-agent-abc123';
-  assert.equal(decide(forcedBranch).kind, 'ask');
-  assert.equal(decide(forcedBranch, { headless: true, mode: 'auto' }).kind, 'deny');
+  assert.equal(decide(forcedBranch, { cwd: root }).kind, 'ask', '-D stays refused');
 });
 
 test('a worktree cleanup chain with the path outside .claude/worktrees/ still asks or denies', () => {
