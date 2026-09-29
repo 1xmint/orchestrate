@@ -86,6 +86,35 @@ test('the wider clean-up still refuses anything that could lose work or reach el
   ]) assert.notEqual(decide(bad).kind, 'pass', bad);
 });
 
+test('the small branch delete passes anywhere in a chain when every other part passes alone', () => {
+  const live = 'git worktree remove .claude/worktrees/agent-abc123 && git branch -d worktree-agent-abc123 && node --test | tail';
+  for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }]) assert.equal(decide(live, opts).kind, 'pass', JSON.stringify(opts));
+  assert.equal(decide('node --test && git branch -d worktree-agent-abc123', {}).kind, 'pass');
+  assert.equal(decide('git branch -d worktree-agent-abc123 && git status | tail', {}).kind, 'pass');
+  for (const bad of [
+    'git branch -d worktree-agent-abc123 && rm -rf src',
+    'git branch -d worktree-agent-abc123 && git push origin --force',
+    'git branch -d main && node --test',
+    'node --test | git branch -d worktree-agent-abc123 && echo hi',
+    'git branch -d worktree-agent-abc123 && echo $(git branch -D x)',
+  ]) assert.notEqual(decide(bad, {}).kind, 'pass', bad);
+});
+
+test('a forced branch delete after a safe folder removal is refused in plain words: no mode, no file name, the small form named', () => {
+  const chain = 'git worktree remove .claude/worktrees/agent-abc123 && git branch -D worktree-agent-abc123 && node --test | tail';
+  for (const opts of [{ headless: true, mode: 'auto' }, { subagent: true }]) {
+    const d = decide(chain, opts);
+    assert.equal(d.kind, 'deny');
+    assert.match(d.reason, /helper folders can be removed, but the forced branch delete cannot/);
+    assert.match(d.reason, /git branch -d <name>/);
+    assert.doesNotMatch(d.reason, /auto mode|allow-bash|\.json|mode/i);
+  }
+  const lone = decide('git branch -D worktree-agent-abc123', { headless: true, mode: 'auto' });
+  assert.equal(lone.kind, 'deny');
+  assert.doesNotMatch(lone.reason, /auto mode|allow-bash|\.json|mode/i);
+  assert.match(lone.reason, /git branch -d <name>/);
+});
+
 test('a forced helper-folder removal passes when the folder is clean or gone, and stops naming the folder when it has unsaved changes', () => {
   const root = mkdtempSync(join(tmpdir(), 'orch-wt-'));
   const sh = (args, cwd) => spawnSync('git', args, { cwd, encoding: 'utf8' });
