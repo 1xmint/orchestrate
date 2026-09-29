@@ -70,7 +70,8 @@ function hasEvidenceLine(text) {
 
 // checkReturn(text) -> { ok, missing, evidence, status }
 //
-// - missing: 'task' and/or 'status' when those fields are absent; 'evidence'
+// - missing: 'task' and/or 'status' when those fields are absent ('task' is
+//   not asked of a five-line hand-back); 'evidence'
 //   added only when STATUS is DONE and no evidence line was found (PARTIAL
 //   and BLOCKED returns are not required to carry one).
 // - evidence: whether an evidence line was found at all, regardless of
@@ -82,9 +83,13 @@ export function checkReturn(text) {
   const t = typeof text === 'string' ? text : String(text == null ? '' : text);
   const missing = [];
 
-  if (!taskIdIn(t, { caseInsensitive: true })) missing.push('task');
+  // The five-line hand-back names no task (the return is matched to its
+  // dispatch by id) and opens OUTCOME with its status word.
+  const fiveLine = /^\s*OUTCOME\s*:/im.test(t) && /^\s*PROOF\s*:/im.test(t);
+  if (!fiveLine && !taskIdIn(t, { caseInsensitive: true })) missing.push('task');
 
-  const statusMatch = /^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im.exec(t);
+  const statusMatch = /^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im.exec(t)
+    || /^\s*OUTCOME\s*:\s*(DONE|PARTIAL|BLOCKED)\b/im.exec(t);
   const status = statusMatch ? statusMatch[1].toUpperCase() : null;
   if (!status) missing.push('status');
 

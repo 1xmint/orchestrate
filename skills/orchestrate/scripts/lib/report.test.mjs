@@ -117,3 +117,13 @@ test('schema field names are read from the shipped schema, not hardcoded twice',
   assert.ok(top.includes('suggestion'));
   assert.ok(checks.includes('evidence'));
 });
+
+test('a five-line hand-back is read without a task line, its status from the word that opens OUTCOME', () => {
+  const done = checkReturn('OUTCOME: DONE - both steps committed.\nPROOF: node scripts/test.mjs gave 12 pass, 0 fail.\nNOT CHECKED: nothing.\nNEEDS A DECISION: nothing\nFULL REPORT: progress/x.md\n');
+  assert.deepEqual(done, { ok: true, missing: [], evidence: true, status: 'DONE' });
+  const partial = checkReturn('OUTCOME: PARTIAL - step 1 only.\nPROOF: none yet.\n');
+  assert.equal(partial.status, 'PARTIAL');
+  assert.ok(partial.ok, 'a partial hand-back owes no evidence');
+  const bare = checkReturn('OUTCOME: all steps committed.\nPROOF: 12 pass, 0 fail.\n');
+  assert.deepEqual(bare.missing, ['status'], 'with no status word the status is still asked for');
+});
