@@ -146,6 +146,32 @@ on: **returns to grade** is finished work waiting for someone to judge it, and
 sitting idle. After that first line it stays quiet until one of those facts
 changes.
 
+### What it tells you, and what it holds back
+
+**Before the first helper starts, you get three short lines:** what the job
+needs, who does it on what model and why, and how the result is checked. If
+they are missing, the helper is not sent until they are written.
+
+**A helper reports in five lines.** What happened, the proof, what it did not
+check, what needs a decision from you, and where the full report is. The long
+version stays in a file you can open.
+
+**Work that is expensive to get wrong is held for review.** A change to money,
+sign-in, destructive data or something other people depend on is not called
+finished until a review has looked at it, or you have been told in words why
+one was skipped. A review that fails keeps the hold.
+
+**Leftovers are counted once.** When helpers have finished and their folders
+or branches are still on disk, one note says how many, so they can be cleared.
+
+**A long conversation keeps its place.** When the conversation is summarised
+to make room, a checkpoint is written from the conversation itself: the goal,
+what is done, what is next. The session carries on from that, not from memory.
+
+**Throwing away unsaved work is stopped.** A command that would discard every
+edit in a folder is stopped only when there are edits that were never saved.
+Where nothing can be lost, it goes through.
+
 ### When it will stop and ask you
 
 Four things, and only these: money, a public surface, credentials, and anything

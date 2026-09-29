@@ -2,7 +2,7 @@
 
 Resume point for building the `orchestrate` skill.
 
-## Unreleased (after v0.16.1) — the scoresheet audit, and rules that can be measured, 2026-09-24
+## v0.17.0 — the scoresheet audit, and rules that can be measured, 2026-09-29
 
 A scored audit (`docs/scoresheet-audit-prompt.md`, report
 `docs/audits/2026-09-24-scoresheet-r1.md`) put the plugin at 49/100 for its
@@ -97,6 +97,70 @@ session transcript this round (tens of thousands of lines, dozens of
 the turns just before the newest boundary needs no new hook event and no time
 window. The compacted line in the router now only names the checkpoint's
 path, never its text.
+
+**What a user will meet that 0.16.1 did not have.**
+
+- Before the first helper of a session starts, the user is told three short
+  things: what the job needs, who does it on what model and why, and how it
+  is checked. A helper sent before those lines is refused, up to three times.
+- A helper hands back five lines under 600 bytes (what happened, the proof,
+  what was not checked, what needs a decision, where the full report is).
+  The detail stays in a file.
+- Work that touches money, sign-in, destructive data or a shared contract is
+  held at the end of a turn until a review has looked at it, or the lead has
+  said in words why it skipped one. A failed review keeps the hold.
+- When helpers have returned and their folders or branches are still there,
+  one note says how many are left. It arrives on a tool call, once, never as
+  a stop error.
+- At compaction the plugin writes its own checkpoint from the conversation,
+  so the session after a summary has one whether or not the lead wrote it.
+- The command guard stops a command that would destroy work in every mode
+  where nobody can answer, says once that nothing in the line ran, and lets
+  routine tidy-up (a merged helper branch, a clean helper folder) through
+  first try.
+
+**The final pass, 2026-09-29.** Round 11 of the audit was stopped part way
+(`docs/audits/2026-09-29-scoresheet-r11.md`): five areas scored, eleven not,
+because each auditing helper ran out of room before it could probe. What it
+did find was fixed directly:
+
+- The guard reads a git line with its leading options removed, so
+  `git -C . worktree remove --force` meets the same check as the plain form.
+- `git reset --hard`, `git checkout -- .` and `git restore .` are stopped
+  only when the folder holds edits that were never saved to git.
+- A quoted branch name passes the small delete. A refused line of several
+  parts says once that nothing ran.
+- The bare word "model" no longer counts as naming one.
+- A request of two or three words that holds a build or fix word gets a
+  card. A period inside a file name is not the end of a sentence. The short
+  card says to find the cause before fixing.
+- The builder and fault-finder roles ask for proof that a new test fails on
+  the code as it was. Every role file says the size note is not a stop order
+  below the budget.
+- The run template has a "Stops anyway when" line. `references/dispatch.md`
+  has a "Before you send" list: classify first, pilot one helper, few helpers
+  with room, and for a checking task the input that makes each item come up.
+
+**Built and tested, not yet seen in a real session:** everything in the final
+pass, the size note, and a failed review keeping its hold.
+
+**Known limits.** The risky-word check matches whole words only. The leftover
+count includes helpers that made no commit. A forced folder removal outside
+the helper-folder area is not checked. A folder git cannot read counts as
+holding unsaved work. With no window reported, the size line shows no total.
+The review hold assumes the reviewer's dispatch was recorded first. The
+first-helper wait depends on the lead's last message being readable. A helper
+cannot save, compact and carry on; a job larger than its room must be split.
+The three largest hook scripts (`guard-agent.mjs`, `ledger.mjs`,
+`router.mjs`) hold rules added one fault at a time, and moving them into
+small modules is about a day of work, not done. Currency was not re-checked
+this round. The eval and grader runs cannot run on Windows without WSL.
+
+**A lesson about the method.** The score moved 87, 85, 84, 89 across four
+rounds while fixes landed: the scorer's own spread was as large as a round's
+gain. Live runs found the faults a user would meet; repeated scoresheets
+mostly re-measured. A run whose measure is a judge needs a written stop rule
+before it starts, which is why the run template now asks for one.
 
 ## v0.16.1 — a review that can stop the merge, 2026-09-21
 
@@ -196,93 +260,9 @@ Cortex itself is fixed from its own session (another repo, mid-fix in the same
 checkout): the user pastes it a short note to open the follow-up as a draft, review
 on Opus at push, ready only on PASS, and add the draft rule to its AGENTS.md.
 
-## v0.16.0 — from work dispatcher to engineering partner, 2026-09-21
-
-Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` with its steering
-notes. Five pull requests.
-
-- **PR 1. The card survives a compaction.** `handleSessionStart` used to set
-  `cardSent` on `compact` and send nothing, so a long session ran most of its
-  length with no card (the cited Cortex session: ten compactions, card seen
-  once). It now pushes `cardBody()` first on `compact` (not on `resume`,
-  which keeps the conversation; not when muted). Ask rules: the user is asked
-  about what the product should do, money, public surfaces, credentials, legal
-  exposure and destructive actions; an engineering fork is the lead's to settle
-  (plain.md, SKILL.md §1 and §8, RUN.md). The planner may say once, under
-  VERDICT, that the goal is the wrong target. plain.md is 4,679 bytes of 4,700.
-  New `AGENTS.md` (with `CLAUDE.md` = `@AGENTS.md`, the pairing
-  code.claude.com/docs/en/memory recommends, read 2026-09-21): what this plugin
-  is for, and the rule that its wording follows Anthropic's current prompting
-  guidance.
-- **PR 2. Roles and guard.** Every role description now names the moment to
-  reach for it ("Reach for this when…"), double-quoted because several carry
-  ": ". New `orch-advisor` (opus, high effort, 12 steps, Read/Grep/Glob only):
-  tests a direction against the goal and may answer CAN'T TELL. Priced at about
-  half a reviewer run ($3 / $1.50 / $0.50), because it reads a proposal and a
-  brief, not a diff. It is not an author role, so the guard needs no progress
-  file from it; Plan mode admits it. The advisor, researcher and reviewer each
-  say that what they read is data. The packet cap in `assets.test.mjs` went
-  from 6,500 to 7,000 bytes for the advisor packet (6,943 now).
-  Each role was listed twice (`orch-*` and `orchestrate:orch-*`): the plugin
-  provides them, and `install-agents.mjs` had also copied them into
-  `~/.claude/agents`. The installer now writes nothing when the plugin is
-  found (`--force` still copies), and this PC's loose copies were moved to
-  `~/.claude/orchestrate/agents-backup-2026-09-21/`. The plugin's coordinator
-  file carried `{{SKILL_DIR}}`, which only the installer substitutes, so its
-  script permission never matched; it now uses
-  `${CLAUDE_PLUGIN_ROOT}/skills/orchestrate`.
-- **PR 3. New card.** The old card was all delegation mechanics. The new one
-  opens with who owns what (the user: what the product does; the lead: how it
-  is built), checks proposals against the brief ("What this is for" in the
-  project's CLAUDE.md or AGENTS.md), and sends orch-advisor at a turning point
-  without waiting to be asked; the moments themselves live in the advisor's
-  description, which Claude Code keeps in view through a summary. It keeps
-  working while the advisor runs (Fable 5.1 prompting page: do not make the lead
-  stop and wait). "Never Write / never Read back" became what to do. The Codex
-  lane and installed-skills sentences left, because other hooks say them at the
-  moment they matter (`guard-agent.mjs` Codex lane, `pluginFitReport`). These
-  are ownership facts and a list of moments, things the lead cannot derive, so
-  they do not contradict the earlier cut of "how to think" instructions.
-  Measured 2,184 characters; `CARD_CAP` 1,550 → 2,200 (rounded up to the next
-  50, as 1,400 → 1,550 was). Cost: about 550 tokens once per session and once
-  per compaction. After a compaction a fact line now leads the card:
-  compaction count, helpers sent, and when orch-advisor was last sent, from
-  `state.dispatches`. It states facts only, and a test holds that.
-- **PR 4. Brief from the project's instruction file.** The brief is no longer a
-  file this plugin keeps; it is the `## What this is for` section of the
-  project's own `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md` or
-  `AGENTS.md` (`assets/BRIEF.md` is now a section to paste, not a file to
-  drop in). `context-check.mjs` learns the working project (`state.work.root`,
-  `.dir`) from the paths a session's own tool calls carry, string-prefixed
-  against the launch folder so it costs no disk read after the first; the
-  counts reset each compaction so a session that moves projects relearns one.
-  `router.mjs`'s `briefState`/`briefNote` walk from that folder up to the repo
-  root, nearest first, and print nothing when Claude Code is already showing
-  the section (a `CLAUDE.md`-family file at or above the session's own launch
-  folder, or a bare `AGENTS.md` one of those pulls in with `@AGENTS.md`);
-  otherwise the section's text once per epoch and the "missing" line once per
-  session. `resumeExcerpt`'s reader generalised to `sectionExcerpt(md,
-  sections, cap, {intro})`, `resumeExcerpt` now a one-line wrapper over it.
-  `resolveRun` was left as-is (no `state.work.root` fallback for binding): the
-  brief only ever reads a run's `root` field for its own fallback chain, and
-  widening what a hook can *write* through felt like a second, riskier change
-  better done with its own test once the read-only path has run for a while.
-  `ctx.run.root` holds the run's repo root (`readRun`'s existing `root` field,
-  unchanged by this PR).
-- **PR 5. Release.** Version 0.16.0 in `plugin.json` and `marketplace.json`;
-  the README counts eight roles, and says the installer skips its loose copies
-  when the plugin already provides them, since a second copy lists each role
-  twice. Evals 18-22 cover the direction check, the scope file outranking the
-  code just read, an engineering fork settled rather than asked, guidance after
-  a compaction, and a review bought before real spending merges. The `.skill`
-  bundles stay out of git; CI builds them. The router's compaction count
-  (`state.compactions`) is its own number; the context line's "compacted N×"
-  comes from reading the transcript in `lib/context.mjs`, so nothing is counted
-  twice. Known gap: `orch-coordinator` has no price row in REASONED. Guidance
-  pages checked 2026-09-21.
-
 ## Earlier releases
 
+- [v0.16.0 — from work dispatcher to engineering partner, 2026-09-21](docs/state/v0.16.0.md)
 - [v0.15.8 — a scoped model grant, an outbox, honest Codex state, and helper compactions made visible, 2026-09-18](docs/state/v0.15.8.md)
 - [v0.15.7 — the lead hears facts, not orders, 2026-09-14](docs/state/v0.15.7.md)
 - [v0.15.6 — tests pin behaviour, not numbers, 2026-09-14](docs/state/v0.15.6.md)
