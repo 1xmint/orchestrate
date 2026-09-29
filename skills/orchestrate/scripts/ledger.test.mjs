@@ -4,14 +4,36 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendCost, sumCosts, parseReturn, lintRunRow, lintLedger, evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE } from './ledger.mjs';
+import { spawnSync } from 'node:child_process';
+import {
+  appendCost, sumCosts, parseReturn, lintRunRow, lintLedger,
+  evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE,
+  dirtyPaths, dirtyDowngrade, dirtyNote, resolveHelperWorktree,
+} from './ledger.mjs';
 
 function tmpFile() {
   const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-'));
   return join(dir, 'costs.jsonl');
+}
+
+// A real temp git repo, one commit in, HOME pointed at a fresh temp folder so
+// nothing here ever touches a real ~/.claude.
+function tmpRepo() {
+  const home = mkdtempSync(join(tmpdir(), 'orch-ledger-home-'));
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-repo-'));
+  const git = (...args) => spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+  git('init', '-q');
+  git('config', 'user.email', 'x@x.com');
+  git('config', 'user.name', 'x');
+  writeFileSync(join(dir, 'a.txt'), 'one\n');
+  git('add', 'a.txt');
+  git('commit', '-q', '-m', 'first');
+  return dir;
 }
 
 test('the costs cap is deterministic: 600 appends never leave more than 500 rows', () => {
@@ -203,4 +225,87 @@ test('reviewDowngrade: a review inferred from the objective\'s own words names t
 test('reviewDowngrade: no reviewInferred word falls back to the plain NO_REVIEW_NOTE', () => {
   const r = reviewDowngrade('DONE', true, '9-1-0034', []);
   assert.equal(r.note, NO_REVIEW_NOTE);
+});
+
+test('dirtyDowngrade: DONE with a dirty worktree is downgraded to PARTIAL, note names the paths', () => {
+  const dir = tmpRepo();
+  writeFileSync(join(dir, 'untracked.txt'), 'x\n');
+  const paths = dirtyPaths(dir);
+  assert.deepEqual(paths, ['untracked.txt']);
+  const r = dirtyDowngrade('DONE', paths);
+  assert.equal(r.status, 'PARTIAL');
+  assert.equal(r.note, 'returned done with uncommitted changes in its worktree: untracked.txt; commit or copy them before the worktree is removed');
+});
+
+test('dirtyDowngrade: DONE with a clean worktree stays DONE, no note', () => {
+  const dir = tmpRepo();
+  const paths = dirtyPaths(dir);
+  assert.deepEqual(paths, []);
+  const r = dirtyDowngrade('DONE', paths);
+  assert.equal(r.status, 'DONE');
+  assert.equal(r.note, null);
+});
+
+test('dirtyDowngrade: DONE with no worktree resolved (no such dir, no run) is unchanged', () => {
+  const r = resolveHelperWorktree({ cwd: mkdtempSync(join(tmpdir(), 'orch-ledger-nowt-')), agent_id: 'nope-does-not-exist' }, { task: '9-1-0001' }, null);
+  assert.equal(r, null);
+  const d = dirtyDowngrade('DONE', r ? dirtyPaths(r) : []);
+  assert.equal(d.status, 'DONE');
+  assert.equal(d.note, null);
+});
+
+test('dirtyDowngrade: a PARTIAL return with a dirty worktree stays PARTIAL, note untouched', () => {
+  const dir = tmpRepo();
+  writeFileSync(join(dir, 'untracked.txt'), 'x\n');
+  const r = dirtyDowngrade('PARTIAL', dirtyPaths(dir));
+  assert.equal(r.status, 'PARTIAL');
+  assert.equal(r.note, null);
+});
+
+test('dirtyDowngrade never touches BLOCKED or a null status', () => {
+  assert.equal(dirtyDowngrade('BLOCKED', ['x.txt']).status, 'BLOCKED');
+  assert.equal(dirtyDowngrade('BLOCKED', ['x.txt']).note, null);
+  assert.equal(dirtyDowngrade(null, ['x.txt']).status, null);
+});
+
+test('dirtyPaths: a directory that is not a git repo answers no paths, never throws', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-notrepo-'));
+  assert.deepEqual(dirtyPaths(dir), []);
+});
+
+test('dirtyPaths: git missing from PATH answers no paths, never throws', () => {
+  const dir = tmpRepo();
+  writeFileSync(join(dir, 'untracked.txt'), 'x\n');
+  const realPath = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    assert.deepEqual(dirtyPaths(dir), []);
+  } finally {
+    process.env.PATH = realPath;
+  }
+});
+
+test('dirtyPaths: .orchestrator/ and the progress file are never counted as dirty', () => {
+  const dir = tmpRepo();
+  mkdirSync(join(dir, '.orchestrator'), { recursive: true });
+  writeFileSync(join(dir, '.orchestrator', 'run.md'), 'x\n');
+  writeFileSync(join(dir, 'progress.md'), 'x\n');
+  writeFileSync(join(dir, 'real.txt'), 'x\n');
+  const paths = dirtyPaths(dir, join(dir, 'progress.md'));
+  assert.deepEqual(paths, ['real.txt']);
+});
+
+test('dirtyNote: more than 8 paths is shown as up to 8, plus a count of the rest', () => {
+  const paths = Array.from({ length: 11 }, (_, i) => `f${i}.txt`);
+  const note = dirtyNote(paths);
+  assert.match(note, /^returned done with uncommitted changes in its worktree: f0\.txt, f1\.txt, f2\.txt, f3\.txt, f4\.txt, f5\.txt, f6\.txt, f7\.txt, \+3 more; commit or copy them before the worktree is removed$/);
+});
+
+test('resolveHelperWorktree: the harness-named worktree dir is used when it exists', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'orch-ledger-cwd-'));
+  const agentId = 'abc123';
+  const wt = join(cwd, '.claude', 'worktrees', `agent-${agentId}`);
+  mkdirSync(wt, { recursive: true });
+  const r = resolveHelperWorktree({ cwd, agent_id: agentId }, { task: '9-1-0001' }, null);
+  assert.equal(r, wt);
 });
