@@ -265,7 +265,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   assert.equal(s9.reading.tokens, cp + 15000);
 });
 
-test('the first reading after a compaction writes the plugin's own checkpoint and names it, so the lead is not asked', () => {
+test('the first reading after a compaction writes the checkpoint and names it, so the lead is not asked', () => {
   // The host appends the boundary record after the compaction hooks have run,
   // so this sample is the first moment the plugin can see it. It writes the
   // checkpoint here; the ask to the lead is only for when that write fails.
