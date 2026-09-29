@@ -2,7 +2,7 @@
 //   node --test skills/orchestrate/scripts/lib/goal.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readGoal, goalLine, goalDue, markShown, clipWords, SHOWN_CAP, NOTE_CAP, EVERY } from './goal.mjs';
@@ -80,16 +80,18 @@ test('an unreadable note falls through to the next source without throwing', () 
   assert.equal(g.source, 'first-request');
 });
 
-test('age counts prompts since the note was first seen, and restarts when it is rewritten', () => {
+test('a note is as old as its file, however new the session; only the first request is aged in prompts', () => {
   const d = project('One.\nTwo.\n');
-  const state = { prompts: 4 };
-  assert.equal(readGoal({ cwd: d, state }).age.n, 0);
-  state.prompts = 9;
-  const g = readGoal({ cwd: d, state });
-  assert.deepEqual(g.age, { unit: 'prompts', n: 5 });
-  assert.match(goalLine(g), /\(written 5 prompts ago\)$/);
-  // Without a session state the age is in minutes.
-  assert.equal(readGoal({ cwd: d }).age.unit, 'minutes');
+  const week = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+  utimesSync(join(d, '.orchestrator', 'goal.md'), week, week);
+  const g = readGoal({ cwd: d, state: { prompts: 0 } });
+  assert.equal(g.age.unit, 'minutes');
+  assert.match(goalLine(g), /\(written 7 days ago\)$/);
+  const hour = new Date(Date.now() - 3 * 3600 * 1000);
+  utimesSync(join(d, '.orchestrator', 'goal.md'), hour, hour);
+  assert.match(goalLine(readGoal({ cwd: d, state: { prompts: 40 } })), /\(written 3 hours ago\)$/);
+  const f = readGoal({ cwd: mkdtempSync(join(tmpdir(), 'goal-none-')), state: { prompts: 6, goal: 'fix the export' } });
+  assert.deepEqual(f.age, { unit: 'prompts', n: 6 });
 });
 
 test('clipWords ends at a word boundary with an ellipsis, and leaves short text alone', () => {

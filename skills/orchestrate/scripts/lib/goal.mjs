@@ -73,16 +73,16 @@ function readLedger(runMd) {
   return { one: goal, two: done, mtime: mtimeOf(runMd) };
 }
 
-// Age: in user prompts when the session's own count is at hand, else minutes.
-// The mark is kept on the session state, so a rewritten note (new mtime)
-// restarts the count from the next prompt that sees it.
+// Age: a note or a ledger is as old as its file, so a note written last week
+// says so however new the session is. Only the first request, which has no
+// file, is aged in user prompts.
 function ageOf(state, key, mtime) {
+  if (key !== 'first' && mtime) return { unit: 'minutes', n: Math.max(0, Math.round((Date.now() - mtime) / 60000)) };
   if (state && typeof state.prompts === 'number') {
     const now = state.prompts;
     if (!state.goalMark || state.goalMark.key !== key) state.goalMark = { key, prompts: key === 'first' ? 0 : now };
     return { unit: 'prompts', n: Math.max(0, now - state.goalMark.prompts) };
   }
-  if (mtime) return { unit: 'minutes', n: Math.max(0, Math.round((Date.now() - mtime) / 60000)) };
   return null;
 }
 
@@ -109,7 +109,14 @@ export function readGoal({ cwd, root, session, runMd, state } = {}) {
 
 function ageWords(age) {
   if (!age) return '';
-  if (age.unit === 'minutes') return age.n < 1 ? 'written just now' : `written ${age.n} min ago`;
+  if (age.unit === 'minutes') {
+    if (age.n < 1) return 'written just now';
+    if (age.n < 60) return `written ${age.n} min ago`;
+    const h = Math.round(age.n / 60);
+    if (h < 24) return `written ${h} hour${h === 1 ? '' : 's'} ago`;
+    const d = Math.round(h / 24);
+    return `written ${d} day${d === 1 ? '' : 's'} ago`;
+  }
   return age.n === 0 ? 'written this prompt' : `written ${age.n} prompt${age.n === 1 ? '' : 's'} ago`;
 }
 

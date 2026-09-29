@@ -781,7 +781,7 @@ test('the goal shows on the tenth prompt only, then ten later, and adds nothing 
   assert.deepEqual(shown, [10, 20]);
   const line = goalOf(outs[9]);
   assert.match(line, /Get the invoice export working for the accountant\. Done looks like: She can open the file in Excel\./);
-  assert.match(line, /\(written (\d+ prompts? ago|this prompt)\)$/);
+  assert.match(line, /\(written (just now|\d+ min ago)\)$/);
   assert.ok(Buffer.byteLength(line) <= 350);
   assert.equal(outs[10], '', 'a prompt where nothing is due adds 0 bytes');
 });
