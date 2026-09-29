@@ -175,6 +175,14 @@ test('parseReturn reads REVIEW OF: as the reviewed task id, its first token', ()
   assert.equal(r.task, '9-1-0099');
 });
 
+test('parseReturn reads a reviewer five-line return: OUTCOME gives status and verdict, PROOF counts as evidence', () => {
+  const r = parseReturn('OUTCOME: PASS the change holds.\nPROOF: ran the tests, 12 pass.\nNOT CHECKED: none.\nNEEDS A DECISION: nothing\nFULL REPORT: x');
+  assert.equal(r.status, 'DONE');
+  assert.equal(r.verdict, 'PASS');
+  assert.equal(r.evidence, true);
+  assert.equal(parseReturn('OUTCOME: FAIL broken\nPROOF: y').verdict, 'FAIL');
+});
+
 test('parseReturn: no REVIEW OF line reads as null', () => {
   assert.equal(parseReturn('TASK: 9-1-0001\nSTATUS: DONE\n').reviewOf, null);
 });

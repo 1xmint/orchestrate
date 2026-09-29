@@ -98,7 +98,7 @@ function freeFormOpen(returned, dispatches) {
       : (r.agentId ? ds.find(x => x && x.agentId === r.agentId) : null);
     if (!d || !d.toolUseId || d.task || !d.review || isReviewerRow(d)) continue;
     if (ds.some(x => x && x.reviewOf === d.toolUseId)) continue;
-    out.push({ id: d.toolUseId, at: Date.parse(r.at) });
+    out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at) });
   }
   return out;
 }
@@ -116,7 +116,7 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   const open = freeFormOpen(returned, dispatches);
   for (const f of open) {
     if (already.has(f.id) || skipSaid) continue;
-    const later = open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && !d.reviewOf && /reviewer/i.test(String(d.agent || '')) && Date.parse(d.at) > f.at);
+    const later = open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && isReviewerRow(d) && !(d.reviewOf && dispatches.some(x => x && x.toolUseId === d.reviewOf)) && Date.parse(d.at) > (Number.isFinite(f.sentAt) ? f.sentAt : f.at));
     if (later) continue;
     return { block: true, task: f.id, freeForm: true, blockedFor: [...already, f.id] };
   }

@@ -111,6 +111,17 @@ test('an inferred review adds a plain-language additionalContext note naming the
   assert.match(ctx, /dispatch orch-reviewer on opus with REVIEW OF: 9-1-0099/);
 });
 
+test('a reviewer dispatch is never itself flagged for review, whatever its brief mentions', () => {
+  const home = sandboxHome();
+  const sid = 's-reviewer';
+  const { json } = dispatch(home, sid, { subagent_type: 'orch-reviewer', model: 'opus', prompt: 'TASK: 9-1-0100\nREVIEW OF: 9-1-0099\nOBJECTIVE\nCheck the Stripe payment capture\nCONTEXT\nmore' });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.doesNotMatch(ctx, /will wait for an independent review/);
+  const d = lastDispatch(home, sid);
+  assert.equal(d.review, undefined);
+  assert.equal(d.reviewInferred, undefined);
+});
+
 test('an explicit REVIEW: yes dispatch gets no duplicate inferred-review sentence', () => {
   const home = sandboxHome();
   const sid = 's-no-dup';

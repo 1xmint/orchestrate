@@ -597,7 +597,7 @@ function main() {
     const fh = firstHelperNote(input.transcript_path);
     if (fh) tag = `${tag ? `${tag}; ` : ''}${fh}`;
   }
-  const rw = inferredReviewWord(ti.prompt);
+  const rw = /reviewer/i.test(String(ti.subagent_type || '')) ? null : inferredReviewWord(ti.prompt);
   if (rw && !/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || ''))) {
     const task = taskIdIn(ti.prompt) || 'this task';
     tag = `${tag ? `${tag}; ` : ''}this task will wait for an independent review because its objective mentions ${rw}; to send one, dispatch orch-reviewer on opus with REVIEW OF: ${task}`;
@@ -655,7 +655,8 @@ export function firstHelperNote(transcriptPath) {
 // One line per dispatch in the session state, for the ledger. Never throws; a
 // missing session file just means no router ran here.
 function recordDispatch(input, ti) {
-  const reviewWord = inferredReviewWord(ti.prompt);
+  const isReviewer = /reviewer/i.test(String(ti.subagent_type || ''));
+  const reviewWord = isReviewer ? null : inferredReviewWord(ti.prompt);
   withSession(input, state => {
     state.dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
     if (state.dispatches.length > 200) state.dispatches = state.dispatches.slice(-200);
@@ -685,7 +686,7 @@ function recordDispatch(input, ti) {
       // same gate is also reached without an explicit REVIEW: yes line, when
       // the packet's own OBJECTIVE mentions one of REVIEW_WORDS (reviewWord
       // below) — reviewInferred records which word tripped it.
-      ...(/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || '')) ? { review: true } : {}),
+      ...(!isReviewer && /^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || '')) ? { review: true } : {}),
       ...(reviewWord ? { review: true, reviewInferred: reviewWord } : {}),
       // A reviewer's own packet names the task it reviews under "REVIEW OF:"
       // (packet.md). Recorded on the reviewer's own dispatch row so

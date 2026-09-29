@@ -172,6 +172,19 @@ test('reviewHoldDecision is quiet once a reviewer dispatch names the task under 
   assert.equal(d.block, false);
 });
 
+test('reviewHoldDecision is quiet while a reviewer is running, even one that named a wrong REVIEW OF id', () => {
+  const d = reviewHoldDecision({
+    returned: [{ status: 'DONE', toolUseId: 'tu1', at: '2026-01-01T00:00:10Z' }],
+    dispatches: [
+      { toolUseId: 'tu1', agent: 'orch-implementer', review: true, at: '2026-01-01T00:00:00Z' },
+      { toolUseId: 'tu2', agent: 'orch-reviewer', reviewOf: 'task', at: '2026-01-01T00:00:05Z' },
+    ],
+    lastMessage: '',
+    blockedFor: [],
+  });
+  assert.equal(d.block, false);
+});
+
 test('reviewHoldDecision is quiet when the lead\'s own closing message explains the review was skipped', () => {
   const d = reviewHoldDecision({
     returned: [{ task: '9-9-0001', reviewGated: true }],
