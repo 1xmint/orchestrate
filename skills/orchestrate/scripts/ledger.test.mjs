@@ -12,7 +12,21 @@ import {
   appendCost, sumCosts, parseReturn, lintRunRow, lintLedger,
   evidenceDowngrade, NO_EVIDENCE_NOTE, reviewDowngrade, NO_REVIEW_NOTE,
   dirtyPaths, dirtyDowngrade, dirtyNote, resolveHelperWorktree, handbackText, reviewGated,
+  recordBody, LONG_HANDBACK_BYTES,
 } from './ledger.mjs';
+
+test('recordBody keeps a short hand-back whole and cuts a long one to five lines and the byte count', () => {
+  const short = 'OUTCOME: DONE it works.\nPROOF: tests pass.\n';
+  assert.deepEqual(recordBody(short), { body: short, bytes: Buffer.byteLength(short), long: false });
+  const lines = ['OUTCOME: DONE x', 'PROOF: y', 'NOT CHECKED: z', 'NEEDS A DECISION: nothing', 'FULL REPORT: p'];
+  const long = lines.join('\n') + '\n' + 'STATUS: DONE\nEVIDENCE: ' + 'e'.repeat(LONG_HANDBACK_BYTES);
+  const r = recordBody(long);
+  assert.equal(r.long, true);
+  assert.equal(r.bytes, Buffer.byteLength(long));
+  assert.ok(r.body.startsWith(lines.join('\n') + '\n'));
+  assert.ok(!r.body.includes('EVIDENCE'));
+  assert.ok(r.body.includes(`${r.bytes} bytes against 600`));
+});
 
 function tmpFile() {
   const dir = mkdtempSync(join(tmpdir(), 'orch-ledger-'));
@@ -370,7 +384,8 @@ test('the filed return is the hand-back report, not the 27-byte stub, and the ro
   const tp = writeTranscript([plainLine('working'), handbackLine(report), plainLine(STUB)]);
   const { row, filed, res } = runHook(hookInput({ agent_transcript_path: tp, last_assistant_message: STUB }));
   assert.equal(res.status, 0);
-  assert.ok(filed.includes(report), 'the filed file holds the full hand-back text');
+  assert.ok(filed.includes('TASK: 9-1-0001') && !filed.includes(report), 'a long hand-back is filed as five lines');
+  assert.ok(filed.includes(`${Buffer.byteLength(report)} bytes against 600`), 'with its size');
   assert.equal(row.task, '9-1-0001');
   assert.equal(row.status, 'PARTIAL');
   assert.equal(row.evidence, true);

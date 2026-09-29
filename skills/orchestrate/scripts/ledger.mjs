@@ -229,6 +229,16 @@ export const NO_REVIEW_NOTE = 'done, but it was marked for an independent review
 // filing, it only lets the *next* DONE return through.
 // A reviewer's own return is never held for review: it IS the review. Only a
 // return that names no REVIEW OF can be gated by its dispatch's flag.
+export const LONG_HANDBACK_BYTES = 1200;
+// A hand-back over the limit is filed as its first five lines and its size; the
+// long form belongs in the helper's own report file.
+export function recordBody(text) {
+  const bytes = Buffer.byteLength(text);
+  if (bytes <= LONG_HANDBACK_BYTES) return { body: text, bytes, long: false };
+  const five = text.split('\n').filter(l => l.trim()).slice(0, 5).join('\n');
+  return { body: `${five}\n(the hand-back was ${bytes} bytes against 600)\n`, bytes, long: true };
+}
+
 export function reviewGated(dispatch, ret) {
   return Boolean(dispatch && dispatch.review) && !(ret && ret.reviewOf);
 }
@@ -630,6 +640,7 @@ function main() {
   if (alreadyHandled(input, agent, text)) return;
 
   const r = parseReturn(text);
+  const shortened = recordBody(text);
   if (r.suggest) { try { addSuggestion(r.suggest, { source: r.task || r.run || null }); } catch {} }
   const usage = sumUsage(input.agent_transcript_path);
   // Compared against the cap by segment (turns since the helper was last
@@ -677,7 +688,7 @@ function main() {
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
     const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${dirtyNoteText}${compactNote} -->\n\n`;
-    writeFileSync(file, header + text + (text.endsWith('\n') ? '' : '\n'));
+    writeFileSync(file, header + shortened.body + (shortened.body.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
   appendIndex(dir, {
@@ -714,7 +725,7 @@ function main() {
       // yes or an inferred word) and none has come back yet — turn-check.mjs
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(shortened.long ? { longBytes: shortened.bytes } : {}), ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
       saveSession(state);
     }
   } catch {}

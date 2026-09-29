@@ -134,6 +134,18 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   return { block: false, task: null, blockedFor: [...already] };
 }
 
+// A hand-back over the size the ledger keeps whole (ledger.mjs marks the return
+// with longBytes): one line of fact per helper, never repeated.
+export function longHandBackFact({ returned, noted }) {
+  const seen = new Set(Array.isArray(noted) ? noted : []);
+  for (const r of Array.isArray(returned) ? returned : []) {
+    const id = r && r.longBytes ? String(r.agentId || r.toolUseId || r.at || '') : '';
+    if (!id || seen.has(id)) continue;
+    return { id, text: `a helper's hand-back was ${r.longBytes} bytes against 600; ask for five lines.` };
+  }
+  return null;
+}
+
 // Work the lead built alone. The hold above only reads a helper's return, so a
 // lead that edits sign-in, money or stored personal data itself and finishes
 // never meets it. This reads the lead's own transcript (helpers keep theirs
@@ -321,6 +333,14 @@ function checkHeartbeat(input) {
     return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
+
+  const lf = longHandBackFact({ returned: state.returned, noted: rec.longNotedFor });
+  if (lf) {
+    updated.longNotedFor = [...(Array.isArray(rec.longNotedFor) ? rec.longNotedFor : []), lf.id].slice(-50);
+    store[key] = updated;
+    try { writeJsonAtomic(path, store); } catch {}
+    return emitBlock(`orchestrate: ${lf.text}`);
+  }
 
   // Risky work the lead did itself and no reviewer has seen: one fact, once per
   // set of edits. Quiet, and no file read beyond the transcript tail, otherwise.

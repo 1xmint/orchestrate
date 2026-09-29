@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches, mergedBranches } from './turn-check.mjs';
+import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, longHandBackFact, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches, mergedBranches } from './turn-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'turn-check.mjs');
@@ -572,4 +572,24 @@ test('the hook tells the lead once, in one plain line, that a review failed', ()
   assert.match(r.stdout, /independent look found a problem/);
   const r2 = run({ session_id: 'sess-failed-review', cwd: home, last_assistant_message: 'Done.' }, home);
   assert.doesNotMatch(r2.stdout, /independent look found a problem/);
+});
+
+// ---- a long hand-back is named to the lead, once ------------------------------
+
+test('longHandBackFact names the size once per helper', () => {
+  const returned = [{ agentId: 'ag-1', longBytes: 6000 }, { agentId: 'ag-2', status: 'DONE' }];
+  const f = longHandBackFact({ returned, noted: [] });
+  assert.match(f.text, /6000 bytes against 600; ask for five lines/);
+  assert.equal(longHandBackFact({ returned, noted: [f.id] }), null);
+});
+
+test('the hook says a hand-back was long, once', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'sess-long.json'), JSON.stringify({ v: 1, session_id: 'sess-long', returned: [{ agentId: 'ag-1', longBytes: 6000 }], dispatches: [] }));
+  const a = run({ session_id: 'sess-long', cwd: home, last_assistant_message: 'Done.' }, home);
+  assert.match(a.stdout, /6000 bytes against 600/);
+  const b = run({ session_id: 'sess-long', cwd: home, last_assistant_message: 'Done.' }, home);
+  assert.doesNotMatch(b.stdout, /against 600/);
 });
