@@ -41,7 +41,6 @@ import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport } from 
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR, limitsFromTail, scanLimits } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
-import { UNCAPPED_GATE_ROLE } from './lib/workflow.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
 import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
@@ -332,11 +331,7 @@ function handlePrompt(input) {
   // the lead can fix an install.
   const sendFullCardExtras = () => {
     if (!input.agent_id && ctx.agentsExpected && ctx.agents < ctx.agentsExpected) {
-      const missing = Array.isArray(ctx.agentsMissing) ? ctx.agentsMissing : [];
-      const guardNote = missing.includes(UNCAPPED_GATE_ROLE)
-        ? 'so the guard against uncapped helpers is off'
-        : 'the guard against uncapped helpers is on, so the missing roles cannot be sent until the install is finished';
-      out.push(`Only ${ctx.agents} of the plugin's ${ctx.agentsExpected} helper roles are installed, ${guardNote}; run \`claude plugin install orchestrate@orchestrate\` (or \`node scripts/install.mjs --with-router --with-hook\`) to complete it.`);
+      out.push(`Only ${ctx.agents} of the plugin's ${ctx.agentsExpected} helper roles are installed; type \`claude plugin install orchestrate@orchestrate\` to finish.`);
     }
     if (ctx.run) {
       const ex = resumeExcerpt(ctx.run.runMd);
@@ -389,8 +384,20 @@ function handlePrompt(input) {
   }
 
   // Said once, after the state line rather than before it: a question, not a
-  // notice — nothing is written until the user types the command back.
-  if (offer.offer) out.push(autocompactTip(offer.value));
+  // notice — nothing is written until the user types the command back. The
+  // offer is decided and marked spent right here, on the first substantive
+  // prompt, but its screen time waits for the second one — the session's
+  // opening prompt already carries the card and (often) an install or brief
+  // note, and the first payload in a fresh home has a byte budget of its own.
+  if (substantive) {
+    if (offer.offer) {
+      if (freshSession) state.autocompactTipPending = offer.value;
+      else out.push(autocompactTip(offer.value));
+    } else if (state.autocompactTipPending != null) {
+      out.push(autocompactTip(state.autocompactTipPending));
+      state.autocompactTipPending = null;
+    }
+  }
 
   if (substantive) {
     const brief = briefNote(ctx, state);

@@ -166,7 +166,7 @@ export function briefNote(ctx, state, { force = false, store = BRIEF_MISSING_STO
     state.briefMissingShown = true;
     if (alreadyToldAcrossSessions(store, b.root)) return '';
     rememberToldAcrossSessions(store, b.root);
-    return `[orchestrate · brief] This project has no "What this is for" section in its CLAUDE.md or AGENTS.md. Add one (what it is for, who it serves, which documents decide) so the goal survives summaries; the plugin's assets folder has a BRIEF.md template.`;
+    return `[orchestrate · brief] This project has no "What this is for" section; add one (what it is for, who it serves, which documents decide) to CLAUDE.md or AGENTS.md.`;
   }
   if (b.kind === 'kept') { state.briefSentFor = null; return ''; }
   if (!force && state.briefSentFor === b.file) return '';
