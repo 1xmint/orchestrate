@@ -279,3 +279,19 @@ test('first helper: with no transcript at all the plain fact is sent, and the di
   assert.equal(json.hookSpecificOutput.permissionDecision, undefined);
   assert.match(json.hookSpecificOutput.additionalContext, /first helper this session: the user is owed three plain lines first/);
 });
+
+// ---- a brief with no task id and no headings (a real run: a password check) ----
+
+const NO_HEADINGS_BRIEF = `Repo: a small club server (clean).\n\nFull current contents:\n\n\`\`\`js\n${'const members = [];\n'.repeat(40)}\`\`\`\n\nTask: add a password check so only people who know the password can see /members.\n\nReport back what you changed.`;
+
+test('a brief with no task id and no headings still gets the review note and is recorded as risky work', () => {
+  const home = sandboxHome();
+  const sid = 's-no-headings';
+  const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: NO_HEADINGS_BRIEF });
+  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
+  assert.match(ctx, /will wait for an independent review because its objective mentions password/);
+  const d = lastDispatch(home, sid);
+  assert.equal(d.review, true);
+  assert.equal(d.reviewInferred, 'password');
+  assert.equal(d.task, null);
+});

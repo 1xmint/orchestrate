@@ -23,8 +23,8 @@ export const REVIEW_WORDS = [
 // The OBJECTIVE section of a packet: everything between an OBJECTIVE heading
 // (its own line, an optional trailing colon) and the next CONTEXT/SCOPE/DONE
 // WHEN heading, or to the end of the prompt when none of those follow. A
-// packet with no OBJECTIVE heading at all is judged on its first 600
-// characters instead, since that is usually where the ask is stated.
+// packet with no OBJECTIVE heading at all is judged on its whole text outside
+// fenced code instead (see FENCED below).
 // A packet's WHERE, FILES and RULES lines name paths, globs and constraints,
 // not the work itself — "run dir <absolute path in the main checkout>" is
 // the WHERE field's own template text, and a packet with no OBJECTIVE
@@ -34,11 +34,17 @@ export const REVIEW_WORDS = [
 // own objective.
 const FIELD_LINE = /^[ \t]*(WHERE|FILES|RULES)[ \t]*:.*$/gim;
 
+// A brief with no OBJECTIVE heading is read whole, minus fenced code: a brief
+// that pastes a file first puts the ask well past any fixed cut (a real
+// password-check brief did), while a word that only sits inside pasted code
+// says nothing about the work.
+const FENCED = /^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:^[ \t]*\1[ \t]*$|(?![\s\S]))/gm;
+
 export function objectiveSection(prompt) {
   const text = String(prompt || '');
   const start = /^[ \t]*OBJECTIVE[ \t]*:?[ \t]*$/im.exec(text);
   const section = (() => {
-    if (!start) return text.slice(0, 600);
+    if (!start) return text.replace(FENCED, '');
     const rest = text.slice(start.index + start[0].length);
     const end = /^[ \t]*(CONTEXT|SCOPE|DONE WHEN)[ \t]*:?[ \t]*$/im.exec(rest);
     return end ? rest.slice(0, end.index) : rest;
