@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
+import { plainRole, missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
 
 test('missingFact says what a building brief lacks as one line, in a fixed order', () => {
   assert.equal(missingFact('orch-implementer', 'TASK: 1\nfind it', false), 'brief lacks: what it is for, a check it is done, a PROGRESS path');
@@ -102,13 +102,22 @@ test('an explicit REVIEW: yes still sets review:true with no reviewInferred word
   assert.equal(d.reviewInferred, undefined);
 });
 
+test('a dispatch note names the helper by what it does, never by role id', () => {
+  const home = sandboxHome();
+  const { stdout } = dispatch(home, 's-plain', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-1-0100\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
+  assert.match(stdout, /helper size: a builder on sonnet/);
+  assert.doesNotMatch(stdout, /orch-(implementer|reviewer)/);
+  assert.equal(plainRole('orch-debugger'), 'a fault-finder');
+  assert.equal(plainRole('orchestrate:orch-planner'), 'a planner');
+});
+
 test('an inferred review adds a plain-language additionalContext note naming the word and how to dispatch a reviewer', () => {
   const home = sandboxHome();
   const sid = 's-note';
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-1-0099\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
   assert.match(ctx, /will wait for an independent review because its objective mentions payment/);
-  assert.match(ctx, /dispatch orch-reviewer on opus with REVIEW OF: 9-1-0099/);
+  assert.match(ctx, /send a reviewer on opus with REVIEW OF: 9-1-0099/);
 });
 
 test('a reviewer dispatch is never itself flagged for review, whatever its brief mentions', () => {
@@ -196,7 +205,7 @@ test('the first orch-implementer dispatch of a session bound to an open run ledg
 test('on a subscription the first implementer dispatch is told its size against a solo build, with no dollar sign', () => {
   const { json } = dispatch(sandboxHome('pro'), 's-pair-sub', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /helper size: orch-implementer on sonnet, about the usual size for this kind of helper; a solo build in this chat is about 1\/2\.6 of it/);
+  assert.match(ctx, /helper size: a builder on sonnet, about the usual size for this kind of helper; a solo build in this chat is about 1\/2\.6 of it/);
   assert.doesNotMatch(ctx, /\$/);
 });
 
