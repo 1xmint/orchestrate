@@ -297,7 +297,7 @@ test('every role file tells a helper to hand back the five lines only, and why',
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const text = readFileSync(join(AGENTS, f), 'utf8');
     assert.ok(text.includes('Hand back only five lines, one short sentence each, under 600 B in all, nothing after them:'), `${f} limits the hand-back`);
-    assert.ok(text.includes('The lead reads every byte, so the long report stays in that file.'), `${f} gives the reason`);
+    assert.ok(text.includes('The lead reads every byte, so the long report stays in that file'), `${f} gives the reason`);
   }
   const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');
   assert.match(packet, /five lines only, under 600 B \(the lead reads every byte\)/, 'packet.md matches');
@@ -664,4 +664,11 @@ test('no role file or packet asks for a STATUS or EVIDENCE block in the hand-bac
   const ret = packet.slice(packet.indexOf('RETURN: five lines'), packet.indexOf('## Advisor packet'));
   assert.ok(ret.startsWith('RETURN: five lines'), 'reviewer packet RETURN asks for the five lines');
   assert.ok(/The file holds/.test(ret.replace(/\s+/g, ' ')), 'reviewer packet puts the schema in the file');
+});
+
+test('every role file keeps the five lines even when the brief asks for pasted contents', () => {
+  for (const f of readdirSync(AGENTS).filter(x => x.endsWith('.md'))) {
+    const text = readFileSync(join(AGENTS, f), 'utf8');
+    assert.match(text, /even if the brief asks for pasted contents or output; FULL REPORT names it\./, `${f} lacks the file-not-return sentence`);
+  }
 });
