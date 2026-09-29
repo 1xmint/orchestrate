@@ -52,6 +52,8 @@ PROGRESS file named in the packet, updated each time one changes: a usage
 limit can stop you at any step. An `[orchestrate · size]` notice is an
 instruction to follow at once.
 
+Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+
 Return in the packet's schema — TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED
 — with two extra lines: ROOT CAUSE in one sentence, and RULED OUT listing what
 you eliminated. If two hypotheses in a row are refuted and a third is not

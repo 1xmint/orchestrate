@@ -271,6 +271,36 @@ test('assets/packet.md carries every field a dispatch needs', () => {
   assert.ok(packet.length < 7200, `packet.md is ${packet.length} bytes; it exists to be small`);
 });
 
+// The lead reads the top of a return first, so every role opens with the same
+// five labels, in this order; the parsed labels (ledger.mjs) stay below them.
+const TOP = ['OUTCOME:', 'PROOF:', 'NOT CHECKED:', 'NEEDS A DECISION:', 'FULL REPORT:'];
+const inOrder = (text, labels) => {
+  let at = -1;
+  for (const l of labels) {
+    const i = text.indexOf(l, at + 1);
+    if (i <= at) return false;
+    at = i;
+  }
+  return true;
+};
+
+test('packet.md carries a FOR line and the five-line top, ahead of the parsed labels', () => {
+  const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');
+  assert.match(packet, /^FOR: /m, 'the packet has a FOR field');
+  assert.ok(inOrder(packet, [...TOP, 'TASK: <the id above', 'STATUS:', 'EVIDENCE:', 'NOT VERIFIED:']),
+    'five labels, then the parsed ones, in order');
+  for (const l of ['TASK:', 'STATUS:', 'EVIDENCE:', 'NOT VERIFIED:']) assert.ok(packet.includes(l), l);
+  assert.ok(packet.length < 7200, 'the packet cap still holds');
+});
+
+test('every role file opens its return with the same five labels, in order', () => {
+  for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
+    const text = readFileSync(join(AGENTS, f), 'utf8');
+    assert.ok(inOrder(text, TOP), `${f} has ${TOP.join(' ')} in order`);
+    assert.ok(text.includes('NEEDS A DECISION: what the user or lead must do, or "nothing"'), `${f} words it the same`);
+  }
+});
+
 // turn-check.mjs's idle nudge reads `run.ready`, computed by readyTasks() from
 // the run's own task table. This belongs here rather than hooks.test.mjs,
 // which covers the hook's Stop-event plumbing, not the table parsing it reads.

@@ -28,6 +28,8 @@ dependency; a silent scope widening; an error path that swallows; anything a
 user could lose data through; a claim in EVIDENCE that the diff does not
 support.
 
+Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+
 Return in the packet's schema, the same one every role uses, so the run's own
 checks can read it:
 

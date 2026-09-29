@@ -39,6 +39,8 @@ cannot (a blocked page, structured platform data), use it — unless its
 description says it needs its own API key or credits and the packet does not
 say the user allowed that.
 
+Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+
 Append each finding to the PROGRESS file named in the packet the moment you
 have it — dated, quoted, sourced — not at the end. A usage limit or a step cap
 can stop you at any point, and whatever is in that file is what survives; the

@@ -20,6 +20,20 @@ child, and only the bounded roles the guard allows. Other role agents cannot
 dispatch. Built-in `general-purpose` has no turn cap, so while the role
 agents are installed the guard sends you to the capped role instead.
 
+## The FOR line and the top of a return
+
+Every author packet carries `FOR:`, what the whole job is for and what done
+looks like to the user, in one or two lines of your own plain words. It comes
+from the run's goal when there is one; otherwise from the user's request as you
+would say it. A helper that knows only its own file cannot tell the user what
+its work meant.
+
+Every return opens with five lines: OUTCOME, PROOF, NOT CHECKED, NEEDS A
+DECISION, FULL REPORT. Read them first; tell the user OUTCOME in terms of their
+goal. Anything a helper did outside its allowed files, or any file it wrote
+outside its own folder, belongs under NEEDS A DECISION, never at the bottom.
+The parsed labels (TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED) follow.
+
 ## Codex workers
 
 Codex for workers until it runs out; Claude for judgment and for what Codex
