@@ -31,10 +31,23 @@ export function resolveAutocompactWindow(policy, { env = {}, settingsPath = null
   return policy.context.autocompactDefault;
 }
 
-export function thresholds(reading, policy = loadPolicy()) {
+// `ctx` (env, settingsPath) is only read when the reading itself carries no
+// capacity: a known reading always wins, since it is the real transcript's
+// own window. Without one, the autocompact window this host will actually
+// hit (resolveAutocompactWindow) stands in for it, so a narrower window than
+// the policy default (say CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000) still gets
+// a checkpoint/compact ask before autocompact fires, not after.
+export function thresholds(reading, policy = loadPolicy(), ctx = {}) {
   const c = policy.context;
   let compactAt = c.compactAt;
-  if (reading && reading.capacity) compactAt = Math.min(compactAt, Math.floor(reading.capacity * c.windowFraction));
+  if (reading && reading.capacity) {
+    compactAt = Math.min(compactAt, Math.floor(reading.capacity * c.windowFraction));
+  } else {
+    const window = resolveAutocompactWindow(policy, ctx);
+    if (window !== 'off' && Number.isFinite(window)) {
+      compactAt = Math.min(compactAt, Math.floor(window * c.windowFraction));
+    }
+  }
   const checkpointAt = Math.min(c.checkpointAt, Math.floor(compactAt * 0.8));
   return { checkpointAt, compactAt };
 }
@@ -132,13 +145,13 @@ export function hasCheckpoint(session, reading, opts = {}) {
 
 // What to do about the current size. The key changes only when the advice
 // does, and it carries the compaction epoch, so a compaction resets it.
-export function adviseContext(reading, policy = loadPolicy()) {
+export function adviseContext(reading, policy = loadPolicy(), ctx = {}) {
   const epoch = contextEpoch(reading);
   const key = action => `${epoch}|${action}`;
   if (!reading || reading.state === 'unknown' || reading.tokens == null) {
     return { action: 'unknown', key: key('unknown'), why: reading && reading.stale ? 'the last measurement is stale' : 'no model response has reported usage yet' };
   }
-  const { checkpointAt, compactAt } = thresholds(reading, policy);
+  const { checkpointAt, compactAt } = thresholds(reading, policy, ctx);
   const k = n => `${Math.round(n / 1000)}k`;
   if (reading.state === 'provisional') {
     if (reading.tokens >= compactAt) return { action: 'investigate', key: key('investigate'), why: `the compaction summary alone is reported at ${k(reading.tokens)}` };
@@ -208,7 +221,7 @@ function reportedWindow(reading, policy, ctx = {}) {
 // or autocompact (`resolveAutocompactWindow`), whichever is lower and
 // not yet passed. Null once both are behind the current size.
 function nextEvent(reading, policy, ctx = {}) {
-  const { compactAt } = thresholds(reading, policy);
+  const { compactAt } = thresholds(reading, policy, ctx);
   const auto = resolveAutocompactWindow(policy, ctx);
   const candidates = [{ label: 'compact', at: compactAt }];
   if (auto !== 'off') candidates.push({ label: 'autocompact', at: auto });
@@ -235,6 +248,31 @@ function factLine(reading, policy, ctx = {}, cp = undefined) {
   return `[orchestrate · context] ${parts.join(' · ')}`;
 }
 
+// Whether the "just summarised" ask is due: a compaction this store has not
+// asked about yet (`ctx.askedAfterCompactions`, kept by lib/context-store.mjs,
+// compared against `reading.compactions`), with nothing else already saying
+// something for this reading (`action === 'none'`) and no checkpoint yet for
+// the epoch. Keyed on the compaction count rather than
+// `responsesSinceCompaction === 0` so it fires on the first reading of any
+// state (provisional or measured) after the boundary, not only a sample that
+// happens to land before the first response — a sample that lands after does
+// not miss it, and a second compaction the lead never sampled right after
+// still gets its own ask. Exported so lib/context-store.mjs can record the
+// count it asked about without re-deriving this from the notice text.
+export function postCompactionAskDue(reading, advice, ctx = {}) {
+  if (!reading || !advice || advice.action !== 'none' || !reading.compaction) return false;
+  const asked = Number(ctx.askedAfterCompactions) || 0;
+  // A reading straight from lib/context-scan.mjs's readContext (no store
+  // history behind it, e.g. context.mjs's on-demand report, or a test that
+  // builds a reading directly) carries no `compactions` count at all; a
+  // compaction object present is itself the fact that one has happened, so
+  // that counts as compaction 1, the same as the old behaviour it replaces.
+  const compactions = Number.isFinite(reading.compactions) ? reading.compactions : 1;
+  if (!(compactions > asked)) return false;
+  const { session = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null } = ctx;
+  return !newestCheckpoint(session, reading, { dir, runMd, permissionMode });
+}
+
 // The short notice for an advice change; empty when there is nothing to say.
 // Never recommend a switch from memory or an old number: only this notice,
 // measured from the last response, says the conversation is full. `ctx` carries
@@ -245,17 +283,11 @@ export function contextNotice(reading, advice, ctx = {}) {
   const policy = ctx.policy || loadPolicy();
   // Right after a compaction, before anything else: a PreCompact block reaches
   // nobody under autocompact, so this is the one place the lead hears that the
-  // conversation was just summarised. Fires once (the once-per-epoch key in
-  // lib/context-store.mjs does not change again until either a response is
-  // measured or the size itself earns a notice) and only while nothing else
-  // is already saying something and no checkpoint exists for this epoch.
-  if (advice.action === 'none' && reading.compaction && reading.responsesSinceCompaction === 0) {
-    const { session = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null } = ctx;
-    const cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
-    if (!cp) {
-      const line = factLine(reading, policy, ctx, cp);
-      return `${line} · the conversation was just summarised; before anything else, write the checkpoint now (goal, decisions, files changed, verification, next action) to ${shortPath(checkpointPath(session, reading, dir), ctx.home)}`;
-    }
+  // conversation was just summarised.
+  if (postCompactionAskDue(reading, advice, ctx)) {
+    const { session = null, dir = CONTEXT_DIR } = ctx;
+    const line = factLine(reading, policy, ctx, null);
+    return `${line} · the conversation was just summarised; before anything else, write the checkpoint now (goal, decisions, files changed, verification, next action) to ${shortPath(checkpointPath(session, reading, dir), ctx.home)}`;
   }
   switch (advice.action) {
     case 'checkpoint':

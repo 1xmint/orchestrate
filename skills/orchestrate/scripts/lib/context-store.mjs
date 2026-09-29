@@ -17,7 +17,7 @@ import {
   CONTEXT_V, CONTEXT_DIR, SCAN_MAX, idPart,
   scanSlice, stepEditCounter, toReading, readContext, statusCapacity, readRange,
 } from './context-scan.mjs';
-import { contextEpoch, adviseContext, contextNotice, contextTick } from './context-advice.mjs';
+import { contextEpoch, adviseContext, contextNotice, contextTick, postCompactionAskDue } from './context-advice.mjs';
 
 export function storePath(session, agent = null, dir = CONTEXT_DIR) {
   return join(dir, idPart(session || 'nosession'), `${agent ? `agent-${idPart(agent)}` : 'lead'}.json`);
@@ -109,11 +109,17 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
     ? Math.max(0, reading.tokens - prevTokens)
     : 0;
 
-  const noticeCtx = { policy, session, editCounter, dir, now, runMd, permissionMode, settingsPath, env };
-  const advice = adviseContext(reading, policy);
+  const prevAsked = prev && Number.isFinite(prev.askedAfterCompactions) ? prev.askedAfterCompactions : 0;
+  const noticeCtx = { policy, session, editCounter, dir, now, runMd, permissionMode, settingsPath, env, askedAfterCompactions: prevAsked };
+  const advice = adviseContext(reading, policy, noticeCtx);
   const lastKey = prev ? prev.advisedKey || null : null;
   const changed = advice.key !== lastKey;
-  let notice = changed ? contextNotice(reading, advice, noticeCtx) : '';
+  // The post-compaction ask fires on the compaction count, not on `changed`
+  // alone (the epoch is already part of `advice.key`, so the two agree in
+  // practice, but checking it directly keeps the once-per-compaction promise
+  // even if that ever stops being true).
+  const askDue = postCompactionAskDue(reading, advice, noticeCtx);
+  let notice = (changed || askDue) ? contextNotice(reading, advice, noticeCtx) : '';
   // Between thresholds the lead still hears the measured size, one short line
   // each `tickEvery` of growth and after each compaction, so it never has to
   // guess the size from memory or an old summary.
@@ -127,6 +133,7 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
     offset: offset || 0, size: sz || 0, reading: clean, editCounter,
     advisedKey: announce && changed ? advice.key : lastKey,
     tickKey: announce && ticked ? tick.key : lastTick,
+    askedAfterCompactions: announce && askDue ? (Number(reading.compactions) || 0) : prevAsked,
     sampledAt: new Date(now).toISOString(),
   });
   return { reading: clean, advice, changed, notice, tick: ticked ? tick.key : null, editCounter };

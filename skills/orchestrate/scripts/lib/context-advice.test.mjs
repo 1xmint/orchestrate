@@ -9,6 +9,7 @@ import { join, dirname } from 'node:path';
 import {
   thresholds, adviseContext, contextEpoch, checkpointPath, hasCheckpoint, newestCheckpoint,
   switchAdvice, contextNotice, contextTick, formatReading, shortPath, resolveAutocompactWindow,
+  postCompactionAskDue,
 } from './context-advice.mjs';
 import { toReading } from './context-scan.mjs';
 import { loadPolicy } from './policy.mjs';
@@ -32,6 +33,28 @@ test('thresholds caps compactAt to a fraction of a known capacity, and derives c
   const t = thresholds({ capacity: 100000 }, p);
   assert.equal(t.compactAt, 50000, 'min(150000, 100000*0.5)');
   assert.equal(t.checkpointAt, 40000, 'min(120000, compactAt*0.8)');
+});
+
+test('thresholds falls back to the resolved autocompact window when the reading carries no capacity', () => {
+  const p = policy();
+  const t = thresholds(null, p, { env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '100000' } });
+  assert.equal(t.compactAt, Math.floor(100000 * p.context.windowFraction), 'compactAt is the fraction of the window');
+  assert.equal(t.checkpointAt, Math.floor(t.compactAt * 0.8), 'checkpointAt is derived from that compactAt');
+  assert.ok(t.compactAt < p.context.compactAt, 'a 100k window is tighter than the policy default');
+});
+
+test('thresholds with no env and no settings keeps the policy numbers unchanged', () => {
+  const p = policy();
+  const t = thresholds(null, p, {});
+  assert.equal(t.compactAt, p.context.compactAt);
+  assert.equal(t.checkpointAt, p.context.checkpointAt);
+});
+
+test('thresholds with the autocompact window turned "off" also keeps the policy numbers unchanged', () => {
+  const p = policy();
+  const t = thresholds(null, p, { env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: 'off' } });
+  assert.equal(t.compactAt, p.context.compactAt);
+  assert.equal(t.checkpointAt, p.context.checkpointAt);
 });
 
 // ---- adviseContext: one test per action -----------------------------------------
@@ -100,6 +123,16 @@ test('the same short reading with a small last growth does not ask', () => {
   const p = policy();
   const r = measured(119904, { lastDelta: 500 });
   assert.equal(adviseContext(r, p).action, 'none');
+});
+
+test('adviseContext asks before a narrow autocompact window is reached, not only before the policy default', () => {
+  const p = policy();
+  const ctx = { env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '100000' } };
+  const { checkpointAt, compactAt } = thresholds(null, p, ctx);
+  assert.equal(adviseContext(measured(90000), p, {}).action, 'none', 'below the 150k default, no window given');
+  assert.equal(adviseContext(measured(95000, { lastDelta: 5000 }), p, ctx).action, 'compact', '95k is over the 100k window\'s own compact line');
+  assert.equal(adviseContext(measured(82000, { lastDelta: 39000 }), p, ctx).action, 'compact', '82k is also over that line');
+  assert.ok(compactAt < p.context.compactAt && checkpointAt < p.context.checkpointAt);
 });
 
 test('resolveAutocompactWindow: the environment beats settings.json, which beats the policy default', () => {
@@ -198,6 +231,38 @@ test('at the compact line with no checkpoint, one clause says compaction will su
   assert.match(text, / · compaction will summarise without a checkpoint$/);
   assert.doesNotMatch(text, /write the checkpoint/);
   assert.ok(Buffer.byteLength(text) < 400);
+});
+
+test('the post-compaction ask fires on a measured reading, not only a provisional one, and is keyed on the compaction count', () => {
+  const p = policy();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-adv-'));
+  // A measured reading (a response already landed) right after the boundary,
+  // never asked about before: still an ask, unlike the old
+  // `responsesSinceCompaction === 0` check, which only a provisional reading
+  // (or a sample that lands before the first response) could satisfy.
+  const r = measured(1000, { compaction: { uuid: 'e9', at: now() }, responsesSinceCompaction: 3, compactions: 1 });
+  const advice = adviseContext(r, p);
+  assert.equal(advice.action, 'none');
+  assert.equal(postCompactionAskDue(r, advice, { dir }), true);
+  const notice = contextNotice(r, advice, { policy: p, session: 's1', dir });
+  assert.match(notice, /just summarised/);
+  // Already asked about this compaction: no second ask for the same count.
+  assert.equal(postCompactionAskDue(r, advice, { dir, askedAfterCompactions: 1 }), false);
+  assert.doesNotMatch(contextNotice(r, advice, { policy: p, session: 's1', dir, askedAfterCompactions: 1 }), /just summarised/);
+  // A second compaction (count 2) asks again even though it was asked before.
+  const r2 = measured(1000, { compaction: { uuid: 'e10', at: now() }, responsesSinceCompaction: 1, compactions: 2 });
+  assert.equal(postCompactionAskDue(r2, adviseContext(r2, p), { dir, askedAfterCompactions: 1 }), true);
+});
+
+test('the post-compaction ask never fires when a checkpoint already exists for the epoch', () => {
+  const p = policy();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-adv-'));
+  const r = measured(1000, { compaction: { uuid: 'e11', at: now() }, responsesSinceCompaction: 0, compactions: 1 });
+  const path = checkpointPath('s1', r, dir);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, 'goal: x\n');
+  assert.equal(postCompactionAskDue(r, adviseContext(r, p), { dir, session: 's1' }), false);
+  assert.doesNotMatch(contextNotice(r, adviseContext(r, p), { policy: p, session: 's1', dir }), /just summarised/);
 });
 
 test('shortPath writes a home path as ~/ with forward slashes and leaves others alone', () => {

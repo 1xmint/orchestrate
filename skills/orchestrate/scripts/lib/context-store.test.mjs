@@ -95,6 +95,49 @@ test('the checkpoint ask is said once per epoch, and again after a compaction', 
   assert.match(after.notice, /write the checkpoint now .* to .*checkpoint-e7\.md$/, 'a new epoch asks again, for its own file');
 });
 
+test('the post-compaction ask fires on the first reading after each compaction, measured or provisional, and only once per compaction', () => {
+  const { dir } = tempHome();
+  // A response has already landed by the time this store samples (not a
+  // provisional-only reading): the old `responsesSinceCompaction === 0` gate
+  // would miss this.
+  const lines1 = [boundaryLine('e1'), assistantLine({ input_tokens: 1000 }, 'a')];
+  const p = transcript(lines1);
+  const first = sampleContext({ transcriptPath: p, session: 's1', policy: policy(), dir });
+  assert.match(first.notice, /just summarised/, 'a measured first reading after compaction 1 still asks');
+  assert.equal(first.reading.compactions, 1);
+
+  // A second sample in the same epoch: no repeat.
+  const again = sampleContext({ transcriptPath: p, session: 's1', policy: policy(), dir });
+  assert.doesNotMatch(again.notice || '', /just summarised/, 'not twice for the same compaction');
+
+  // A second compaction: asks again.
+  const lines2 = [...lines1, boundaryLine('e2'), assistantLine({ input_tokens: 2000 }, 'b')];
+  writeFileSync(p, lines2.join(''));
+  const second = sampleContext({ transcriptPath: p, session: 's1', policy: policy(), dir });
+  assert.match(second.notice, /just summarised/, 'a second compaction asks again');
+  assert.equal(second.reading.compactions, 2);
+});
+
+test('the post-compaction ask does not fire once a checkpoint exists for the epoch', () => {
+  const { dir } = tempHome();
+  const lines = [boundaryLine('e1'), assistantLine({ input_tokens: 1000 }, 'a')];
+  const p = transcript(lines);
+  const cpPath = join(dir, 's1', 'checkpoint-e1.md');
+  mkdirSync(join(dir, 's1'), { recursive: true });
+  writeFileSync(cpPath, 'goal: x\n');
+  const r = sampleContext({ transcriptPath: p, session: 's1', policy: policy(), dir });
+  assert.doesNotMatch(r.notice || '', /just summarised/);
+});
+
+test('sampleContext honours a narrow autocompact window for the checkpoint/compact decision, not only the policy default', () => {
+  const { dir } = tempHome();
+  const p = transcript([assistantLine({ input_tokens: 90000 }, 'a')]);
+  const env = { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '100000' };
+  const first = sampleContext({ transcriptPath: p, session: 's5', policy: policy(), dir, env });
+  assert.equal(first.advice.action, 'compact', '90k is already over a 100k window\'s own compact line');
+  assert.notEqual(first.notice, '');
+});
+
 test('an unannounced sample records nothing until markAnnounced and markTicked are called', () => {
   const { dir } = tempHome();
   const { checkpointAt } = thresholds(null, policy());

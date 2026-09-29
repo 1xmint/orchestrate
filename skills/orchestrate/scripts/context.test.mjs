@@ -126,7 +126,11 @@ test('thresholds: checkpoint and compact from policy, or 75% of a known smaller 
   assert.deepEqual(thresholds({ capacity: 160000 }, policy), { checkpointAt: 96000, compactAt: 120000 });
   assert.equal(at(121000, 160000), 'compact', 'a small known window moves compaction earlier');
   assert.equal(at(121000, 1000000), 'checkpoint', 'a large window does not move it later');
-  const custom = loadPolicy(setPolicyValue({}, 'context.compactAt', '200000'));
+  // Raising compactAt alone is capped by the autocompact window's own 75%
+  // mark (thresholds() falls back to it when the reading carries no
+  // capacity), so this also raises autocompactDefault to let the override
+  // actually take effect — the same thing a real profile.json edit would need.
+  const custom = loadPolicy(setPolicyValue(setPolicyValue({}, 'context.compactAt', '200000'), 'context.autocompactDefault', '999999'));
   assert.equal(adviseContext({ state: 'measured', tokens: 160000, capacity: null, compaction: null }, custom).action, 'checkpoint');
   assert.throws(() => setPolicyValue({}, 'context.nope', '1'), /unknown policy key/);
 });
