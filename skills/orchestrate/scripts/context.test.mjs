@@ -265,13 +265,16 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   assert.equal(s9.reading.tokens, cp + 15000);
 });
 
-test('the first reading after a compaction with no checkpoint on disk asks once, then falls silent', () => {
+test('the first reading after a compaction writes the checkpoint and names it, so the lead is not asked', () => {
+  // The host appends the boundary record after the compaction hooks have run,
+  // so this sample is the first moment the plugin can see it. It writes the
+  // checkpoint here; the ask to the lead is only for when that write fails.
   const { p, store } = file([assistant(311000, { min: 1 }), boundary(311000, 17000, 2), summary(2)]);
   const s1 = sampleContext({ transcriptPath: p, session: 'sess-cp', policy, now: NOW, dir: store });
   assert.equal(s1.reading.state, 'provisional');
-  assert.match(s1.notice, /the conversation was just summarised; before anything else, write the checkpoint now/);
-  // Sampling again with nothing new: the advice key has not changed, so the
-  // ask is not repeated (the once-per-epoch rule already in context-store.mjs).
+  assert.doesNotMatch(s1.notice, /write the checkpoint now/);
+  assert.match(s1.notice, /newest checkpoint: .*checkpoint-/);
+  assert.doesNotMatch(s1.notice, /newest checkpoint: none/);
   const s2 = sampleContext({ transcriptPath: p, session: 'sess-cp', policy, now: NOW, dir: store, force: true });
   assert.doesNotMatch(s2.notice, /just summarised/);
 });

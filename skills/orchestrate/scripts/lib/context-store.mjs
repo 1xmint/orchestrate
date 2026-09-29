@@ -13,6 +13,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSyn
 import { homedir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { loadPolicy } from './policy.mjs';
+import { writeCompactionSnapshot } from './compaction-snapshot.mjs';
 import {
   CONTEXT_V, CONTEXT_DIR, SCAN_MAX, idPart,
   scanSlice, stepEditCounter, toReading, readContext, statusCapacity, readRange,
@@ -109,6 +110,20 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
     ? Math.max(0, reading.tokens - prevTokens)
     : 0;
 
+  // The host runs the compaction hooks before it appends the boundary record,
+  // so they cannot write the note for the summary they follow. This is the
+  // first read that sees the boundary: write it here. The writer returns on an
+  // existing file before it reads the transcript, so later calls cost one
+  // existence check. Lead only; never throws.
+  if (!agent && reading.compaction && transcriptPath) {
+    try {
+      writeCompactionSnapshot({
+        session, reading, transcriptPath,
+        ctx: { dir, runMd, runDir: runMd ? dirname(runMd) : undefined },
+      });
+    } catch { /* the notice below then says there is no checkpoint yet */ }
+  }
+
   const prevAsked = prev && Number.isFinite(prev.askedAfterCompactions) ? prev.askedAfterCompactions : 0;
   const noticeCtx = { policy, session, editCounter, dir, now, runMd, permissionMode, settingsPath, env, askedAfterCompactions: prevAsked };
   const advice = adviseContext(reading, policy, noticeCtx);
@@ -170,9 +185,7 @@ export function markTicked(session, agent = null, tickKey = null, dir = CONTEXT_
   if (s) writeStore(p, { ...s, tickKey });
 }
 
-// Compatibility for callers that only want a number: the measured input side,
-// or null when the reading is provisional or unknown.
-export function lastMeasuredTokens(transcriptPath, opts = {}) {
-  const r = readContext(transcriptPath, opts);
-  return r.state === 'measured' ? r.tokens : null;
-}
+// Lives in context-scan.mjs, below both this module and tier.mjs, so tier.mjs
+// can read a number without importing this module (which now reaches
+// recover.mjs through the snapshot writer, and recover.mjs imports tier.mjs).
+export { lastMeasuredTokens } from './context-scan.mjs';
