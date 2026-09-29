@@ -23,6 +23,7 @@
 // command going forward, and how to add a new pattern.
 
 import { readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { resolve as resolvePath, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -136,16 +137,51 @@ function isProcessKill(cmd) {
 // The lead's clean-up of finished helper worktrees: remove each worktree
 // folder, then delete its now-unreferenced branch. Passes only when the whole
 // line is commands joined by `&&` or `;`, each one of:
-//   git worktree remove <path>...     no flag; every path under .claude/worktrees/, no ..
+//   git worktree remove [-f|--force] <path>...   every path under .claude/worktrees/, no ..,
+//                                     no folder with uncommitted changes (worktreeRemoveRule)
 //   git worktree list                 read-only
 //   git branch -d|--delete <name>...  worktree-agent-<hex> or task/<slug> only
-// with at least one branch delete. A path may be quoted. No force flag on
-// either half: git refuses -d on an unmerged branch by itself, and --force on
-// the worktree would discard uncommitted work. Anything else (a -D, a path
+// with at least one branch delete. A path may be quoted. The folder half may
+// be forced because a folder with uncommitted changes is refused first; the
+// branch half has no force flag: git refuses -d on an unmerged branch by
+// itself. Anything else (a -D, a path
 // elsewhere, a pipe, another kind of command) fails the match and falls
 // through to the ordinary branch-delete rule below, unchanged.
 const CLEANUP_BRANCH_RE = /^(?:worktree-agent-[0-9a-f]+|task\/[A-Za-z0-9._-]+)$/;
 const unquote = t => (/^(["']).*\1$/.test(t) ? t.slice(1, -1) : t);
+
+const FORCE_FLAGS = new Set(['-f', '-ff', '--force']);
+const isHelperPath = p => !p.split('/').includes('..') && p.includes('.claude/worktrees/');
+
+// Whether the folder holds work git has not saved. A folder that is not there
+// counts as clean; one git cannot read counts as not clean.
+function worktreeIsDirty(folder) {
+  if (!existsSync(folder)) return false;
+  try {
+    const r = spawnSync('git', ['status', '--porcelain'], { cwd: folder, encoding: 'utf8', timeout: 15000 });
+    return r.status !== 0 || String(r.stdout || '').trim() !== '';
+  } catch { return true; }
+}
+
+// Removing a helper folder under .claude/worktrees/, forced or not, alone or in
+// a chain, passes only when the folder has no uncommitted changes.
+function worktreeRemoveRule(cmd, cwd) {
+  for (const seg of cmd.split(/&&|;/)) {
+    const t = seg.trim().split(/\s+/);
+    if (t[0] !== 'git' || t[1] !== 'worktree' || t[2] !== 'remove') continue;
+    for (const raw of t.slice(3)) {
+      if (raw.startsWith('-')) continue;
+      const path = normSlashes(unquote(raw));
+      if (!isHelperPath(path.toLowerCase())) continue;
+      let folder;
+      try { folder = resolvePath(cwd || process.cwd(), path); } catch { continue; }
+      if (worktreeIsDirty(folder)) {
+        return { name: 'worktree-remove-dirty', reason: `This would delete the helper folder ${path}, which still has changes that were never saved to git. ${ASK_TAIL}` };
+      }
+    }
+  }
+  return null;
+}
 
 function isSafeWorktreeCleanupChain(cmd) {
   if (/[|<>`$(){}]|(?<!&)&(?!&)/.test(cmd)) return false;
@@ -156,8 +192,9 @@ function isSafeWorktreeCleanupChain(cmd) {
     if (t[1] === 'worktree' && t[2] === 'list' && t.length === 3) continue;
     if (t[1] === 'worktree' && t[2] === 'remove' && t.length > 3) {
       for (const raw of t.slice(3)) {
+        if (FORCE_FLAGS.has(raw)) continue;
         const path = normSlashes(unquote(raw)).toLowerCase();
-        if (path.startsWith('-') || path.split('/').includes('..') || !path.includes('.claude/worktrees/')) return false;
+        if (path.startsWith('-') || !isHelperPath(path)) return false;
       }
       continue;
     }
@@ -309,7 +346,7 @@ export function decide(command, ctx = {}) {
   const cmd = String(command || '').replace(/\s+/g, ' ').trim();
   if (!cmd) return { kind: 'pass' };
 
-  const hit = RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
+  const hit = worktreeRemoveRule(cmd, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
 
   if (ctx.subagent) {
