@@ -240,3 +240,10 @@ export function readContext(transcriptPath, { session = null, agent = null, capa
     window = Math.min(size, window * 4);
   }
 }
+
+// Compatibility for callers that only want a number: the measured input side,
+// or null when the reading is provisional or unknown.
+export function lastMeasuredTokens(transcriptPath, opts = {}) {
+  const r = readContext(transcriptPath, opts);
+  return r.state === 'measured' ? r.tokens : null;
+}

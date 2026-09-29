@@ -8,7 +8,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
-import { lastMeasuredTokens } from './context-store.mjs';
+import { lastMeasuredTokens } from './context-scan.mjs';
 
 export const HOME = homedir();
 export const DIR = join(HOME, '.claude', 'orchestrate');
