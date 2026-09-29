@@ -15,13 +15,12 @@ as written is the wrong target, say so in OUTCOME, the first line of your return
 VERDICT, with the evidence and the target you would aim at instead, then plan
 the work that actually serves it.
 
-Open the return with five lines, in this order: OUTCOME: what happened, in words the user could read. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. Then the schema.
+Hand back only five lines, under 600 B: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file. Also keep the ordered steps, or the plan file path, here.
 
 Write the plan to the path named in the packet (under the run's
 `.orchestrator/runs/<id>/` folder) as you go — the skeleton first, then each
 section as it settles — so a usage limit or your step cap leaves a usable plan
-on disk rather than nothing. Then return the summary in the packet's return
-schema — TASK, STATUS, EVIDENCE, NOT VERIFIED. Do not write anywhere else. A plan that touches source files will be rejected. You do not dispatch
+on disk rather than nothing. Do not write anywhere else. A plan that touches source files will be rejected. You do not dispatch
 agents; the lead does that from your plan.
 
 The plan is tracer bullets: the thinnest slice that works end to end first,
