@@ -76,7 +76,7 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
     const tail = missingNames.length
       ? ` ${installed} of ${AGENT_NAMES.length} role agent files are installed; missing: ${missingNames.map(n => `${n}.md`).join(', ')}.`
       : '';
-    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. Send a capped role agent instead: orch-implementer (model "sonnet") to change code, orch-researcher or Explore (model "haiku") to find things, orch-planner when you cannot yet name the steps, orch-debugger for a failure that survived one attempt, orch-reviewer before shipping something expensive to get wrong, orch-advisor before committing to a direction, orch-browser when only a real browser settles it. Or do a small task yourself.${tail}` };
+    return { prefix: 'workers', reason: `${role} has no turn cap and can start helpers of its own. To build, send orch-implementer (model "sonnet", it runs in its own worktree: WHERE … worktree: yes); to find things, orch-researcher or Explore (model "haiku"); orch-planner, orch-debugger, orch-reviewer, orch-advisor or orch-browser for the rest. Or do a small task yourself.${tail}` };
   }
 
   const locked = lockedWorktreeIn(prompt, external);

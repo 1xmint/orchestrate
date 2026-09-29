@@ -149,6 +149,13 @@ test('policy.workers.generalPurpose = allow overrides the gate even with orch-im
   assert.equal(workflowDecision({}, ti(), { policy: allow, installed: AGENT_NAMES.length, missing: NONE_MISSING }), null);
 });
 
+test('the general-purpose refusal names the build helper and says it runs in its own worktree', () => {
+  const d = workflowDecision({}, ti(), { policy: fullPolicy, installed: AGENT_NAMES.length, missing: NONE_MISSING });
+  assert.match(d.reason, /To build, send orch-implementer/);
+  assert.match(d.reason, /worktree: yes/);
+  assert.doesNotMatch(d.reason, /\n/);
+});
+
 test('claude is treated the same as general-purpose', () => {
   const d = workflowDecision({}, ti('claude'), { policy: fullPolicy, installed: 3, missing: THREE_WITH_IMPLEMENTER_MISSING });
   assert.match(d.reason, /no turn cap/);
