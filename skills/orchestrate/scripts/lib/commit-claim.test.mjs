@@ -149,3 +149,11 @@ test('namesAllPaths is false when a path is missing or the list is empty', () =>
   assert.equal(namesAllPaths('committed everything', []), false);
   assert.equal(namesAllPaths('committed everything', null), false);
 });
+
+test('namesAllPaths is true for an untracked directory status entry when the message names a path under it', () => {
+  assert.equal(namesAllPaths('src/notes.txt is the user\'s own untracked file.', ['src/']), true);
+});
+
+test('namesAllPaths is false for an untracked directory status entry when nothing under it is named', () => {
+  assert.equal(namesAllPaths('everything else is committed.', ['src/']), false);
+});

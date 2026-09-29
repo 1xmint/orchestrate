@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 // turn-check.mjs — the session's Stop hook and management heartbeat, registered
-// from SKILL.md's frontmatter so it is live only while the skill is in play, and
-// only for a coordinated run this session has explicitly bound.
+// from SKILL.md's frontmatter so it is live only while the skill is in play.
+// Idle and Pickup below are for a coordinated run this session has explicitly
+// bound; the review hold is not — it reads a task's own return, which lands
+// in session state whether or not a run is bound, so it checks regardless.
 //
-// Two pulses, in priority order, at most one block per Stop:
+// Three pulses, in priority order, at most one block per Stop:
 //   1. idle — two or more tasks are unblocked and nothing new was dispatched;
 //      start them or say why you are waiting. Said once per unblocked set.
-//   2. pickup — a run whose Pickup is older than the last dispatch cannot be
+//   2. review — a task tagged for independent review came back done with none
+//      sent. Said once per task, cleared by a reviewer dispatch or a closing
+//      message that says the review was skipped and why.
+//   3. pickup — a run whose Pickup is older than the last dispatch cannot be
 //      resumed, so the next session would start blind.
 //
 // It never asks for more research, more testing or a better answer: a Stop hook
@@ -119,24 +124,30 @@ export function heartbeatDecision({ run, rec }) {
 }
 
 function checkHeartbeat(input) {
-  // Only a run this session was explicitly bound to. An unbound session is a
-  // session doing direct work, and direct work has no ledger to keep current;
-  // an open run this session never claimed is not its to be nagged about.
+  // Idle and Pickup honesty are only for a run this session was explicitly
+  // bound to: an unbound session is doing direct work, and direct work has no
+  // ledger to keep current, and an open run this session never claimed is not
+  // its to be nagged about. The review hold below is different — it reads a
+  // task's own `returned` row, which ledger.mjs writes to session state on
+  // every SubagentStop whether or not a run is bound, so it runs regardless.
   const run = sessionRun(input.session_id);
-  if (!run || !run.open) return;
+  const bound = run && run.open;
 
   const path = STORE();
   const store = readJson(path) || {};
-  const key = sanitizeId(`${input.session_id || 'nosession'}-${run.runId}`);
+  const key = sanitizeId(`${input.session_id || 'nosession'}-${bound ? run.runId : 'unbound'}`);
   const rec = store[key] || {};
+  let updated = { ...rec, checkedAt: new Date().toISOString() };
 
-  // Idle first, advancing the turn counter either way.
-  const hb = heartbeatDecision({ run, rec });
-  let updated = { ...hb.rec, checkedAt: new Date().toISOString() };
-  if (hb.kind) {
-    store[key] = updated;
-    try { writeJsonAtomic(path, store); } catch {}
-    return emitBlock(`orchestrate: ${hb.why}`);
+  if (bound) {
+    // Idle first, advancing the turn counter either way.
+    const hb = heartbeatDecision({ run, rec });
+    updated = { ...hb.rec, checkedAt: new Date().toISOString() };
+    if (hb.kind) {
+      store[key] = updated;
+      try { writeJsonAtomic(path, store); } catch {}
+      return emitBlock(`orchestrate: ${hb.why}`);
+    }
   }
 
   const state = loadSession(input.session_id) || {};
@@ -157,6 +168,8 @@ function checkHeartbeat(input) {
     return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
+
+  if (!bound) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
 
   // Then Pickup honesty, only after a dispatch, only for the run this session
   // drives, exactly as before.

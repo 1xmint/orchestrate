@@ -65,6 +65,19 @@ function bindWithReturn(home, sessionId, repo, returnedRow, dispatches = []) {
   }));
 }
 
+// Session state with a `returned` row but no `run` at all — the way
+// ledger.mjs leaves it when a tagged dispatch's return never had a run to
+// file under (no ledger opened, or none bound this session).
+function withReturnNoRun(home, sessionId, returnedRow, dispatches = []) {
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${sessionId}.json`), JSON.stringify({
+    v: 1, session_id: sessionId,
+    returned: [returnedRow],
+    dispatches,
+  }));
+}
+
 // ---- pickupSection / pickupWritten ---------------------------------------------
 
 test('pickupSection extracts the text between the Pickup heading and the next heading', () => {
@@ -245,6 +258,52 @@ test('Stop: a task with no review tag is silent, 0 B', () => {
   bindWithReturn(home, 'review-hold-3', repo, { task: '9-9-0001', status: 'DONE' }, []);
 
   const r = run({ hook_event_name: 'Stop', session_id: 'review-hold-3', last_assistant_message: 'Done, no review needed.' }, home);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+});
+
+// ---- hook process: the review hold with no run bound (no ledger) ------------
+
+test('Stop: a tagged DONE return with no run bound blocks once, then is silent on the retry', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  withReturnNoRun(home, 'no-ledger-1', { task: '9-9-0002', status: 'PARTIAL', reviewGated: true }, []);
+
+  const first = run({ hook_event_name: 'Stop', session_id: 'no-ledger-1', last_assistant_message: 'Shipped it.' }, home);
+  assert.equal(first.status, 0);
+  const decision = JSON.parse(first.stdout);
+  assert.equal(decision.decision, 'block');
+  assert.match(decision.reason, /9-9-0002/);
+  assert.ok(decision.reason.length < 200, `reason is ${decision.reason.length} bytes`);
+
+  const second = run({ hook_event_name: 'Stop', session_id: 'no-ledger-1', last_assistant_message: 'Shipped it.' }, home);
+  assert.equal(second.status, 0);
+  assert.equal(second.stdout.trim(), '', 'blocked once for this task; silent on the retry even though nothing changed');
+});
+
+test('Stop: with no run bound, a reviewer dispatch recorded with REVIEW OF the task clears the hold, 0 B', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  withReturnNoRun(home, 'no-ledger-2', { task: '9-9-0002', status: 'PARTIAL', reviewGated: true },
+    [{ agent: 'orch-reviewer', task: '9-9-0500', reviewOf: '9-9-0002' }]);
+
+  const r = run({ hook_event_name: 'Stop', session_id: 'no-ledger-2', last_assistant_message: 'Sent the reviewer.' }, home);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+});
+
+test('Stop: with no run bound, a closing message saying the review was skipped clears the hold, 0 B', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  withReturnNoRun(home, 'no-ledger-3', { task: '9-9-0002', status: 'PARTIAL', reviewGated: true }, []);
+
+  const r = run({ hook_event_name: 'Stop', session_id: 'no-ledger-3', last_assistant_message: 'I skipped the review because this is a comment-only change.' }, home);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+});
+
+test('Stop: with no run bound, an untagged return is silent, 0 B', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  withReturnNoRun(home, 'no-ledger-4', { task: '9-9-0002', status: 'DONE' }, []);
+
+  const r = run({ hook_event_name: 'Stop', session_id: 'no-ledger-4', last_assistant_message: 'Done, no review needed.' }, home);
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), '');
 });
