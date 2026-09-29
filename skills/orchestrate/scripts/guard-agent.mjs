@@ -464,7 +464,7 @@ export function progressWorktreeNote(role, prompt, planMode, readFile = readFile
     }
   }
   if (!has) return '';
-  return 'if writing the progress file is refused, write the same relative path inside your own worktree instead, and say so in your return';
+  return 'if writing the progress file is refused, write the same relative path inside your own separate folder instead, and say so in your return';
 }
 
 // A fact, not an order, said only on an orch-implementer dispatch: Codex was
