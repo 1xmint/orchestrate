@@ -116,3 +116,18 @@ change says so up front: commit each piece as its check passes, and stop
 adding at about three quarters of the step cap to make the gate green, commit
 and return. What a helper committed is recovered from its worktree in one
 step; what it left unstaged is recovered by hand.
+
+## Before you send
+
+- Classify first. A fix whose cause nobody has named is a fault-finding task
+  (`orch-debugger`); it becomes a build only once the cause is written down.
+- Pilot one. Before sending several helpers on the same kind of task, send one
+  and read its return: a brief that fails then fails once, not five times.
+- Few, with room. Every helper pays a fixed starting cost before its first
+  read, so a few helpers with room to finish beat many small ones. Use the
+  cheapest model that can do the task; routine probing is not judgment.
+- A finish line. When a run opens, write under "Done when" what ends the work
+  if the measure stalls or the judge disagrees with itself.
+- A check that checks. Before sending a checking task, write for each item the
+  input that makes it come up; an item with no such input is reported as not
+  checked.

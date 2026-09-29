@@ -192,7 +192,7 @@ but you. `references/ledger.md` has the ceiling option, context thresholds, chec
 
 ## 5. Dispatch: role agent plus packet
 
-Each role is named for the moment to reach for it; its description says when.
+A fix with no named cause is `orch-debugger`'s first; pilot one helper before many.
 `routing.md` has the model for each, by plan. Set `subagent_type` to the role,
 `model` from that table, and `isolation: "worktree"` for concurrent repo work;
 only `orch-coordinator` may dispatch a child, and only the bounded roles the

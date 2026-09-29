@@ -189,6 +189,26 @@ test('options placed before the git command word do not step round any check', (
   assert.equal(decide('git -C . branch -d feature/x').kind, 'pass');
 });
 
+test('throwing away every unsaved edit is stopped only when there are edits to lose', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orch-discard-'));
+  const sh = args => spawnSync('git', ['-c', 'user.email=t@example.com', '-c', 'user.name=t', ...args], { cwd: root, encoding: 'utf8' });
+  sh(['init', '-q']);
+  writeFileSync(join(root, 'a.txt'), 'one');
+  sh(['add', '.']); sh(['commit', '-q', '-m', 'first']);
+  const all = ['git reset --hard', 'git reset --hard HEAD', 'git checkout -- .', 'git checkout .', 'git restore .', 'git -C . reset --hard', 'git status && git reset --hard'];
+  for (const c of all) assert.equal(decide(c, { cwd: root }).kind, 'pass', `clean: ${c}`);
+  writeFileSync(join(root, 'a.txt'), 'two, never saved');
+  for (const c of all) {
+    const d = decide(c, { cwd: root });
+    assert.equal(d.kind, 'ask', c);
+    assert.match(d.reason, /never saved to git/);
+    assert.equal(decide(c, { cwd: root, subagent: true }).kind, 'deny', c);
+  }
+  for (const c of ['git checkout -- a.txt', 'git restore a.txt', 'git restore --staged .', 'git reset --soft HEAD', 'git checkout main']) {
+    assert.equal(decide(c, { cwd: root }).kind, 'pass', `one file or no loss: ${c}`);
+  }
+});
+
 test('a quoted branch name in the small delete passes; a quoted name with shell syntax does not', () => {
   assert.equal(decide('git branch -d "feature/x"').kind, 'pass');
   assert.equal(decide("git branch -d 'feature/x' task/y").kind, 'pass');
@@ -244,8 +264,8 @@ test('rm -rf inside the OS temp dir passes through', () => {
   assert.equal(decide(`rm -rf ${dir}`, { cwd: process.cwd() }).kind, 'pass');
 });
 
-test('git reset --hard with no argument is not blocked: it only discards uncommitted local edits in the working copy, never a commit', () => {
-  assert.equal(decide('git reset --hard').kind, 'pass');
+test('git reset --hard passes where there is nothing unsaved to lose', () => {
+  assert.equal(decide('git reset --hard', { cwd: mkdtempSync(join(tmpdir(), 'orch-clean-')) }).kind, 'pass');
 });
 
 test('npm publish, gh release create, and deploy commands are stopped', () => {

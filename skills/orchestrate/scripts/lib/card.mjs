@@ -41,7 +41,7 @@ export function cardBody() {
 export const SHORT_CARD_CAP = 600;
 
 export function shortCard() {
-  return 'orchestrate is loaded. This looks like a small, one-step task: just do it yourself and report back in plain words with the evidence (what you ran or checked) that it is done. The fuller guidance on planning, delegation and review arrives with your first larger request.';
+  return 'orchestrate is loaded. This looks like a small, one-step task: just do it yourself and report back in plain words with the evidence (what you ran or checked) that it is done. If it is a fix and nobody has yet seen the cause, find the cause before changing anything: make the fault happen, name what is wrong, then fix that. The fuller guidance on planning, delegation and review arrives with your first larger request.';
 }
 
 // One line in plain words for the write `autocompact on` (or `autocompact

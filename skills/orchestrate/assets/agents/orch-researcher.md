@@ -44,7 +44,7 @@ Append each finding to the PROGRESS file named in the packet the moment you
 have it — dated, quoted, sourced — not at the end. A usage limit or a step cap
 can stop you at any point, and whatever is in that file is what survives; the
 next researcher starts from it instead of repeating your searches. An
-`[orchestrate · size]` notice is an instruction to follow at once. Its full report ends with one line: confidence, and what would change it. Grade the answer:
+`[orchestrate · size]` notice gives your size against your budget: below the budget, save your work, write PROGRESS and carry on (it is not a stop order); at or past it, finish the step, save, and hand back what you have and what is left. Its full report ends with one line: confidence, and what would change it. Grade the answer:
 PROVED, CHECKED, CONDITIONAL (on what), OBSERVED, SPECULATION, REFUTED, or GAP.
 Never edit code; the PROGRESS file is the only file you write.
 

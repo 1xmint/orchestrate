@@ -201,6 +201,33 @@ function worktreeRemoveRule(cmd, cwd) {
   return null;
 }
 
+// Throwing away every unsaved edit at once (`git reset --hard`, `git checkout
+// -- .`, `git restore .`) is stopped only when there are edits to lose: git
+// keeps no copy of work that was never committed. A clean folder, or a
+// discard that names single files, passes.
+function hasUnsavedEdits(folder) {
+  try {
+    const r = spawnSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: folder, encoding: 'utf8', timeout: 15000 });
+    return r.status === 0 && String(r.stdout || '').trim() !== '';
+  } catch { return false; }
+}
+function discardAllRule(cmd, cwd) {
+  for (const seg of cmd.split(/&&|;|\|\|/)) {
+    const t = plainGit(seg).trim().split(/\s+/);
+    if (t[0] !== 'git') continue;
+    const rest = t.slice(2).map(unquote);
+    const whole = (t[1] === 'reset' && rest.includes('--hard'))
+      || ((t[1] === 'checkout' || t[1] === 'restore') && rest.some(a => a === '.' || a === ':/') && !rest.includes('--staged'));
+    if (!whole) continue;
+    let folder;
+    try { folder = resolvePath(cwd || process.cwd(), ...gitFolders(seg)); } catch { continue; }
+    if (hasUnsavedEdits(folder)) {
+      return { name: 'discard-unsaved', reason: `This would throw away every change in this folder that was never saved to git, with no way to get it back. ${ASK_TAIL}` };
+    }
+  }
+  return null;
+}
+
 function isSafeWorktreeCleanupChain(cmd) {
   if (/[|<>`$(){}]|(?<!&)&(?!&)/.test(cmd)) return false;
   let deletes = 0;
@@ -415,7 +442,7 @@ function decideOne(command, ctx = {}) {
   if (!asSent) return { kind: 'pass' };
   const cmd = plainGit(asSent);
 
-  const hit = worktreeRemoveRule(asSent, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
+  const hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
 
   // A branch delete that nobody can approve: say in plain words what is refused

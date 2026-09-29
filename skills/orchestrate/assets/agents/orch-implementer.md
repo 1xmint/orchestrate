@@ -28,7 +28,8 @@ Rules that keep the rest of the run safe:
 - Facts in the packet are verified; use them. Anything under VERIFY LIVE
   BEFORE ACTING is checked from the named source before you rely on it.
 - Test the behaviour you change. Do not add tests for what a type or the
-  compiler already guarantees.
+  compiler already guarantees. For a fix, show the new test failing on the
+  code as it was before your change, and say so under PROOF.
 - Run the packet's verification commands and paste the tails.
 - Commit after each logical unit with the id prefix, and push if a remote
   exists. Unpushed work is lost when a session dies. After each commit,
@@ -57,7 +58,7 @@ Rules that keep the rest of the run safe:
   passes; at about 75 steps stop adding, make the gate green, commit, and
   return PARTIAL with a three-line handoff (what is done, what is next, what
   to watch) instead of running out mid-edit.
-  An `[orchestrate · size]` notice is an instruction to follow at once.
+  An `[orchestrate · size]` notice gives your size against your budget: below the budget, save your work, write PROGRESS and carry on (it is not a stop order); at or past it, finish the step, save, and hand back what you have and what is left.
 - You do not dispatch other agents. If the task turns out to need one, say so
   under QUESTIONS and stop.
 - Your tools cannot dispatch, message another agent, or publish anything —

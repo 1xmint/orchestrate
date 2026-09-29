@@ -168,6 +168,22 @@ test('a large first prompt still gets the full card, not the short one', () => {
   assert.match(first, /orchestrate is loaded\. The user owns/);
 });
 
+test('a three-word request that names building or fixing gets a card; a three-word reply does not', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  assert.match(prompt(home, repo, 'migrate to postgres', { session_id: 's-3a' }), /Evidence decides done/, 'a build word earns the full card');
+  assert.match(prompt(home, repo, 'fix login properly', { session_id: 's-3b' }), /find the cause before changing anything/, 'a fix earns the short card');
+  assert.equal(prompt(home, repo, 'yes go ahead', { session_id: 's-3c' }), '');
+});
+
+test('a fix with no named cause is told to find the cause first; a file name does not count as a second sentence', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const fix = prompt(home, repo, 'can you fix this on the frontend', { session_id: 's-fix' });
+  assert.match(fix, /find the cause before changing anything/);
+  const file = prompt(home, repo, 'Please rename the variable foo to bar in src/index.js', { session_id: 's-file' });
+  assert.match(file, /This looks like a small, one-step task/);
+  assert.doesNotMatch(file, /Evidence decides done/);
+});
+
 test("a helper's own first prompt (agent_id present) gets neither card, short or full, for a small prompt", () => {
   const home = makeHome(); const repo = makeRepo(false);
   const inside = prompt(home, repo, 'fix the typo in the README', { session_id: 's-small-helper', agent_id: 'a1' });
