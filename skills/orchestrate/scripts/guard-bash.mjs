@@ -214,7 +214,10 @@ function isSafeWorktreeCleanupChain(cmd) {
 // plain: helper or task branch names only, no shell tricks.
 const CHAIN_META_RE = /[|<>`$(){}]|(?<!&)&(?!&)/;
 const CHAIN_TRICKS_RE =/[`<>]|\$\(|(?<!&)&(?!&)/;
-const segmentsOf = cmd => cmd.split(/&&|;/).map(s => s.trim()).filter(Boolean);
+const segmentsOf = cmd => cmd.split(/&&|;|\|\|/).map(s => s.trim()).filter(Boolean);
+// `2>&1` only folds error text into the normal output; it writes nothing and
+// hides nothing, so it never decides whether a delete is safe.
+const withoutStderrJoin = cmd => cmd.replace(/\s2>&1(?=\s|;|&|\||$)/g, '');
 const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && /\s(-D|-d|--delete|--force-delete)(\s|$)/.test(seg);
 function isPlainBranchDelete(seg, flags) {
   const t = seg.split(/\s+/);
@@ -225,7 +228,8 @@ function isPlainBranchDelete(seg, flags) {
 function segmentPasses(seg) {
   return !(RULES.find(r => r.test(seg)) || rmRule(seg) || psRemoveRule(seg));
 }
-function chainRestIsSafe(cmd, flags) {
+function chainRestIsSafe(raw, flags) {
+  const cmd = withoutStderrJoin(raw);
   const segs = segmentsOf(cmd);
   if (segs.length < 2 || CHAIN_TRICKS_RE.test(cmd)) return false;
   let deletes = 0;
@@ -269,10 +273,13 @@ const RULES = [
     // cleanup cannot lose work. -D, and -d of any other name, still ask.
     // A second shape also passes: that same delete chained after removing the
     // worktree folder it belonged to — see isSafeWorktreeCleanupChain above.
-    test: cmd => (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
-      && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd)
-      && !isSafeWorktreeCleanupChain(cmd)
-      && !isSafeBranchDeleteInChain(cmd),
+    test: raw => {
+      const cmd = withoutStderrJoin(raw);
+      return (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
+        && !/^\s*git\s+branch\s+(-d|--delete)(\s+worktree-agent-[0-9a-f]+)+\s*$/.test(cmd)
+        && !isSafeWorktreeCleanupChain(cmd)
+        && !isSafeBranchDeleteInChain(cmd);
+    },
     reason: `This would permanently delete a branch. ${ASK_TAIL}`,
   },
   {
@@ -401,14 +408,19 @@ export function decide(command, ctx = {}) {
       : `This branch delete is refused, because it can throw away work that was never merged. ${small}` };
   }
 
-  if (ctx.subagent) {
-    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} The question cannot be answered here, so this is refused: report back what you were about to run instead of retrying.` };
-  }
-  if (ctx.headless) {
-    // Nobody can answer a question in this mode, so "say yes" would be a
-    // lie: name the mode in plain words and the two real ways forward.
-    const mode = ctx.mode ? `${ctx.mode} mode` : 'this mode';
-    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} You are in ${mode}, where nobody can say yes, so this is refused: run it yourself in a normal session, or add the exact command to .orchestrator/allow-bash.json.` };
+  if (ctx.subagent || ctx.headless) {
+    // Nobody is present to say yes, so "say yes" would be a lie. Say so in
+    // plain words and give the way that works, naming no mode and no file for
+    // anyone to repeat. The project's own approved-commands list still works;
+    // it is documented, not named in a refusal.
+    const why = hit.reason.replace(ASK_TAIL_RE, '');
+    if (hit.name === 'worktree-remove-dirty') {
+      return { kind: 'deny', reason: `${why} This is refused here because nobody is present to say yes. Save what is needed first: commit the changes inside that folder, or copy the files into the main folder and commit them there. Then remove the folder without force. Or leave the folder where it is and tell the user it is there.` };
+    }
+    if (ctx.subagent) {
+      return { kind: 'deny', reason: `${why} The question cannot be answered here, so this is refused: report back what you were about to run instead of retrying.` };
+    }
+    return { kind: 'deny', reason: `${why} This is refused here because nobody is present to say yes. Nothing was run. Leave it and tell the user what you were about to run, or ask them to run it themselves in a normal session.` };
   }
   // A real interactive user who already said yes is not blocked by this: the
   // host applies their answer before the hook ever sees the next call. This
