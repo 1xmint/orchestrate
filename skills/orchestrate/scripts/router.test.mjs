@@ -432,46 +432,19 @@ test('the after-compaction line states facts, not an instruction', () => {
   // compactionFact's own direct-call tests moved to lib/recover.test.mjs.
 });
 
-test('SessionStart compact with no bound run injects the checkpoint file, capped at 1,200 chars', () => {
+test('SessionStart compact with no bound run names the checkpoint file, not its text', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const sessionId = 's-checkpoint1';
   const dir = join(home, '.claude', 'orchestrate', 'context', sessionId);
   mkdirSync(dir, { recursive: true });
-  const long = 'checkpoint text '.repeat(200); // well over the 1,200 char cap
-  writeFileSync(join(dir, 'checkpoint-e1.md'), long);
+  const long = 'checkpoint text '.repeat(200); // well over any per-notice cap
+  const cpPath = join(dir, 'checkpoint-e1.md');
+  writeFileSync(cpPath, long);
 
   const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo });
-  const m = /\[orchestrate · compacted\] checkpoint\n([\s\S]*)/.exec(out);
-  assert.ok(m, `expected a checkpoint block: ${out}`);
-  const excerpt = m[1];
-  assert.ok(excerpt.length <= 1200, `${excerpt.length} <= 1200`);
-  assert.match(excerpt, /\.\.\.$/);
-  assert.equal(excerpt, `${long.slice(0, 1197)}...`);
-});
-
-test('checkpointExcerpt cuts at the last newline before the cap, never mid-word', () => {
-  const home = makeHome(); const repo = makeRepo(false);
-  const sessionId = 's-checkpoint2';
-  const dir = join(home, '.claude', 'orchestrate', 'context', sessionId);
-  mkdirSync(dir, { recursive: true });
-  // Short lines so a newline boundary sits well before the raw cut point.
-  const lines = [];
-  for (let i = 0; i < 60; i++) lines.push(`line ${i}: some notes about the work done so far, nothing longer`);
-  const long = lines.join('\n');
-  writeFileSync(join(dir, 'checkpoint-e1.md'), long);
-
-  const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sessionId, cwd: repo });
-  const m = /\[orchestrate · compacted\] checkpoint\n([\s\S]*)/.exec(out);
-  assert.ok(m, `expected a checkpoint block: ${out}`);
-  const excerpt = m[1];
-  assert.ok(excerpt.length <= 1200, `${excerpt.length} <= 1200`);
-  assert.match(excerpt, /\.\.\.$/);
-  // Raw cut at 1197 chars would land inside a line; confirm the fixture
-  // reproduces that before checking the fix.
-  assert.doesNotMatch(long.slice(1194, 1200), /\n/, 'fixture must cross mid-line under a raw cut');
-  // The fix cuts back to the end of the last whole line before the cap.
-  const lastFullLine = long.slice(0, 1197).split('\n').slice(0, -1).join('\n');
-  assert.equal(excerpt, `${lastFullLine}...`);
+  assert.match(out, /\[orchestrate · compacted\] checkpoint: /);
+  assert.ok(out.includes(cpPath), 'names the file');
+  assert.ok(!out.includes('checkpoint text checkpoint text'), 'never injects the file\'s own text');
 });
 
 // unreturned/unreturnedNote's own direct-call test moved to lib/recover.test.mjs.

@@ -84,6 +84,20 @@ checkpoint line with no checkpoint for this compaction epoch, it says to
 write one now and names the path, once per epoch; at the compact line with
 none, it says compaction will summarise without one.
 
+The post-compaction ask (above) fires correctly but is only an ask: a live
+run this round sent it four times and the lead wrote no checkpoint. Asking
+again was not going to fix that, so the plugin now writes its own checkpoint
+at compaction, from the transcript, into the same path the ask already checks
+(`lib/compaction-snapshot.mjs`, called from `postcompact-check.mjs` on the
+lead side and from `router.mjs` at `SessionStart:compact`) — idempotent, so a
+file the lead already wrote is left alone. It writes after the boundary, not
+before: a compaction does not remove the transcript file, verified on a real
+session transcript this round (tens of thousands of lines, dozens of
+`compact_boundary` records, every earlier turn still present), so reading
+the turns just before the newest boundary needs no new hook event and no time
+window. The compacted line in the router now only names the checkpoint's
+path, never its text.
+
 ## v0.16.1 — a review that can stop the merge, 2026-09-21
 
 Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` (replaced the

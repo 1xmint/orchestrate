@@ -15,8 +15,10 @@
 // returns.jsonl. ledger.mjs reads those rows back when the helper's return
 // lands, and turns them into one fact the lead sees.
 //
-// Lead-side PostCompact (no `agent_id`) does nothing: the lead is not this
-// hook's job; context-check.mjs asks the lead for a checkpoint before it.
+// Lead-side PostCompact (no `agent_id`) writes the plugin's own checkpoint
+// from the transcript (lib/compaction-snapshot.mjs), the same file
+// context-advice.mjs's post-compaction ask already looks for — so the ask is
+// silent once this has run, and stays as the fallback when it has not.
 //
 // It never fails the compaction on its own errors; exit 0 always.
 
@@ -24,6 +26,8 @@ import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } fr
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitizeId, sessionRun } from './lib/tier.mjs';
+import { readContext } from './lib/context-scan.mjs';
+import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
 
 export const INDEX_NAME = 'returns.jsonl';
 
@@ -70,6 +74,17 @@ function main() {
 
   let run = null;
   try { run = sessionRun(input.session_id); } catch { return; }
+
+  if (!input.agent_id) {
+    try {
+      const reading = readContext(input.transcript_path, { session: input.session_id });
+      writeCompactionSnapshot({
+        session: input.session_id, reading, transcriptPath: input.transcript_path,
+        ctx: { runMd: run && run.runMd, runDir: run && run.dir },
+      });
+    } catch {}
+    return;
+  }
 
   let d;
   try { d = decide(input, run); } catch { return; }
