@@ -12,12 +12,18 @@ lead reads only while debugging the plugin.
   200k default, once, unless configured or opted out; nothing is written
   until the user types `autocompact on`. `profile.mjs --autocompact 200k`
   writes it directly and `--autocompact off` removes it and records the
-  opt-out; both accept `--dry-run`.
+  opt-out; both accept `--dry-run`. Since Claude Code v2.1.247 Sonnet 5's own
+  default auto-compact window is its full 1M context (auto-compacting around
+  967K tokens) when nothing narrower is configured; this doesn't change what
+  the plugin writes (CHANGELOG.md, read 2026-09-28).
   `/compact [instructions]` accepts focus text. A hook cannot run that command.
 - **Tool results.** Interactive sessions have no automatic clearing of old tool
   results. Compact or continue from a checkpoint instead.
 - **Worker model.** A `model` on an `Agent` call beats both the agent file and
-  `CLAUDE_CODE_SUBAGENT_MODEL`. Name it on every dispatch.
+  `CLAUDE_CODE_SUBAGENT_MODEL`. Name it on every dispatch. Confirmed by
+  CHANGELOG.md (v2.1.251, read 2026-09-28): `CLAUDE_CODE_SUBAGENT_MODEL` sets
+  only the *default* subagent model — an agent definition's `model:` and an
+  explicit per-spawn model both take precedence over it.
 - **Helper compaction.** A helper compacts on its own when its window fills,
   "using the same logic as the main conversation" (sub-agents.md, 2026-09-14);
   seen once here, 167k to 63k. Nothing lets a helper ask for it on purpose, and
@@ -25,7 +31,12 @@ lead reads only while debugging the plugin.
   subagent compaction and no focus argument for one; `/compact [instructions]`
   is lead-only. `PreCompact` and `PostCompact` hooks fire inside a subagent
   with its `agent_id`, but nothing outside can trigger one or replace its
-  result (code.claude.com/docs/en/hooks, read 2026-09-18). This skill's
+  result (code.claude.com/docs/en/hooks, read 2026-09-18). `PreCompact` can
+  still block that compaction from inside the subagent: "Exit with code 2 to
+  block compaction... You can also block by returning JSON with
+  `"decision": "block"`," while `PostCompact` "have no decision control. They
+  can't affect the compaction result but can perform follow-up tasks" (same
+  page, re-read 2026-09-28). This skill's
   `postcompact-check.mjs` saves the helper's `compact_summary` under the run
   and the saved return says "compacted N× mid-task; kept: <path>": read it,
   and correct a wrong summary with one `SendMessage` while the helper is warm. A helper at
