@@ -1,10 +1,10 @@
 # Packet template
 
 A packet is the whole context the agent will ever have; it sees nothing of the
-conversation. The fields below are the packet; add the rest only when they apply.
+conversation. The fields below are the packet.
 
 The packet is re-read every step, so size is cost: point at `path:line` ranges
-instead of pasting content, under about 6,000 characters. One verifiable
+instead of pasting content, under 6,000 characters. One verifiable
 change per packet; a task needing more steps than the role's `maxTurns` is two
 packets. The cap ends a helper mid-call with no report, so a code packet
 says: commit each piece as its check passes; stop adding at three quarters.
@@ -34,8 +34,7 @@ DONE WHEN (evidence)
 
 PROGRESS: <absolute path — <run dir>/progress/<task>.md, or
           .orchestrator/progress/<task>.md with no run>. Author roles keep it
-          current: a fresh agent resumes from this file and the branch, never
-          the stopped one (its cache is gone).
+          current: a fresh agent resumes from this file and the branch.
 ```
 
 Add a field only when the answer is not "none":
@@ -109,10 +108,11 @@ DIFF: `git diff <base>..<sha>` in that worktree
 CALLERS: <`map.mjs who-uses` per changed file, if mapped>
 EVIDENCE: <the author's EVIDENCE section and any log paths>
 REPO STANDARDS: <path to AGENTS.md / CLAUDE.md>
-RETURN: TASK, REVIEW OF: <the task id above>, STATUS: DONE, VERDICT: PASS|FAIL,
-  FINDINGS (numbered, file:line, the failure it causes, the exact edit),
-  EVIDENCE, NOT VERIFIED. Correctness and the stated requirements decide the
-  verdict; anything else is optional.
+RETURN: five lines, under 600 B, nothing after; OUTCOME is PASS or FAIL and the
+  one finding that decides it. The file holds TASK, REVIEW OF: <the task id>,
+  STATUS: DONE, VERDICT: PASS|FAIL, FINDINGS (numbered, file:line, the failure,
+  the exact edit), EVIDENCE, NOT VERIFIED. Correctness and the stated
+  requirements decide the verdict; anything else is optional.
 ```
 
 Name the risk: a reviewer sent to decide one question answers it.
