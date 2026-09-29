@@ -1,9 +1,22 @@
 // lib/spend-gate.mjs — the price tag and the budget-ceiling gate, split out of
 // guard-agent.mjs. No network, no child processes.
 
-import { priceTag, priceTagPair, estimateDollars } from './prices.mjs';
+import { priceTag, priceTagPair, estimateDollars, normalizeRole } from './prices.mjs';
 import { readJson, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer } from './tier.mjs';
 import { readCosts } from '../ledger.mjs';
+import { roleModel } from './workers.mjs';
+
+// The model a dispatch will actually run on: the one it named, or — when it
+// named none — the model the role's own agent file names (assets/agents/
+// <role>.md). general-purpose, claude, Explore and Plan have no such file and
+// stay unnamed, the same 'inherit' as before: they run on whatever the
+// session was on, which nothing here can price. Each orch-* role's model is
+// its own, known whether or not the dispatch said so.
+export function effectiveModel(ti) {
+  const named = String((ti && ti.model) || '');
+  if (named) return named;
+  return roleModel(normalizeRole(ti && ti.subagent_type)) || '';
+}
 
 // A price, said once, before the spend. Measured from this machine's own past
 // runs when there are any; labelled reasoned when there are not; absent when
@@ -19,7 +32,7 @@ import { readCosts } from '../ledger.mjs';
 export function tagFor(ti, { pair = false } = {}) {
   try {
     const role = String(ti.subagent_type || 'claude');
-    const model = String(ti.model || '');
+    const model = effectiveModel(ti);
     if (!model) return '';
     const rows = readCosts();
     const t = detectTier().tier;

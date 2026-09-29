@@ -3,7 +3,7 @@
 //   node --test skills/orchestrate/scripts/lib/spend-gate.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { overCeiling, budgetDecision, runFor, tagFor } from './spend-gate.mjs';
+import { overCeiling, budgetDecision, runFor, tagFor, effectiveModel } from './spend-gate.mjs';
 
 // ---- overCeiling: pure arithmetic ------------------------------------------
 
@@ -53,10 +53,30 @@ test('runFor falls back to nothing when neither a RUN: line nor a session bindin
   assert.equal(runFor({ session_id: 'unbound-session' }, { prompt: 'no run line here' }), null);
 });
 
-// ---- tagFor: no model named means no price tag -----------------------------
+// ---- effectiveModel: the model that actually runs --------------------------
 
-test('tagFor is empty when the dispatch names no model, and never throws', () => {
-  assert.equal(tagFor({ subagent_type: 'orch-implementer', prompt: '' }), '');
+test('effectiveModel is the named model when one is given', () => {
+  assert.equal(effectiveModel({ subagent_type: 'orch-implementer', model: 'opus' }), 'opus');
+});
+
+test('effectiveModel falls back to the role\'s own agent-file model when none is named', () => {
+  assert.equal(effectiveModel({ subagent_type: 'orch-implementer' }), 'sonnet');
+  assert.equal(effectiveModel({ subagent_type: 'orch-reviewer' }), 'opus');
+});
+
+test('effectiveModel is empty for a role with no agent file, naming no model', () => {
+  assert.equal(effectiveModel({ subagent_type: 'general-purpose' }), '');
+  assert.equal(effectiveModel({ subagent_type: 'claude' }), '');
+});
+
+// ---- tagFor: no model named means no price tag, unless the role has one ---
+
+test('tagFor is empty when a role with no agent file (general-purpose) names no model, and never throws', () => {
+  assert.equal(tagFor({ subagent_type: 'general-purpose', prompt: '' }), '');
+});
+
+test('tagFor prices an orch- role on its own file\'s model even when the dispatch names none', () => {
+  assert.match(tagFor({ subagent_type: 'orch-implementer', prompt: '' }), /price tag: orch-implementer on sonnet/);
 });
 
 test('tagFor prints the plain tag by default, and the solo/helper pair only when told to', () => {

@@ -322,17 +322,34 @@ test('guard: an attributable coordinator child is recorded with its parent', () 
   assert.equal(state.dispatches.at(-1).task, '9-9-0007');
 });
 
-test('guard: a dispatch that names no model is recorded as inherited and not priced', () => {
+test('guard: a Plan dispatch that names no model is recorded as inherited and not priced', () => {
   const home = sandbox();
   const out = run('guard-agent.mjs', {
     hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's9', cwd: home,
-    tool_input: { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0001\nPROGRESS: /r/progress/1.md\ndo it' },
+    tool_input: { subagent_type: 'Plan', prompt: 'TASK: 9-9-0001\ndo it' },
   }, home);
-  // No model named means no price figure to give; the packet already names its
-  // progress file, so the only context line left is the worktree fallback for it.
-  assert.match(out.json.hookSpecificOutput.additionalContext, /write the same relative path inside your own worktree/);
+  // No model named, and Plan has no agent file of its own, so there is no
+  // price figure to give: no additionalContext at all.
+  assert.doesNotMatch(String(out.json && out.json.hookSpecificOutput && out.json.hookSpecificOutput.additionalContext || ''), /price tag/);
   const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9.json'), 'utf8'));
   assert.equal(state.dispatches[0].model, 'inherit');
+  assert.equal(state.dispatches[0].modelFrom, 'inherit');
+});
+
+test('guard: an orch-implementer dispatch that names no model is recorded and priced on its own file\'s model', () => {
+  const home = sandbox();
+  const out = run('guard-agent.mjs', {
+    hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's9b', cwd: home,
+    tool_input: { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0002\nPROGRESS: /r/progress/1.md\ndo it' },
+  }, home);
+  // The role's own file names sonnet, so a tag prints even though the
+  // dispatch itself named nothing; this is the first implementer dispatch of
+  // the session with no ledger, so the solo/helper pair prints too.
+  assert.match(out.json.hookSpecificOutput.additionalContext, /price tag: orch-implementer on sonnet/);
+  assert.match(out.json.hookSpecificOutput.additionalContext, /done in this chat/);
+  const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's9b.json'), 'utf8'));
+  assert.equal(state.dispatches[0].model, 'sonnet');
+  assert.equal(state.dispatches[0].modelFrom, 'role');
 });
 
 // R3: the machine-wide active-run pointer is a display hint for a session
