@@ -546,3 +546,12 @@ test('the lead hears "N work calls since your last dispatch" only on a crossing,
   runContextCheck({ session_id: sid, agent_id: 'a1', tool_name: 'Edit', tool_input: {} }, home);
   assert.equal(readWorkCalls(home, sid), 42);
 });
+
+test('the lead hears a long hand-back on its next tool call, once per helper', () => {
+  const home = ctxSandbox();
+  const sid = 'lb-1';
+  writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, returned: [{ agentId: 'ag-1', longBytes: 2737 }] }));
+  const edit = { session_id: sid, tool_name: 'Read', tool_input: { file_path: '/x' } };
+  assert.match(runContextCheck(edit, home), /the last hand-back was 2737 bytes against 600; in the next brief, ask for five lines and a file for the rest/);
+  assert.doesNotMatch(runContextCheck(edit, home), /against 600/, 'once per helper');
+});

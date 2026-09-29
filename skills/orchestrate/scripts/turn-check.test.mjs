@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, longHandBackFact, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches, mergedBranches } from './turn-check.mjs';
+import { shouldBlock, heartbeatDecision, pickupSection, pickupHash, pickupWritten, IDLE_READY_MIN, reviewHoldDecision, unreviewedRiskFact, leftoverHelperWorktrees, leftoverHelperBranches, mergedBranches, anyHelperRunning } from './turn-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'turn-check.mjs');
@@ -574,22 +574,39 @@ test('the hook tells the lead once, in one plain line, that a review failed', ()
   assert.doesNotMatch(r2.stdout, /independent look found a problem/);
 });
 
-// ---- a long hand-back is named to the lead, once ------------------------------
+// ---- a long hand-back is not named at a stop --------------------------------
 
-test('longHandBackFact names the size once per helper', () => {
-  const returned = [{ agentId: 'ag-1', longBytes: 6000 }, { agentId: 'ag-2', status: 'DONE' }];
-  const f = longHandBackFact({ returned, noted: [] });
-  assert.match(f.text, /6000 bytes against 600; ask for five lines/);
-  assert.equal(longHandBackFact({ returned, noted: [f.id] }), null);
-});
-
-test('the hook says a hand-back was long, once', () => {
+test("the stop hook no longer reports a helper's hand-back size", () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
   const dir = join(home, '.claude', 'orchestrate', 'sessions');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'sess-long.json'), JSON.stringify({ v: 1, session_id: 'sess-long', returned: [{ agentId: 'ag-1', longBytes: 6000 }], dispatches: [] }));
   const a = run({ session_id: 'sess-long', cwd: home, last_assistant_message: 'Done.' }, home);
-  assert.match(a.stdout, /6000 bytes against 600/);
-  const b = run({ session_id: 'sess-long', cwd: home, last_assistant_message: 'Done.' }, home);
-  assert.doesNotMatch(b.stdout, /against 600/);
+  assert.doesNotMatch(a.stdout, /against 600/);
+});
+
+// ---- the leftover note waits while a helper is still working ------------------
+
+test('anyHelperRunning: a dispatch with no return is running; an old one is not', () => {
+  const now = Date.parse('2026-09-29T12:00:00Z');
+  const d = (id, at) => ({ toolUseId: id, at });
+  assert.equal(anyHelperRunning({ dispatches: [d('t1', '2026-09-29T11:59:00Z')], returned: [], now }), true);
+  assert.equal(anyHelperRunning({ dispatches: [d('t1', '2026-09-29T11:59:00Z')], returned: [{ toolUseId: 't1' }], now }), false);
+  assert.equal(anyHelperRunning({ dispatches: [d('t1', '2026-09-28T01:00:00Z')], returned: [], now }), false);
+});
+
+test('Stop: merged helper folders are not named while another helper is still working', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const repo = mkdtempSync(join(tmpdir(), 'orch-turncheck-lo-'));
+  const g = (...a) => spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  g('init', '-q'); g('commit', '-q', '--allow-empty', '-m', 'base');
+  mergeHelper(g, 'a1b2'); mkdirSync(join(repo, '.claude', 'worktrees', 'agent-a1b2'), { recursive: true });
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  const dispatches = [{ toolUseId: 'tu-1', agentId: 'a1b2', at: new Date().toISOString() }, { toolUseId: 'tu-2', at: new Date().toISOString() }];
+  writeFileSync(join(dir, 'run-1.json'), JSON.stringify({ v: 1, session_id: 'run-1', cwd: repo, dispatches, returned: [{ agentId: 'a1b2', toolUseId: 'tu-1', status: 'DONE' }] }));
+  const input = { hook_event_name: 'Stop', session_id: 'run-1' };
+  assert.equal(run(input, home).stdout.trim(), '', 'a helper is still working: quiet');
+  writeFileSync(join(dir, 'run-1.json'), JSON.stringify({ v: 1, session_id: 'run-1', cwd: repo, dispatches, returned: [{ agentId: 'a1b2', toolUseId: 'tu-1', status: 'DONE' }, { agentId: 'z9', toolUseId: 'tu-2', status: 'DONE' }] }));
+  assert.match(JSON.parse(run(input, home).stdout).reason, /still here/, 'all returned: said');
 });

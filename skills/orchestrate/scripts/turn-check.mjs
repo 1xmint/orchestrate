@@ -93,6 +93,16 @@ const reviewFailed = (d, returned) => (Array.isArray(returned) ? returned : []).
   && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId)));
 const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id);
 
+// A dispatch of this session with no return yet, sent within the last six
+// hours (an older one is a helper that died without a return, not one working).
+export function anyHelperRunning({ dispatches, returned, now }) {
+  const rs = Array.isArray(returned) ? returned : [];
+  const t0 = Number.isFinite(now) ? now : Date.now();
+  return (Array.isArray(dispatches) ? dispatches : []).some(d => d && (d.toolUseId || d.agentId)
+    && !(Date.parse(d.at) < t0 - 6 * 3600 * 1000)
+    && !rs.some(r => r && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId))));
+}
+
 function freeFormOpen(returned, dispatches) {
   const ds = Array.isArray(dispatches) ? dispatches : [];
   const out = [];
@@ -132,18 +142,6 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
     return { block: true, task: f.id, freeForm: true, failed: Boolean(f.failed), blockedFor: [...already, key] };
   }
   return { block: false, task: null, blockedFor: [...already] };
-}
-
-// A hand-back over the size the ledger keeps whole (ledger.mjs marks the return
-// with longBytes): one line of fact per helper, never repeated.
-export function longHandBackFact({ returned, noted }) {
-  const seen = new Set(Array.isArray(noted) ? noted : []);
-  for (const r of Array.isArray(returned) ? returned : []) {
-    const id = r && r.longBytes ? String(r.agentId || r.toolUseId || r.at || '') : '';
-    if (!id || seen.has(id)) continue;
-    return { id, text: `a helper's hand-back was ${r.longBytes} bytes against 600; ask for five lines.` };
-  }
-  return null;
 }
 
 // Work the lead built alone. The hold above only reads a helper's return, so a
@@ -334,14 +332,6 @@ function checkHeartbeat(input) {
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
 
-  const lf = longHandBackFact({ returned: state.returned, noted: rec.longNotedFor });
-  if (lf) {
-    updated.longNotedFor = [...(Array.isArray(rec.longNotedFor) ? rec.longNotedFor : []), lf.id].slice(-50);
-    store[key] = updated;
-    try { writeJsonAtomic(path, store); } catch {}
-    return emitBlock(`orchestrate: ${lf.text}`);
-  }
-
   // Risky work the lead did itself and no reviewer has seen: one fact, once per
   // set of edits. Quiet, and no file read beyond the transcript tail, otherwise.
   if (input.transcript_path) {
@@ -355,10 +345,11 @@ function checkHeartbeat(input) {
   }
 
   // Helper folders and branches still there after their work was merged: one
-  // fact with the count, once per count. Nothing is removed. The git call is
+  // fact with the count, once per count, and only when no helper of this session
+  // is still running. Nothing is removed. The git call is
   // made only when a returned helper's own folder still exists.
   const cwd = state.cwd || input.cwd;
-  const anyHelper = cwd && Array.isArray(state.returned) && state.returned.some(r => r && r.agentId);
+  const anyHelper = cwd && Array.isArray(state.returned) && state.returned.some(r => r && r.agentId) && !anyHelperRunning({ dispatches: state.dispatches, returned: state.returned });
   if (anyHelper) {
     const merged = mergedBranches(cwd);
     const f = leftoverHelperWorktrees({ cwd, returned: state.returned, merged, exists: existsSync, clean: folderIsClean });

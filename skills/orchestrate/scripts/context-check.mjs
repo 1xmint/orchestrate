@@ -253,10 +253,22 @@ export function check(input) {
     if (note) out.push(note);
     const capped = cappedNote(state);
     if (capped) out.push(capped);
+    // A helper's hand-back over the size the ledger keeps whole: said once per
+    // helper, here, while the next brief is still to be written.
+    const told = Array.isArray(state.longTold) ? state.longTold : [];
+    let longTold = false;
+    for (const r of Array.isArray(state.returned) ? state.returned : []) {
+      const id = r && r.longBytes ? String(r.agentId || r.toolUseId || r.at || '') : '';
+      if (!id || told.includes(id)) continue;
+      out.push(`[orchestrate · context] the last hand-back was ${r.longBytes} bytes against 600; in the next brief, ask for five lines and a file for the rest.`);
+      state.longTold = [...told, id].slice(-50);
+      longTold = true;
+      break;
+    }
     if (workCallsChanged) state.workCalls = { count: workCalls };
     const workChanged = trackWork(state, input);
     const returnChanged = markDispatchReturn(state, input);
-    if ((state.mode || null) !== before || capped || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
+    if ((state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
   } else if (workCallsChanged) {
     try { saveSession({ v: 1, session_id: session, started: new Date().toISOString(), workCalls: { count: workCalls } }); } catch {}
   }
