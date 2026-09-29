@@ -10,7 +10,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseReturn, sumUsage, describeDispatch, returnFilename, costLine, appendCost, readCosts, latestPerAgent, COSTS_MAX } from './ledger.mjs';
+import { parseReturn, returnToolUseId, sumUsage, describeDispatch, returnFilename, costLine, appendCost, readCosts, latestPerAgent, COSTS_MAX } from './ledger.mjs';
 import { shouldBlock, pickupHash, pickupWritten, pickupSection } from './turn-check.mjs';
 import { decide, eventId, markSeen } from './guard-agent.mjs';
 import { trimLog, runSpend } from './lib/tier.mjs';
@@ -1087,4 +1087,16 @@ test('turn check: nothing in it can ask for more research, testing or improvemen
   const live = src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
   assert.doesNotMatch(live, /sourceCalls|WebFetch|WebSearch|floorDecision/);
   assert.doesNotMatch(live, /orch-researcher/);
+});
+
+// Live helper stop payload: an agent id, no tool_use_id. The dispatch row holds both.
+test("returnToolUseId fills the call id from the dispatch row with the same agent id", () => {
+  const rows = [
+    { agent: "orch-implementer", toolUseId: "toolu_one", agentId: "a8c3248b76def6836" },
+    { agent: "orch-implementer", toolUseId: "toolu_two", agentId: "aebff525fc3e85cb0" },
+  ];
+  assert.equal(returnToolUseId({ agent_id: "aebff525fc3e85cb0" }, rows), "toolu_two");
+  assert.equal(returnToolUseId({ agent_id: "a8c3248b76def6836", tool_use_id: "toolu_x" }, rows), "toolu_x");
+  assert.equal(returnToolUseId({ agent_id: "unknown" }, rows), null);
+  assert.equal(returnToolUseId({}, rows), null);
 });

@@ -233,6 +233,20 @@ test('reviewHoldDecision with two open free-form returns does not let one unname
   assert.equal(named.task, 'toolu_B', 'only the one the reviewer named is cleared');
 });
 
+// Live shape (a real run): the return has an agent id and toolUseId null; the
+// dispatch row has both. The hold must still fire, and a reviewer clears it.
+test('reviewHoldDecision matches a live return (toolUseId null) to its dispatch by agent id', () => {
+  const disp = { ...FF_DISPATCH, agentId: 'a8c3248b76def6836' };
+  const live = { ...FF_RETURN, toolUseId: null, agentId: 'a8c3248b76def6836' };
+  const d = reviewHoldDecision({ returned: [live], dispatches: [disp], lastMessage: '', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.task, 'toolu_A');
+  const named = { at: '2026-09-29T10:10:00.000Z', agent: 'orch-reviewer', task: null, toolUseId: 'toolu_R', reviewOf: 'toolu_A' };
+  assert.equal(reviewHoldDecision({ returned: [live], dispatches: [disp, named], lastMessage: '', blockedFor: [] }).block, false);
+  const other = { ...live, agentId: 'not-a-dispatched-agent' };
+  assert.equal(reviewHoldDecision({ returned: [other], dispatches: [disp], lastMessage: '', blockedFor: [] }).block, false);
+});
+
 // ---- hook process: stdin/stdout contract ---------------------------------------
 
 test('a malformed JSON payload exits 0 and writes nothing', () => {

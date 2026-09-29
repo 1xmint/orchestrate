@@ -354,6 +354,16 @@ export function describeDispatch(d) {
   return d.model === 'inherit' ? 'inherited model' : d.model;
 }
 
+// The id of the dispatch call a return answers. A live helper stop carries its
+// agent id and no tool_use_id, while the dispatch row holds both; so the row
+// with the same agent id supplies the call id when the stop event has none.
+export function returnToolUseId(input, dispatches) {
+  if (input && input.tool_use_id) return String(input.tool_use_id);
+  if (!input || !input.agent_id) return null;
+  const row = (Array.isArray(dispatches) ? dispatches : []).find(d => d && d.agentId === String(input.agent_id) && d.toolUseId);
+  return row ? String(row.toolUseId) : null;
+}
+
 function dispatchFor(sessionId, task) {
   try {
     const state = loadSession(sessionId);
@@ -697,7 +707,7 @@ function main() {
       // yes or an inferred word) and none has come back yet — turn-check.mjs
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: input.tool_use_id ? String(input.tool_use_id) : null, task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
       saveSession(state);
     }
   } catch {}

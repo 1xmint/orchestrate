@@ -88,11 +88,15 @@ function freeFormOpen(returned, dispatches) {
   const ds = Array.isArray(dispatches) ? dispatches : [];
   const out = [];
   for (const r of Array.isArray(returned) ? returned : []) {
-    if (!r || r.task || r.status !== 'DONE' || !r.toolUseId) continue;
-    const d = ds.find(x => x && x.toolUseId === r.toolUseId);
-    if (!d || d.task || !d.review || isReviewerRow(d)) continue;
-    if (ds.some(x => x && x.reviewOf === r.toolUseId)) continue;
-    out.push({ id: r.toolUseId, at: Date.parse(r.at) });
+    if (!r || r.task || r.status !== 'DONE') continue;
+    // A helper's stop event carries its agent id but not the dispatch call's id,
+    // so a return with no toolUseId is matched on the agent id both rows share.
+    const d = r.toolUseId
+      ? ds.find(x => x && x.toolUseId === r.toolUseId)
+      : (r.agentId ? ds.find(x => x && x.agentId === r.agentId) : null);
+    if (!d || !d.toolUseId || d.task || !d.review || isReviewerRow(d)) continue;
+    if (ds.some(x => x && x.reviewOf === d.toolUseId)) continue;
+    out.push({ id: d.toolUseId, at: Date.parse(r.at) });
   }
   return out;
 }
