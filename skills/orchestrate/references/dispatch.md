@@ -32,7 +32,8 @@ A helper hands back five lines only, under 600 B: OUTCOME, PROOF, NOT CHECKED,
 NEEDS A DECISION, FULL REPORT; the long report stays in its file. Read them; tell the user OUTCOME in terms of their
 goal. Anything a helper did outside its allowed files, or any file it wrote
 outside its own folder, belongs under NEEDS A DECISION, never at the bottom.
-The parsed labels (TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED) follow.
+OUTCOME opens with DONE, PARTIAL or BLOCKED. The file holds the parsed labels
+(TASK, STATUS, CHANGED, EVIDENCE, NOT VERIFIED).
 
 ## Codex workers
 

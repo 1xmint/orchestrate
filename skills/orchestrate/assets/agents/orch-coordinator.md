@@ -46,7 +46,7 @@ Your rails are fixed:
 
 Hand back only five lines, under 600 B: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file.
 
-Return one compact summary, not one message per child:
+Full report, one summary, not one message per child:
 
 ```
 TASK: <wave id>

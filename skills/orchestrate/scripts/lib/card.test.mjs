@@ -66,3 +66,8 @@ test('the card keeps risky work and a request for a helper out of the do-it-your
 test('the card carries no counter phrase — those live behind `router status`', () => {
   assert.doesNotMatch(CARD, /orch-agents|codex:|tier \w|limits today/);
 });
+
+test('the card tells the lead to say "a separate folder", never worktree or harness, to the user', () => {
+  // Live runs: the lead said "worktree" to the user five times.
+  assert.match(CARD, /Tell the user "a separate folder", never worktree or harness\./);
+});
