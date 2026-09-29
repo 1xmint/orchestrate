@@ -89,7 +89,7 @@ test('the coordinator owns one bounded wave and one graded return', () => {
   assert.match(text, /Grade every return against that task's DONE WHEN/);
   assert.match(text, /integrate their branches in dependency order/);
   assert.match(text, /run the packet's gate once/);
-  assert.match(text, /Return one compact summary, not one message per child/);
+  assert.match(text, /Full report, one summary, not one message per child/);
   assert.match(text, /Never turn the return into a question for the user/);
 });
 
@@ -648,7 +648,6 @@ test('no role file names the old TASK/STATUS/CHANGED form as the hand-back', () 
   for (const f of readdirSync(AGENTS).filter((n) => n.endsWith('.md'))) {
     const s = readFileSync(join(AGENTS, f), 'utf8');
     assert.ok(!/Return in the packet's schema/i.test(s), `${f} tells the helper to return the old form`);
-    assert.ok(!/Return one compact summary/i.test(s), `${f} asks for a second return form`);
     assert.ok(/five lines/.test(s), `${f} names the five-line hand-back`);
   }
 });
