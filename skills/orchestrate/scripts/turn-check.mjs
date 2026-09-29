@@ -164,10 +164,15 @@ export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
   const goalWord = reviewWordMatch(String(goal || ''));
   if (!word && !goalWord) return null;
   const since = word ? lastRiskAt : lastEditAt;
-  const reviewed = (Array.isArray(returned) ? returned : []).some(r => r && /reviewer/i.test(String(r.agent || '')) && (Date.parse(r.at) || 0) >= since);
-  if (reviewed) return null;
+  const reviews = (Array.isArray(returned) ? returned : []).filter(r => r && /reviewer/i.test(String(r.agent || '')));
+  if (reviews.some(r => (Date.parse(r.at) || 0) >= since)) return null;
   const topic = TOPIC_OF(word || goalWord);
-  return { topic, key: `${word || goalWord}@${lastRiskIdx}:${edits}`, text: `this change touches ${topic}; nobody independent has looked at it.` };
+  // A review that came before the last change means the reviewed version was
+  // looked at; only what was changed since is not.
+  const text = reviews.length
+    ? `this change touches ${topic}; the change made since the review has not been looked at.`
+    : `this change touches ${topic}; nobody independent has looked at it.`;
+  return { topic, key: `${word || goalWord}@${lastRiskIdx}:${edits}`, text };
 }
 
 // Helper folders left behind. A helper that works in its own worktree leaves a

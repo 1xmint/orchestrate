@@ -288,7 +288,9 @@ test('unreviewedRiskFact is silent once a reviewer returned after the last risky
   const after = { agent: 'orch-reviewer', at: '2026-09-29T10:05:00.000Z', status: 'DONE' };
   const before = { agent: 'orch-reviewer', at: '2026-09-29T09:00:00.000Z', status: 'DONE' };
   assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [after] }), null);
-  assert.ok(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [before] }));
+  const f = unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [before] });
+  assert.equal(f.text, 'this change touches sign-in; the change made since the review has not been looked at.');
+  assert.ok(!/nobody/.test(f.text), 'a review exists, so it must not say nobody looked');
 });
 
 test('Stop: a lead-built password edit gets the one-line fact once, then the same edits are silent', () => {
