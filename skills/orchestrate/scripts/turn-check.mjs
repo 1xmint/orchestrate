@@ -187,6 +187,19 @@ export function leftoverHelperWorktrees({ cwd, returned, merged, exists }) {
   return seen.size;
 }
 
+// Helper branches already merged whose folder is gone: the branch alone is
+// still left over, and the person is told the same way. Counts only.
+export function leftoverHelperBranches({ cwd, returned, merged, exists }) {
+  const seen = new Set();
+  for (const r of Array.isArray(returned) ? returned : []) {
+    const id = r && r.agentId ? String(r.agentId) : '';
+    if (!id || seen.has(id) || !/^[A-Za-z0-9]+$/.test(id)) continue;
+    if (!(merged || []).includes(`worktree-agent-${id}`)) continue;
+    if (!exists(join(String(cwd), '.claude', 'worktrees', `agent-${id}`))) seen.add(id);
+  }
+  return seen.size;
+}
+
 function mergedBranches(cwd) {
   try {
     return execFileSync('git', ['branch', '--merged', 'HEAD', '--format=%(refname:short)'], { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).split('\n').map(s => s.trim()).filter(Boolean);
@@ -292,14 +305,20 @@ function checkHeartbeat(input) {
   // fact with the count, once per count. Nothing is removed. The git call is
   // made only when a returned helper's own folder still exists.
   const cwd = state.cwd || input.cwd;
-  const folders = cwd && Array.isArray(state.returned) && state.returned.some(r => r && r.agentId && existsSync(join(String(cwd), '.claude', 'worktrees', `agent-${r.agentId}`)));
-  if (folders) {
-    const n = leftoverHelperWorktrees({ cwd, returned: state.returned, merged: mergedBranches(cwd), exists: existsSync });
+  const anyHelper = cwd && Array.isArray(state.returned) && state.returned.some(r => r && r.agentId);
+  if (anyHelper) {
+    const merged = mergedBranches(cwd);
+    const f = leftoverHelperWorktrees({ cwd, returned: state.returned, merged, exists: existsSync });
+    const b = leftoverHelperBranches({ cwd, returned: state.returned, merged, exists: existsSync });
+    const n = f + b;
     if (n && rec.leftoverNotedFor !== n) {
       updated.leftoverNotedFor = n;
       store[key] = updated;
       try { writeJsonAtomic(path, store); } catch {}
-      return emitBlock(`orchestrate: ${n} helper ${n === 1 ? 'folder and branch are' : 'folders and branches are'} still here although their work was merged.`);
+      const what = f && b ? `${f} helper ${f === 1 ? 'folder' : 'folders'} and ${f + b} helper ${f + b === 1 ? 'branch are' : 'branches are'}`
+        : f ? `${f} helper ${f === 1 ? 'folder and branch are' : 'folders and branches are'}`
+          : `${b} helper ${b === 1 ? 'branch is' : 'branches are'}`;
+      return emitBlock(`orchestrate: ${what} still here although their work was merged; nothing has been removed.`);
     }
   }
 
