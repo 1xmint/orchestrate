@@ -78,6 +78,20 @@ test('a worktree-isolated role that does say worktree: yes clears the isolation 
   assert.equal(d, null);
 });
 
+test('a brief that only says where a file lives is not refused, with or without isolation set', () => {
+  const prompt = 'Build the tool. Put a file called notes.json in the project root.';
+  assert.equal(workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', isolation: 'worktree', prompt }, { policy: policy() }), null);
+  assert.equal(workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', prompt }, { policy: policy() }), null);
+});
+
+test('a brief that really says to work in the shared checkout is still refused', () => {
+  for (const prompt of ['Work directly in the project root.', 'Edit in the shared checkout.', 'Do not use a separate worktree.']) {
+    const d = workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', prompt }, { policy: policy() });
+    assert.ok(d, prompt);
+    assert.match(d.reason, /always works in its own worktree/);
+  }
+});
+
 // ---- locked worktree and concurrency -----------------------------------------
 
 test('a packet naming a worktree a live Codex worker holds is denied', () => {
