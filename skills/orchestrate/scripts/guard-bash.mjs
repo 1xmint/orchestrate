@@ -396,7 +396,7 @@ export function recordAsked(sessionId, command) {
 // asking. `ctx.cwd` resolves relative delete targets; `ctx.subagent` (a
 // helper nobody can answer) and `ctx.headless` change deny-vs-ask, never
 // which commands match.
-export function decide(command, ctx = {}) {
+function decideOne(command, ctx = {}) {
   const cmd = String(command || '').replace(/\s+/g, ' ').trim();
   if (!cmd) return { kind: 'pass' };
 
@@ -435,6 +435,15 @@ export function decide(command, ctx = {}) {
   }
   if (ctx.sessionId) recordAsked(ctx.sessionId, cmd);
   return { kind: 'ask', reason: hit.reason };
+}
+
+// One place where every refusal is finished: a line of several parts that is
+// refused because of one part says, in one plain sentence, that none of it ran.
+export function decide(command, ctx = {}) {
+  const d = decideOne(command, ctx);
+  if (d.kind !== 'deny') return d;
+  const parts = String(command || '').split(/&&|;|\|/).filter(x => x.trim());
+  return parts.length > 1 ? { ...d, reason: d.reason + ' Nothing in this line ran.' } : d;
 }
 
 // A project's own list of commands its user has already approved, so the

@@ -660,3 +660,15 @@ test('a refused branch delete never names a form that is itself refused', () => 
   assert.match(d.reason, /git branch -d <name>/);
   assert.doesNotMatch(d.reason, /helper branches/);
 });
+
+test('a refused line with several parts ends by saying nothing in it ran; a single part does not', () => {
+  for (const opts of [{ headless: true, mode: 'auto' }, { subagent: true }]) {
+    for (const multi of ['git status && rm -rf src', 'git branch -D x; git status', 'git status && git push --force']) {
+      const d = decide(multi, opts);
+      assert.equal(d.kind, 'deny', multi);
+      assert.match(d.reason, /Nothing in this line ran\.$/, multi);
+    }
+    assert.doesNotMatch(decide('git branch -D x', opts).reason, /Nothing in this line ran/);
+    assert.doesNotMatch(decide('git push --force', opts).reason, /Nothing in this line ran/);
+  }
+});
