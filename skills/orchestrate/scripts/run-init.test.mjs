@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { latestRun } from './lib/tier.mjs';
+import { openRunsUnder } from './lib/runs.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPT = join(HERE, 'run-init.mjs');
@@ -166,4 +167,35 @@ test('the new ledger reads back as an open run with an unwritten Pickup', () => 
   assert.equal(found.open, true, 'the placeholder row counts as open');
   assert.deepEqual(found.pickup, {}, 'nothing in Pickup is written yet, so nothing is reported');
   assert.equal(readdirSync(join(dir, '.orchestrator', 'runs')).length, 1);
+});
+
+// Seen live on 0.17.0: a finished run kept one blocked row (work only another
+// machine could do), so it stayed "open", and every new session in the repo was
+// told it continued that run and filed its helpers' returns into it.
+test('--close ends a run that still holds a blocked row; --reopen brings it back', () => {
+  const dir = repo({ 'package.json': '{}' });
+  run(dir, 'finished', '--goal', 'old goal');
+  const runsDir = join(dir, '.orchestrator', 'runs');
+  const id = readdirSync(runsDir)[0];
+  const runMd = join(runsDir, id, 'RUN.md');
+  writeFileSync(runMd, readFileSync(runMd, 'utf8').replace(/\n## Tasks[^\n]*\n/, m => `${m}\n| 9-29-0001 | ⛔ blocked (machine) | — | — | — | needs Linux | — | 0 | — |\n`));
+  assert.equal(openRunsUnder(dir).length, 1, 'a blocked row keeps the run open');
+
+  const closed = run(dir, '--close', id, '--reason', 'goal dropped by the user');
+  assert.equal(closed.status, 0, closed.stderr);
+  assert.match(readFileSync(runMd, 'utf8'), /^Closed: \d{4}-\d{2}-\d{2} — goal dropped by the user$/m);
+  assert.equal(openRunsUnder(dir).length, 0, 'a closed run is not open, blocked row or not');
+  assert.equal(latestRun(dir).closed, true);
+
+  const back = run(dir, '--reopen', id);
+  assert.equal(back.status, 0, back.stderr);
+  assert.doesNotMatch(readFileSync(runMd, 'utf8'), /^Closed:/m);
+  assert.equal(openRunsUnder(dir).length, 1, 'reopening removes the Closed line');
+});
+
+test('--close names a run that does not exist and changes nothing', () => {
+  const dir = repo({ 'package.json': '{}' });
+  const r = run(dir, '--close', '20990101-nope');
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /no RUN\.md/);
 });

@@ -195,8 +195,10 @@ export function parseBudget(text) {
 }
 
 // One run, read from its RUN.md. `open` is true while a task row still carries
-// a non-final glyph. Pickup lines come from the "## Pickup" section; template
-// placeholders count as empty.
+// a non-final glyph and no `Closed:` line says the goal was met or dropped: a
+// finished run can keep a blocked row (work only another machine can do), and
+// without the line it bound every new session in the repo. Pickup lines come
+// from the "## Pickup" section; template placeholders count as empty.
 export function readRun(runMd, root) {
   try {
     const st = statSync(runMd);
@@ -213,7 +215,9 @@ export function readRun(runMd, root) {
     const spend = runSpend(dir);
     // The phase cell, not the whole row: a task description that mentions a
     // glyph is not an open task.
-    const open = rows.some(l => OPEN_GLYPHS.test(cellAt(l, 2)));
+    const closedLine = /^Closed:[ \t]*(\S.*)$/m.exec(text);
+    const closed = Boolean(closedLine);
+    const open = !closed && rows.some(l => OPEN_GLYPHS.test(cellAt(l, 2)));
     const done = rows.filter(l => /✅/.test(cellAt(l, 2))).length;
     // A plan nobody has touched in two days is not the work in front of this
     // session. It stays on disk, and `run-init --reopen` makes it live again.
@@ -231,7 +235,7 @@ export function readRun(runMd, root) {
         if (kv && isWritten(kv[2])) pickup[kv[1]] = kv[2].trim();
       }
     }
-    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, lastActivity, open, stale, rows: rows.length, done, ready, ungraded, edgesMissing, budget, spend, pickup };
+    return { runId: runIdOf(runMd), dir, runMd, root: root || dirname(dirname(dir)), mtimeMs: st.mtimeMs, lastActivity, open, closed, closedNote: closed ? closedLine[1].trim() : null, stale, rows: rows.length, done, ready, ungraded, edgesMissing, budget, spend, pickup };
   } catch { return null; }
 }
 
@@ -308,6 +312,8 @@ export function sessionRun(sessionId) {
   if (!r || !r.runMd || !existsSync(r.runMd)) return null;
   const run = readRun(r.runMd, r.root);
   if (run && run.stale && !(r.explicit && Date.now() - Date.parse(r.boundAt || 0) < STALE_RUN_MS)) return null;
+  // A closed run keeps only a binding made on purpose after it was closed.
+  if (run && run.closed && !(r.explicit && Date.parse(r.boundAt || 0) >= run.mtimeMs)) return null;
   return run;
 }
 

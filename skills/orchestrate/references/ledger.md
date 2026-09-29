@@ -68,3 +68,11 @@ worktrees, so a shared file becomes a merge conflict after both are done.
 Read the latest `RUN.md` once, continue from its Pickup line, do not re-plan,
 do not re-read it whole later. An unbound session claims a run with
 `run-init.mjs --bind <RUN.md> --session-id <id>`.
+
+## Closing
+
+When the goal is met, or the user drops it, run
+`run-init.mjs --close <run id> --reason "…"`. It writes one `Closed:` line under
+the title. A run with any blocked or planned row left counts as open, binds the
+next session in the repo, and has helper returns filed into it; a closed one
+never does. `--reopen <run id>` removes the line.
