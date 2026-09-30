@@ -193,7 +193,7 @@ function riskText(input, fc) {
 }
 
 export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
-  let edits = 0; let lastEditAt = 0; let word = null; let lastRiskAt = 0; let lastRiskIdx = -1;
+  let edits = 0; let lastEditAt = 0; let word = null; let lastRiskAt = 0; let lastRiskId = null;
   const lines = String(transcriptTail || '').split('\n');
   lines.forEach((line, idx) => {
     if (!line.includes('"tool_use"')) return;
@@ -208,7 +208,7 @@ export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
       if (at > lastEditAt) lastEditAt = at;
       const text = riskText(c.input, fc);
       const w = text == null ? null : reviewWordMatch(text);
-      if (w) { word = w; lastRiskIdx = idx; if (at > lastRiskAt) lastRiskAt = at; }
+      if (w) { word = w; lastRiskId = c.id || o.uuid || `${o.timestamp}#${idx}`; if (at > lastRiskAt) lastRiskAt = at; }
     }
   });
   if (!edits) return null;
@@ -223,7 +223,12 @@ export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
   const text = reviews.length
     ? `this change touches ${topic}; the change made since the review has not been looked at.`
     : `this change touches ${topic}; nobody independent has looked at it.`;
-  return { topic, key: `${word || goalWord}@${lastRiskIdx}:${edits}`, text };
+  // The key names the risky edit itself (its tool-call id), never its place in
+  // the transcript tail: the tail is the last 1 MB, so a line number or an edit
+  // count moves as the chat grows and the same edit would be raised again. With
+  // only the request to go on, it is raised once per review.
+  const lastReview = reviews.reduce((m, r) => Math.max(m, Date.parse(r.at) || 0), 0);
+  return { topic, key: word ? `${word}@${lastRiskId}` : `${goalWord}@review:${lastReview}`, text };
 }
 
 // Helper folders and branches left behind. A helper that works in its own

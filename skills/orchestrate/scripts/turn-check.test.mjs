@@ -293,6 +293,23 @@ test('unreviewedRiskFact is silent once a reviewer returned after the last risky
   assert.ok(!/nobody/.test(f.text), 'a review exists, so it must not say nobody looked');
 });
 
+test('unreviewedRiskFact keeps one key for the same risky edit as the transcript window slides', () => {
+  // Live, 2026-09-29: the stop hook reads the last 1 MB of the transcript, and
+  // the key was the risky edit's line number in that window plus the edit
+  // count, so the same old edit was raised again on a later turn. The key is
+  // now the edit's own tool-call id; a new risky edit still gets a new key.
+  const withId = (id, name, input, at) => JSON.stringify({ type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', id, name, input }] } });
+  const older = withId('tu-0', 'Edit', { file_path: 'a.js', new_string: 'const x = 1;' }, '2026-09-29T09:00:00.000Z');
+  const risky = withId('tu-1', 'Edit', { file_path: 's.js', new_string: '// check the password here' }, '2026-09-29T10:00:00.000Z');
+  const bland = withId('tu-2', 'Edit', { file_path: 'b.js', new_string: 'const y = 2;' }, '2026-09-29T10:10:00.000Z');
+  const k1 = unreviewedRiskFact({ transcriptTail: [older, risky].join('\n'), goal: '', returned: [] }).key;
+  const slid = unreviewedRiskFact({ transcriptTail: [risky, bland].join('\n'), goal: '', returned: [] }).key;
+  assert.equal(slid, k1, 'an older line left the window and a bland edit came in: same risky edit, same key');
+  const risky2 = withId('tu-3', 'Edit', { file_path: 's.js', new_string: '// and the password reset' }, '2026-09-29T10:20:00.000Z');
+  const k2 = unreviewedRiskFact({ transcriptTail: [risky, bland, risky2].join('\n'), goal: '', returned: [] }).key;
+  assert.notEqual(k2, k1, 'a new risky edit is raised again');
+});
+
 test('Stop: a lead-built password edit gets the one-line fact once, then the same edits are silent', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
   const dir = join(home, '.claude', 'orchestrate', 'sessions');

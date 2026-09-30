@@ -27,6 +27,8 @@ test that fails on the old code:
   the edits being made.
 - A review that failed and then passed on a follow-up to the same reviewer
   no longer makes the stop hook say the review found a problem.
+- The "this change touches ..." stop line is said once per risky edit; it no
+  longer comes back as the chat grows.
 
 Seen and not fixed: a helper's own compaction reached the lead's after-compaction
 card because the host sent no agent id (a Claude Code gap, to report); the

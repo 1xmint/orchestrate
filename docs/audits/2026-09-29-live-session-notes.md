@@ -220,6 +220,14 @@ the later PASS was never seen. *Got in the way:* it asked for work already
 done. Fixed in 0.17.1: the newest verdict for a dispatch decides; replaying
 this session's own rows through the fixed check stays quiet.
 
+**M. The "touches payments" line came back on a later turn.** It fired on a
+scratch script that quoted `git checkout` (0.17.1 already strips that phrase;
+replaying the session through it gives no alarm). Then it fired again, word for
+word, one turn later. Its "said once" memory was keyed on the edit's line number
+in the last 1 MB of the transcript plus an edit count, and both move as the chat
+grows. *Got in the way.* Fixed in 0.17.1: the key is the risky edit's own
+tool-call id.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to
