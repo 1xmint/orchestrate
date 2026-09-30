@@ -222,6 +222,8 @@ function promptText(input) {
 // Everything the model cannot see, once; then nothing until one of those facts
 // changes. A message whose wording differs from the last one is not a change of
 // state, and the old router treated it as one.
+const HOST_TAGS = /<(system-reminder|local-command-caveat|local-command-stdout|command-name|command-message|command-args)>[\s\S]*?<\/\1>/g;
+
 function handlePrompt(input) {
   // A hook fires inside a subagent's own call too, with `agent_id` set on the
   // stdin payload (hooks doc, "common input fields"). Nothing here is about
@@ -242,7 +244,11 @@ function handlePrompt(input) {
   if (promptKey && state.lastPromptId === promptKey) return;
   if (promptKey) state.lastPromptId = promptKey;
 
-  const trimmed = text.trim();
+  // The host's own tagged text around what the user typed (the desktop app's
+  // folder notice in a system-reminder, a slash command's caveat and echo) is
+  // cut out first: none of it is the user's words, and once it was pinned as
+  // the goal.
+  const trimmed = text.replace(HOST_TAGS, ' ').trim();
 
   // The host also submits its own notices through this hook: a background
   // task finishing arrives as a prompt that opens "[SYSTEM NOTIFICATION - NOT
