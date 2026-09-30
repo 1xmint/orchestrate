@@ -25,15 +25,32 @@ export function isProsePath(p) { return /\.(md|mdx|txt|rst)$/i.test(String(p || 
 // Split a command into segments of tokens. Splits on unquoted && || ; | and
 // newlines; an unquoted > or >> (with an optional leading fd number, or &>)
 // becomes a {redirect} token so a quoted ">" is never mistaken for one.
-// Quotes are dropped from the token text. Heredoc bodies are removed first:
-// they are the written content, not commands.
+// Quotes are dropped from the token text. Heredoc bodies are taken out first
+// (they are the written content, not commands) and put back into the source
+// text of the segment that owns them. Each segment is {toks, text}.
 function segments(command) {
-  const src = String(command || '').replace(/<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1([^\n]*)\n[\s\S]*?(?:\n[ \t]*\2[ \t]*(?=\n|$)|$)/g, '<<$2$3');
-  const out = []; let seg = []; let word = ''; let has = false; let quoted = false;
+  const bodies = [];
+  const HEREDOC = /<<-?[ \t]*(['"]?)([A-Za-z_]\w*)\1([^\n]*)(\n[\s\S]*?(?:\n[ \t]*\2[ \t]*(?=\n|$)|$))/g;
+  const src = String(command || '').replace(HEREDOC, (m, q, tag, rest, body) => `<<${tag}\u0001${bodies.push(body) - 1}\u0001${rest}`);
+  const back = t => t.replace(/\u0001(\d+)\u0001/g, (m, n) => bodies[Number(n)]);
+  const out = []; let seg = []; let word = ''; let has = false; let quoted = false; let start = -1; let subs = [];
   const endWord = () => { if (has) seg.push({ t: word, q: quoted }); word = ''; has = false; quoted = false; };
-  const endSeg = () => { endWord(); if (seg.length) out.push(seg); seg = []; };
+  const endSeg = end => { endWord(); if (seg.length) out.push({ toks: seg, text: back(src.slice(start, end)), subs }); seg = []; start = -1; subs = []; };
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
+    if (start < 0 && !/[ \t\r\n;|]/.test(ch) && !(ch === '&' && src[i + 1] === '&')) start = i;
+    // $(...) and `...` stay inside their word, and what they run is read as
+    // commands of its own (so `n=$(grep ...)` is an assignment, not a command).
+    if ((ch === '$' && src[i + 1] === '(' && src[i + 2] !== '(') || ch === '`') {
+      let end = i + 1;
+      if (ch === '`') { end = src.indexOf('`', i + 1); if (end < 0) end = src.length; subs.push(back(src.slice(i + 1, end))); } else {
+        for (let d = 0; end < src.length; end++) {
+          if (src[end] === '(') d++; else if (src[end] === ')' && --d === 0) break;
+        }
+        subs.push(back(src.slice(i + 2, end)));
+      }
+      word += src.slice(i, end + 1); has = true; i = end; continue;
+    }
     if (ch === '\'' || ch === '"') {
       const close = ch === '"' ? src.indexOf('"', i + 1) : src.indexOf('\'', i + 1);
       const end = close < 0 ? src.length : close;
@@ -42,10 +59,10 @@ function segments(command) {
     // A backslash escapes only a space or quote; elsewhere it is a Windows path separator.
     if (ch === '\\' && /[ '"]/.test(src[i + 1] || '')) { word += src[++i]; has = true; continue; }
     if (ch === ' ' || ch === '\t' || ch === '\r') { endWord(); continue; }
-    if (ch === '\n' || ch === ';') { endSeg(); continue; }
-    if (ch === '|') { endSeg(); if (src[i + 1] === '|') i++; continue; }
+    if (ch === '\n' || ch === ';') { endSeg(i); continue; }
+    if (ch === '|') { endSeg(i); if (src[i + 1] === '|') i++; continue; }
     if (ch === '&') {
-      if (src[i + 1] === '&') { endSeg(); i++; continue; }
+      if (src[i + 1] === '&') { endSeg(i); i++; continue; }
       if (src[i + 1] === '>') { endWord(); i++; seg.push({ redirect: true }); if (src[i + 1] === '>') i++; continue; }
       word += ch; has = true; continue;
     }
@@ -57,12 +74,16 @@ function segments(command) {
     }
     word += ch; has = true;
   }
-  endSeg();
+  endSeg(src.length);
   return out;
 }
 
 const NULLISH = /^(\/dev\/null|nul|\$null)$/i;
-const WRAPPERS = new Set(['sudo', 'time', 'nohup', 'command', 'env', 'builtin', 'exec', 'nice']);
+// Words that come before a command, and shell grammar that is not a command:
+// skipped, so `do gh pr checks $p` is read as gh. A `for ...` or `case ...` head
+// names no command at all (see segmentChange).
+const WRAPPERS = new Set(['sudo', 'time', 'nohup', 'command', 'env', 'builtin', 'exec', 'nice',
+  'if', 'then', 'else', 'elif', 'fi', 'while', 'until', 'do', 'done', 'esac', '{', '}']);
 
 // Commands that only read (a redirect on the line still makes it a write).
 const READ_ONLY = new Set([
@@ -78,10 +99,13 @@ const GIT_READ = new Set([
 ]);
 const PS_WRITE = new Set(['set-content', 'add-content', 'out-file', 'new-item', 'remove-item', 'move-item', 'copy-item', 'clear-content', 'rename-item', 'sc', 'ac', 'ni', 'ri', 'mi', 'cpi', 'rni', 'del', 'erase', 'rd', 'copy', 'move', 'ren', 'md', 'mkdir', 'tee-object']);
 
-const isOpt = t => t.q === false && /^-/.test(t.t);
+// What an inline node script would have to call to change a file or run a program.
+const NODE_WRITES = /writeFile|appendFile|writeSync|createWriteStream|\.(?:rm|rmSync|unlink|unlinkSync|rename|renameSync|copyFile|copyFileSync|cp|cpSync|mkdir|mkdirSync|rmdir|rmdirSync|truncate|truncateSync|symlink|link|chmod)\(|\bopen(?:Sync)?\(|child_process|\bexec\w*\(|\bspawn\w*\(/;
+
+const isOpt =t => t.q === false && /^-/.test(t.t);
 
 // One segment (tokens, no separators) -> { changes, paths, exact }.
-function segmentChange(seg) {
+function segmentChange(seg, text) {
   const paths = [];
   let exact = true; let changes = false;
   // Redirection: the token after each redirect is the file written.
@@ -96,7 +120,7 @@ function segmentChange(seg) {
     } else words.push(seg[i]);
   }
   while (words.length && (/^[A-Za-z_]\w*=/.test(words[0].t) || WRAPPERS.has(words[0].t))) words.shift();
-  if (!words.length) return { changes, paths, exact };
+  if (!words.length || words[0].t === 'for' || words[0].t === 'case') return { changes, paths, exact };
   const cmd = words[0].t.replace(/^.*[\\/]/, '').replace(/\.(exe|cmd|bat)$/i, '').toLowerCase();
   const args = words.slice(1);
   const opts = args.filter(isOpt).map(a => a.t);
@@ -109,7 +133,7 @@ function segmentChange(seg) {
     if (at >= 0 && args[at + 1]) {
       const inner = commandChange(args[at + 1].t);
       if (inner.changes) { changes = true; paths.push(...inner.paths); if (!inner.exact) exact = false; }
-      return { changes, paths, exact };
+      return { changes, paths, exact, text: inner.text };
     }
     unsure(); return { changes, paths, exact };
   }
@@ -160,12 +184,16 @@ function segmentChange(seg) {
   if (cmd === 'node' || cmd === 'npm' || cmd === 'npx') {
     // node --test / --check / -v, npm test / ls / view only read or run checks.
     if (opts.some(o => /^--(test|check|version)$|^-[cv]$/.test(o)) && cmd === 'node') return { changes, paths, exact };
+    // An inline script (-e, -p, or `node -` with a heredoc) that calls nothing
+    // that writes or runs a program only reads.
+    if (cmd === 'node' && opts.some(o => /^(-e|-p|--eval|--print|-)$/.test(o)) && !NODE_WRITES.test(text)) return { changes, paths, exact };
     if (cmd === 'npm' && /^(test|t|ls|list|view|outdated|audit|--version|-v)$/.test(plain[0] || '')) return { changes, paths, exact };
     unsure(); return { changes, paths, exact };
   }
   if (cmd === 'gh') {
-    if (/^(view|list|status|diff|checks)$/.test(plain[1] || '') || /^(auth|--version)$/.test(plain[0] || '')) return { changes, paths, exact };
-    unsure(); return { changes, paths, exact };
+    // Only these put files on disk; create, edit, api and the rest talk to GitHub.
+    if (/^(pr:checkout|repo:clone|run:download|release:download)$/.test(`${plain[0]}:${plain[1]}`)) unsure();
+    return { changes, paths, exact };
   }
   if (PS_WRITE.has(cmd)) {
     // -Path / -FilePath / -LiteralPath / -Destination, else the first plain word.
@@ -180,13 +208,20 @@ function segmentChange(seg) {
 }
 
 function commandChange(command) {
-  const paths = []; let changes = false; let exact = true;
+  const paths = []; const texts = []; let changes = false; let exact = true;
   for (const seg of segments(command)) {
-    const r = segmentChange(seg);
+    for (const sub of seg.subs) {
+      const s = commandChange(sub);
+      if (!s.changes) continue;
+      changes = true; paths.push(...s.paths); if (!s.exact) exact = false;
+      texts.push(s.text);
+    }
+    const r = segmentChange(seg.toks, seg.text);
     if (!r.changes) continue;
     changes = true; paths.push(...r.paths); if (!r.exact) exact = false;
+    texts.push(r.text != null ? r.text : seg.text);
   }
-  return { changes, paths, exact };
+  return { changes, paths, exact, text: texts.join('\n') };
 }
 
 // name + input of one tool_use block -> { changes, paths, exact }.
@@ -199,7 +234,9 @@ export function fileChange(name, input) {
   if (SHELL_TOOLS.has(name) && typeof i.command === 'string') {
     const r = commandChange(i.command);
     // A command that names no file it writes (the eager guess) is not "exact".
-    return { changes: r.changes, paths: r.paths, exact: r.changes ? r.exact && r.paths.length > 0 : true };
+    // `text` is the source of only the pieces that write (heredoc bodies kept),
+    // for matching words against what was written, not what was searched for.
+    return { changes: r.changes, paths: r.paths, exact: r.changes ? r.exact && r.paths.length > 0 : true, text: r.text };
   }
   return { changes: false, paths: [], exact: true };
 }

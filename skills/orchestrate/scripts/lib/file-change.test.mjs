@@ -50,3 +50,41 @@ test('isProsePath goes by extension only', () => {
   for (const p of ['a.md', 'x/B.MDX', 'notes.txt', 'r.rst']) assert.equal(isProsePath(p), true, p);
   for (const p of ['docs/a.ts', 'README', 'docs/pricing/table.json', 'a.md.bak']) assert.equal(isProsePath(p), false, p);
 });
+
+test('text is the source of only the pieces that write, with a heredoc body kept', () => {
+  const r = sh('git checkout -q main && git pull -q && grep -n -E "price|PRICE" file');
+  assert.equal(r.changes, true);
+  assert.doesNotMatch(r.text, /price/i);
+  assert.match(r.text, /git pull/);
+  const h = sh('cat > f.js <<EOF\nconst payments = 1;\nEOF\ngrep token x');
+  assert.match(h.text, /payments/);
+  assert.doesNotMatch(h.text, /token/);
+});
+
+test('shell keywords are not commands: a loop of read-only calls is not a change', () => {
+  assert.equal(sh('for p in 1 2; do gh pr checks $p; done').changes, false);
+  assert.equal(sh('if grep -q a b; then echo yes; else echo no; fi').changes, false);
+  assert.equal(sh('for f in a b; do sed -i s/x/y/ $f; done').changes, true);
+});
+
+test('gh changes local files only for pr checkout, repo clone, run download, release download', () => {
+  for (const c of ['gh pr checkout 5', 'gh repo clone a/b', 'gh run download 1', 'gh release download v1']) {
+    const r = sh(c);
+    assert.equal(r.changes, true, c);
+    assert.equal(r.exact, false, c);
+  }
+  for (const c of ['gh pr create --fill', 'gh pr edit 3 --body x', 'gh api repos/a/b', 'gh pr view 2']) assert.equal(sh(c).changes, false, c);
+});
+
+test('a read-only inline node script is no change; one that writes still is', () => {
+  assert.equal(sh("node -e 'const t=require(\"fs\").readFileSync(\"a\",\"utf8\"); console.log(t.match(/x/))'").changes, false);
+  assert.equal(sh("node - a <<'EOT'\nconsole.log(1)\nEOT").changes, false);
+  assert.equal(sh("node -e 'require(\"fs\").writeFileSync(\"a\",\"b\")'").changes, true);
+  assert.equal(sh("node - a <<'EOT'\nfs.writeFileSync(f, s)\nEOT").changes, true);
+});
+
+test('a command substitution is read as commands of its own', () => {
+  assert.equal(sh('F=a.txt; n=$(grep -n -i billing "$F"); sed -n 1,5p "$F"').changes, false);
+  assert.equal(sh('n=$(sed -i s/a/b/ f); echo $n').changes, true);
+  assert.equal(sh('echo `rm -f x`').changes, true);
+});

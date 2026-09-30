@@ -153,7 +153,7 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
 // reviewer has returned since its last edit, it yields one plain fact. Nothing
 // is asked for: the host can hold a finish only by blocking it, so the fact is
 // the whole reason given, and the key makes it once per set of edits.
-const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pricing?)$/.test(w) ? 'payments'
+const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pric(?:e|es|ing))$/.test(w) ? 'payments'
   : /^(auth|authentication|authorization|login|password|credentials?|token|oauth|permission)$/.test(w) ? 'sign-in'
   : /^(drop table|truncate|delete rows|delete records|purge|migration)$/.test(w) ? 'stored data'
   : 'a shared contract');
@@ -177,7 +177,10 @@ const NOT_PAYMENTS = /\b(?:git|gh\s+pr)\s+(?:-[Cc]\s+\S+\s+)*(?:checkout|switch)
 // prose only when every path it writes is known and is a prose file.
 function riskText(input, fc) {
   if (fc.exact && fc.paths.length && fc.paths.every(isProsePath)) return null;
-  return editText(input).replace(NOT_PAYMENTS, ' ');
+  // A shell line is searched only in the pieces that write: a grep pattern
+  // beside a `git pull` is not something that was changed.
+  const text = typeof fc.text === 'string' ? fc.text : editText(input);
+  return text.replace(NOT_PAYMENTS, ' ');
 }
 
 export function unreviewedRiskFact({ transcriptTail, goal, returned }) {

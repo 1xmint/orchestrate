@@ -677,3 +677,15 @@ test('unreviewedRiskFact: git checkout and actions/checkout are not payments', (
   const real = editLine('Edit', { file_path: 'src/cart.ts', new_string: 'function checkout(cart) {}' });
   assert.equal(unreviewedRiskFact({ transcriptTail: real, goal: '', returned: [] }).topic, 'payments', 'a checkout flow is still payments');
 });
+
+test('unreviewedRiskFact searches only the pieces of a shell line that write', () => {
+  const tail = editLine('Bash', { command: 'git checkout -q main && git pull -q && grep -n -E "price|PRICE" file' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }), null);
+  const heredoc = editLine('Bash', { command: 'cat > f.js <<EOF\nexport const payments = 1;\nEOF' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: heredoc, goal: '', returned: [] }).topic, 'payments');
+});
+
+test('unreviewedRiskFact: the bare word price is payments', () => {
+  const tail = editLine('Edit', { file_path: 'src/cart.ts', new_string: 'const price = 5;' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }).topic, 'payments');
+});
