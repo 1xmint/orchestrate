@@ -442,8 +442,20 @@ function decideOne(command, ctx = {}) {
   if (!asSent) return { kind: 'pass' };
   const cmd = plainGit(asSent);
 
-  const hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
+  let hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
+
+  // Every branch delete in the line is the lowercase kind, so another part is
+  // what stopped it: name that part, not the delete that was already right.
+  if (hit.name === 'branch-delete-local') {
+    const segs = segmentsOf(withoutStderrJoin(cmd));
+    if (segs.filter(isBranchDeleteSeg).every(s => isPlainBranchDelete(s, ['-d', '--delete']))) {
+      const other = segs.filter(s => !isBranchDeleteSeg(s))
+        .map(s => RULES.find(r => r.name !== 'branch-delete-local' && r.test(s)) || rmRule(s, ctx.cwd) || psRemoveRule(s, ctx.cwd))
+        .find(Boolean);
+      if (other) hit = other;
+    }
+  }
 
   // A branch delete that nobody can approve: say in plain words what is refused
   // and what works instead, with nothing about modes or files to repeat.
