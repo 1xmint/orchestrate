@@ -16,7 +16,7 @@ not exercised. *Helped:* writing "I'll open two of its cited pages myself"
 committed the lead to a check it then did (the effort and advisor pages,
 fetched directly).
 
-**2. The recovery note after a summary.** Seen once (compaction 1).
+**2. The recovery note after a summary.** Seen at every compaction of the lead (four), and once inside a helper (item H).
 - The "never returned" bug is gone. The line was *"Compaction 1 of this
   session. 1 helper sent so far; orch-advisor last sent: never."* That is true:
   the one helper had returned, and it was not listed as missing.
@@ -38,8 +38,29 @@ fetched directly).
   lead's own read of an older checkpoint (the `11` is the line number the read
   printed). Suggest taking test lines only from shell command results.
 
-**3. Tidy-up after helpers.** Not seen. The only helper was read-only and had
-no helper folder, so there was nothing to tidy.
+**3. Tidy-up after helpers.** Seen, later in the session, with two builder
+helpers that each had a helper folder. It did not go through first try.
+- `git worktree unlock` said *"is not locked"*. The lead had assumed a lock.
+- `git worktree remove` failed with *"Permission denied"*, twice. Both times the
+  lead had just run a command with `cd` into that helper folder, which moved the
+  session's working folder there. Windows will not delete a folder something is
+  standing in. Git dropped its record of the folder but left it empty on disk.
+- The lead then sent one line that removed a folder with `rm -rf`, removed the
+  other with `git worktree remove --force`, and deleted a merged branch with
+  lowercase `git branch -d`. The guard refused it with *"This branch delete is
+  refused, because it can throw away work that was never merged. Deleting with
+  the lowercase flag works…"*. The line already used the lowercase flag; the
+  part that stopped it was the `rm -rf`. **Fixed** in PR #33: the refusal now
+  names the part that stopped it.
+- A recursive delete of the two now-empty folders was refused, since nobody
+  was present to approve (right). A plain `rmdir` of empty folders removed them.
+- A lone lowercase `git branch -d worktree-agent-…` passed both times. *Helped.*
+- No leftover-folder note arrived while the two empty folders sat there for
+  several turns. The note's count is not tested by this session.
+
+*Suggestion:* when a helper hands back, the lead tidies from the main folder,
+never after `cd` into the helper folder. One line in the tidy-up guidance would
+cover it.
 
 **4. Discarding unsaved edits.** Seen in part. The lead ran
 `git checkout -- run-init.mjs lib/runs.mjs` to throw away a broken rewrite of
@@ -51,8 +72,23 @@ and only when edits exist. *Helped:* it did not block a deliberate fix. The
 **5. A short fix request with a card.** Not seen. The session opened with a
 long brief, not a short fix request.
 
-**6. A helper's size note.** Not seen. The researcher finished well inside its
-budget.
+**6. A helper's size note.** Seen in all three helpers, each with a ~120k
+budget. Example: *"[orchestrate · size] ~84k of ~120k budget · turn 17 of 100 ·
+6 tool calls since your last edit · progress file: none given"*.
+- Below the budget, every helper carried on as the note intends. *Helped.*
+- At the budget it was missed once. The shell-edits helper was sent a
+  follow-up while already near its budget. It got *"~121k of ~120k budget ·
+  turn 4 of 100 · … · progress file: none given"* and kept working to ~140k.
+  Then the host compacted it automatically at ~150k, and it carried on after
+  that. It did hand back good work, but about 30k past the point the note is
+  for. The over-budget line gives the numbers and nothing else, so it reads the
+  same as the ones below the budget. *Got in the way, mildly.*
+- Every note said "progress file: none given", because none of the lead's
+  briefs named one. The note has nothing to point the helper at.
+
+*Suggestions:* at or over the budget, have the line say so in words ("over
+budget: save, write progress, hand back now"). And when the lead sends a
+follow-up to a helper already near its budget, say so at dispatch.
 
 **7. Money or sign-in work held for review.** Seen, as a false alarm. At the
 end of a turn the stop check held the finish, saying the change touched money
@@ -64,7 +100,7 @@ review. Suggest the stop check skip edits to prose files, known by their
 extension (`.md`, `.txt`) rather than their folder, since every repo lays out
 folders its own way (notes about money are not money moving), and not count the
 git command. A real payment change would still be caught through its code
-files. Being built on `fix/shell-edits-count`, together with item B.
+files. **Fixed** in PR #31, together with item B. A replay of this session's 178 tool calls: the old check raised 5 alarms, all false; the new one raises 2, both real.
 
 ## Other things that came up
 
@@ -82,7 +118,7 @@ anything in the session. Later it said *"22 tool calls since your last edit"*
 right after a file was changed with a shell command. *Mostly helpful:* it is a
 fair nudge to stop reading and act. The word "edit" misleads. Suggest counting
 a shell command that writes into the repo as an edit, or wording it as "tool
-calls since you last changed a file with Edit or Write".
+calls since you last changed a file with Edit or Write". **Fixed** in PR #31: shell writes now count.
 
 **C. The hand-back note fired because the lead's own brief blocked it.** The
 line was *"the last hand-back was 7367 bytes against 600; in the next brief, ask
@@ -113,8 +149,8 @@ about 106k and 95k. A response that calls the advisor lists its steps
 separately, and the plugin added the main model's steps together. *Got in the
 way:* a doubled number pushes the lead to tidy up or start fresh for no reason.
 **Fixed** in PR #28: the size is what the last main-model step read. The
-advisor's own tokens were not counted in any spend total either; being built
-on `fix/count-advisor-spend`.
+advisor's own tokens were not counted in any spend total either. **Fixed** in
+PR #32, which sits on top of #28.
 
 **G. Dispatch-guard false alarms.**
 - *"brief lacks: what it is for, a check it is done"* on a brief that had
@@ -127,6 +163,49 @@ on `fix/count-advisor-spend`.
   list is eager on purpose, and one extra line costs little.
 - *"this brief asks for contents to be pasted back"* on "paste the failing
   line in your report". Borderline, since one line is not a dump. Left alone.
+
+**H. A helper got the lead's after-compaction card.** The shell-edits helper
+filled its own context and the host compacted it (02:06Z). The plugin then gave
+it *"[orchestrate · after compaction] … Compaction 4 of this session. 3 helpers
+sent so far; orch-advisor last sent: never."*, plus the finished run's goal
+(item A).
+- That card is the lead's: the lead's helper count, the lead's run.
+- It also moved the lead's compaction count up by one. At the lead's next real
+  compaction the card said *"Compaction 5"*, while the size line on the same
+  turn said *"compacted 4×"*. The lead's transcript has four.
+- The router already skips a compaction hook that carries a helper id
+  (`agent_id`), and the installed 0.17.0 has that line. So the host sent this
+  hook from inside the helper with no helper id, although its docs say hooks
+  fired inside a helper carry one.
+- No checkpoint was written for the helper's compaction, so the hook read the
+  lead's transcript. A check on the transcript path would not have caught it
+  either.
+- *Got in the way, mildly:* a helper told it is the lead with a finished run
+  could act on either. This one did not.
+
+*Suggestions:* report the missing helper id to the host. Meanwhile, take the
+compaction number from the lead transcript's own records, as the size line
+does, rather than a counter any compaction hook can bump.
+
+**I. The stop check does not count the built-in advisor as a second opinion.**
+The stop hook said *"a brief flagged for independent review returned done with
+none sent. Dispatch orch-reviewer … or tell the user it was skipped and why"*
+after the built-in advisor had reviewed the change and asked for a replay
+against a real transcript, which was done. The lead told the user it was
+skipped and why, as the hook allows. *Got in the way, mildly:* the skill (PR
+#29) now says the built-in advisor comes first, and the stop check does not
+know it.
+
+**J. The guard reads the text inside heredocs and `node -e` scripts.** Two
+test scripts that only mentioned `rm -rf` and `git branch -d` as strings were
+refused, and so was a commit message body sent through a heredoc. Moving the
+text into a file got past it. This is the guard erring towards caution, and a
+shell line can hide a real delete in the same places, so it is left as is.
+
+**K. "N tool calls since your last edit" missed shell edits again.** After the
+lead changed files with `sed -i` and a heredoc, the line read *"27 tool calls
+since your last edit"*. This is item B; it is fixed in PR #31 and not yet
+installed.
 
 ## Not about the plugin, but seen
 
