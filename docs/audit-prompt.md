@@ -5,7 +5,7 @@ the strongest model available) after a version is built and its tests pass. It
 is pre-filled so the auditor spends its effort on judgment rather than
 re-discovery. Replace `<path>`. This prompt is superseded and kept for the
 record: treat the facts below as historical and use `scoresheet-audit-prompt.md`
-(current for v0.16.1) for a fresh audit.
+for a fresh audit.
 
 ```
 You are auditing a Claude Code skill called `orchestrate` before it ships. Be
