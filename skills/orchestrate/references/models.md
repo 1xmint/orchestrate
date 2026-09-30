@@ -1,6 +1,6 @@
 # Models: what each one is for, and what it costs to run
 
-Rates from platform.claude.com pricing, checked 2026-09-24. They move; re-check
+Rates from platform.claude.com pricing, checked 2026-09-29. They move; re-check
 before a run that will spend heavily. On a subscription you are not paying these
 dollars, you are spending a share of a 5-hour and a weekly window, and Opus draws
 on it meaningfully faster than Sonnet (support.claude.com, "models, usage and
@@ -12,13 +12,15 @@ limits"). Read the ratios.
 |---|---|---|---|---|---|
 | Fable 5.1 | 1M | $10 / $50 | $0.25 | low–max | work that is hard to check and expensive to get wrong |
 | Opus 5.5 | 1M | $4 / $20 | $0.20 | low–max | judgment: planning, grading, deciding, diagnosing |
-| Sonnet 5 | 1M | $2 / $10 | $0.20 | low–max | bounded work with a strong oracle |
+| Sonnet 5.5 (and 5) | 1M | $2 / $10 | $0.20 | low–max | bounded work with a strong oracle |
 | Haiku 4.5 | **200K** | $1 / $5 | $0.10 | **none** | reading, sweeping, extracting |
 
 What catches people out:
 - **Haiku's window is 200K** and it takes **no effort setting**; it retires no
   sooner than 2026-10-15. If Haiku is not enough, change the model.
-- **Opus 4.7 and later, and Sonnet 5, use a tokenizer that makes ~30% more tokens**
+- **Opus 5.5 defaults to `medium` effort**, one level below Opus 5; every other
+  model here defaults to `high`. See Effort.
+- **Opus 4.7 and later, and Sonnet 5 and 5.5, use a tokenizer that makes ~30% more tokens**
   for the same text.
 - **Built-in `Explore` and `general-purpose` run on this conversation's model**
   (Explore capped at Opus) unless the dispatch names one. The guard refuses them
@@ -45,16 +47,20 @@ re-reads; Sonnet instead of Opus is 40% of the per-token price. So:
 
 ## Effort
 
-Five levels: `low`, `medium`, `high`, `xhigh`, `max`. The default is `high` (Opus
-4.7: `xhigh`). Effort changes every output token — thinking, text and tool calls —
+Five levels: `low`, `medium`, `high`, `xhigh`, `max`. The default is `high`, except
+Opus 5.5, which defaults to `medium`: an Opus 5.5 helper with no pin runs a level
+lower than the same helper did on Opus 5. Effort changes every output token — thinking, text and tool calls —
 and lower effort gives fewer, more consolidated tool calls.
 
 - Opus 5 at `medium` scored about 2 points below `high` on SWE-bench Pro at half
   the cost; `low` about 8 points below at a quarter. Running at `low` and re-running
   only failures at the default passed ~93% at half the default's cost.
 - Sonnet 5 at `medium` is roughly Sonnet 4.6 at `high`.
+- Sonnet 5.5's levels are recalibrated, so a level is not the same amount of
+  thinking as on Sonnet 5. For agentic coding Anthropic suggests `medium` on a
+  well-specified task and `high` on a harder or longer one.
 - `max` shows diminishing returns and can over-think.
-(platform.claude.com, optimizing-for-cost-and-intelligence and effort, 2026-09-13)
+(platform.claude.com, optimizing-for-cost-and-intelligence, 2026-09-13; effort, 2026-09-29)
 
 The eight `orch-*` roles pin their own: implementer and researcher `medium`,
 browser `low`, and planner, reviewer, debugger, coordinator and advisor `high`.
