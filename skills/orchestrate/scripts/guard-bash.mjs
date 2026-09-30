@@ -471,8 +471,15 @@ function decideOne(command, ctx = {}) {
   // A line that mentions a merge (lib/merge-bar.mjs) runs only in its one
   // readable shape and above the bar, in every mode: the bar is a fact gh can
   // read, not a question for whoever is present. Read from the line as sent,
-  // since a newline separates commands too. An error here refuses the merge.
-  if (mentionsMerge(command)) {
+  // since a newline separates commands too. An error here, in reading the line
+  // or checking the bar, refuses it. `ctx.mentionsMerge` is for tests.
+  let merges;
+  try {
+    merges = (ctx.mentionsMerge || mentionsMerge)(command);
+  } catch (e) {
+    return { kind: 'deny', reason: `Checking whether this line merges a pull request failed (${String((e && e.message) || e).slice(0, 120)}), so it is refused. Nothing was run.` };
+  }
+  if (merges) {
     let why;
     try {
       why = mergeRefusal(String(command), {
@@ -600,8 +607,13 @@ function main() {
   if (!command) return;
 
   // The approved-commands list never lifts the merge bar: Claude can write that
-  // file itself, so it cannot be what vouches for a merge.
-  if (isAllowed(command, input.cwd) && !mentionsMerge(command)) return;
+  // file itself, so it cannot be what vouches for a merge. A check that throws
+  // counts as a merge, and decide() then refuses the line.
+  if (isAllowed(command, input.cwd)) {
+    let merges = true;
+    try { merges = mentionsMerge(command); } catch {}
+    if (!merges) return;
+  }
 
   // `bypassPermissions`, `auto`, and `dontAsk` are the permission_modes where
   // nobody sees an interactive prompt at all — an "ask" would just sit there

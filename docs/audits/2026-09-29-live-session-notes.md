@@ -453,6 +453,18 @@ five kinds of harmless line now refused, listed in docs/safety-guard.md.
 *Helped, a lot*, and the stop rule worked twice: it brought the "another
 round?" question to the user each time instead of looping.
 
+**AL. The fourth review found real merges passing the redesign.** Its first
+line read *"decide() lets through `gh pr m{e..e..1}rge 36`, and bash 5.2 runs
+that as `gh pr merge 36`, so criterion (a) is met."* Brace ranges with a step
+were left unexpanded, and gh glued to a flag (`env -S'gh pr merge 36'`,
+`git -c alias.m=!gh …`, `-FilePath:gh`) was not seen as a word. Eight
+spellings passed, all confirmed on 8b64472. A line of 100 KB of commas took
+7.7 seconds to read, against the comment that said a long line could not
+slow the check. Two sentences in the docs were also false. *Helped, a lot*:
+every one was real. The stop rule agreed before the round held, so the pull
+request stayed a draft and the question went back to the user rather than
+into round five.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to

@@ -46,35 +46,44 @@ export const REVIEW_PATHS = [
 // contain "merge" (or "enqueuepullrequest", the merge queue) and the line also
 // names gh as a word, or holds "pulls" or "graphql" (the REST and GraphQL
 // addresses). Brace expansion ({merge,}, {m..m}) is expanded first, and a
-// backslash-newline joined. A plain read of one pull request passes: see
-// readsOnly. Everything here is a single pass over the text, so a long line
-// cannot run the hook out of time.
+// backslash-newline joined. A plain read of one pull request, or a plain git
+// merge, passes: see readsOnly and plainGitMerge. Each step is linear in the
+// line and expansion stops at 400 steps, so a long line cannot run the hook
+// out of time.
 export function mentionsMerge(line) {
-  if (readsOnly(line)) return false;
-  const text = String(line || '').replace(/\\\r?\n/g, '').toLowerCase().replace(/["'`$]/g, '');
+  if (readsOnly(line) || plainGitMerge(line)) return false;
+  const text = String(line || '').replace(/\\\r?\n/g, '').replace(/["'`$]/g, '');
   const expanded = expandBraces(text, { calls: 0 });
-  const forms = expanded || [text];
+  const forms = (expanded || [text]).map(f => f.toLowerCase());
   const flat = forms.map(f => f.replace(/[^a-z0-9]/g, '')).join(' ');
-  const says = !expanded || flat.includes('merge') || flat.includes('enqueuepullrequest');
+  // Braces this cannot expand hide both halves, so then the line counts as
+  // saying merge, and gh counts wherever its letters are.
+  if (!expanded) return flat.includes('gh') || flat.includes('pulls') || flat.includes('graphql');
+  const says = flat.includes('merge') || flat.includes('enqueuepullrequest');
   return says && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql'));
 }
 
 // Any word that is gh once quotes, braces and backslashes are gone, or whose
-// last path part is gh (C:\…\gh.exe, /usr/bin/gh).
+// last path part is gh (C:\…\gh.exe, /usr/bin/gh). Words split at = : ! as
+// well (--split-string=gh, -FilePath:gh, alias.m=!gh), and a short flag glued
+// on the front is dropped (-Sgh).
 const GH = /^gh(?:\.exe)?$/;
 function namesGh(text) {
-  return text.split(/[\s;&|()<>]+/).some(w => {
-    const bare = w.replace(/[{},]/g, '');
-    return GH.test(bare.replace(/\\/g, '')) || GH.test(bare.split(/[\\/]/).pop());
+  return text.split(/[\s;&|()<>=:!]+/).some(w => {
+    const bare = w.replace(/[{},\\]/g, '');
+    return GH.test(bare) || GH.test(bare.replace(/^-[a-z0-9]+?(?=gh)/, '')) || GH.test(w.replace(/[{},]/g, '').split(/[\\/]/).pop());
   });
 }
 
-// The shell's brace expansion, roughly: each {a,b} or {x..y} group gives one
-// copy of the line per choice, innermost group first. Null when that makes
-// more than 64 copies, and the caller then treats the line as saying merge.
+// The shell's brace expansion: each {a,b}, {x..y} or {x..y..step} group gives
+// one copy of the line per choice, innermost group first, done before letters
+// are lowercased so a range such as {Z..a} holds what bash's would. Null when
+// that makes more than 64 copies or a `..` group is not a range this reads.
 function expandBraces(text, budget) {
   if (++budget.calls > 400) return null;
-  const m = /\{([^{}]*(?:,|\.\.)[^{}]*)\}/.exec(text);
+  const groups = /\{([^{}]*)\}/g;
+  let m;
+  while ((m = groups.exec(text)) && !m[1].includes(',') && !m[1].includes('..'));
   if (!m) return [text];
   const items = braceItems(m[1]);
   if (!items) return null;
@@ -88,13 +97,14 @@ function expandBraces(text, budget) {
 }
 function braceItems(inner) {
   if (inner.includes(',')) return inner.split(',');
-  const r = /^(-?\d+|[a-z])\.\.(-?\d+|[a-z])$/.exec(inner);
+  const r = /^(-?\d+|[a-zA-Z])\.\.(-?\d+|[a-zA-Z])(?:\.\.(-?\d+))?$/.exec(inner);
   const num = r && /\d/.test(r[1]);
-  if (!r || num !== /\d/.test(r[2])) return [inner];
+  if (!r || num !== /\d/.test(r[2])) return null;
   const a = num ? Number(r[1]) : r[1].charCodeAt(0), b = num ? Number(r[2]) : r[2].charCodeAt(0);
-  if (Math.abs(b - a) > 64) return null;
-  const step = a <= b ? 1 : -1, list = [];
-  for (let i = a; i !== b + step; i += step) list.push(num ? String(i) : String.fromCharCode(i));
+  const step = Math.max(1, Math.abs(Number(r[3] || 1))), dir = a <= b ? 1 : -1;
+  if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || Math.abs(b - a) / step > 64) return null;
+  const list = [];
+  for (let i = a; dir > 0 ? i <= b : i >= b; i += dir * step) list.push(num ? String(i) : String.fromCharCode(i));
   return list;
 }
 
@@ -122,6 +132,16 @@ function readsOnly(line) {
   i += 1;
   skipRepo();
   return READS.has(words[i]);
+}
+
+// A plain git merge, alone on its line, with the same plain words minus @ (a
+// PowerShell splat). It runs git and nothing else, whatever the branch is
+// called, so `git merge feature/graphql-schema` passes.
+function plainGitMerge(line) {
+  const text = String(line || '').trim();
+  if (!text || /[\r\n]/.test(text)) return false;
+  const words = text.split(/\s+/);
+  return /^git(?:\.exe)?$/i.test(words[0]) && words[1] === 'merge' && words.every(w => /^[\w./:=,#+-]+$/.test(w));
 }
 
 const METHODS = new Set(['--merge', '-m', '--squash', '-s', '--rebase', '-r']);

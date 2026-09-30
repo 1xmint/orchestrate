@@ -977,6 +977,52 @@ test('reviewer round 3: a very long line is read in well under the hook\'s time 
   assert.ok(took < 1000, `took ${took} ms`);
 });
 
+test('reviewer round 4: brace ranges with a step, and gh glued to a flag, =, : or !, cannot hide a merge', () => {
+  for (const cmd of [
+    'gh pr m{e..e..1}rge 36',
+    'g{h..h..1} pr merge 36',
+    'curl -X PUT https://api.github.com/repos/o/r/pul{l..l..1}s/36/merge',
+    'git -c alias.m=!gh m pr merge 36',
+    "env -S'gh pr merge 36'",
+    'env -Sgh pr merge 36',
+    "env --split-string='gh pr merge 36'",
+    'Start-Process -FilePath:gh -ArgumentList pr,merge,36',
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 4: a line full of unclosed brace commas is read in well under the hook\'s time limit', () => {
+  const line = 'gh pr merge 36 {' + ','.repeat(100000);
+  const start = Date.now();
+  const d = decide(line, merging(prView()).ctx);
+  const took = Date.now() - start;
+  assert.equal(d.kind, 'deny');
+  assert.ok(took < 1000, `took ${took} ms`);
+});
+
+test('reviewer round 4: a plain git merge alone on its line passes whatever the branch is called, and nothing rides along with it', () => {
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of ['git merge feature/graphql-schema', 'git merge origin/pulls-cleanup', 'git merge --no-ff feature/gh-merge-fix']) {
+    assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  }
+  assert.equal(m.calls.length, 0);
+  for (const cmd of [
+    'git merge main; gh pr merge 36',
+    'git merge main\ngh pr merge 36',
+    'git merge $(gh pr merge 36)',
+    'git merge `gh pr merge 36`',
+    "git merge 'x' && gh pr merge 36",
+    'git merge main | gh pr merge 36',
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 4: when reading the line for a merge fails, the line is refused rather than let through', () => {
+  const m = merging(prView());
+  const d = decide('echo hi', { ...m.ctx, mentionsMerge: () => { throw new Error('boom'); } });
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /boom/);
+  assert.match(d.reason, /Nothing was run/);
+});
+
 test('reviewer round 1: a merge in the same line as a push, a branch switch or a change of project is refused, even when green and naming the commit', () => {
   for (const cmd of [
     `git push && gh pr merge 36 --squash --match-head-commit ${HEAD}`,
