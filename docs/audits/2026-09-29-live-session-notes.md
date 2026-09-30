@@ -102,6 +102,8 @@ folders its own way (notes about money are not money moving), and not count the
 git command. A real payment change would still be caught through its code
 files. **Fixed** in PR #31, together with item B. A replay of this session's 178 tool calls: the old check raised 5 alarms, all false; the new one raises 2, both real.
 
+Seen twice more, after the replay above. First, a sign-in alarm on a turn that changed nothing: the word "permission" matched in these notes, which quote the Windows error *"Permission denied"*. Replayed on #31, that match is gone. Second, #31 still raises a payments alarm on this session. The cause is a `node -e` script the lead ran to edit these notes; #31 cannot see which file such a script writes, so on purpose it reads the whole script. That trade-off is fair. Suggest the lead edit notes with the edit tool, not a shell script.
+
 ## Other things that came up
 
 **A. A finished run bound every new session.** The first prompt carried
