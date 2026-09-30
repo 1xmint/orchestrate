@@ -576,6 +576,26 @@ test('reviewHoldDecision is released by a later PASS on the same work', () => {
   assert.equal(d.block, false);
 });
 
+test('reviewHoldDecision is released by a PASS from the same reviewer, sent the fix as a follow-up', () => {
+  // Live, 2026-09-29: the fixes went back to the same reviewer, so its FAIL and
+  // its later PASS carried one dispatch id; the stop hook still said the
+  // review had found a problem. The newest verdict for a dispatch decides.
+  const t = (m) => new Date(Date.UTC(2026, 8, 30, 2, m)).toISOString();
+  const tagged = { toolUseId: 'tu-b', agentId: 'ag-b', agent: 'orch-implementer', review: true, at: t(1) };
+  const rev = { toolUseId: 'tu-r', agentId: 'ag-r', agent: 'orchestrate:orch-reviewer', reviewOf: 'tu-b', at: t(26) };
+  const returned = [
+    { toolUseId: 'tu-b', agentId: 'ag-b', status: 'DONE', at: t(9) },
+    { toolUseId: 'tu-r', agentId: 'ag-r', status: 'FAIL', verdict: 'FAIL', at: t(32) },
+    { toolUseId: 'tu-r', agentId: 'ag-r', status: 'DONE', verdict: 'PASS', at: t(41) },
+  ];
+  const d = reviewHoldDecision({ returned, dispatches: [tagged, rev], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, false);
+  const failedLast = [returned[0], returned[2], returned[1]].map((r, i) => ({ ...r, at: t(30 + i * 5) }));
+  const still = reviewHoldDecision({ returned: failedLast, dispatches: [tagged, rev], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(still.block, true, 'a FAIL after the PASS still holds');
+  assert.equal(still.failed, true);
+});
+
 test('the hook tells the lead once, in one plain line, that a review failed', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
   const dir = join(home, '.claude', 'orchestrate', 'sessions');

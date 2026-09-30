@@ -89,9 +89,18 @@ const isReviewerRow = d => Boolean(d && (d.reviewOf || /reviewer/i.test(String(d
 
 // A reviewer dispatch counts as a look unless its return is on file with a FAIL
 // verdict. One still running, or one that passed, is a look; a returned FAIL is
-// not, and a later PASS on the same work is.
-const reviewFailed = (d, returned) => (Array.isArray(returned) ? returned : []).some(r => r && r.verdict === 'FAIL'
-  && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId)));
+// not, and a later PASS on the same work is — including a PASS from the same
+// reviewer sent the fix as a follow-up, which shares the dispatch's ids, so the
+// newest verdict on file for the dispatch decides (file order breaks a tie).
+const reviewFailed = (d, returned) => {
+  let last = null;
+  for (const r of Array.isArray(returned) ? returned : []) {
+    if (!r || !r.verdict) continue;
+    if (!((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId))) continue;
+    if (!last || !(Date.parse(r.at) < Date.parse(last.at))) last = r;
+  }
+  return Boolean(last && last.verdict === 'FAIL');
+};
 const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id);
 
 // A dispatch of this session with no return yet, sent within the last six

@@ -211,6 +211,15 @@ lead changed files with `sed -i` and a heredoc, the line read *"27 tool calls
 since your last edit"*. This is item B; it is fixed in PR #31 and not yet
 installed.
 
+**L. A passed recheck was read as a failed review.** At the end of the session
+the stop hook said *"the independent look found a problem; fix it and have it
+looked at again."* The cost fix's review had come back FAIL, the fixes went
+back to the same reviewer as a follow-up, and it answered PASS. Both answers
+carry one dispatch id, and the check counted any FAIL on that id as failed, so
+the later PASS was never seen. *Got in the way:* it asked for work already
+done. Fixed in 0.17.1: the newest verdict for a dispatch decides; replaying
+this session's own rows through the fixed check stays quiet.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to
