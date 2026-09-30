@@ -974,3 +974,22 @@ test("a compact hook seconds after a helper's own boundary prints nothing and ke
   writeFileSync(join(sub, 'agent-a2.jsonl'), boundary(Date.now() - 30000));
   assert.match(hook(), /\[orchestrate/, 'a fresh helper file with an old boundary is not a helper compaction');
 });
+
+// The lead's working project is learned from touched paths and cleared at the
+// lead's own compaction. A helper's compaction (no agent_id, #91910) must not
+// clear it: the check runs before any state is loaded or saved.
+test("a helper's compaction leaves the lead's working project in place", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sid = 's-helper-work';
+  const t = join(mkdtempSync(join(tmpdir(), 'orch-hw-t-')), 'session.jsonl');
+  writeFileSync(t, '');
+  run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo, transcript_path: t });
+  const file = join(home, '.claude', 'orchestrate', 'sessions', `${sid}.json`);
+  const state = JSON.parse(readFileSync(file, 'utf8'));
+  state.work = join(repo, 'app');
+  writeFileSync(file, JSON.stringify(state));
+  const sub = join(dirname(t), sid, 'subagents'); mkdirSync(sub, { recursive: true });
+  writeFileSync(join(sub, 'agent-a1.jsonl'), JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid: 'h1', timestamp: new Date(Date.now() - 500).toISOString() }) + '\n');
+  run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo, transcript_path: t });
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).work, join(repo, 'app'), "the helper's compaction kept the lead's working project");
+});
