@@ -387,6 +387,37 @@ in V.
 small edits and test runs, which a helper would have had to learn from the
 start. *Neither:* it changed nothing, and it did not repeat.
 
+**AD. The reviewer's first line on the merge bar.** *"OUTCOME: FAIL (REVIEW OF:
+a404154) Two natural lines get past the merge bar: an apostrophe in a comment
+hides the merge, and a push in the same line leaves the bar reading the old
+commit."* *Helped, a lot:* both were real, and four more findings came with
+them. Each was written as a failing test first. The fix stopped trying to read
+every spelling of a merge. Any line that mentions one is now held to one shape
+that names the exact commit, and GitHub refuses that shape if the commit moved.
+The cost is a new false alarm of the AA kind: a commit message containing
+"pr merge" is refused, and the refusal says to pass it as a file.
+
+**AE. "Ask for five lines and a file" for a helper that cannot write files.**
+After the review came back, the context line said *"the last hand-back was 4644
+bytes against 600; in the next brief, ask for five lines and a file for the
+rest."* The reviewer has no write tool, so it has no file to put the rest in,
+and its findings were the point of sending it. The dispatch guard gave the same
+advice when the brief asked for findings to be pasted back. *In the way,
+mildly:* followed literally, it would lose the findings. The length check
+should skip a helper whose tools cannot write.
+
+**AF. "This change touches sign-in" while a review was already running.** The
+stop hook said *"orchestrate: this change touches sign-in; nobody independent
+has looked at it."* Nothing touched sign-in. The word list files "permission"
+under sign-in, and this change is about the guard's permission prompt. A
+reviewer had also been sent minutes earlier and was still working. *Helped the
+right way, but mislabelled:* the change did need review. The hook should name
+the word that set it off and count a review already under way.
+
+**AG. The goal after the fifth compaction was still the folder notice.** Same
+card text as V, Y and AB, for the same reason: this session runs the 0.17.1
+hooks. *In the way*, as in V.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to

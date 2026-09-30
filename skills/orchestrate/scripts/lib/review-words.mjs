@@ -74,7 +74,8 @@ function negatedBefore(text, index) {
 const NOT_PAYMENTS = /\b(?:git|gh\s+pr)\s+(?:-[Cc]\s+\S+\s+)*(?:checkout|switch)\b|\bactions\/checkout\b/gi;
 
 export function reviewWordMatch(section) {
-  const text = String(section || '').replace(NOT_PAYMENTS, ' ');
+  // Only the switch word goes: the folder named with -C still counts.
+  const text = String(section || '').replace(NOT_PAYMENTS, m => /actions\/checkout/i.test(m) ? ' ' : m.replace(/(?:checkout|switch)$/i, ' '));
   for (const word of REVIEW_WORDS) {
     const pattern = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/ /g, '\\s+');
     const re = new RegExp(`\\b${pattern}\\b`, 'gi');

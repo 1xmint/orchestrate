@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId, loadSession } from './lib/tier.mjs';
-import { mergesIn, ghView, belowBar, REVIEW_PATHS } from './lib/merge-bar.mjs';
+import { mentionsMerge, mergeRefusal, ghView, REVIEW_PATHS } from './lib/merge-bar.mjs';
 
 export { REVIEW_PATHS };
 
@@ -468,20 +468,22 @@ function decideOne(command, ctx = {}) {
   const asSent = String(command || '').replace(/\s+/g, ' ').trim();
   if (!asSent) return { kind: 'pass' };
 
-  // A merge below the bar (lib/merge-bar.mjs) is refused in every mode: the
-  // bar is a fact gh can read, not a question for whoever is present. Read
-  // from the line as sent, since a newline separates commands too.
-  const merges = mergesIn(String(command), ctx.cwd || process.cwd());
-  if (merges.length) {
-    let session = null;
-    for (const m of merges) {
-      const view = m.kind === 'merge' && !m.auto ? (ctx.ghView || ghView)(m.target, m.cwd) : null;
-      if (view && view.ok && session === null) {
-        try { session = ctx.session || (ctx.sessionId && loadSession(ctx.sessionId)) || {}; } catch { session = {}; }
-      }
-      const why = belowBar(m, view, session || {});
-      if (why) return { kind: 'deny', reason: why };
+  // A line that mentions a merge (lib/merge-bar.mjs) runs only in its one
+  // readable shape and above the bar, in every mode: the bar is a fact gh can
+  // read, not a question for whoever is present. Read from the line as sent,
+  // since a newline separates commands too. An error here refuses the merge.
+  if (mentionsMerge(command)) {
+    let why;
+    try {
+      why = mergeRefusal(String(command), {
+        cwd: ctx.cwd || process.cwd(),
+        ghView: ctx.ghView || ghView,
+        session: () => { try { return ctx.session || (ctx.sessionId && loadSession(ctx.sessionId)) || {}; } catch { return {}; } },
+      });
+    } catch (e) {
+      why = `This line merges a pull request, and checking it failed (${String((e && e.message) || e).slice(0, 120)}), so it is refused. Nothing was run.`;
     }
+    return why ? { kind: 'deny', reason: why } : { kind: 'pass' };
   }
   const cmd = plainGit(asSent);
 
@@ -599,7 +601,7 @@ function main() {
 
   // The approved-commands list never lifts the merge bar: Claude can write that
   // file itself, so it cannot be what vouches for a merge.
-  if (isAllowed(command, input.cwd) && !mergesIn(command, input.cwd || process.cwd()).length) return;
+  if (isAllowed(command, input.cwd) && !mentionsMerge(command)) return;
 
   // `bypassPermissions`, `auto`, and `dontAsk` are the permission_modes where
   // nobody sees an interactive prompt at all — an "ask" would just sit there

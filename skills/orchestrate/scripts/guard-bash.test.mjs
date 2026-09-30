@@ -867,16 +867,110 @@ function merging(view, session = {}, extra = {}) {
   return { ctx, calls };
 }
 const reviewed = (reviewOf, extra = {}) => ({ agent: 'orch-reviewer', verdict: 'PASS', reviewOf, ...extra });
+// The one shape of merge that can pass: alone on its line, naming the commit.
+const M = `gh pr merge 35 --merge --match-head-commit ${HEAD}`;
 
 test('a merge is refused while a check is still running, in every mode, and passes once all have passed', () => {
   for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }, { mode: 'default' }]) {
-    const d = decide('gh pr merge 35 --merge', merging(prView({ checks: [passed('a'), running('b')] }), {}, opts).ctx);
+    const d = decide(M, merging(prView({ checks: [passed('a'), running('b')] }), {}, opts).ctx);
     assert.equal(d.kind, 'deny', JSON.stringify(opts));
     assert.match(d.reason, /still running/);
     assert.match(d.reason, /d11b6ff/);
     assert.match(d.reason, /Nothing was run/);
   }
-  assert.equal(decide('gh pr merge 35 --merge', merging(prView()).ctx).kind, 'pass');
+  assert.equal(decide(M, merging(prView()).ctx).kind, 'pass');
+});
+
+test('a merge passes only when it names the newest commit in full, and the refusal gives the exact command', () => {
+  const green = () => merging(prView()).ctx;
+  const plain = decide('gh pr merge 35 --merge', green());
+  assert.equal(plain.kind, 'deny');
+  assert.ok(plain.reason.includes(M), plain.reason);
+  for (const sha of ['d11b6ff', OLDER, `${HEAD}0`, '']) {
+    assert.equal(decide(`gh pr merge 35 --merge --match-head-commit ${sha}`, green()).kind, 'deny', sha);
+  }
+  assert.equal(decide(`gh pr merge 35 --merge --match-head-commit ${HEAD.toUpperCase()}`, green()).kind, 'pass');
+  assert.equal(decide(`gh pr merge 35 --squash --match-head-commit=${HEAD} -d`, green()).kind, 'pass');
+  assert.equal(decide(`gh pr merge 35 -R o/r --merge --match-head-commit ${HEAD}`, green()).kind, 'pass');
+  // The command given back keeps the project and the way of merging it was sent with.
+  const other = decide('gh pr merge 35 --squash -R o/r', green());
+  assert.ok(other.reason.includes(`gh pr merge 35 --squash -R o/r --match-head-commit ${HEAD}`), other.reason);
+});
+
+test('reviewer round 1: a comment, a heredoc or an escaped quote cannot hide a merge', () => {
+  for (const cmd of [
+    `# merge once it's green\ngh pr merge 36 --squash --match-head-commit ${HEAD}`,
+    `cat > n.md <<'EOF'\nDon't forget\nEOF\ngh pr merge 36 --match-head-commit ${HEAD}`,
+    `echo "a \\" b" ; gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    String.raw`gh p\r merge 36 --merge --match-head-commit ` + HEAD,
+    `gh pr \`\n merge 36 --merge --match-head-commit ${HEAD}`,
+    `gh -R o/r pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `gh pr mer""ge 36 --merge --match-head-commit ${HEAD}`,
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 1: a merge in the same line as a push, a branch switch or a change of project is refused, even when green and naming the commit', () => {
+  for (const cmd of [
+    `git push && gh pr merge 36 --squash --match-head-commit ${HEAD}`,
+    'git switch other && gh pr merge --squash',
+    `export GH_REPO=o/r; gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `gh pr merge 36 -Ro/r --merge --match-head-commit ${HEAD}`,
+    `cd /c/Users/Josh/Desktop/GitHub/orchestrate && gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `gh pr merge 36 --merge --match-head-commit ${HEAD}\ngh pr merge 37 --merge --match-head-commit ${HEAD}`,
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 1: a wrapper or another runner cannot carry a merge past the check', () => {
+  for (const cmd of [
+    `timeout 60 gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `env -i gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `echo 36 | xargs gh pr merge --merge --match-head-commit ${HEAD}`,
+    `cmd /c gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `nice -n 5 gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `winpty gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `sudo -u me gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `eval "gh pr merge 36 --merge --match-head-commit ${HEAD}"`,
+    `watch -n 5 gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `"C:\\Program Files\\GitHub CLI\\gh.exe" pr merge 36 --merge --match-head-commit ${HEAD}`,
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 1: a raw API merge is refused however its flags are written and whatever sends it', () => {
+  for (const cmd of [
+    'gh api -XPUT repos/o/r/pulls/36/merge',
+    'curl -X PUT -H "Authorization: token x" https://api.github.com/repos/o/r/pulls/36/merge',
+    'Invoke-RestMethod -Method Put -Uri https://api.github.com/repos/o/r/pulls/36/merge',
+    `echo '{"query":"mutation { mergePullRequest(input: {pullRequestId: \\"x\\"}) { clientMutationId } }"}' | gh api graphql --input -`,
+  ]) {
+    const d = decide(cmd, merging(prView()).ctx);
+    assert.equal(d.kind, 'deny', cmd);
+    assert.match(d.reason, /gh pr merge/, cmd);
+  }
+});
+
+test('a line that only mentions a merge is refused and says how to pass the text instead; lines that do not mention one never run gh', () => {
+  const d = decide('git commit -m "Refuse gh pr merge below the bar"', merging(prView()).ctx);
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /git commit -F/);
+  const m = merging(prView({ checks: [running()] }));
+  for (const other of [
+    'gh pr view 35 --json mergeable',
+    'gh pr view 35 --json mergeStateStatus,headRefOid',
+    'gh pr checks 35',
+    'git merge main',
+    'gh pr checks 35 && git merge main',
+    'git commit -m "fix the typo"',
+    'gh api repos/o/r/pulls/35',
+  ]) assert.equal(decide(other, m.ctx).kind, 'pass', other);
+  assert.equal(m.calls.length, 0);
+});
+
+test('an error while checking a merge refuses it rather than letting it through', () => {
+  const ctx = { cwd: '/repo', session: {}, ghView: () => { throw new Error('boom'); } };
+  let d;
+  assert.doesNotThrow(() => { d = decide(M, ctx); });
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /Nothing was run/);
 });
 
 test('a merge is refused when a check failed, naming it', () => {
@@ -906,10 +1000,7 @@ test('a merge is refused when the checks cannot be read, and gh is not run for a
     'gh pr view 35 --json mergeable',
     'gh pr checks 35',
     'git merge main',
-    'echo "gh pr merge 35"',
-    'grep -n "gh pr merge" docs/notes.md',
     'gh pr merge 35 --disable-auto',
-    'gh api repos/o/r/pulls/35/merge',
     'gh api repos/o/r/pulls/35',
   ]) assert.equal(decide(other, m.ctx).kind, 'pass', other);
   assert.equal(m.calls.length, 0);
@@ -953,17 +1044,16 @@ test('every other way of spelling a merge is read as one', () => {
   }
 });
 
-test('the checks read are those of the pull request the merge names, in the folder it runs in', () => {
+test('the checks read are those of the pull request the merge names, in the folder the command runs in', () => {
   const pick = cmd => { const m = merging(prView()); decide(cmd, m.ctx); return m.calls[0] || {}; };
-  assert.deepEqual(pick('gh pr merge 35 --merge').target, { selector: '35', repo: null });
-  assert.deepEqual(pick('gh pr merge --merge').target, { selector: null, repo: null });
-  assert.deepEqual(pick('gh pr -R o/r merge 35').target, { selector: '35', repo: 'o/r' });
-  assert.deepEqual(pick('gh pr merge feature/x --repo=o/r -t "a title"').target, { selector: 'feature/x', repo: 'o/r' });
-  assert.deepEqual(pick('GH_REPO=o/r gh pr merge 35').target, { selector: '35', repo: 'o/r' });
-  assert.deepEqual(pick('gh pr merge -b "body text" 35').target, { selector: '35', repo: null });
-  assert.equal(pick('gh pr merge 35').cwd, '/repo');
-  assert.match(String(pick('cd /other/repo && gh pr merge 35').cwd).replace(/\\/g, '/'), /\/other\/repo$/);
-  assert.match(String(pick('Set-Location C:\\work\\other; gh pr merge 35').cwd).replace(/\\/g, '/'), /work\/other$/);
+  assert.deepEqual(pick(M).target, { selector: '35', repo: null });
+  assert.deepEqual(pick(`gh pr merge 35 -R o/r --merge --match-head-commit ${HEAD}`).target, { selector: '35', repo: 'o/r' });
+  assert.deepEqual(pick(`gh pr merge 35 --repo=o/r --merge`).target, { selector: '35', repo: 'o/r' });
+  assert.equal(pick(M).cwd, '/repo');
+  // A merge that names no number is refused before gh is asked anything.
+  const m = merging(prView());
+  assert.equal(decide('gh pr merge --merge', m.ctx).kind, 'deny');
+  assert.equal(m.calls.length, 0);
 });
 
 test('merging through the raw API is refused, since it skips the checks this guard reads', () => {
@@ -983,15 +1073,15 @@ test('merging through the raw API is refused, since it skips the checks this gua
 
 test('a change to the plugin\'s own safety checks also needs a reviewer\'s pass naming the newest commit', () => {
   const view = prView({ files: ['README.md', GUARD_FILE] });
-  const none = decide('gh pr merge 35 --merge', merging(view).ctx);
+  const none = decide(M, merging(view).ctx);
   assert.equal(none.kind, 'deny');
   assert.match(none.reason, /reviewer/);
   assert.match(none.reason, /REVIEW OF: d11b6ff/);
   assert.ok(none.reason.includes(GUARD_FILE));
-  assert.equal(decide('gh pr merge 35 --merge', merging(view, { returned: [reviewed('d11b6ff')] }).ctx).kind, 'pass');
-  assert.equal(decide('gh pr merge 35 --merge', merging(view, { returned: [reviewed(HEAD.toUpperCase())] }).ctx).kind, 'pass');
+  assert.equal(decide(M, merging(view, { returned: [reviewed('d11b6ff')] }).ctx).kind, 'pass');
+  assert.equal(decide(M, merging(view, { returned: [reviewed(HEAD.toUpperCase())] }).ctx).kind, 'pass');
   // A change that touches none of them needs none.
-  assert.equal(decide('gh pr merge 35 --merge', merging(prView({ files: ['README.md'] })).ctx).kind, 'pass');
+  assert.equal(decide(M, merging(prView({ files: ['README.md'] })).ctx).kind, 'pass');
 });
 
 test('a reviewer pass is refused when it names another commit, is not a reviewer\'s, or names work that is not a commit', () => {
@@ -1006,24 +1096,24 @@ test('a reviewer pass is refused when it names another commit, is not a reviewer
     ['no verdict', [reviewed('d11b6ff', { verdict: null })]],
     ['passed then failed', [reviewed('d11b6ff'), reviewed('d11b6ffe', { verdict: 'FAIL' })]],
     ['not a prefix', [reviewed('0d11b6ff')]],
-  ]) assert.equal(decide('gh pr merge 35', merging(view, { returned }).ctx).kind, 'deny', label);
-  assert.equal(decide('gh pr merge 35', merging(view, { returned: [reviewed('d11b6ff', { verdict: 'FAIL' }), reviewed('d11b6ff')] }).ctx).kind, 'pass', 'failed then passed');
+  ]) assert.equal(decide(M, merging(view, { returned }).ctx).kind, 'deny', label);
+  assert.equal(decide(M, merging(view, { returned: [reviewed('d11b6ff', { verdict: 'FAIL' }), reviewed('d11b6ff')] }).ctx).kind, 'pass', 'failed then passed');
   // A reviewer's plugin-prefixed name is still a reviewer.
-  assert.equal(decide('gh pr merge 35', merging(view, { returned: [reviewed('d11b6ff', { agent: 'orchestrate:orch-reviewer' })] }).ctx).kind, 'pass');
+  assert.equal(decide(M, merging(view, { returned: [reviewed('d11b6ff', { agent: 'orchestrate:orch-reviewer' })] }).ctx).kind, 'pass');
 });
 
 test('a reviewer that did not repeat the commit counts through the brief that sent it, never through another helper\'s', () => {
   const view = prView({ files: [GUARD_FILE] });
   const back = { agent: 'orch-reviewer', verdict: 'PASS', toolUseId: 'tu-1' };
-  assert.equal(decide('gh pr merge 35', merging(view, { returned: [back], dispatches: [{ toolUseId: 'tu-1', agent: 'orch-reviewer', reviewOf: 'd11b6ff' }] }).ctx).kind, 'pass');
-  assert.equal(decide('gh pr merge 35', merging(view, { returned: [back], dispatches: [{ toolUseId: 'tu-2', agent: 'orch-reviewer', reviewOf: 'd11b6ff' }] }).ctx).kind, 'deny');
+  assert.equal(decide(M, merging(view, { returned: [back], dispatches: [{ toolUseId: 'tu-1', agent: 'orch-reviewer', reviewOf: 'd11b6ff' }] }).ctx).kind, 'pass');
+  assert.equal(decide(M, merging(view, { returned: [back], dispatches: [{ toolUseId: 'tu-2', agent: 'orch-reviewer', reviewOf: 'd11b6ff' }] }).ctx).kind, 'deny');
 });
 
 test('the head moving after the review, or a file list cut short, still needs the reviewer', () => {
   const moved = prView({ files: [GUARD_FILE], head: OLDER });
-  assert.equal(decide('gh pr merge 35', merging(moved, { returned: [reviewed('d11b6ff')] }).ctx).kind, 'deny');
+  assert.equal(decide(M, merging(moved, { returned: [reviewed('d11b6ff')] }).ctx).kind, 'deny');
   const cut = prView({ files: Array.from({ length: 100 }, (_, i) => `src/f${i}.js`), changedFiles: 140 });
-  const d = decide('gh pr merge 35', merging(cut).ctx);
+  const d = decide(M, merging(cut).ctx);
   assert.equal(d.kind, 'deny');
   assert.match(d.reason, /reviewer/);
 });
@@ -1033,7 +1123,7 @@ test('the hooks file, the reviewer\'s own instructions and the merge bar itself 
   const paths = guard.REVIEW_PATHS || [];
   for (const p of ['hooks/hooks.json', 'skills/orchestrate/assets/agents/orch-reviewer.md', GUARD_FILE, 'skills/orchestrate/scripts/guard-agent.mjs', 'skills/orchestrate/scripts/ledger.mjs', 'skills/orchestrate/scripts/turn-check.mjs', 'skills/orchestrate/scripts/lib/review-of.mjs', 'skills/orchestrate/scripts/lib/review-words.mjs', 'skills/orchestrate/scripts/lib/merge-bar.mjs']) {
     assert.ok(paths.includes(p), p);
-    assert.equal(decide('gh pr merge 35', merging(prView({ files: [p] })).ctx).kind, 'deny', p);
+    assert.equal(decide(M, merging(prView({ files: [p] })).ctx).kind, 'deny', p);
   }
   const root = join(HERE, '..', '..', '..');
   for (const p of paths) assert.ok(existsSync(join(root, p)), `${p} is listed but does not exist`);

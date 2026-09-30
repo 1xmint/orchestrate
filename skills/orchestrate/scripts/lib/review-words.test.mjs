@@ -128,3 +128,10 @@ test('a checkout page, or checkout beside a branch switch, still needs review', 
   assert.equal(reviewWordMatch('git checkout main, then change the checkout page'), 'checkout');
   assert.equal(inferredReviewWord('OBJECTIVE\ngit checkout main and fix the refund total\nDONE WHEN\ntests pass'), 'refund');
 });
+
+// Reviewer, 0.17.2 round 1: dropping the branch switch also dropped the folder
+// named with -C, so a folder called billing no longer counted.
+test('the folder a branch switch runs in still counts', () => {
+  assert.equal(reviewWordMatch('git -C billing checkout main'), 'billing');
+  assert.equal(reviewWordMatch('git -C /repo/payments switch fix/x'), 'payments');
+});

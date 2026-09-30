@@ -68,10 +68,35 @@ round a check.
 
 ## Merging a pull request
 
-`gh pr merge` is refused until the pull request clears a bar, in every mode,
-whoever is present. The bar is read with `gh pr view` at the moment of the
-merge, and the approved-commands list below does not lift it, since Claude can
-write that file itself:
+A pull request merges only in one shape, and only once it clears a bar, in
+every mode, whoever is present. The approved-commands list below does not lift
+it, since Claude can write that file itself.
+
+**The shape.** The command is alone on its line and reads
+
+```
+gh pr merge <number> --merge --match-head-commit <full 40-character commit id>
+```
+
+with `--squash` or `--rebase` in place of `--merge` if wanted, and optionally
+`--delete-branch` and `-R owner/repo`. `--match-head-commit` makes GitHub
+itself refuse the merge if that commit is no longer the newest, so a push,
+a branch switch or another project cannot slip in between the check and the
+merge. A merge without it, or with a short or wrong id, is refused with the
+exact command to run instead.
+
+**Which lines count.** Any line that mentions a merge anywhere is held to that
+shape: `pr merge` (with flags between the two words), the REST route
+`…/pulls/N/merge`, or the `mergePullRequest` and `enablePullRequestAutoMerge`
+GraphQL mutations. Quotes, backticks and backslashes are taken out before
+looking, and quoted text and comments count too. So a merge inside a chain, a
+pipe, `bash -c`, a wrapper such as `timeout`, `env` or `xargs`, `curl` or
+`Invoke-RestMethod`, after a `cd`, or behind a comment or heredoc is refused
+rather than read. This has one known cost: a commit message or note that
+contains "pr merge" is refused too. Put that text in a file and pass the file
+(`git commit -F msg.txt`).
+
+**The bar**, read with `gh pr view` at the moment of the merge:
 
 - every check on the pull request's newest commit has passed. A check still
   running, a failed check, or no check reported yet is refused. A project with
@@ -85,19 +110,16 @@ write that file itself:
   touching them;
 - switching on automatic merging (`--auto`) is always refused: it later
   merges whatever the newest commit is, including one nobody checked;
-- merging through the raw API (`gh api …/pulls/N/merge` with PUT, or the
-  `mergePullRequest` and `enablePullRequestAutoMerge` GraphQL mutations) is
-  refused, so the merge goes through the command this check reads;
+- merging through the raw API is refused, so the merge goes through the one
+  command this check reads;
 - when the checks cannot be read (gh missing, signed out, offline, or slower
-  than 12 seconds), the merge is refused, never waved through.
+  than 12 seconds), or checking fails for any other reason, the merge is
+  refused, never waved through.
 
-The merge is found however it is spelled: a quoted or full-path `gh`,
-`-R`/`--repo` before `merge`, `GH_REPO=`, inside a chain or pipe, inside
-`bash -c` or `pwsh -c`, and after a `cd` or `Set-Location`, whose folder is
-the one the checks are read from. Out of scope, and not caught: a merge run
-from a script file or `node -e`, a gh alias, a GraphQL query read from a
-file, and a push straight to the base branch (`git push origin HEAD:main`),
-which skips pull requests altogether.
+Out of scope, and not caught: a command word built from a variable, `$(…)`
+or escape codes; a merge run from a script file or `node -e`; a gh alias; a
+GraphQL query read from a file; and a push straight to the base branch
+(`git push origin HEAD:main`), which skips pull requests altogether.
 
 ## What happens when one of these is about to run
 

@@ -4,14 +4,18 @@
 // commit. guard-bash.mjs refuses a merge below the bar, in every mode, and the
 // project's approved-commands list does not lift it.
 //
-// What it reads: `gh pr merge` however it is spelled (a quoted or full-path
-// gh, `-R` before `merge`, GH_REPO=, a chain, a pipe, `bash -c`, `pwsh -c`,
-// after `cd`), and the raw API routes that merge. What it does not read: a
-// merge run from inside a script file, `node -e`, or a gh alias. Those are
-// out of scope, and docs/safety-guard.md says so.
+// It does not try to read every way a merge can be spelled; a shell has too
+// many. Instead any line that mentions a merge anywhere, quotes and comments
+// included, is caught, and only one shape of it can pass: gh pr merge with a
+// number, alone on its line, naming the full id of the newest commit with
+// --match-head-commit. GitHub itself then refuses the merge if that commit is
+// no longer the newest, so nothing that runs between the check and the merge
+// can swap in an unchecked one. Out of scope, and docs/safety-guard.md says
+// so: a command word built from a variable or $(…), a script file, node -e,
+// a gh alias, a GraphQL query read from a file, and a push straight to the
+// base branch.
 
 import { spawnSync } from 'node:child_process';
-import { resolve as resolvePath } from 'node:path';
 
 // The plugin's own safety checks: a change to any of these can switch a check
 // off, so it merges only after an independent reviewer passed it. Full repo
@@ -35,115 +39,72 @@ export const REVIEW_PATHS = [
   'skills/orchestrate/scripts/lib/review-words.test.mjs',
 ];
 
-// Split a line into the commands it runs, outside quotes: at ; & | newlines,
-// and the brackets and backticks that start a command of their own.
-function segments(line) {
-  const out = [];
-  let cur = '', q = null;
-  for (const ch of String(line || '')) {
-    if (q) { cur += ch; if (ch === q) q = null; continue; }
-    if (ch === '"' || ch === "'") { q = ch; cur += ch; continue; }
-    if (';&|\n\r()`{}'.includes(ch)) { if (cur.trim()) out.push(cur.trim()); cur = ''; continue; }
-    cur += ch;
+// Whether a line mentions merging a pull request anywhere: `pr merge` (with
+// flags between them), the REST merge route, or the GraphQL mutations. Quotes,
+// backticks and backslashes are taken out first, so none of them can split the
+// words apart.
+export function mentionsMerge(line) {
+  const t = String(line || '').replace(/["'`\\]/g, '').toLowerCase();
+  return /\bpr\s+(?:--?[a-z][\w-]*(?:[=\s]+[^\s-]\S*)?\s+)*merge\b/.test(t)
+    || /pulls\/\d+\/merge\b/.test(t)
+    || /\b(?:mergepullrequest|enablepullrequestautomerge)\b/.test(t);
+}
+
+const METHODS = new Set(['--merge', '-m', '--squash', '-s', '--rebase', '-r']);
+const SHA = /^[0-9a-f]{40}$/i;
+const REPO = /^[\w.-]+\/[\w.-]+$/;
+
+// The one merge that can pass, read from the whole line: `gh pr merge <number>`
+// with at most a way of merging, --delete-branch, -R owner/repo and
+// --match-head-commit <id>, alone on its line. Anything else is null.
+export function readMerge(line) {
+  const t = String(line || '').trim();
+  if (!t || /[\r\n]/.test(t)) return null;
+  const w = t.split(/\s+/);
+  if (!w.every(x => /^[\w./:=-]+$/.test(x))) return null;
+  if (!/^gh(?:\.exe)?$/i.test(w[0]) || w[1] !== 'pr' || w[2] !== 'merge') return null;
+  const out = { number: null, repo: null, sha: null, method: null, deleteBranch: false, disableAuto: false };
+  for (let i = 3; i < w.length; i++) {
+    const a = w[i];
+    const eq = /^(--repo|--match-head-commit)=(.+)$/.exec(a);
+    if (/^\d+$/.test(a) && !out.number) out.number = a;
+    else if (METHODS.has(a) && !out.method) out.method = a;
+    else if ((a === '-d' || a === '--delete-branch') && !out.deleteBranch) out.deleteBranch = true;
+    else if (a === '--disable-auto' && !out.disableAuto) out.disableAuto = true;
+    else if (eq && eq[1] === '--repo' && !out.repo) out.repo = eq[2];
+    else if (eq && eq[1] === '--match-head-commit' && !out.sha) out.sha = eq[2];
+    else if ((a === '-R' || a === '--repo') && !out.repo && w[i + 1]) out.repo = w[++i];
+    else if (a === '--match-head-commit' && !out.sha && w[i + 1]) out.sha = w[++i];
+    else return null;
   }
-  if (cur.trim()) out.push(cur.trim());
+  if (!out.number || (out.repo && !REPO.test(out.repo))) return null;
+  if (out.disableAuto) return out.method || out.deleteBranch || out.sha ? null : out;
   return out;
 }
 
-// Words of one command, quotes removed. A backslash is kept as it is, so a
-// Windows path reads as written.
-function words(seg) {
-  const out = [];
-  let cur = '', q = null, any = false;
-  for (const ch of seg) {
-    if (q) { if (ch === q) q = null; else cur += ch; continue; }
-    if (ch === '"' || ch === "'") { q = ch; any = true; continue; }
-    if (/\s/.test(ch)) { if (cur || any) out.push(cur); cur = ''; any = false; continue; }
-    cur += ch;
-  }
-  if (cur || any) out.push(cur);
-  return out;
-}
+const SHAPE = 'gh pr merge <number> --merge --match-head-commit <the full 40-character id of its newest commit>, alone on its line, with -R owner/repo for another project';
 
-const base = w => String(w || '').split(/[\\/]/).pop().toLowerCase();
-const WRAPPERS = new Set(['env', 'command', 'exec', 'nohup', 'time', 'sudo']);
-const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'bash.exe', 'sh.exe']);
-const POWERSHELLS = new Set(['powershell', 'pwsh', 'powershell.exe', 'pwsh.exe']);
-const CDS = new Set(['cd', 'chdir', 'pushd', 'set-location', 'push-location', 'sl']);
-// gh flags that take the next word as their value, for `pr merge` and `api`.
-const VALUE_FLAGS = new Set(['-R', '--repo', '-b', '--body', '-F', '--body-file', '-t', '--subject', '--match-head-commit', '-A', '--author-email', '-X', '--method', '-f', '--field', '--raw-field', '-H', '--header', '--input', '-q', '--jq', '--template', '--hostname', '-p', '--preview', '--cache']);
-const FIELD_FLAGS = new Set(['-f', '-F', '--field', '--raw-field', '--input']);
-const MERGE_MUTATION = /\b(?:mergePullRequest|enablePullRequestAutoMerge)\b/;
-
-// Read one gh command: a merge, an API merge, or nothing.
-function readGh(args, env) {
-  const pos = [];
-  const flags = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a.startsWith('-') && a.length > 1) {
-      const eq = a.indexOf('=');
-      if (a.startsWith('--') && eq > 0) flags.push([a.slice(0, eq), a.slice(eq + 1)]);
-      else if (VALUE_FLAGS.has(a)) { flags.push([a, args[i + 1] ?? '']); i++; }
-      else flags.push([a, true]);
-    } else pos.push(a);
+// Why a line that mentions a merge cannot run, or null when it clears the bar.
+// `opts.ghView` and `opts.session` stand in for gh and this session's state.
+export function mergeRefusal(line, { cwd = process.cwd(), ghView: view = ghView, session } = {}) {
+  const m = readMerge(line);
+  if (!m) {
+    const t = String(line || '').replace(/["'`\\]/g, '').toLowerCase();
+    if (/pulls\/\d+\/merge\b|\b(?:mergepullrequest|enablepullrequestautomerge)\b/.test(t)) return belowBar({ kind: 'api' });
+    if (/\bpr\s+merge\b[^\n]*--auto\b/.test(t)) return belowBar({ kind: 'merge', auto: true });
+    return `This line merges a pull request, or mentions merging one, in a form this check does not read, so it is refused. A merge runs only as one command: ${SHAPE}. If the line only mentions a merge (a commit message, a note), put that text in a file and pass the file, for example git commit -F msg.txt. Nothing was run.`;
   }
-  const has = name => flags.some(([f]) => f === name);
-  const value = (...names) => { const hit = flags.find(([f]) => names.includes(f)); return hit ? String(hit[1]) : null; };
-  if (pos[0] === 'pr' && pos[1] === 'merge') {
-    if (has('--disable-auto')) return null;
-    return { kind: 'merge', auto: has('--auto'), target: { selector: pos[2] || null, repo: value('-R', '--repo') || env.GH_REPO || null } };
-  }
-  if (pos[0] === 'api') {
-    const endpoint = pos[1] || '';
-    if (endpoint === 'graphql') return flags.some(([, v]) => MERGE_MUTATION.test(String(v))) ? { kind: 'api' } : null;
-    if (/(?:^|\/)pulls\/\d+\/merge\/?$/.test(endpoint.split('?')[0])) {
-      const method = (value('-X', '--method') || (flags.some(([f]) => FIELD_FLAGS.has(f)) ? 'POST' : 'GET')).toUpperCase();
-      return method === 'GET' ? null : { kind: 'api' };
-    }
-  }
-  return null;
-}
-
-// Every merge a line would run, with the folder it runs in.
-export function mergesIn(line, cwd = process.cwd(), depth = 0) {
-  const found = [];
-  if (depth > 3) return found;
-  let here = cwd;
-  const env = {};
-  for (const seg of segments(line)) {
-    let w = words(seg);
-    const psRepo = /^\$env:GH_REPO\s*=\s*(.+)$/i.exec(seg);
-    if (psRepo) { env.GH_REPO = words(psRepo[1])[0] || null; continue; }
-    const local = { ...env };
-    while (w.length && (WRAPPERS.has(base(w[0])) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0]))) {
-      const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(w[0]);
-      if (m && m[1] === 'GH_REPO') local.GH_REPO = m[2];
-      w = w.slice(1);
-    }
-    if (!w.length) continue;
-    const cmd = base(w[0]);
-    if (CDS.has(cmd)) {
-      const to = w.slice(1).filter(x => !/^-/.test(x))[0];
-      if (to) here = resolvePath(here, to);
-      continue;
-    }
-    if (SHELLS.has(cmd)) {
-      const at = w.findIndex((x, i) => i > 0 && /^-[a-z]*c$/.test(x));
-      if (at > 0 && w[at + 1] !== undefined) found.push(...mergesIn(w[at + 1], here, depth + 1));
-      continue;
-    }
-    if (POWERSHELLS.has(cmd)) {
-      const at = w.findIndex((x, i) => i > 0 && /^-(?:c|command)$/i.test(x));
-      if (at > 0) found.push(...mergesIn(w.slice(at + 1).join(' '), here, depth + 1));
-      continue;
-    }
-    if (/^gh(?:\.exe)?$/.test(cmd)) {
-      const hit = readGh(w.slice(1), local);
-      if (hit) found.push({ ...hit, cwd: here });
-    }
-  }
-  return found;
+  if (m.disableAuto) return null;
+  const target = { selector: m.number, repo: m.repo };
+  const read = view(target, cwd);
+  const head = String((read && read.ok && read.data && read.data.headRefOid) || '');
+  const got = read && read.ok && !SHA.test(head) ? { ok: false, error: 'gh gave no id for its newest commit' } : read;
+  const why = belowBar({ kind: 'merge', auto: false, target }, got, got && got.ok ? session() : {});
+  if (why) return why;
+  if (String(m.sha || '').toLowerCase() === head.toLowerCase()) return null;
+  const exact = ['gh pr merge', m.number, m.method || '--merge', m.deleteBranch ? '--delete-branch' : '', m.repo ? `-R ${m.repo}` : '', `--match-head-commit ${head}`].filter(Boolean).join(' ');
+  const named = m.sha ? `names ${m.sha.slice(0, 12)}, which is not the full id of its newest commit` : 'does not name the commit it merges';
+  return `Pull request ${m.number} clears the bar on its newest commit ${head.slice(0, 7)}, but this merge ${named}. Run exactly this, alone on its line, so GitHub refuses it if a newer commit arrives first: ${exact}. Nothing was run.`;
 }
 
 // `gh pr view` for the checks, files and newest commit of the pull request a
