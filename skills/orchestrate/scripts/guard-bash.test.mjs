@@ -78,7 +78,7 @@ test('the wider clean-up still refuses anything that could lose work or reach el
     'git worktree remove .claude/worktrees/a && git branch -D task/x',
     'git worktree remove .claude/worktrees/a && git branch -d task/x --force',
     'git worktree remove .claude/worktrees/a && git branch -d task/x && rm -rf src',
-    'git worktree remove .claude/worktrees/a && git branch -d task/x | cat',
+    'git worktree remove .claude/worktrees/a && git branch -d task/x | sh',
     'git worktree remove .claude/worktrees/a && git branch -d task/x & git branch -D y',
     'git worktree remove .claude/worktrees/a && git branch -d $(git branch)',
   ]) assert.notEqual(decide(bad).kind, 'pass', bad);
@@ -113,7 +113,7 @@ test('the small branch delete passes with several names, error text folded in, a
     'git branch -D worktree-agent-a1 2>&1; git branch',
     'git branch -d worktree-agent-a1 --force 2>&1',
     'git branch -d worktree-agent-a1 > out.txt',
-    'git branch -d worktree-agent-a1 2>&1 | cat',
+    'git branch -d worktree-agent-a1 2>&1 | sh',
     'git branch -d worktree-agent-a1 2>&1; rm -rf src',
     'git branch -d worktree-agent-a1 2>&1 || git push --force',
     'git branch -d worktree-agent-a1 2>&1; git branch -D x',
@@ -747,4 +747,98 @@ test('a line refused for another part names that part, not a lowercase branch de
     assert.match(decide('git branch -D worktree-agent-abc123 && rm -rf src', opts).reason, /lowercase flag/);
     assert.match(decide('git branch -d feature-x && git branch -D y', opts).reason, /lowercase flag/);
   }
+});
+
+// Live, 0.17.1: `git branch -d <ten names> 2>&1 | tail -12; grep …` was refused
+// for the pipe, and the refusal told the lead to use the lowercase flag it had
+// already used. A pipe into a filter that only reads cannot change what the
+// delete does, so that shape passes; every way to make the pipe do more stays refused.
+test('a small branch delete piped into a read-only filter passes, with several names', () => {
+  const live = 'git branch -d release/0.17.1 trial/all-prs fix/review-hold 2>&1 | tail -12; grep -rh "pass" docs';
+  for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }]) {
+    assert.equal(decide(live, opts).kind, 'pass', JSON.stringify(opts));
+    for (const ok of [
+      'git branch -d a b c | tail -12',
+      'git branch -d a b | head -5',
+      'git branch -d a | wc -l',
+      'git branch -d a b | cat',
+      'git branch -d a b 2>&1 | grep -v "not found"',
+      'git worktree remove .claude/worktrees/agent-a1 && git branch -d worktree-agent-a1 | tail -3',
+    ]) assert.equal(decide(ok, opts).kind, 'pass', ok);
+  }
+});
+
+// Written before the change; these pass on the old code by design, because the
+// old code refused every pipe. They pin what the new allowance must not open.
+test('a pipe after a small branch delete stays refused when it can run, write or delete anything', () => {
+  for (const bad of [
+    'git branch -d a | xargs git branch -D',
+    'git branch -d a | xargs -I{} git branch -D {}',
+    'git branch -d a | sh',
+    'git branch -d a | bash',
+    'git branch -d a | eval',
+    'git branch -d a | env sh',
+    'git branch -d a | tee log.txt',
+    'git branch -d a | tail > out.txt',
+    'git branch -d a | tail >> out.txt',
+    'git branch -d a |& cat',
+    'git branch -d a | grep x | xargs git branch -D',
+    'git branch -d a | grep x | sh',
+    'git branch -d a | sort -o out.txt',
+    'git branch -d a | uniq - out.txt',
+    'git branch -d a | tail -n $(rm -rf src)',
+    'git branch -d a | tail `rm -rf src`',
+    'git branch -d a | grep "$(rm -rf src)"',
+    'git branch -d a | tail <(git branch -D b)',
+    'git branch -d a | tail & rm -rf src',
+    'git branch -d $(git branch) | tail',
+    'git branch -d `git branch` | tail',
+    'git branch -d a -f | tail',
+    'git branch -df a | tail',
+    'git branch -d a --force | tail',
+    'git branch -D a | tail',
+    'git branch -d a | tail; git branch -D b',
+    'git branch -d a | tail && rm -rf src',
+    'git branch -d main; git push origin --delete main | tail',
+    'sh -c "git branch -D a" | tail',
+  ]) {
+    for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }]) assert.notEqual(decide(bad, opts).kind, 'pass', `${bad} ${JSON.stringify(opts)}`);
+  }
+});
+
+// Found while writing the tests above: 0.17.1 let `git branch -df main` through
+// with no question, because the delete flag was only seen standing alone.
+// -df and -fd are the forced delete, the same as -D.
+test('a delete flag combined with others is still a branch delete', () => {
+  for (const bad of [
+    'git branch -df main',
+    'git branch -fd main',
+    'git branch -Df main',
+    'git branch -fD main',
+    'git branch -dr origin/main',
+    'git -C /x branch -df main',
+    'git branch -q -df main',
+  ]) {
+    for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }]) assert.notEqual(decide(bad, opts).kind, 'pass', `${bad} ${JSON.stringify(opts)}`);
+  }
+  // Listing flags that merely contain a letter d elsewhere are not deletes.
+  for (const ok of ['git branch -a', 'git branch -vv', 'git branch --merged', 'git branch --no-merged main']) assert.equal(decide(ok).kind, 'pass', ok);
+});
+
+test('a small delete refused only for what follows it says so, and does not advise the flag already used', () => {
+  for (const opts of [{ headless: true, mode: 'auto' }, { subagent: true }]) {
+    for (const [line, part] of [
+      ['git branch -d a b c | tee log.txt', '| tee log.txt'],
+      ['git branch -d a > out.txt', '> out.txt'],
+      ['git branch -d a b | sh', '| sh'],
+    ]) {
+      const d = decide(line, opts);
+      assert.equal(d.kind, 'deny', line);
+      assert.doesNotMatch(d.reason, /lowercase flag works/, line);
+      assert.ok(d.reason.includes(part), `${line}: ${d.reason}`);
+      assert.match(d.reason, /same delete with nothing after it passes/, line);
+    }
+  }
+  // A forced delete still gets the lowercase advice.
+  assert.match(decide('git branch -D a | tail', { headless: true, mode: 'auto' }).reason, /git branch -d <name>/);
 });

@@ -263,11 +263,35 @@ const segmentsOf = cmd => cmd.split(/&&|;|\|\|/).map(s => s.trim()).filter(Boole
 // `2>&1` only folds error text into the normal output; it writes nothing and
 // hides nothing, so it never decides whether a delete is safe.
 const withoutStderrJoin = cmd => cmd.replace(/\s2>&1(?=\s|;|&|\||$)/g, '');
-const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && /\s(-D|-d|--delete|--force-delete)(\s|$)/.test(seg);
+// A delete flag inside a cluster of short flags (-df, -fd, -dr) is still a
+// delete; -df is the forced one. Read only within the `git branch` part, so a
+// later command's own -d flag is not taken for it.
+const CLUSTERED_DELETE_RE = /\bgit\s+branch\b[^|;&]*\s-[a-zA-Z]*[dD][a-zA-Z]*(?=\s|$)/;
+const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && (/\s(-D|-d|--delete|--force-delete)(\s|$)/.test(seg) || CLUSTERED_DELETE_RE.test(seg));
+// A filter that only reads what it is given. Its words are plain flags, names
+// or quoted text with nothing the shell would run, so it can neither write a
+// file nor start another command.
+const READ_ONLY_FILTER_RE = /^(?:tail|head|wc|cat|grep)(?:\s+(?:[-\w.,:=/+]+|'[^'$`\\]*'|"[^"$`\\]*"))*$/;
+// The delete part with one trailing pipe into a read-only filter taken off:
+// what the delete does is the same with or without it.
+function withoutReadOnlyTail(seg) {
+  const i = seg.indexOf('|');
+  if (i < 0) return seg;
+  const rest = seg.slice(i + 1).trim();
+  return rest.includes('|') || !READ_ONLY_FILTER_RE.test(rest) ? seg : seg.slice(0, i).trim();
+}
 function isPlainBranchDelete(seg, flags) {
-  const t = seg.split(/\s+/);
-  return t[0] === 'git' && t[1] === 'branch' && flags.includes(t[2]) && t.length > 3 && !/[|<>`$(){}&]/.test(seg)
+  const own = withoutReadOnlyTail(seg);
+  const t = own.split(/\s+/);
+  return t[0] === 'git' && t[1] === 'branch' && flags.includes(t[2]) && t.length > 3 && !/[|<>`$(){}&]/.test(own)
     && t.slice(3).map(unquote).every(isSmallDeleteName);
+}
+// The shell syntax that follows an otherwise plain delete, from its first
+// symbol on, or '' when the delete is not plain even without it.
+function syntaxAfterPlainDelete(seg) {
+  const i = seg.search(/[|<>`$(){}&]/);
+  if (i < 0) return '';
+  return isPlainBranchDelete(seg.slice(0, i).trim(), ['-d', '--delete']) ? seg.slice(i).trim() : '';
 }
 // Whether a part passes on its own (no rule of this guard stops it).
 function segmentPasses(seg) {
@@ -320,7 +344,7 @@ const RULES = [
     // worktree folder it belonged to — see isSafeWorktreeCleanupChain above.
     test: raw => {
       const cmd = withoutStderrJoin(raw);
-      return (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
+      return (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd) || CLUSTERED_DELETE_RE.test(cmd))
         && !isPlainBranchDelete(cmd.trim(), ['-d', '--delete'])
         && !isSafeWorktreeCleanupChain(cmd)
         && !isSafeBranchDeleteInChain(cmd);
@@ -455,6 +479,18 @@ function decideOne(command, ctx = {}) {
         .find(Boolean);
       if (other) hit = other;
     }
+    // Every delete is the small kind apart from what follows it: name that part.
+    if (hit.name === 'branch-delete-local') {
+      const after = segs.filter(isBranchDeleteSeg).map(syntaxAfterPlainDelete);
+      const extra = after.find(Boolean);
+      if (extra && after.every(Boolean)) {
+        const shown = extra.length > 40 ? `${extra.slice(0, 40)}…` : extra;
+        hit = { name: 'branch-delete-syntax', reason: `The branch delete itself is the small kind; what is refused is the "${shown}" after it, which this check does not read through. The same delete with nothing after it passes. ${ASK_TAIL}` };
+      }
+    }
+  }
+  if (hit.name === 'branch-delete-syntax' && (ctx.subagent || ctx.headless)) {
+    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} Nothing was run.` };
   }
 
   // A branch delete that nobody can approve: say in plain words what is refused

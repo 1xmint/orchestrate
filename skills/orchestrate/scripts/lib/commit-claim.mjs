@@ -31,6 +31,12 @@ const notCommittedRe = new RegExp(
   'gi',
 );
 
+// "no uncommitted files" says the opposite of "uncommitted": everything is
+// committed. Only a negation right before the word (one "any" allowed between)
+// turns it round; "No files changed, but notes.txt is uncommitted" stays a
+// not-committed claim.
+const negatedUncommittedRe = /\b(?:no|nothing|none|zero|without)\s+(?:any\s+)?uncommitted\b/gi;
+
 const committedWordRe = /\bcommitted\b/i;
 const commitsAreInRe = /\bcommits\s+are\s+in\b/i;
 
@@ -39,7 +45,8 @@ const commitsAreInRe = /\bcommits\s+are\s+in\b/i;
 // NOT_COMMITTED phrase except "uncommitted" and the two "commit" ones
 // contains the word "committed" itself ("have not committed") — without the
 // strip, every not-committed claim would misread as also claiming committed.
-function classifySentence(sentence) {
+function classifySentence(raw) {
+  const sentence = raw.replace(negatedUncommittedRe, ' committed ');
   const matched = sentence.match(notCommittedRe);
   const hasNot = !!matched;
   const stripped = hasNot ? sentence.replace(notCommittedRe, ' ') : sentence;

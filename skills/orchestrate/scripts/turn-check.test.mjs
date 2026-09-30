@@ -270,7 +270,7 @@ const GOAL = 'a password check on the page that shows who paid what';
 test('unreviewedRiskFact names sign-in when the lead edited a password check and no reviewer returned', () => {
   const tail = editLine('Edit', { file_path: 'server.js', old_string: 'a', new_string: 'if (req.body.password !== SECRET) return deny();' });
   const f = unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] });
-  assert.equal(f.text, 'this change touches sign-in; nobody independent has looked at it.');
+  assert.equal(f.text, 'this change contains "password", a word on the review list for sign-in; nobody independent has looked at it.');
 });
 
 test('unreviewedRiskFact uses the request when the edit itself is bland, and needs at least one edit', () => {
@@ -290,7 +290,7 @@ test('unreviewedRiskFact is silent once a reviewer returned after the last risky
   const before = { agent: 'orch-reviewer', at: '2026-09-29T09:00:00.000Z', status: 'DONE' };
   assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [after] }), null);
   const f = unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [before] });
-  assert.equal(f.text, 'this change touches sign-in; the change made since the review has not been looked at.');
+  assert.equal(f.text, 'this change contains "password", a word on the review list for sign-in; the change made since the review has not been looked at.');
   assert.ok(!/nobody/.test(f.text), 'a review exists, so it must not say nobody looked');
 });
 
@@ -322,7 +322,7 @@ test('Stop: a lead-built password edit gets the one-line fact once, then the sam
   const first = run(input, home);
   const out = JSON.parse(first.stdout);
   assert.equal(out.decision, 'block');
-  assert.equal(out.reason, 'orchestrate: this change touches sign-in; nobody independent has looked at it.');
+  assert.equal(out.reason, 'orchestrate: this change contains "password", a word on the review list for sign-in; nobody independent has looked at it.');
   assert.equal(run(input, home).stdout.trim(), '', 'said once');
 });
 
@@ -755,7 +755,7 @@ test('unreviewedRiskFact counts a shell edit: sed -i on auth code returns the si
   const tail = editLine('Bash', { command: "sed -i 's/token = null/token = req.token/' src/auth.ts" });
   const f = unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] });
   assert.equal(f.topic, 'sign-in');
-  assert.equal(f.text, 'this change touches sign-in; nobody independent has looked at it.');
+  assert.equal(f.text, 'this change contains "auth", a word on the review list for sign-in; nobody independent has looked at it.');
 });
 
 test('unreviewedRiskFact counts a heredoc write and a PowerShell write', () => {
@@ -811,4 +811,62 @@ test('unreviewedRiskFact searches only the pieces of a shell line that write', (
 test('unreviewedRiskFact: the bare word price is payments', () => {
   const tail = editLine('Edit', { file_path: 'src/cart.ts', new_string: 'const price = 5;' });
   assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }).topic, 'payments');
+});
+
+// ---- the risk line names its word, and waits while a reviewer is working ----------
+
+// Live, 0.17.1: the line said "this change touches sign-in" for notes that
+// quoted "Permission denied" and a comment saying "the first token after", so
+// the reader could not tell why. It now names the word that matched.
+test('unreviewedRiskFact names the word that matched, for an edit and for a request', () => {
+  const tail = editLine('Edit', { file_path: 'notes.js', new_string: '// the first token after the colon' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }).text,
+    'this change contains "token", a word on the review list for sign-in; nobody independent has looked at it.');
+  const bland = editLine('Write', { file_path: 'a.js', content: 'export const x = 1;' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: bland, goal: 'fix the refund page', returned: [] }).text,
+    'the request mentions "refund", a word on the review list for payments; nobody independent has looked at the change.');
+  const contract = editLine('Edit', { file_path: 'x.js', new_string: '// the public API stays the same' });
+  assert.match(unreviewedRiskFact({ transcriptTail: contract, goal: '', returned: [] }).text, /a word on the review list for a shared contract;/);
+});
+
+// Live, 0.17.1 (item N): a reviewer was already running on the change and the
+// line still said nobody had looked. A reviewer sent after the last risky
+// edit, within six hours, with no reply yet, is a look in progress.
+const RISKY_AT = '2026-09-29T10:00:00.000Z';
+const NOW = Date.parse('2026-09-29T10:30:00.000Z');
+const riskyTail = () => editLine('Edit', { file_path: 's.js', new_string: '// check the password here' }, RISKY_AT);
+test('unreviewedRiskFact is quiet while a reviewer sent after the change is still working', () => {
+  const d = { agent: 'orchestrate:orch-reviewer', toolUseId: 'tu-r', agentId: 'ag-r', at: '2026-09-29T10:10:00.000Z' };
+  assert.equal(unreviewedRiskFact({ transcriptTail: riskyTail(), goal: '', returned: [], dispatches: [d], now: NOW }), null);
+  const bland = editLine('Write', { file_path: 'a.js', content: 'export const x = 1;' }, RISKY_AT);
+  assert.equal(unreviewedRiskFact({ transcriptTail: bland, goal: GOAL, returned: [], dispatches: [d], now: NOW }), null, 'request-only case too');
+});
+
+test('unreviewedRiskFact is not silenced by a dispatch that is not a working reviewer of this change', () => {
+  const cases = {
+    'reviewer sent before the change': { agent: 'orch-reviewer', toolUseId: 'tu-a', at: '2026-09-29T09:50:00.000Z' },
+    'reviewer sent more than six hours ago': { agent: 'orch-reviewer', toolUseId: 'tu-b', at: '2026-09-29T10:05:00.000Z', _now: Date.parse('2026-09-29T16:30:00.000Z') },
+    'a builder that carries a REVIEW OF id': { agent: 'orchestrate:orch-implementer', toolUseId: 'tu-c', reviewOf: 'task-9', at: '2026-09-29T10:10:00.000Z' },
+    'a reviewer that already replied': { agent: 'orch-reviewer', toolUseId: 'tu-d', at: '2026-09-29T10:10:00.000Z', _returned: [{ agent: 'orch-reviewer', toolUseId: 'tu-d', at: '2026-09-29T09:59:00.000Z' }] },
+    'the advisor': { agent: 'orchestrate:orch-advisor', toolUseId: 'tu-e', at: '2026-09-29T10:10:00.000Z' },
+    'a dispatch with no time': { agent: 'orch-reviewer', toolUseId: 'tu-f' },
+  };
+  for (const [name, c] of Object.entries(cases)) {
+    const { _now, _returned, ...d } = c;
+    const f = unreviewedRiskFact({ transcriptTail: riskyTail(), goal: '', returned: _returned || [], dispatches: [d], now: _now || NOW });
+    assert.ok(f && /password/.test(f.text), name);
+  }
+});
+
+test('Stop: no risk line while a reviewer sent after the change is still working', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const dir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(dir, { recursive: true });
+  const editAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+  const sentAt = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const dispatches = [{ agent: 'orchestrate:orch-reviewer', toolUseId: 'tu-rev', at: sentAt }];
+  writeFileSync(join(dir, 'risk-run.json'), JSON.stringify({ v: 1, session_id: 'risk-run', goal: '', returned: [], dispatches }));
+  const tp = join(home, 'transcript.jsonl');
+  writeFileSync(tp, editLine('Edit', { file_path: 'server.js', new_string: 'password check' }, editAt) + '\n');
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'risk-run', transcript_path: tp }, home).stdout.trim(), '');
 });
