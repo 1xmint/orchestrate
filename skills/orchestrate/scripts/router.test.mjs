@@ -449,6 +449,28 @@ test('the after-compaction line states facts, not an instruction', () => {
   // compactionFact's own direct-call tests moved to lib/recover.test.mjs.
 });
 
+// The compaction number comes from the lead transcript's boundary records. The
+// hook runs before the host writes the new boundary, so a real compaction finds
+// the earlier boundaries on file (none for the first) and announces one more; a
+// compact hook with no new boundary since the last one counted (a helper's own
+// compaction reaching the lead with no agent_id) leaves the number alone.
+test('the compaction number follows boundaries in the lead transcript, not compact hooks', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sid = 's-count1';
+  const t = join(mkdtempSync(join(tmpdir(), 'orch-count-t-')), 'session.jsonl');
+  const boundary = uuid => JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid, timestamp: new Date().toISOString(), compactMetadata: { preTokens: 150000, postTokens: 20000 } }) + '\n';
+  const hook = () => run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo, transcript_path: t });
+  const said = out => Number(/Compaction (\d+) of this session/.exec(out)[1]);
+  writeFileSync(t, '');
+  assert.equal(said(hook()), 1, 'first compaction: no boundary on file yet');
+  assert.equal(said(hook()), 1, 'a second hook with no new boundary is not a new compaction');
+  writeFileSync(t, boundary('c1'));
+  assert.equal(said(hook()), 2, 'the first boundary is on file, so this is the second compaction');
+  assert.equal(said(hook()), 2, 'the stray hook again: unchanged');
+  writeFileSync(t, boundary('c1') + boundary('c2'));
+  assert.equal(said(hook()), 3, 'a real new boundary raises it by one');
+});
+
 test('SessionStart compact with no bound run names the checkpoint file, not its text', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const sessionId = 's-checkpoint1';
@@ -874,6 +896,11 @@ test('the size line after a compaction prints no window the host did not report,
   const home = makeHome(); const repo = makeRepo(false);
   writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: '180000' } }));
   const t = ctxTranscript([boundaryLine('b1'), usageLine(60000, 'm1')]);
+  // The boundary is already on file and already counted (the number does not
+  // move), so the reading past it is the one this hook may print.
+  run(home, { hook_event_name: 'UserPromptSubmit', prompt: 'finish the tidy command', session_id: 's-cap1', cwd: repo });
+  const sp = join(home, '.claude', 'orchestrate', 'sessions', 's-cap1.json');
+  writeFileSync(sp, JSON.stringify({ ...JSON.parse(readFileSync(sp, 'utf8')), compactions: 1, boundariesCounted: 1 }));
   const out = run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: 's-cap1', cwd: repo, transcript_path: t });
   const line = /\[orchestrate · context\][^\n]*/.exec(out);
   assert.ok(line, 'a measured reading past the boundary is printed');
