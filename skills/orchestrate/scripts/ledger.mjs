@@ -73,7 +73,10 @@ export function parseReturn(text) {
     // (packet.md's Reviewer packet RETURN schema), the task id its own first
     // token. This is how a reviewer return is told from any other return —
     // never TASK, which on a reviewer return names the reviewer's own task id.
-    reviewOf: field(/^\s*REVIEW OF:\s*(\S+)/im),
+    // The five-line hand-back carries it inside the OUTCOME line instead
+    // ("OUTCOME: PASS (REVIEW OF: tu-x) …"), so a follow-up's verdict says
+    // which work it is about.
+    reviewOf: ((/^\s*(?:OUTCOME:[^\n]*?\b)?REVIEW OF:\s*([^\s,;()]+)/im.exec(t) || [])[1] || '').replace(/\.+$/, '') || null,
   };
 }
 
@@ -755,7 +758,7 @@ function main() {
       // yes or an inferred word) and none has come back yet — turn-check.mjs
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(shortened.long ? { longBytes: shortened.bytes } : {}), ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}), ...(shortened.long ? { longBytes: shortened.bytes } : {}), ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
       saveSession(state);
     }
   } catch {}

@@ -26,7 +26,12 @@ test that fails on the old code:
 - The skill says the built-in advisor is not an independent review: it watched
   the edits being made.
 - A review that failed and then passed on a follow-up to the same reviewer
-  no longer makes the stop hook say the review found a problem.
+  no longer makes the stop hook say the review found a problem, when the pass
+  names the same work. The reviewer's first line now says which work it judged
+  ("OUTCOME: PASS (REVIEW OF: <id>)"); a pass about other work, or naming
+  none, leaves the fail standing.
+- A second fail after a pass is said again, and a fresh reviewer's fail holds
+  even if another reviewer passed the same work.
 - The "this change touches ..." stop line is said once per risky edit; it no
   longer comes back as the chat grows.
 

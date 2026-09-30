@@ -217,8 +217,15 @@ looked at again."* The cost fix's review had come back FAIL, the fixes went
 back to the same reviewer as a follow-up, and it answered PASS. Both answers
 carry one dispatch id, and the check counted any FAIL on that id as failed, so
 the later PASS was never seen. *Got in the way:* it asked for work already
-done. Fixed in 0.17.1: the newest verdict for a dispatch decides; replaying
-this session's own rows through the fixed check stays quiet.
+done. First fix: the newest verdict for a dispatch decides. The independent
+reviewer failed that fix: a follow-up to the same reviewer can be about other
+work, so a PASS on change Y would clear its FAIL on change X. Fixed again in
+0.17.1: the reviewer's first line names the work it judged, and only a PASS
+naming the same work undoes a FAIL. The same review found two older holes that
+matter now merging leans on this check: a second FAIL after a PASS was never
+said, and one reviewer's PASS outweighed a fresh reviewer's later FAIL. Both
+fixed. *The review helped:* it caught a hole in a fix to the review check
+itself, which the lead's own tests had passed.
 
 **M. The "touches payments" line came back on a later turn.** It fired on a
 scratch script that quoted `git checkout` (0.17.1 already strips that phrase;
@@ -227,6 +234,13 @@ word, one turn later. Its "said once" memory was keyed on the edit's line number
 in the last 1 MB of the transcript plus an edit count, and both move as the chat
 grows. *Got in the way.* Fixed in 0.17.1: the key is the risky edit's own
 tool-call id.
+
+**N. The stop hook asked for a review that was already running.** Right after
+the reviewer was sent, the stop hook said *"this change touches a shared
+contract; the change made since the review has not been looked at."* True, but
+the look was under way, and the line does not say so. *Slightly in the way:* it
+cost one turn saying "the reviewer is working". Not fixed; a candidate for the
+next round (say "a reviewer is still working on it" when one is).
 
 ## Not about the plugin, but seen
 

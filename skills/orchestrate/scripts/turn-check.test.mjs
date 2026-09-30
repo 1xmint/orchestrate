@@ -603,7 +603,7 @@ test('reviewHoldDecision is released by a PASS from the same reviewer, sent the 
   const returned = [
     { toolUseId: 'tu-b', agentId: 'ag-b', status: 'DONE', at: t(9) },
     { toolUseId: 'tu-r', agentId: 'ag-r', status: 'FAIL', verdict: 'FAIL', at: t(32) },
-    { toolUseId: 'tu-r', agentId: 'ag-r', status: 'DONE', verdict: 'PASS', at: t(41) },
+    { toolUseId: 'tu-r', agentId: 'ag-r', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-b', at: t(41) },
   ];
   const d = reviewHoldDecision({ returned, dispatches: [tagged, rev], lastMessage: 'Done.', blockedFor: [] });
   assert.equal(d.block, false);
@@ -611,6 +611,68 @@ test('reviewHoldDecision is released by a PASS from the same reviewer, sent the 
   const still = reviewHoldDecision({ returned: failedLast, dispatches: [tagged, rev], lastMessage: 'Done.', blockedFor: [] });
   assert.equal(still.block, true, 'a FAIL after the PASS still holds');
   assert.equal(still.failed, true);
+});
+
+// Review of 1be1f60 (2026-09-30): the same reviewer's follow-up can be about
+// other work, and its reply carries no dispatch of its own.
+const fu = (m) => new Date(Date.UTC(2026, 8, 30, 5, m)).toISOString();
+const fuX = { toolUseId: 'tu-x', agentId: 'ag-x', agent: 'orch-implementer', review: true, at: fu(1) };
+const fuY = { toolUseId: 'tu-y', agentId: 'ag-y', agent: 'orch-implementer', review: true, at: fu(2) };
+const fuR = { toolUseId: 'tu-rx', agentId: 'ag-rx', agent: 'orch-reviewer', reviewOf: 'tu-x', at: fu(10) };
+const fuR2 = { toolUseId: 'tu-ry', agentId: 'ag-ry', agent: 'orch-reviewer', reviewOf: 'tu-y', at: fu(11) };
+const fuDone = [
+  { toolUseId: 'tu-x', agentId: 'ag-x', status: 'DONE', at: fu(5) },
+  { toolUseId: 'tu-y', agentId: 'ag-y', status: 'DONE', at: fu(6) },
+  { toolUseId: 'tu-ry', agentId: 'ag-ry', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-y', at: fu(15) },
+  { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-x', at: fu(16) },
+];
+
+test('reviewHoldDecision: a follow-up PASS from the same reviewer about other work does not clear its FAIL', () => {
+  const returned = [...fuDone, { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-y', at: fu(20) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, fuY, fuR, fuR2], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.task, 'tu-x');
+  assert.equal(d.failed, true);
+});
+
+test('reviewHoldDecision: a follow-up PASS that names no work does not clear a FAIL', () => {
+  const returned = [...fuDone, { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'DONE', verdict: 'PASS', at: fu(20) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, fuY, fuR, fuR2], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.task, 'tu-x');
+});
+
+test('reviewHoldDecision: a FAIL that names other work still counts', () => {
+  const returned = [fuDone[0], { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-typo', at: fu(16) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.failed, true);
+});
+
+test('reviewHoldDecision says a second FAIL after a PASS again', () => {
+  const pass = { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-x', at: fu(20) };
+  const fail2 = { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-x', at: fu(30) };
+  const first = reviewHoldDecision({ returned: [fuDone[0], fuDone[3]], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(first.block, true);
+  const quiet = reviewHoldDecision({ returned: [fuDone[0], fuDone[3], pass], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: first.blockedFor });
+  assert.equal(quiet.block, false);
+  const again = reviewHoldDecision({ returned: [fuDone[0], fuDone[3], pass, fail2], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: quiet.blockedFor });
+  assert.equal(again.block, true, 'the second FAIL is news');
+  const once = reviewHoldDecision({ returned: [fuDone[0], fuDone[3], pass, fail2], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: again.blockedFor });
+  assert.equal(once.block, false, 'and is said once');
+});
+
+test('reviewHoldDecision holds when a fresh reviewer FAILs work another reviewer passed', () => {
+  const rA = { ...fuR, toolUseId: 'tu-ra', agentId: 'ag-ra' };
+  const rB = { ...fuR, toolUseId: 'tu-rb', agentId: 'ag-rb', at: fu(12) };
+  const returned = [fuDone[0],
+    { toolUseId: 'tu-ra', agentId: 'ag-ra', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-x', at: fu(15) },
+    { toolUseId: 'tu-rb', agentId: 'ag-rb', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-x', at: fu(18) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, rA, rB], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.failed, true);
+  const running = { ...fuR, toolUseId: 'tu-rc', agentId: 'ag-rc', at: fu(19) };
+  assert.equal(reviewHoldDecision({ returned, dispatches: [fuX, rA, rB, running], lastMessage: 'Done.', blockedFor: [] }).block, false, 'a reviewer still running is a look');
 });
 
 test('the hook tells the lead once, in one plain line, that a review failed', () => {

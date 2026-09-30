@@ -27,7 +27,7 @@ dependency; a silent scope widening; an error path that swallows; anything a
 user could lose data through; a claim in EVIDENCE that the diff does not
 support.
 
-Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: PASS or FAIL, with the one finding that decides it. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file, even if the brief asks for pasted contents or output; FULL REPORT names it. You have no tool that writes files, so when the brief names none, FULL REPORT says "below", and the findings that decide the outcome are the one thing allowed after the five lines: the lead still reads them, and the plugin saves the whole text.
+Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: PASS or FAIL, then the REVIEW OF id of the work judged in brackets, "(REVIEW OF: <id>)", taken from the brief or the latest message that sent you work, then the one finding that decides it. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file, even if the brief asks for pasted contents or output; FULL REPORT names it. You have no tool that writes files, so when the brief names none, FULL REPORT says "below", and the findings that decide the outcome are the one thing allowed after the five lines: the lead still reads them, and the plugin saves the whole text.
 
 Full report, in the file only, in the packet's schema:
 

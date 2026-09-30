@@ -108,8 +108,8 @@ DIFF: `git diff <base>..<sha>` in that worktree
 CALLERS: <`map.mjs who-uses` per changed file, if mapped>
 EVIDENCE: <the author's EVIDENCE section and any log paths>
 REPO STANDARDS: <path to AGENTS.md / CLAUDE.md>
-RETURN: five lines, under 600 B, nothing after; OUTCOME is PASS or FAIL and the
-  one finding that decides it. The file holds TASK, REVIEW OF: <the task id>,
+RETURN: five lines, under 600 B, nothing after; OUTCOME: PASS or FAIL (REVIEW OF: <id>) and the
+  one finding that decides it. The file holds TASK, REVIEW OF,
   STATUS: DONE, VERDICT: PASS|FAIL, FINDINGS (numbered, file:line, the failure,
   the exact edit), EVIDENCE, NOT VERIFIED. Correctness and the stated
   requirements decide the verdict; anything else is optional.

@@ -792,6 +792,29 @@ test('ledger: a nested SubagentStop is filed and indexed with its parent', () =>
   assert.equal(rec.toolUseId, 'toolu_child', 'the dispatch id rides on the return so the worker count can pair them without a transcript file');
 });
 
+test('ledger: a reviewer\'s return row keeps the work its OUTCOME line names', () => {
+  // The stop check tells a follow-up about other work from a recheck of the
+  // same work by this field (turn-check.mjs's standingVerdict).
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'review-of-stop', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'review-of-stop.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  state.dispatches = [{ at: new Date().toISOString(), agent: 'orch-reviewer', model: 'opus', reviewOf: 'toolu_b', toolUseId: 'toolu_rev' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'review-of-stop', cwd: repo.dir,
+    agent_id: 'rev-id', tool_use_id: 'toolu_rev', agent_type: 'orch-reviewer',
+    last_assistant_message: 'OUTCOME: PASS (REVIEW OF: toolu_b) the fix holds.\nPROOF: node --test, all pass.\nNOT CHECKED: nothing.\nNEEDS A DECISION: nothing.\nFULL REPORT: below\n',
+  }, home);
+
+  assert.equal(out.status, 0);
+  const rec = JSON.parse(readFileSync(sessionPath, 'utf8')).returned[0];
+  assert.equal(rec.verdict, 'PASS');
+  assert.equal(rec.reviewOf, 'toolu_b');
+});
+
 test('ledger: the task rows are left exactly as they were', () => {
   // Two returns landing together each rewrote the whole file, and the second
   // erased the first one's row. The lead sets a row when it has read the

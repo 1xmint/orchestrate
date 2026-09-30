@@ -87,21 +87,42 @@ const SKIP_EXPLAINED = /\bskip(?:ped|ping)?\b[^.\n]{0,80}\breview\b|\breview\b[^
 // is never held, and a dispatch that was not flagged is never held.
 const isReviewerRow = d => Boolean(d && (d.reviewOf || /reviewer/i.test(String(d.agent || ''))));
 
-// A reviewer dispatch counts as a look unless its return is on file with a FAIL
-// verdict. One still running, or one that passed, is a look; a returned FAIL is
-// not, and a later PASS on the same work is — including a PASS from the same
-// reviewer sent the fix as a follow-up, which shares the dispatch's ids, so the
-// newest verdict on file for the dispatch decides (file order breaks a tie).
-const reviewFailed = (d, returned) => {
+// The verdict that stands for one reviewer dispatch: the newest on file for its
+// ids, in file order (`returned` is append-only). A follow-up SendMessage to the
+// same reviewer shares the dispatch's ids but may be about other work, so a
+// PASS naming other work under REVIEW OF is skipped, and a PASS that names no
+// work cannot undo a FAIL: only a PASS naming the same work can. A FAIL always
+// counts, whatever it names: a mistyped id must not hide one.
+const standingVerdict = (d, returned) => {
   let last = null;
   for (const r of Array.isArray(returned) ? returned : []) {
     if (!r || !r.verdict) continue;
     if (!((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId))) continue;
-    if (!last || !(Date.parse(r.at) < Date.parse(last.at))) last = r;
+    if (r.verdict !== 'FAIL' && r.reviewOf && d.reviewOf && r.reviewOf !== d.reviewOf) continue;
+    if (last && last.verdict === 'FAIL' && r.verdict !== 'FAIL' && !(r.reviewOf && r.reviewOf === d.reviewOf)) continue;
+    last = r;
   }
-  return Boolean(last && last.verdict === 'FAIL');
+  return last;
 };
+const reviewFailed = (d, returned) => (standingVerdict(d, returned) || {}).verdict === 'FAIL';
 const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id);
+
+// Several reviewers of the same work. One still running, or back with no
+// verdict, is a look. Otherwise the newest standing verdict among them decides,
+// so a fresh reviewer's FAIL after another's PASS holds. `fail` is the FAIL that
+// stands, whose time keys the ask-once memory: a second FAIL after a PASS is
+// news and is said again.
+const judgeLooks = (looks, returned) => {
+  const rs = Array.isArray(returned) ? returned : [];
+  let newest = null;
+  for (const d of looks) {
+    const v = standingVerdict(d, rs);
+    if (!v) return { passed: true, fail: null };
+    if (!newest || rs.indexOf(v) > rs.indexOf(newest)) newest = v;
+  }
+  return newest && newest.verdict === 'FAIL' ? { passed: false, fail: newest } : { passed: Boolean(newest), fail: null };
+};
+const failKey = (id, fail) => (fail && fail.at ? `${id}:failed@${fail.at}` : `${id}:failed`);
 
 // A dispatch of this session with no return yet, sent within the last six
 // hours (an older one is a helper that died without a return, not one working).
@@ -125,8 +146,9 @@ function freeFormOpen(returned, dispatches) {
       : (r.agentId ? ds.find(x => x && x.agentId === r.agentId) : null);
     if (!d || !d.toolUseId || d.task || !d.review || isReviewerRow(d)) continue;
     const looks = looksAt(ds, returned, d.toolUseId);
-    if (looks.some(x => !reviewFailed(x, returned))) continue;
-    out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at), failed: looks.length > 0 });
+    const judged = judgeLooks(looks, returned);
+    if (judged.passed) continue;
+    out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at), failed: looks.length > 0, fail: judged.fail });
   }
   return out;
 }
@@ -137,15 +159,16 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   const skipSaid = SKIP_EXPLAINED.test(String(lastMessage || ''));
   for (const r of gated) {
     const looks = looksAt(Array.isArray(dispatches) ? dispatches : [], returned, r.task);
-    if (looks.some(d => !reviewFailed(d, returned)) || skipSaid) continue;
+    const judged = judgeLooks(looks, returned);
+    if (judged.passed || skipSaid) continue;
     const failed = looks.length > 0;
-    const key = failed ? `${r.task}:failed` : r.task;
+    const key = failed ? failKey(r.task, judged.fail) : r.task;
     if (already.has(key)) continue;
     return { block: true, task: r.task, failed, blockedFor: [...already, key] };
   }
   const open = freeFormOpen(returned, dispatches);
   for (const f of open) {
-    const key = f.failed ? `${f.id}:failed` : f.id;
+    const key = f.failed ? failKey(f.id, f.fail) : f.id;
     if (already.has(key) || skipSaid) continue;
     const later = !f.failed && open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && isReviewerRow(d) && !(d.reviewOf && dispatches.some(x => x && x.toolUseId === d.reviewOf)) && !reviewFailed(d, returned) && Date.parse(d.at) > (Number.isFinite(f.sentAt) ? f.sentAt : f.at));
     if (later) continue;
