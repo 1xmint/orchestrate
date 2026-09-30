@@ -85,7 +85,10 @@ const SKIP_EXPLAINED = /\bskip(?:ped|ping)?\b[^.\n]{0,80}\breview\b|\breview\b[^
 // still open, until a reviewer is dispatched after it. With two or more open,
 // only the explicit id clears one; nothing is guessed. A reviewer's own return
 // is never held, and a dispatch that was not flagged is never held.
-const isReviewerRow = d => Boolean(d && (d.reviewOf || /reviewer/i.test(String(d.agent || ''))));
+// A reviewer is known by its role alone. A session file written before 0.17.2
+// can hold a builder's dispatch with reviewOf (its brief quoted a review), and
+// that builder is not a look.
+const isReviewerRow = d => Boolean(d && /reviewer/i.test(String(d.agent || '')));
 
 // The verdict that stands for one reviewer dispatch: the newest on file for its
 // ids, in file order (`returned` is append-only). A follow-up SendMessage to the
@@ -105,7 +108,7 @@ const standingVerdict = (d, returned) => {
   return last;
 };
 const reviewFailed = (d, returned) => (standingVerdict(d, returned) || {}).verdict === 'FAIL';
-const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id);
+const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id && isReviewerRow(x));
 
 // Several reviewers of the same work. One still running (no reply on file, sent
 // within six hours, the bound anyHelperRunning uses) is a look. One that replied
@@ -204,12 +207,6 @@ function editText(input) {
   return parts.filter(x => typeof x === 'string').join('\n');
 }
 
-// Words on the review list that mean something else here: a branch switch
-// (`git checkout`, `git switch`, `gh pr checkout`) and the CI step
-// actions/checkout. Removed before the word match, here rather than in
-// reviewWordMatch, which the dispatch gate shares.
-const NOT_PAYMENTS = /\b(?:git|gh\s+pr)\s+(?:-[Cc]\s+\S+\s+)*(?:checkout|switch)\b|\bactions\/checkout\b/gi;
-
 // The text of a change to look for review words in, or null when the change is
 // only to prose files (.md .mdx .txt .rst, by extension: a price table or a
 // design note is not the code that charges anyone). A shell command counts as
@@ -219,10 +216,10 @@ function riskText(input, fc) {
   // A shell line is searched only in the pieces that write: a grep pattern
   // beside a `git pull` is not something that was changed.
   const text = typeof fc.text === 'string' ? fc.text : editText(input);
-  return text.replace(NOT_PAYMENTS, ' ');
+  return text;
 }
 
-export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
+export function unreviewedRiskFact({ transcriptTail, goal, returned, dispatches, now = Date.now() }) {
   let edits = 0; let lastEditAt = 0; let word = null; let lastRiskAt = 0; let lastRiskId = null;
   const lines = String(transcriptTail || '').split('\n');
   lines.forEach((line, idx) => {
@@ -247,12 +244,24 @@ export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
   const since = word ? lastRiskAt : lastEditAt;
   const reviews = (Array.isArray(returned) ? returned : []).filter(r => r && /reviewer/i.test(String(r.agent || '')));
   if (reviews.some(r => (Date.parse(r.at) || 0) >= since)) return null;
+  // A reviewer sent after that change, within six hours and with no reply yet,
+  // is looking at it now. Only a reviewer by role counts: a builder whose brief
+  // carries a REVIEW OF id, or the advisor, is not a look at the change.
+  const rs = Array.isArray(returned) ? returned : [];
+  const looking = (Array.isArray(dispatches) ? dispatches : []).some(d => d && /reviewer/i.test(String(d.agent || ''))
+    && Date.parse(d.at) >= since && Date.parse(d.at) >= now - 6 * 3600 * 1000 && !rs.some(r => sameHelper(r, d)));
+  if (looking) return null;
   const topic = TOPIC_OF(word || goalWord);
-  // A review that came before the last change means the reviewed version was
-  // looked at; only what was changed since is not.
+  // The word itself is named, so a reader can see why: "token" in a comment
+  // and a token check read the same to this list. A review that came before
+  // the last change means the reviewed version was looked at; only what was
+  // changed since is not.
+  const said = word
+    ? `this change contains "${word}", a word on the review list for ${topic}`
+    : `the request mentions "${goalWord}", a word on the review list for ${topic}`;
   const text = reviews.length
-    ? `this change touches ${topic}; the change made since the review has not been looked at.`
-    : `this change touches ${topic}; nobody independent has looked at it.`;
+    ? `${said}; the change made since the review has not been looked at.`
+    : `${said}; nobody independent has looked at ${word ? 'it' : 'the change'}.`;
   // The key names the risky edit itself (its tool-call id), never its place in
   // the transcript tail: the tail is the last 1 MB, so a line number or an edit
   // count moves as the chat grows and the same edit would be raised again. With
@@ -421,7 +430,7 @@ function checkHeartbeat(input) {
   // Risky work the lead did itself and no reviewer has seen: one fact, once per
   // set of edits. Quiet, and no file read beyond the transcript tail, otherwise.
   if (input.transcript_path) {
-    const fact = unreviewedRiskFact({ transcriptTail: readTail(input.transcript_path, 1048576), goal: state.goal, returned: state.returned });
+    const fact = unreviewedRiskFact({ transcriptTail: readTail(input.transcript_path, 1048576), goal: state.goal, returned: state.returned, dispatches: state.dispatches });
     if (fact && rec.riskNotedFor !== fact.key) {
       updated.riskNotedFor = fact.key;
       store[key] = updated;

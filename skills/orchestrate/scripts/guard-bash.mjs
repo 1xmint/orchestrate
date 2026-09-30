@@ -28,7 +28,10 @@ import { resolve as resolvePath, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId } from './lib/tier.mjs';
+import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId, loadSession } from './lib/tier.mjs';
+import { mentionsMerge, mergeRefusal, ghView, REVIEW_PATHS } from './lib/merge-bar.mjs';
+
+export { REVIEW_PATHS };
 
 // Reproducible or already-ephemeral folders: losing one costs a re-run of a
 // build tool, not real work. Named by their last path segment only, so
@@ -263,11 +266,35 @@ const segmentsOf = cmd => cmd.split(/&&|;|\|\|/).map(s => s.trim()).filter(Boole
 // `2>&1` only folds error text into the normal output; it writes nothing and
 // hides nothing, so it never decides whether a delete is safe.
 const withoutStderrJoin = cmd => cmd.replace(/\s2>&1(?=\s|;|&|\||$)/g, '');
-const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && /\s(-D|-d|--delete|--force-delete)(\s|$)/.test(seg);
+// A delete flag inside a cluster of short flags (-df, -fd, -dr) is still a
+// delete; -df is the forced one. Read only within the `git branch` part, so a
+// later command's own -d flag is not taken for it.
+const CLUSTERED_DELETE_RE = /\bgit\s+branch\b[^|;&]*\s-[a-zA-Z]*[dD][a-zA-Z]*(?=\s|$)/;
+const isBranchDeleteSeg = seg => /\bgit\s+branch\b/.test(seg) && (/\s(-D|-d|--delete|--force-delete)(\s|$)/.test(seg) || CLUSTERED_DELETE_RE.test(seg));
+// A filter that only reads what it is given. Its words are plain flags, names
+// or quoted text with nothing the shell would run, so it can neither write a
+// file nor start another command.
+const READ_ONLY_FILTER_RE = /^(?:tail|head|wc|cat|grep)(?:\s+(?:[-\w.,:=/+]+|'[^'$`\\]*'|"[^"$`\\]*"))*$/;
+// The delete part with one trailing pipe into a read-only filter taken off:
+// what the delete does is the same with or without it.
+function withoutReadOnlyTail(seg) {
+  const i = seg.indexOf('|');
+  if (i < 0) return seg;
+  const rest = seg.slice(i + 1).trim();
+  return rest.includes('|') || !READ_ONLY_FILTER_RE.test(rest) ? seg : seg.slice(0, i).trim();
+}
 function isPlainBranchDelete(seg, flags) {
-  const t = seg.split(/\s+/);
-  return t[0] === 'git' && t[1] === 'branch' && flags.includes(t[2]) && t.length > 3 && !/[|<>`$(){}&]/.test(seg)
+  const own = withoutReadOnlyTail(seg);
+  const t = own.split(/\s+/);
+  return t[0] === 'git' && t[1] === 'branch' && flags.includes(t[2]) && t.length > 3 && !/[|<>`$(){}&]/.test(own)
     && t.slice(3).map(unquote).every(isSmallDeleteName);
+}
+// The shell syntax that follows an otherwise plain delete, from its first
+// symbol on, or '' when the delete is not plain even without it.
+function syntaxAfterPlainDelete(seg) {
+  const i = seg.search(/[|<>`$(){}&]/);
+  if (i < 0) return '';
+  return isPlainBranchDelete(seg.slice(0, i).trim(), ['-d', '--delete']) ? seg.slice(i).trim() : '';
 }
 // Whether a part passes on its own (no rule of this guard stops it).
 function segmentPasses(seg) {
@@ -320,7 +347,7 @@ const RULES = [
     // worktree folder it belonged to — see isSafeWorktreeCleanupChain above.
     test: raw => {
       const cmd = withoutStderrJoin(raw);
-      return (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd))
+      return (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd) || CLUSTERED_DELETE_RE.test(cmd))
         && !isPlainBranchDelete(cmd.trim(), ['-d', '--delete'])
         && !isSafeWorktreeCleanupChain(cmd)
         && !isSafeBranchDeleteInChain(cmd);
@@ -440,6 +467,31 @@ export function recordAsked(sessionId, command) {
 function decideOne(command, ctx = {}) {
   const asSent = String(command || '').replace(/\s+/g, ' ').trim();
   if (!asSent) return { kind: 'pass' };
+
+  // A line that mentions a merge (lib/merge-bar.mjs) runs only in its one
+  // readable shape and above the bar, in every mode: the bar is a fact gh can
+  // read, not a question for whoever is present. Read from the line as sent,
+  // since a newline separates commands too. An error here, in reading the line
+  // or checking the bar, refuses it. `ctx.mentionsMerge` is for tests.
+  let merges;
+  try {
+    merges = (ctx.mentionsMerge || mentionsMerge)(command);
+  } catch (e) {
+    return { kind: 'deny', reason: `Checking whether this line merges a pull request failed (${String((e && e.message) || e).slice(0, 120)}), so it is refused. Nothing was run.` };
+  }
+  if (merges) {
+    let why;
+    try {
+      why = mergeRefusal(String(command), {
+        cwd: ctx.cwd || process.cwd(),
+        ghView: ctx.ghView || ghView,
+        session: () => { try { return ctx.session || (ctx.sessionId && loadSession(ctx.sessionId)) || {}; } catch { return {}; } },
+      });
+    } catch (e) {
+      why = `This line merges a pull request, and checking it failed (${String((e && e.message) || e).slice(0, 120)}), so it is refused. Nothing was run.`;
+    }
+    return why ? { kind: 'deny', reason: why } : { kind: 'pass' };
+  }
   const cmd = plainGit(asSent);
 
   let hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
@@ -455,6 +507,18 @@ function decideOne(command, ctx = {}) {
         .find(Boolean);
       if (other) hit = other;
     }
+    // Every delete is the small kind apart from what follows it: name that part.
+    if (hit.name === 'branch-delete-local') {
+      const after = segs.filter(isBranchDeleteSeg).map(syntaxAfterPlainDelete);
+      const extra = after.find(Boolean);
+      if (extra && after.every(Boolean)) {
+        const shown = extra.length > 40 ? `${extra.slice(0, 40)}…` : extra;
+        hit = { name: 'branch-delete-syntax', reason: `The branch delete itself is the small kind; what is refused is the "${shown}" after it, which this check does not read through. The same delete with nothing after it passes. ${ASK_TAIL}` };
+      }
+    }
+  }
+  if (hit.name === 'branch-delete-syntax' && (ctx.subagent || ctx.headless)) {
+    return { kind: 'deny', reason: `${hit.reason.replace(ASK_TAIL_RE, '')} Nothing was run.` };
   }
 
   // A branch delete that nobody can approve: say in plain words what is refused
@@ -467,18 +531,20 @@ function decideOne(command, ctx = {}) {
   }
 
   if (ctx.subagent || ctx.headless) {
-    // Nobody is present to say yes, so "say yes" would be a lie. Say so in
+    // Nobody will be asked (a helper, or a session set to run without asking),
+    // so "say yes" would be a lie; "nobody is present" was wrong too, since
+    // the user may be watching an auto-mode session. Say so in
     // plain words and give the way that works, naming no mode and no file for
     // anyone to repeat. The project's own approved-commands list still works;
     // it is documented, not named in a refusal.
     const why = hit.reason.replace(ASK_TAIL_RE, '');
     if (hit.name === 'worktree-remove-dirty') {
-      return { kind: 'deny', reason: `${why} This is refused here because nobody is present to say yes. Save what is needed first: commit the changes inside that folder, or copy the files into the main folder and commit them there. Then remove the folder without force. Or leave the folder where it is and tell the user it is there.` };
+      return { kind: 'deny', reason: `${why} This is refused here because nobody will be asked to say yes to it here. Save what is needed first: commit the changes inside that folder, or copy the files into the main folder and commit them there. Then remove the folder without force. Or leave the folder where it is and tell the user it is there.` };
     }
     if (ctx.subagent) {
       return { kind: 'deny', reason: `${why} The question cannot be answered here, so this is refused: report back what you were about to run instead of retrying.` };
     }
-    return { kind: 'deny', reason: `${why} This is refused here because nobody is present to say yes. Nothing was run. Leave it and tell the user what you were about to run, or ask them to run it themselves in a normal session.` };
+    return { kind: 'deny', reason: `${why} This is refused here because nobody will be asked to say yes to it here. Nothing was run. Leave it and tell the user what you were about to run, or ask them to run it themselves in a normal session.` };
   }
   // A real interactive user who already said yes is not blocked by this: the
   // host applies their answer before the hook ever sees the next call. This
@@ -540,7 +606,14 @@ function main() {
   const command = String(ti.command || '');
   if (!command) return;
 
-  if (isAllowed(command, input.cwd)) return;
+  // The approved-commands list never lifts the merge bar: Claude can write that
+  // file itself, so it cannot be what vouches for a merge. A check that throws
+  // counts as a merge, and decide() then refuses the line.
+  if (isAllowed(command, input.cwd)) {
+    let merges = true;
+    try { merges = mentionsMerge(command); } catch {}
+    if (!merges) return;
+  }
 
   // `bypassPermissions`, `auto`, and `dontAsk` are the permission_modes where
   // nobody sees an interactive prompt at all — an "ask" would just sit there

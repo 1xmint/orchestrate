@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,7 +78,7 @@ test('the wider clean-up still refuses anything that could lose work or reach el
     'git worktree remove .claude/worktrees/a && git branch -D task/x',
     'git worktree remove .claude/worktrees/a && git branch -d task/x --force',
     'git worktree remove .claude/worktrees/a && git branch -d task/x && rm -rf src',
-    'git worktree remove .claude/worktrees/a && git branch -d task/x | cat',
+    'git worktree remove .claude/worktrees/a && git branch -d task/x | sh',
     'git worktree remove .claude/worktrees/a && git branch -d task/x & git branch -D y',
     'git worktree remove .claude/worktrees/a && git branch -d $(git branch)',
   ]) assert.notEqual(decide(bad).kind, 'pass', bad);
@@ -113,7 +113,7 @@ test('the small branch delete passes with several names, error text folded in, a
     'git branch -D worktree-agent-a1 2>&1; git branch',
     'git branch -d worktree-agent-a1 --force 2>&1',
     'git branch -d worktree-agent-a1 > out.txt',
-    'git branch -d worktree-agent-a1 2>&1 | cat',
+    'git branch -d worktree-agent-a1 2>&1 | sh',
     'git branch -d worktree-agent-a1 2>&1; rm -rf src',
     'git branch -d worktree-agent-a1 2>&1 || git push --force',
     'git branch -d worktree-agent-a1 2>&1; git branch -D x',
@@ -366,7 +366,7 @@ test('a process kill by name from a helper or in headless mode is refused, not a
   assert.doesNotMatch(helper.reason, /Say yes/);
   const headless = decide('pkill -f node', { headless: true, mode: 'auto' });
   assert.equal(headless.kind, 'deny');
-  assert.match(headless.reason, /nobody is present to say yes/);
+  assert.match(headless.reason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(headless.reason, /Say yes|auto mode|allow-bash|\.json/);
 });
 
@@ -434,7 +434,7 @@ test('an unsafe Bash rm -rf under bypassPermissions is denied, not silently allo
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
   // Nobody can answer in this mode, so the reason must not invite a "yes".
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /allow-bash|\.json|mode/i);
 });
 
@@ -487,7 +487,7 @@ test('a session with no one able to answer an interactive prompt (bypassPermissi
 test('auto mode has nobody to answer an ask, so it is denied in plain words with no mode named', () => {
   const r = run(bash('git push --force', { permission_mode: 'auto' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /auto mode|allow-bash|\.json/i);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
 });
@@ -495,7 +495,7 @@ test('auto mode has nobody to answer an ask, so it is denied in plain words with
 test('dontAsk mode has nobody to answer an ask, so it is denied in plain words with no mode named', () => {
   const r = run(bash('git push --force', { permission_mode: 'dontAsk' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /dontAsk|allow-bash|\.json/i);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
 });
@@ -582,7 +582,7 @@ test('a helper where nobody can say yes is refused because the question cannot b
 test('the main session in auto mode is still refused, in plain words with no mode or file named', () => {
   const r = run(bash('git push --force', { permission_mode: 'auto' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
 });
 
 test('every refusal where nobody can say yes is plain: no mode, no file name, and a way that works', () => {
@@ -591,7 +591,7 @@ test('every refusal where nobody can say yes is plain: no mode, no file name, an
     const d = decide(c, { headless: true, mode: 'auto' });
     assert.equal(d.kind, 'deny', c);
     assert.doesNotMatch(d.reason, /\bmode\b|allow-bash|\.json|\.orchestrator|Say yes to continue/i, c);
-    if (!/branch -D/.test(c)) assert.match(d.reason, /nobody is present to say yes/, c);
+    if (!/branch -D/.test(c)) assert.match(d.reason, /nobody will be asked to say yes to it here/, c);
     if (!/branch -D/.test(c)) assert.match(d.reason, /tell the user|run it themselves/, c);
   }
 });
@@ -747,4 +747,523 @@ test('a line refused for another part names that part, not a lowercase branch de
     assert.match(decide('git branch -D worktree-agent-abc123 && rm -rf src', opts).reason, /lowercase flag/);
     assert.match(decide('git branch -d feature-x && git branch -D y', opts).reason, /lowercase flag/);
   }
+});
+
+// Live, 0.17.1: `git branch -d <ten names> 2>&1 | tail -12; grep …` was refused
+// for the pipe, and the refusal told the lead to use the lowercase flag it had
+// already used. A pipe into a filter that only reads cannot change what the
+// delete does, so that shape passes; every way to make the pipe do more stays refused.
+test('a small branch delete piped into a read-only filter passes, with several names', () => {
+  const live = 'git branch -d release/0.17.1 trial/all-prs fix/review-hold 2>&1 | tail -12; grep -rh "pass" docs';
+  for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }]) {
+    assert.equal(decide(live, opts).kind, 'pass', JSON.stringify(opts));
+    for (const ok of [
+      'git branch -d a b c | tail -12',
+      'git branch -d a b | head -5',
+      'git branch -d a | wc -l',
+      'git branch -d a b | cat',
+      'git branch -d a b 2>&1 | grep -v "not found"',
+      'git worktree remove .claude/worktrees/agent-a1 && git branch -d worktree-agent-a1 | tail -3',
+    ]) assert.equal(decide(ok, opts).kind, 'pass', ok);
+  }
+});
+
+// Written before the change; these pass on the old code by design, because the
+// old code refused every pipe. They pin what the new allowance must not open.
+test('a pipe after a small branch delete stays refused when it can run, write or delete anything', () => {
+  for (const bad of [
+    'git branch -d a | xargs git branch -D',
+    'git branch -d a | xargs -I{} git branch -D {}',
+    'git branch -d a | sh',
+    'git branch -d a | bash',
+    'git branch -d a | eval',
+    'git branch -d a | env sh',
+    'git branch -d a | tee log.txt',
+    'git branch -d a | tail > out.txt',
+    'git branch -d a | tail >> out.txt',
+    'git branch -d a |& cat',
+    'git branch -d a | grep x | xargs git branch -D',
+    'git branch -d a | grep x | sh',
+    'git branch -d a | sort -o out.txt',
+    'git branch -d a | uniq - out.txt',
+    'git branch -d a | tail -n $(rm -rf src)',
+    'git branch -d a | tail `rm -rf src`',
+    'git branch -d a | grep "$(rm -rf src)"',
+    'git branch -d a | tail <(git branch -D b)',
+    'git branch -d a | tail & rm -rf src',
+    'git branch -d $(git branch) | tail',
+    'git branch -d `git branch` | tail',
+    'git branch -d a -f | tail',
+    'git branch -df a | tail',
+    'git branch -d a --force | tail',
+    'git branch -D a | tail',
+    'git branch -d a | tail; git branch -D b',
+    'git branch -d a | tail && rm -rf src',
+    'git branch -d main; git push origin --delete main | tail',
+    'sh -c "git branch -D a" | tail',
+  ]) {
+    for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }]) assert.notEqual(decide(bad, opts).kind, 'pass', `${bad} ${JSON.stringify(opts)}`);
+  }
+});
+
+// Found while writing the tests above: 0.17.1 let `git branch -df main` through
+// with no question, because the delete flag was only seen standing alone.
+// -df and -fd are the forced delete, the same as -D.
+test('a delete flag combined with others is still a branch delete', () => {
+  for (const bad of [
+    'git branch -df main',
+    'git branch -fd main',
+    'git branch -Df main',
+    'git branch -fD main',
+    'git branch -dr origin/main',
+    'git -C /x branch -df main',
+    'git branch -q -df main',
+  ]) {
+    for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }]) assert.notEqual(decide(bad, opts).kind, 'pass', `${bad} ${JSON.stringify(opts)}`);
+  }
+  // Listing flags that merely contain a letter d elsewhere are not deletes.
+  for (const ok of ['git branch -a', 'git branch -vv', 'git branch --merged', 'git branch --no-merged main']) assert.equal(decide(ok).kind, 'pass', ok);
+});
+
+test('a small delete refused only for what follows it says so, and does not advise the flag already used', () => {
+  for (const opts of [{ headless: true, mode: 'auto' }, { subagent: true }]) {
+    for (const [line, part] of [
+      ['git branch -d a b c | tee log.txt', '| tee log.txt'],
+      ['git branch -d a > out.txt', '> out.txt'],
+      ['git branch -d a b | sh', '| sh'],
+    ]) {
+      const d = decide(line, opts);
+      assert.equal(d.kind, 'deny', line);
+      assert.doesNotMatch(d.reason, /lowercase flag works/, line);
+      assert.ok(d.reason.includes(part), `${line}: ${d.reason}`);
+      assert.match(d.reason, /same delete with nothing after it passes/, line);
+    }
+  }
+  // A forced delete still gets the lowercase advice.
+  assert.match(decide('git branch -D a | tail', { headless: true, mode: 'auto' }).reason, /git branch -d <name>/);
+});
+
+// ---- the merge bar: a pull request merges only once its checks passed ------
+// `gh` is never run here: `ctx.ghView` stands in for `gh pr view --json …` and
+// `ctx.session` for this session's saved state.
+
+const HEAD = 'd11b6ffe3f7040a3a1c429658b999a79fb5a3c9d';
+const OLDER = 'a3b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9';
+const GUARD_FILE = 'skills/orchestrate/scripts/guard-bash.mjs';
+const passed = (name = 'test') => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion: 'SUCCESS' });
+const running = (name = 'test') => ({ __typename: 'CheckRun', name, status: 'IN_PROGRESS', conclusion: '' });
+const failed = (name = 'test') => ({ __typename: 'CheckRun', name, status: 'COMPLETED', conclusion: 'FAILURE' });
+function prView({ checks = [passed()], files = ['src/app.js'], changedFiles, head = HEAD } = {}) {
+  return { headRefOid: head, statusCheckRollup: checks, files: files.map(path => ({ path })), changedFiles: changedFiles ?? files.length };
+}
+function merging(view, session = {}, extra = {}) {
+  const calls = [];
+  const ctx = {
+    cwd: '/repo',
+    ...extra,
+    ghView: (target, cwd) => { calls.push({ target, cwd }); return view && view.ok === false ? view : { ok: true, data: view }; },
+    session,
+  };
+  return { ctx, calls };
+}
+const reviewed = (reviewOf, extra = {}) => ({ agent: 'orch-reviewer', verdict: 'PASS', reviewOf, ...extra });
+// The one shape of merge that can pass: alone on its line, naming the commit.
+const M = `gh pr merge 35 --merge --match-head-commit ${HEAD}`;
+
+test('a merge is refused while a check is still running, in every mode, and passes once all have passed', () => {
+  for (const opts of [{}, { headless: true, mode: 'auto' }, { subagent: true }, { mode: 'default' }]) {
+    const d = decide(M, merging(prView({ checks: [passed('a'), running('b')] }), {}, opts).ctx);
+    assert.equal(d.kind, 'deny', JSON.stringify(opts));
+    assert.match(d.reason, /still running/);
+    assert.match(d.reason, /d11b6ff/);
+    assert.match(d.reason, /Nothing was run/);
+  }
+  assert.equal(decide(M, merging(prView()).ctx).kind, 'pass');
+});
+
+test('a merge passes only when it names the newest commit in full, and the refusal gives the exact command', () => {
+  const green = () => merging(prView()).ctx;
+  const plain = decide('gh pr merge 35 --merge', green());
+  assert.equal(plain.kind, 'deny');
+  assert.ok(plain.reason.includes(M), plain.reason);
+  for (const sha of ['d11b6ff', OLDER, `${HEAD}0`, '']) {
+    assert.equal(decide(`gh pr merge 35 --merge --match-head-commit ${sha}`, green()).kind, 'deny', sha);
+  }
+  assert.equal(decide(`gh pr merge 35 --merge --match-head-commit ${HEAD.toUpperCase()}`, green()).kind, 'pass');
+  assert.equal(decide(`gh pr merge 35 --squash --match-head-commit=${HEAD} -d`, green()).kind, 'pass');
+  assert.equal(decide(`gh pr merge 35 -R o/r --merge --match-head-commit ${HEAD}`, green()).kind, 'pass');
+  // The command given back keeps the project and the way of merging it was sent with.
+  const other = decide('gh pr merge 35 --squash -R o/r', green());
+  assert.ok(other.reason.includes(`gh pr merge 35 --squash -R o/r --match-head-commit ${HEAD}`), other.reason);
+});
+
+test('reviewer round 1: a comment, a heredoc or an escaped quote cannot hide a merge', () => {
+  for (const cmd of [
+    `# merge once it's green\ngh pr merge 36 --squash --match-head-commit ${HEAD}`,
+    `cat > n.md <<'EOF'\nDon't forget\nEOF\ngh pr merge 36 --match-head-commit ${HEAD}`,
+    `echo "a \\" b" ; gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    String.raw`gh p\r merge 36 --merge --match-head-commit ` + HEAD,
+    `gh pr \`\n merge 36 --merge --match-head-commit ${HEAD}`,
+    `gh -R o/r pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `gh pr mer""ge 36 --merge --match-head-commit ${HEAD}`,
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 2: a flag with its value attached, a backslash-newline, braces or the merge queue cannot hide a merge', () => {
+  for (const cmd of [
+    'git push && gh pr -Ro/r merge 36 --merge',
+    'timeout 5 gh pr -Ro/r merge 36 --merge',
+    'gh pr -Ro/r merge 36 --auto',
+    'gh pr -R"o/r" merge 36 --admin',
+    'gh pr mer\\\nge 36 --merge',
+    'gh p\\\nr merge 36 --merge',
+    'gh pr {merge,} 36 --merge',
+    'gh pr me{r,}ge 36 --merge',
+    `gh api graphql -f query='mutation { enqueuePullRequest(input: {pullRequestId: "x"}) { clientMutationId } }'`,
+  ]) {
+    const m = merging(prView());
+    assert.equal(decide(cmd, m.ctx).kind, 'deny', cmd);
+  }
+  // The wider net still leaves reading a pull request alone.
+  for (const ok of ['gh pr -Ro/r view 36 --json mergeable', 'gh pr view 36 --json mergeable,title', 'gh pr list --json number,title']) {
+    assert.equal(decide(ok, merging(prView()).ctx).kind, 'pass', ok);
+  }
+});
+
+test('reviewer round 3: glued GraphQL names, brace expansion, brace ranges and $-quotes cannot hide a merge, and plain lines still pass', () => {
+  for (const cmd of [
+    'gh api graphql -f query="mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}"',
+    'gh api graphql -f query="mutation{enablePullRequestAutoMerge(input:{pullRequestId:1}){clientMutationId}}"',
+    'gh api graphql -f query="mutation{enqueuePullRequest(input:{pullRequestId:1}){clientMutationId}}"',
+    `curl -X POST https://api.github.com/graphql -d '{"query":"mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}"}'`,
+    'gh {pr,merge} 36',
+    'gh pr {merge,36}',
+    'gh pr {mer,x}ge 36',
+    'gh pr {m..m}erge 36',
+    'gh api -X PUT repos/o/r/pulls/{36..36}/merge',
+    "gh pr $'merge' 36",
+    'gh pr $"merge" 36',
+    // The gh word hidden the same ways.
+    "$'g'h pr merge 36",
+    'g{h,} pr merge 36',
+    '{gh,} pr merge 36',
+    '{gh,pr} merge 36',
+    '{g..g}h pr merge 36',
+  ]) {
+    const m = merging(prView());
+    assert.equal(decide(cmd, m.ctx).kind, 'deny', cmd);
+  }
+  // What the wider net must still leave alone.
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of [
+    'git merge main',
+    'git commit -m "Merge pull request #5 from x"',
+    "git commit -F - <<'EOF'\nFix the merge conflict in app.js\nEOF",
+    'gh pr view 36 --json mergeable,mergeStateStatus',
+    'gh pr -Ro/r view 36 --json mergeable',
+    'gh pr checks 36',
+    "gh pr list --json number,title --jq '.[] | {number,title}'",
+    'git log --merges --oneline',
+  ]) assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  assert.equal(m.calls.length, 0);
+});
+
+test('reviewer round 3: a very long line is read in well under the hook\'s time limit', () => {
+  const line = 'gh pr ' + '-a pr '.repeat(20000) + 'x; gh pr merge 36';
+  const start = Date.now();
+  const d = decide(line, merging(prView()).ctx);
+  const took = Date.now() - start;
+  assert.equal(d.kind, 'deny');
+  assert.ok(took < 1000, `took ${took} ms`);
+});
+
+test('reviewer round 4: brace ranges with a step, and gh glued to a flag, =, : or !, cannot hide a merge', () => {
+  for (const cmd of [
+    'gh pr m{e..e..1}rge 36',
+    'g{h..h..1} pr merge 36',
+    'curl -X PUT https://api.github.com/repos/o/r/pul{l..l..1}s/36/merge',
+    'git -c alias.m=!gh m pr merge 36',
+    "env -S'gh pr merge 36'",
+    'env -Sgh pr merge 36',
+    "env --split-string='gh pr merge 36'",
+    'Start-Process -FilePath:gh -ArgumentList pr,merge,36',
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 4: a line full of unclosed brace commas is read in well under the hook\'s time limit', () => {
+  const line = 'gh pr merge 36 {' + ','.repeat(100000);
+  const start = Date.now();
+  const d = decide(line, merging(prView()).ctx);
+  const took = Date.now() - start;
+  assert.equal(d.kind, 'deny');
+  assert.ok(took < 1000, `took ${took} ms`);
+});
+
+test('reviewer round 4: a plain git merge alone on its line passes whatever the branch is called, and nothing rides along with it', () => {
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of ['git merge feature/graphql-schema', 'git merge origin/pulls-cleanup', 'git merge --no-ff feature/gh-merge-fix']) {
+    assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  }
+  assert.equal(m.calls.length, 0);
+  for (const cmd of [
+    'git merge main; gh pr merge 36',
+    'git merge main\ngh pr merge 36',
+    'git merge $(gh pr merge 36)',
+    'git merge `gh pr merge 36`',
+    "git merge 'x' && gh pr merge 36",
+    'git merge main | gh pr merge 36',
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 4: when reading the line for a merge fails, the line is refused rather than let through', () => {
+  const m = merging(prView());
+  const d = decide('echo hi', { ...m.ctx, mentionsMerge: () => { throw new Error('boom'); } });
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /boom/);
+  assert.match(d.reason, /Nothing was run/);
+});
+
+test('reviewer round 1: a merge in the same line as a push, a branch switch or a change of project is refused, even when green and naming the commit', () => {
+  for (const cmd of [
+    `git push && gh pr merge 36 --squash --match-head-commit ${HEAD}`,
+    'git switch other && gh pr merge --squash',
+    `export GH_REPO=o/r; gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `gh pr merge 36 -Ro/r --merge --match-head-commit ${HEAD}`,
+    `cd /c/Users/Josh/Desktop/GitHub/orchestrate && gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `gh pr merge 36 --merge --match-head-commit ${HEAD}\ngh pr merge 37 --merge --match-head-commit ${HEAD}`,
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 1: a wrapper or another runner cannot carry a merge past the check', () => {
+  for (const cmd of [
+    `timeout 60 gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `env -i gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `echo 36 | xargs gh pr merge --merge --match-head-commit ${HEAD}`,
+    `cmd /c gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `nice -n 5 gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `winpty gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `sudo -u me gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `eval "gh pr merge 36 --merge --match-head-commit ${HEAD}"`,
+    `watch -n 5 gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `"C:\\Program Files\\GitHub CLI\\gh.exe" pr merge 36 --merge --match-head-commit ${HEAD}`,
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+});
+
+test('reviewer round 1: a raw API merge is refused however its flags are written and whatever sends it', () => {
+  for (const cmd of [
+    'gh api -XPUT repos/o/r/pulls/36/merge',
+    'curl -X PUT -H "Authorization: token x" https://api.github.com/repos/o/r/pulls/36/merge',
+    'Invoke-RestMethod -Method Put -Uri https://api.github.com/repos/o/r/pulls/36/merge',
+    `echo '{"query":"mutation { mergePullRequest(input: {pullRequestId: \\"x\\"}) { clientMutationId } }"}' | gh api graphql --input -`,
+  ]) {
+    const d = decide(cmd, merging(prView()).ctx);
+    assert.equal(d.kind, 'deny', cmd);
+    assert.match(d.reason, /gh pr merge/, cmd);
+  }
+});
+
+test('a line that only mentions a merge is refused and says how to pass the text instead; lines that do not mention one never run gh', () => {
+  const d = decide('git commit -m "Refuse gh pr merge below the bar"', merging(prView()).ctx);
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /git commit -F/);
+  // The known cost of a blunt net: gh and a local merge in one line are refused,
+  // and the refusal says to split them.
+  const both = decide('gh pr checks 35 && git merge main', merging(prView()).ctx);
+  assert.equal(both.kind, 'deny');
+  assert.match(both.reason, /line of its own/);
+  const m = merging(prView({ checks: [running()] }));
+  for (const other of [
+    'gh pr view 35 --json mergeable',
+    'gh pr view 35 --json mergeStateStatus,headRefOid',
+    'gh pr checks 35',
+    'git merge main',
+    'git fetch && git merge main',
+    'git commit -m "fix the typo"',
+    'gh api repos/o/r/pulls/35',
+  ]) assert.equal(decide(other, m.ctx).kind, 'pass', other);
+  assert.equal(m.calls.length, 0);
+});
+
+test('an error while checking a merge refuses it rather than letting it through', () => {
+  const ctx = { cwd: '/repo', session: {}, ghView: () => { throw new Error('boom'); } };
+  let d;
+  assert.doesNotThrow(() => { d = decide(M, ctx); });
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /Nothing was run/);
+});
+
+test('a merge is refused when a check failed, naming it', () => {
+  const d = decide('gh pr merge 35 --squash', merging(prView({ checks: [passed('lint'), failed('test (22)')] })).ctx);
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /test \(22\)/);
+  assert.match(d.reason, /failed/);
+  // A plain status (the older kind of check) counts the same way.
+  const s = decide('gh pr merge 35', merging(prView({ checks: [{ __typename: 'StatusContext', context: 'ci/legacy', state: 'PENDING' }] })).ctx);
+  assert.equal(s.kind, 'deny');
+});
+
+test('a merge is refused when no check has reported on the newest commit yet', () => {
+  const d = decide('gh pr merge 35', merging(prView({ checks: [] })).ctx);
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /no checks have reported/i);
+  assert.match(d.reason, /user can merge it themselves/);
+});
+
+test('a merge is refused when the checks cannot be read, and gh is not run for anything that is not a merge', () => {
+  const d = decide('gh pr merge 35', merging({ ok: false, error: 'HTTP 401: Bad credentials' }).ctx);
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /could not be read/);
+  assert.match(d.reason, /HTTP 401/);
+  const m = merging(prView({ checks: [running()] }));
+  for (const other of [
+    'gh pr view 35 --json mergeable',
+    'gh pr checks 35',
+    'git merge main',
+    'gh pr merge 35 --disable-auto',
+    'gh api repos/o/r/pulls/35',
+  ]) assert.equal(decide(other, m.ctx).kind, 'pass', other);
+  assert.equal(m.calls.length, 0);
+});
+
+test('switching on automatic merging is refused even when every check passed', () => {
+  for (const cmd of ['gh pr merge 35 --auto --merge', 'gh pr merge --auto', 'gh pr merge 35 --squash --auto -d']) {
+    const d = decide(cmd, merging(prView()).ctx);
+    assert.equal(d.kind, 'deny', cmd);
+    assert.match(d.reason, /automatic merging/i, cmd);
+  }
+  // Switching it off is not a merge.
+  assert.equal(decide('gh pr merge 35 --disable-auto', merging(prView()).ctx).kind, 'pass');
+});
+
+test('every other way of spelling a merge is read as one', () => {
+  for (const cmd of [
+    'gh pr merge',
+    'gh pr merge 35',
+    'gh pr merge https://github.com/o/r/pull/35 --merge',
+    'gh pr -R o/r merge 35',
+    'gh pr merge 35 --repo=o/r',
+    'GH_REPO=o/r gh pr merge 35',
+    'gh.exe pr merge 35',
+    '"C:\\Program Files\\GitHub CLI\\gh.exe" pr merge 35',
+    '& gh pr merge 35 --merge',
+    'git status && gh pr merge 35',
+    'git fetch; gh pr merge 35 --merge',
+    'gh pr merge 35 --merge | tail -3',
+    'bash -c "gh pr merge 35 --merge"',
+    "sh -c 'gh pr merge 35'",
+    'powershell -Command "gh pr merge 35 --merge"',
+    'pwsh -c "gh pr merge 35"',
+    'gh pr   merge   35',
+    'gh pr merge 35 -m -d',
+    'gh pr merge 35 --admin --merge',
+    'gh "pr" "merge" 35',
+  ]) {
+    const d = decide(cmd, merging(prView({ checks: [running()] })).ctx);
+    assert.equal(d.kind, 'deny', cmd);
+  }
+});
+
+test('the checks read are those of the pull request the merge names, in the folder the command runs in', () => {
+  const pick = cmd => { const m = merging(prView()); decide(cmd, m.ctx); return m.calls[0] || {}; };
+  assert.deepEqual(pick(M).target, { selector: '35', repo: null });
+  assert.deepEqual(pick(`gh pr merge 35 -R o/r --merge --match-head-commit ${HEAD}`).target, { selector: '35', repo: 'o/r' });
+  assert.deepEqual(pick(`gh pr merge 35 --repo=o/r --merge`).target, { selector: '35', repo: 'o/r' });
+  assert.equal(pick(M).cwd, '/repo');
+  // A merge that names no number is refused before gh is asked anything.
+  const m = merging(prView());
+  assert.equal(decide('gh pr merge --merge', m.ctx).kind, 'deny');
+  assert.equal(m.calls.length, 0);
+});
+
+test('merging through the raw API is refused, since it skips the checks this guard reads', () => {
+  for (const cmd of [
+    'gh api -X PUT repos/o/r/pulls/35/merge',
+    'gh api --method=put repos/o/r/pulls/35/merge',
+    'gh api repos/o/r/pulls/35/merge -X PUT -f merge_method=merge',
+    'gh api repos/o/r/pulls/35/merge -f merge_method=squash',
+    `gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: "x"}) { clientMutationId } }'`,
+    `gh api graphql -f query='mutation { enablePullRequestAutoMerge(input: {pullRequestId: "x"}) { clientMutationId } }'`,
+  ]) {
+    const d = decide(cmd, merging(prView()).ctx);
+    assert.equal(d.kind, 'deny', cmd);
+    assert.match(d.reason, /gh pr merge/, cmd);
+  }
+});
+
+test('a change to the plugin\'s own safety checks also needs a reviewer\'s pass naming the newest commit', () => {
+  const view = prView({ files: ['README.md', GUARD_FILE] });
+  const none = decide(M, merging(view).ctx);
+  assert.equal(none.kind, 'deny');
+  assert.match(none.reason, /reviewer/);
+  assert.match(none.reason, /REVIEW OF: d11b6ff/);
+  assert.ok(none.reason.includes(GUARD_FILE));
+  assert.equal(decide(M, merging(view, { returned: [reviewed('d11b6ff')] }).ctx).kind, 'pass');
+  assert.equal(decide(M, merging(view, { returned: [reviewed(HEAD.toUpperCase())] }).ctx).kind, 'pass');
+  // A change that touches none of them needs none.
+  assert.equal(decide(M, merging(prView({ files: ['README.md'] })).ctx).kind, 'pass');
+});
+
+test('a reviewer pass is refused when it names another commit, is not a reviewer\'s, or names work that is not a commit', () => {
+  const view = prView({ files: [GUARD_FILE] });
+  for (const [label, returned] of [
+    ['older commit', [reviewed(OLDER.slice(0, 7))]],
+    ['builder', [reviewed('d11b6ff', { agent: 'orch-implementer' })]],
+    ['general helper', [reviewed('d11b6ff', { agent: 'general-purpose' })]],
+    ['task id', [reviewed('9-1-0050')]],
+    ['too short', [reviewed('d11b6')]],
+    ['FAIL', [reviewed('d11b6ff', { verdict: 'FAIL' })]],
+    ['no verdict', [reviewed('d11b6ff', { verdict: null })]],
+    ['passed then failed', [reviewed('d11b6ff'), reviewed('d11b6ffe', { verdict: 'FAIL' })]],
+    ['not a prefix', [reviewed('0d11b6ff')]],
+  ]) assert.equal(decide(M, merging(view, { returned }).ctx).kind, 'deny', label);
+  assert.equal(decide(M, merging(view, { returned: [reviewed('d11b6ff', { verdict: 'FAIL' }), reviewed('d11b6ff')] }).ctx).kind, 'pass', 'failed then passed');
+  // A reviewer's plugin-prefixed name is still a reviewer.
+  assert.equal(decide(M, merging(view, { returned: [reviewed('d11b6ff', { agent: 'orchestrate:orch-reviewer' })] }).ctx).kind, 'pass');
+});
+
+test('a reviewer that did not repeat the commit counts through the brief that sent it, never through another helper\'s', () => {
+  const view = prView({ files: [GUARD_FILE] });
+  const back = { agent: 'orch-reviewer', verdict: 'PASS', toolUseId: 'tu-1' };
+  assert.equal(decide(M, merging(view, { returned: [back], dispatches: [{ toolUseId: 'tu-1', agent: 'orch-reviewer', reviewOf: 'd11b6ff' }] }).ctx).kind, 'pass');
+  assert.equal(decide(M, merging(view, { returned: [back], dispatches: [{ toolUseId: 'tu-2', agent: 'orch-reviewer', reviewOf: 'd11b6ff' }] }).ctx).kind, 'deny');
+});
+
+test('the head moving after the review, or a file list cut short, still needs the reviewer', () => {
+  const moved = prView({ files: [GUARD_FILE], head: OLDER });
+  assert.equal(decide(M, merging(moved, { returned: [reviewed('d11b6ff')] }).ctx).kind, 'deny');
+  const cut = prView({ files: Array.from({ length: 100 }, (_, i) => `src/f${i}.js`), changedFiles: 140 });
+  const d = decide(M, merging(cut).ctx);
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /reviewer/);
+});
+
+test('the hooks file, the reviewer\'s own instructions and the merge bar itself count as safety checks, and every listed path exists', async () => {
+  const guard = await import('./guard-bash.mjs');
+  const paths = guard.REVIEW_PATHS || [];
+  for (const p of ['hooks/hooks.json', 'skills/orchestrate/assets/agents/orch-reviewer.md', GUARD_FILE, 'skills/orchestrate/scripts/guard-agent.mjs', 'skills/orchestrate/scripts/ledger.mjs', 'skills/orchestrate/scripts/turn-check.mjs', 'skills/orchestrate/scripts/lib/review-of.mjs', 'skills/orchestrate/scripts/lib/review-words.mjs', 'skills/orchestrate/scripts/lib/merge-bar.mjs']) {
+    assert.ok(paths.includes(p), p);
+    assert.equal(decide(M, merging(prView({ files: [p] })).ctx).kind, 'deny', p);
+  }
+  const root = join(HERE, '..', '..', '..');
+  for (const p of paths) assert.ok(existsSync(join(root, p)), `${p} is listed but does not exist`);
+});
+
+test('a line with a merge in it says none of it ran', () => {
+  const d = decide('git fetch && gh pr merge 35 --merge', merging(prView({ checks: [running()] })).ctx);
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /Nothing in this line ran/);
+});
+
+test('the project\'s approved-commands list does not let a merge through', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-merge-allow-'));
+  mkdirSync(join(dir, '.orchestrator'), { recursive: true });
+  writeFileSync(join(dir, '.orchestrator', 'allow-bash.json'), JSON.stringify({ allow: ['gh pr merge 35 --merge', 'git clean -fd'] }));
+  const env = { ...process.env, GH_PROMPT_DISABLED: '1' };
+  delete env.GH_REPO;
+  const home = mkdtempSync(join(tmpdir(), 'orch-bash-home-'));
+  const r = spawnSync(process.execPath, [GUARD], { input: JSON.stringify(bash('gh pr merge 35 --merge', { cwd: dir })), encoding: 'utf8', env: { ...env, HOME: home, USERPROFILE: home }, timeout: 30000 });
+  const out = r.stdout.trim() ? JSON.parse(r.stdout) : null;
+  assert.equal(out && out.hookSpecificOutput.permissionDecision, 'deny');
+  // The list still works for what it is for.
+  assert.equal(run(bash('git clean -fd', { cwd: dir })).stdout.trim(), '');
 });

@@ -400,6 +400,21 @@ function runHook(input) {
   const filed = row ? readFileSync(row.file, 'utf8') : null;
   return { res, row, filed };
 }
+// The same, with this session's dispatch rows already on file, and every row
+// the return filed (index and session) handed back.
+function runHookWith(dispatches, input) {
+  const home = mkdtempSync(join(tmpdir(), 'orch-ledger-hook-'));
+  const sdir = join(home, '.claude', 'orchestrate', 'sessions');
+  mkdirSync(sdir, { recursive: true });
+  writeFileSync(join(sdir, `${input.session_id}.json`), JSON.stringify({ session_id: input.session_id, dispatches }));
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
+  spawnSync(process.execPath, [join(dirname(fileURLToPath(import.meta.url)), 'ledger.mjs')], { input: JSON.stringify(input), encoding: 'utf8', env });
+  const rdir = join(home, '.claude', 'orchestrate', 'returns', String(input.session_id));
+  let rows = [];
+  try { rows = readFileSync(join(rdir, 'returns.jsonl'), 'utf8').split('\n').filter(Boolean).map(l => JSON.parse(l)); } catch {}
+  const state = JSON.parse(readFileSync(join(sdir, `${input.session_id}.json`), 'utf8'));
+  return { row: rows[rows.length - 1] || null, back: (state.returned || [])[(state.returned || []).length - 1] || null };
+}
 function hookInput(extra) {
   return { session_id: 'sess-hb-' + Math.random().toString(16).slice(2), agent_type: 'orchestrate:orch-implementer', agent_id: 'a' + Math.random().toString(16).slice(2, 10), cwd: tmpdir(), ...extra };
 }
@@ -606,4 +621,63 @@ test('a return whose advisor cannot be priced says the price leaves it out', asy
   assert.match(priceText(line), /^\$\d+\.\d\d at list price \(advisor not priced, left out\)$/);
   assert.match(priceText(costLine('x', 'claude-sonnet-5-5', sumUsage(writeTranscript([advRec('m2', ADV_USAGE)])))), /^\$\d+\.\d\d at list price$/);
   assert.equal(priceText({ dollars: null }), 'unpriced (no model named)');
+});
+
+// ---- only a reviewer's own return is a review --------------------------------
+// Each of these is a way a return that is not a review was filed as one, which
+// let a later DONE on that work through unheld.
+
+const sid = () => 'sess-rv-' + Math.random().toString(16).slice(2);
+
+test('a builder whose hand-back opens like a review is filed with no verdict and no REVIEW OF', () => {
+  const s = sid();
+  const text = 'OUTCOME: PASS (REVIEW OF: 9-1-0050) all green\nTASK: 9-1-0051\nSTATUS: DONE\nEVIDENCE: ran it\n';
+  const { row, back } = runHookWith([], hookInput({ session_id: s, agent_id: 'ag-b1', last_assistant_message: text }));
+  assert.equal(row.reviewOf, undefined);
+  assert.equal(row.verdict, null);
+  assert.equal(back.reviewOf, undefined);
+  assert.equal(back.verdict, undefined);
+});
+
+test('a builder that returns just after a reviewer is sent does not take that reviewer\'s REVIEW OF', () => {
+  // Pasted test output starting "PASS" once read as a verdict, and the row
+  // borrowed the newest dispatch's REVIEW OF, which was the reviewer's.
+  const s = sid();
+  const rev = { at: new Date().toISOString(), agent: 'orch-reviewer', task: null, reviewOf: '9-1-0050', toolUseId: 'tu-r', agentId: 'ag-r' };
+  const text = 'Ran the suite.\nPASS src/a.test.js\nPASS src/b.test.js\n';
+  const { row, back } = runHookWith([rev], hookInput({ session_id: s, agent_id: 'ag-b2', last_assistant_message: text }));
+  assert.equal(row.reviewOf, undefined);
+  assert.equal(row.verdict, null);
+  assert.equal(back.verdict, undefined);
+});
+
+test('a flagged builder that pastes a review block is still held for review', () => {
+  const s = sid();
+  const mine = { at: new Date().toISOString(), agent: 'orch-implementer', task: '9-1-0052', review: true, toolUseId: 'tu-b3', agentId: 'ag-b3' };
+  const text = 'TASK: 9-1-0052\nSTATUS: DONE\nEVIDENCE: ran it, 4 pass\nREVIEW OF: 9-1-0052\nVERDICT: PASS\n';
+  const { row } = runHookWith([mine], hookInput({ session_id: s, agent_id: 'ag-b3', last_assistant_message: text }));
+  assert.equal(row.reviewGated, true);
+  assert.notEqual(row.status, 'DONE');
+  assert.equal(row.reviewOf, undefined);
+});
+
+test('a reviewer\'s pasted test line is not its verdict; only its opening word or a VERDICT line is', () => {
+  const s = sid();
+  const text = 'Looked at the change.\nPASS src/a.test.js\nThe refund path skips the amount check.\n';
+  const { row } = runHookWith([], hookInput({ session_id: s, agent_type: 'orchestrate:orch-reviewer', agent_id: 'ag-r4', last_assistant_message: text }));
+  assert.equal(row.verdict, null);
+  const lead = runHookWith([], hookInput({ session_id: sid(), agent_type: 'orchestrate:orch-reviewer', agent_id: 'ag-r5', last_assistant_message: 'PASS\nREVIEW OF: 9-1-0050\nfine\n' }));
+  assert.equal(lead.row.verdict, 'PASS', 'a bare opening PASS still reads');
+  const schema = runHookWith([], hookInput({ session_id: sid(), agent_type: 'orchestrate:orch-reviewer', agent_id: 'ag-r6', last_assistant_message: 'OUTCOME: FAIL (REVIEW OF: 9-1-0050) at x\nVERDICT: FAIL\n' }));
+  assert.equal(schema.row.verdict, 'FAIL');
+  assert.equal(schema.row.reviewOf, '9-1-0050');
+});
+
+test('a reviewer that names no work is filed under its own dispatch\'s REVIEW OF, not the newest one', () => {
+  const s = sid();
+  const t = new Date().toISOString();
+  const a = { at: t, agent: 'orch-reviewer', task: null, reviewOf: '9-1-0060', toolUseId: 'tu-ra', agentId: 'ag-ra' };
+  const b = { at: t, agent: 'orch-reviewer', task: null, reviewOf: '9-1-0061', toolUseId: 'tu-rb', agentId: 'ag-rb' };
+  const { row } = runHookWith([a, b], hookInput({ session_id: s, agent_type: 'orchestrate:orch-reviewer', agent_id: 'ag-ra', last_assistant_message: 'PASS\nlooks right\n' }));
+  assert.equal(row.reviewOf, '9-1-0060');
 });

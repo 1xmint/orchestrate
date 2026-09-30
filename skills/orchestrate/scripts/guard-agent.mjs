@@ -773,8 +773,10 @@ function recordDispatch(input, ti) {
       // A reviewer's own packet names the task it reviews under "REVIEW OF:"
       // (packet.md). Recorded on the reviewer's own dispatch row so
       // turn-check.mjs can tell a review was actually sent for a tagged task
-      // without re-reading any packet text.
-      ...(reviewOfIn(ti.prompt) ? { reviewOf: reviewOfIn(ti.prompt) } : {}),
+      // without re-reading any packet text. Only a reviewer's: a reviewer's
+      // report holds a REVIEW OF line, and pasted into a fix builder's brief it
+      // made that builder count as a look at the work.
+      ...(isReviewer && reviewOfIn(ti.prompt) ? { reviewOf: reviewOfIn(ti.prompt) } : {}),
       ...(input.agent_id ? { parent: String(input.agent_id) } : {}),
     });
     state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;

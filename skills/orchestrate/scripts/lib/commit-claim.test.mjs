@@ -157,3 +157,39 @@ test('namesAllPaths is true for an untracked directory status entry when the mes
 test('namesAllPaths is false for an untracked directory status entry when nothing under it is named', () => {
   assert.equal(namesAllPaths('everything else is committed.', ['src/']), false);
 });
+
+// ---- "no uncommitted files" ---------------------------------------------------
+
+// Live, 0.17.1: "Local main ... has no uncommitted files." on a clean tree was
+// read as a not-committed claim, because "uncommitted" matched and the "no"
+// in front of it did not count, so the check demanded a resend.
+test('"no uncommitted files" claims the work is committed, and holds on a clean tree', () => {
+  for (const t of [
+    'Local `main` is at the merge commit and has no uncommitted files.',
+    'There are no uncommitted changes.',
+    'Nothing uncommitted is left.',
+    'The tree has zero uncommitted files.',
+    'It finished without any uncommitted changes.',
+  ]) {
+    assert.equal(classifyClaim(t), 'committed', t);
+    assert.equal(contradicts(classifyClaim(t), 0, 1), false, t);
+  }
+});
+
+// The old reading also let this false sentence through on a changed tree.
+test('a false "no uncommitted files" on a changed tree is caught', () => {
+  const t = 'Everything is done and there are no uncommitted files.';
+  assert.equal(contradicts(classifyClaim(t), 2, 1), true);
+});
+
+test('a "no" that is not right before "uncommitted" still reads as not committed', () => {
+  for (const t of [
+    'No files changed in src, but notes.txt is uncommitted.',
+    'No problem: the fix is uncommitted.',
+    'notes.txt is left uncommitted.',
+  ]) assert.equal(classifyClaim(t), 'not-committed', t);
+});
+
+test('"not written down yet" makes no claim about commits', () => {
+  assert.equal(classifyClaim('The stop rule is not written down yet.'), null);
+});

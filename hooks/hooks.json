@@ -40,7 +40,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/guard-bash.mjs\"",
-            "timeout": 5
+            "timeout": 20
           }
         ]
       }

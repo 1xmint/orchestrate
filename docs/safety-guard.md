@@ -66,6 +66,97 @@ Options written before git's command word (`git -C <folder> push --force`)
 are taken out before any rule reads the line, so the word order cannot step
 round a check.
 
+## Merging a pull request
+
+A pull request merges only in one shape, and only once it clears a bar, in
+every mode, whoever is present. The approved-commands list below does not lift
+it, since Claude can write that file itself.
+
+**The shape.** The command is alone on its line and reads
+
+```
+gh pr merge <number> --merge --match-head-commit <full 40-character commit id>
+```
+
+with `--squash` or `--rebase` in place of `--merge` if wanted, and optionally
+`--delete-branch` and `-R owner/repo`. `--match-head-commit` makes GitHub
+itself refuse the merge if that commit is no longer the newest, so a push,
+a branch switch or another project cannot slip in between the check and the
+merge. A merge without it, or with a short or wrong id, is refused with the
+exact command to run instead.
+
+**Which lines count.** The check is blunt on purpose, because reading the
+shell's spellings exactly kept losing to one more spelling. A line counts
+when both of these hold:
+
+- its letters and digits, with everything else taken out, contain `merge` or
+  `enqueuepullrequest` (GitHub's merge queue); and
+- it names `gh` as a word (also `gh.exe`, or a path ending in either), or its
+  letters contain `pulls` or `graphql`, the REST and GraphQL addresses. A
+  word also ends at `=`, `:` and `!`, and a short flag glued on the front is
+  dropped, so `--split-string=gh`, `-FilePath:gh`, `alias.m=!gh` and `-Sgh`
+  all name gh.
+
+Before looking, a backslash at a line end is joined up, quotes, backticks and
+`$` are taken out, and brace lists and ranges are expanded the way bash does
+(`{merge,}`, `{pr,merge}`, `{m..m}erge`, `{e..e..1}`). When the braces would
+make more than 64 copies, or hold a `..` group that is not a range, the line
+counts whenever its letters contain `gh`, `pulls` or `graphql` anywhere.
+Quoted text and comments count too. So a merge inside a chain, a pipe,
+`bash -c`, a wrapper such as `timeout`, `env` or `xargs`, `curl` or
+`Invoke-RestMethod`, after a `cd`, or behind a comment or heredoc is refused
+rather than read.
+
+Two kinds of line are let off, each alone on its line with no word holding a
+quote, brace, `$` or separator:
+- a plain read of pull requests: `gh pr view`, `checks`, `list`, `status` or
+  `diff`, optionally with `-R owner/repo`. So `gh pr view 36 --json
+  mergeable` passes;
+- a plain `git merge`, whatever the branch is called. So `git merge
+  feature/graphql-schema` passes.
+
+The cost is that some harmless lines are refused. The refusal names the usual
+ways round it (a file for the text, a line of its own for the rest):
+- a commit message or note that mentions merging along with gh, pulls or
+  graphql (`git commit -m "merge graphql fix"`); pass it as a file: `git
+  commit -F msg.txt`;
+- a flag word that ends in gh (`-high`, `-through`) in a line that says
+  merge;
+- a `gh` command and a `git merge` in one line (`gh pr checks 35 && git merge
+  main`) — run them on separate lines;
+- a `gh pr create` whose title says merge (`--title "Fix merge conflict"`);
+- a read of a pull request with quotes in it (`--jq '.mergeable'`). Drop the
+  quotes: `--jq .mergeable`.
+
+**The bar**, read with `gh pr view` at the moment of the merge:
+
+- every check on the pull request's newest commit has passed. A check still
+  running, a failed check, or no check reported yet is refused. A project with
+  no automatic checks at all never clears this, so its user merges by hand;
+- when the change touches one of the plugin's own safety checks (the list is
+  `REVIEW_PATHS` in `skills/orchestrate/scripts/lib/merge-bar.mjs`, and
+  includes `hooks/hooks.json`), a reviewer in this session handed back PASS
+  for that same commit, named as `REVIEW OF: <first 7 or more characters of
+  the commit>`. The newest verdict on that commit decides, and a push after
+  the review needs a new one. A file list too long to read in full counts as
+  touching them;
+- switching on automatic merging (`--auto`) is always refused: it later
+  merges whatever the newest commit is, including one nobody checked;
+- merging through the raw API is refused, so the merge goes through the one
+  command this check reads;
+- when the checks cannot be read (gh missing, signed out, offline, or slower
+  than 12 seconds), or checking fails for any other reason, the merge is
+  refused, never waved through.
+
+Out of scope, and not caught: a word built from a variable, `$(…)`, escape
+codes or a file-name pattern (`mer?e`, whose result depends on the files in
+the folder); a command name built from pieces (PowerShell's `& ('g'+'h')`
+or `"g$()h"`, cmd's `g^h`); a PowerShell splat (`@args`), which is a
+variable too; a merge run from a script file or `node -e`; a gh alias; a
+GraphQL query read from a file; and merging branches without a pull request
+at all — a push straight to the base branch (`git push origin HEAD:main`),
+the `mergeBranch` mutation or the REST route `…/merges`.
+
 ## What happens when one of these is about to run
 
 - **From the main, interactive session:** the command is held and the

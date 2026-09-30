@@ -250,8 +250,9 @@ tool-call id.
 the reviewer was sent, the stop hook said *"this change touches a shared
 contract; the change made since the review has not been looked at."* True, but
 the look was under way, and the line does not say so. *Slightly in the way:* it
-cost one turn saying "the reviewer is working". Not fixed; a candidate for the
-next round (say "a reviewer is still working on it" when one is).
+cost one turn saying "the reviewer is working". Fixed for 0.17.2: the line
+stays quiet while a reviewer sent after the change has not replied (within six
+hours), and it names the word it matched (see Q).
 
 **O. The stop hook asked for a Pickup on a closed run.** It said *"Pickup has
 never been written. Before this turn ends, update the Pickup section of
@@ -262,7 +263,7 @@ run; 0.17.1 (3ad41bb) drops that binding, so this should not recur after the
 update. Check it live on the next session.
 
 **P. The closed run's spending cap blocked a review.** Sending the third
-independent review, the helper check said *"it would cross the $205 ceiling
+independent review, the helper check said *"it would cross the [amount] ceiling
 ... Raise the ceiling in the run's Budget section, or stop."* The spending was
 counted against the same closed run as O. *Got in the way:* a finished audit's
 cap stopped the review that the merge bar needs. The user agreed to a small
@@ -277,6 +278,192 @@ the ways the check could be fooled before building, which the plugin's own
 advice for reviews ("the questions you wrote before the build") asks for. The
 plugin's part: nothing prompted that list for a change to its own safety
 check.
+
+## Next session, on 0.17.1 (2026-09-30)
+
+**Stop rules, written before any repeated check.** At most two review rounds
+on the same safety check; after a second FAIL, stop and bring the findings to
+the user. CI is read when the app says it finished, never polled. A live check
+of O, P and the reviewer's first line is looked at once, when it happens.
+
+**O and P, checked live.** The opening context of this session did not bind
+the closed run (no "This session continues the run" line), and the first
+helper went out with no spending-cap line. *P helped, by staying quiet.* O is
+checked at the end of this session's turns.
+
+**Q. The "sign-in" label came from words in comments and notes.** Last
+session's *"this change touches sign-in; nobody independent has looked at it"*
+was traced back to the edit before each one. Two causes, neither sign-in code:
+the notes file quoting *"Permission denied"* from a `git worktree remove`
+failure, and a code comment in lib/review-of.mjs, *"the id is the first token
+after"*. "permission" and "token" are on the sign-in list. *Got in the way:* a
+guessed topic sent the lead looking for sign-in code that did not exist.
+Fixing it to name the word that matched, which is a fact, instead of a topic,
+which is a guess.
+
+**R. The guard's refusal of several branch names was about a pipe.** The
+refused line was `git branch -d <ten names> 2>&1 | tail -12; grep …`. Several
+names alone pass on 0.17.1; the `| tail -12` inside the delete part is what
+made it refuse, and the message then said *"Deleting with the lowercase flag
+works"*, which was the flag already used. *Got in the way:* the advice sent the
+lead to change the one thing that was right. This session the guard also
+refused a read-only search whose pattern quoted the delete phrase, twice.
+
+**S. The commit check misread "no uncommitted files".** The resend demand on
+a clean tree was not caused by *"not written down yet"*: the sentence that
+matched was *"has no uncommitted files"*. The check sees "uncommitted" and
+ignores the "no" in front of it. *Got in the way:* one wasted resend.
+
+**T. The plugin's own checkpoint, read after this session's compaction.** It
+said *"Goal: <local-command-caveat>Caveat: The messages below were generated
+by the user while running local commands…"* and *"Last message before
+compaction: <system-reminder> The user started this session…"*: the app's own
+notices, not the user's words. *"Last test result: 64 // One forward pass of
+the transcript…"* is a line of source code from a file read, matched because
+the test pattern ignores case and "pass" is a word. The compaction count
+("Compaction 1 of this session") was right this time. *Mixed:* the file named
+the right session and was written without being asked, but its goal and test
+lines would mislead anyone resuming from it.
+
+**U. The first-helper nudge.** The dispatch check said *"first helper this
+session: the user is owed three plain lines first"*. At first I noted that
+the lines had already been given. The session's own record says otherwise.
+The message that sent the first helper held only the call, with no text for
+the user. The last text before it was the summary written after the
+compaction. So the nudge was true, and the lead had skipped the lines. *Would
+have helped, but came too late:* the nudge arrives with the helper already
+sent, so it can only prompt the lines after the fact. No code change.
+
+**V. The goal after a compaction was the app's own note.** The card after the
+second compaction read *"first request, not confirmed: <system-reminder> The
+user started this session without choosing a project folder…"*. That is the
+app's folder notice, not anything the user asked. *In the way:* the goal line is
+what the lead checks its work against, and here it pointed at nothing.
+
+**W. The hand-back size note.** After the checkpoint helper returned, the
+context line said *"the last hand-back was 5393 bytes against 600; in the next
+brief, ask for five lines and a file for the rest."* True: the brief had asked
+for findings in the return. *Helped a little:* the report was worth reading
+whole, but the next brief asks for five lines and a file.
+
+**X. A delete refused as if nobody were there.** Clearing an old scratch folder
+of the lead's own, the Bash guard refused with *"This would permanently delete
+files or folders… refused here because nobody is present to say yes."* The user
+was present; the lead had not been asked anything. *In the way, mildly:* a new
+folder name worked around it, but the reason given was wrong about the
+session. The refusal itself is right to keep, since a deleted folder cannot be
+brought back. The guard says this whenever a session runs in auto mode, where
+nobody approves each command. Fixed for 0.17.2: it now says *"nobody will be
+asked to say yes to it here"*, which is true in a helper and in auto mode.
+
+**Y. The goal after the third compaction was still the folder notice.** The
+card read *"first request, not confirmed: <system-reminder> The user started
+this session without choosing a project folder…"* again. This is V, still live
+because its fix waits in the unmerged checkpoint pull request. *In the way*, as
+in V.
+
+**Z. The context line after each command.** *"~72k · compacted 3× · last
+tidy-up at ~147k · newest checkpoint: …, just now"*. Short, true, and it names
+the checkpoint file to read after a summary. *Helped a little:* it confirmed a
+checkpoint existed without anyone going to look.
+
+**AA. A file write refused as a branch delete.** Saving new guard tests with a
+shell heredoc, the Bash guard refused with *"This would permanently delete a
+branch on the shared remote… refused here because nobody is present to say
+yes."* Nothing was deleting a branch. The text being written held the words
+`git push` and `--delete-branch` as test data, and the rule reads the whole
+line, including text on its way into a file. *In the way:* the file editor
+worked instead, but a commit message that mentions a force push would be
+refused the same way. Not fixed in 0.17.2; it needs the rule to tell a command
+from text handed to one, which is its own change.
+
+**AB. The goal after the fourth compaction was still the folder notice.** Same
+card text as V and Y. The fix is merged now (pull request #35) and reaches the
+plugin with 0.17.2; this session still runs the 0.17.1 hooks. *In the way*, as
+in V.
+
+**AC. The helper count after a long run of edits.** *"[orchestrate · context]
+100 work calls since your last dispatch"*. True. The work was one thread of
+small edits and test runs, which a helper would have had to learn from the
+start. *Neither:* it changed nothing, and it did not repeat.
+
+**AD. The reviewer's first line on the merge bar.** *"OUTCOME: FAIL (REVIEW OF:
+a404154) Two natural lines get past the merge bar: an apostrophe in a comment
+hides the merge, and a push in the same line leaves the bar reading the old
+commit."* *Helped, a lot:* both were real, and four more findings came with
+them. Each was written as a failing test first. The fix stopped trying to read
+every spelling of a merge. Any line that mentions one is now held to one shape
+that names the exact commit, and GitHub refuses that shape if the commit moved.
+The cost is a new false alarm of the AA kind: a commit message containing
+"pr merge" is refused, and the refusal says to pass it as a file.
+
+**AE. "Ask for five lines and a file" for a helper that cannot write files.**
+After the review came back, the context line said *"the last hand-back was 4644
+bytes against 600; in the next brief, ask for five lines and a file for the
+rest."* The reviewer has no write tool, so it has no file to put the rest in,
+and its findings were the point of sending it. The dispatch guard gave the same
+advice when the brief asked for findings to be pasted back. *In the way,
+mildly:* followed literally, it would lose the findings. The length check
+should skip a helper whose tools cannot write.
+
+**AF. "This change touches sign-in" while a review was already running.** The
+stop hook said *"orchestrate: this change touches sign-in; nobody independent
+has looked at it."* Nothing touched sign-in. The word list files "permission"
+under sign-in, and this change is about the guard's permission prompt. A
+reviewer had also been sent minutes earlier and was still working. *Helped the
+right way, but mislabelled:* the change did need review. The hook should name
+the word that set it off and count a review already under way.
+
+**AG. The goal after the fifth compaction was still the folder notice.** Same
+card text as V, Y and AB, for the same reason: this session runs the 0.17.1
+hooks. *In the way*, as in V.
+
+**AH. The second review found a hole the first fix left.** Its first line read
+*"OUTCOME: FAIL (REVIEW OF: f76eea0). `gh pr -Ro/r merge 36 --merge` merges
+with no check, because mentionsMerge misses a flag with its value attached when
+it sits before `merge`."* It also found that a backslash at a line end, or
+braces (`{merge,}`), split the word so the net missed it. *Helped, a lot:* a
+check that shows it has missed something twice needs a third look, and
+the stop rule (two rounds, then ask) brought that choice to the user instead of
+looping.
+
+**AI. "This change touches payments" from a word in a test.** After the round 1
+fix the stop hook said *"orchestrate: this change touches payments; the change
+made since the review has not been looked at."* Nothing touched payments; a new
+test uses a folder called `billing`. The second half was right, though: the
+fix had not been reviewed yet. *Helped the right way, but mislabelled*, as in
+AF.
+
+**AJ. The installed guard refused a harmless script.** Writing a check script
+through a heredoc was refused as *"This would overwrite the history of a shared
+branch"*. Nothing was being pushed. The file's text held `git push` on one
+line and `gh api graphql -f query=…` a few lines later, and the push rule read
+that later `-f` as a push flag. *In the way*, the same kind as AA. The file
+tool did the job.
+
+**AK. The third review found that the second fix opened a hole.** Its first
+line read *"Removing braces joins `mutation{` onto the name, so `gh api graphql
+-f query="mutation{mergePullRequest(...)}"` now passes; at f76eea0 it was
+refused."* It also found brace ranges (`{m..m}erge`), `$'merge'`, and a line
+long enough to run the check past the hook's 20-second limit. Three rounds had each found a
+new spelling, so the check was redesigned rather than patched again. It now
+flattens the line to letters and digits and refuses any line that says merge
+next to gh or a GitHub address. The only lines let off are plain reads. The price is
+five kinds of harmless line now refused, listed in docs/safety-guard.md.
+*Helped, a lot*, and the stop rule worked twice: it brought the "another
+round?" question to the user each time instead of looping.
+
+**AL. The fourth review found real merges passing the redesign.** Its first
+line read *"decide() lets through `gh pr m{e..e..1}rge 36`, and bash 5.2 runs
+that as `gh pr merge 36`, so criterion (a) is met."* Brace ranges with a step
+were left unexpanded, and gh glued to a flag (`env -S'gh pr merge 36'`,
+`git -c alias.m=!gh …`, `-FilePath:gh`) was not seen as a word. Eight
+spellings passed, all confirmed on 8b64472. A line of 100 KB of commas took
+7.7 seconds to read, against the comment that said a long line could not
+slow the check. Two sentences in the docs were also false. *Helped, a lot*:
+every one was real. The stop rule agreed before the round held, so the pull
+request stayed a draft and the question went back to the user rather than
+into round five.
 
 ## Not about the plugin, but seen
 
