@@ -950,3 +950,27 @@ test('the size line after a compaction prints no window the host did not report,
   assert.doesNotMatch(line[0], /autocompact/);
 });
 
+
+// A helper's own compaction reaches the lead with no agent_id and the lead's
+// transcript_path (anthropics/claude-code#91910). The helper's transcript shows
+// a boundary written seconds ago; then the hook prints nothing and leaves the
+// lead's count alone. A helper boundary older than the window is not this one.
+test("a compact hook seconds after a helper's own boundary prints nothing and keeps the lead's count; an old helper boundary does not", () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sid = 's-helper-compact';
+  const t = join(mkdtempSync(join(tmpdir(), 'orch-hc-t-')), 'session.jsonl');
+  writeFileSync(t, '');
+  const sub = join(dirname(t), sid, 'subagents'); mkdirSync(sub, { recursive: true });
+  const helper = join(sub, 'agent-a1.jsonl');
+  const boundary = at => JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid: 'h1', timestamp: new Date(at).toISOString() }) + '\n';
+  const hook = () => run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo, transcript_path: t });
+  writeFileSync(helper, boundary(Date.now() - 500));
+  assert.equal(hook().trim(), '', "a helper's compaction half a second ago: not the lead's card");
+  writeFileSync(helper, boundary(Date.now() - 60000));
+  const out = hook();
+  assert.match(out, /Compaction 1 of this session/, "the lead's first compaction still says 1: the helper's did not count");
+  // A helper still writing (fresh file) whose compaction was long ago: still the lead's card.
+  const old = new Date(Date.now() - 60000); utimesSync(helper, old, old);
+  writeFileSync(join(sub, 'agent-a2.jsonl'), boundary(Date.now() - 30000));
+  assert.match(hook(), /\[orchestrate/, 'a fresh helper file with an old boundary is not a helper compaction');
+});

@@ -37,6 +37,7 @@ import {
 import { sampleContext, storedContext } from './lib/context-store.mjs';
 import { readContext, idPart, countBoundaries } from './lib/context-scan.mjs';
 import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
+import { helperJustCompacted } from './lib/helper-compaction.mjs';
 import { readGoal, goalLine, goalDue, markShown } from './lib/goal.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
@@ -524,6 +525,10 @@ function handleSessionStart(input) {
   if (source === 'clear') { try { unlinkSync(sessionPath(input.session_id)); } catch {} return; }
   if (source === 'startup') { pruneSessions(7); return; }
   if (source !== 'resume' && source !== 'compact') return;
+  // The same, when the host dropped the agent_id (#91910): a helper that
+  // compacted seconds ago. Before any state is loaded, so its compaction
+  // neither bumps the lead's count nor clears the lead's working project.
+  if (source === 'compact' && helperJustCompacted(input)) return;
 
   const state = loadSession(input.session_id) || newState(input);
   const ctx = gatherContext(input, state);
