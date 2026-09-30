@@ -504,6 +504,33 @@ things:
   pending work. *Neither helped nor got in the way this time.* "Note follows"
   promises more than a path.
 
+**AO. Telling a helper's compaction apart without the host's help.** Item H's
+bug is already filed as anthropics/claude-code#91910, so the plugin works
+around it. At hook time the lead transcript cannot tell the two apart, because
+the lead's own hook runs before its boundary is written. The helpers'
+transcripts can. One replay over every compaction on this machine, with the
+rule written first ("ship only if no lead compaction is misjudged"):
+- In all 379 helper compactions, the helper's boundary is stamped 0.2 to 10.7 s
+  before its hook's record.
+- With a 10 s window, 378 of 379 helper compactions are caught. None of the 354
+  lead compactions is misjudged.
+- Checking the working folder would catch nothing: none of the 379 helpers ran
+  in a helper folder of its own.
+
+Two findings along the way:
+- A helper's compaction also cleared the lead's learned working project. So
+  the check now runs before any of the lead's state is loaded.
+- `postcompact-check.mjs` was built to save a helper's compaction summary
+  under its run. That needs the helper id, which never arrives, so it has
+  never run. Instead each helper compaction wrote a lead checkpoint at an
+  arbitrary moment. That stray checkpoint stops with the same check. The
+  summary saving is left as is: nobody reads it.
+
+Records are stamped when the event happens, not when the file is written. A
+helper whose file is written late is missed, and then the card prints as
+before. *Live proof is for the next audit:* no card in helper transcripts
+dated after this fix is installed.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to

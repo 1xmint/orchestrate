@@ -114,3 +114,31 @@ test('agent_id present keeps today\'s helper-side behaviour, never touching the 
   const dir = join(home, '.claude', 'orchestrate', 'context', 'unbound-session');
   assert.ok(!existsSync(dir), 'the helper branch never touches the context store');
 });
+
+// A helper's own compaction also reaches PostCompact with no agent_id and the
+// lead's transcript (anthropics/claude-code#91910). No lead checkpoint for it;
+// the same payload with only an old helper boundary still writes one.
+test("a lead-side payload seconds after a helper's own boundary writes no checkpoint; an old helper boundary does", () => {
+  const tdir = mkdtempSync(join(tmpdir(), 'orch-postcompact-transcript-'));
+  const transcriptPath = join(tdir, 't.jsonl');
+  const line = o => JSON.stringify(o) + '\n';
+  writeFileSync(transcriptPath, [
+    line({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'do the widget task' } }),
+    line({ type: 'system', subtype: 'compact_boundary', uuid: 'b1', timestamp: new Date().toISOString(), compactMetadata: { trigger: 'auto', preTokens: 200000, postTokens: 20000 } }),
+  ].join(''));
+  const sid = 'lead-snap-helper';
+  const sub = join(tdir, sid, 'subagents'); mkdirSync(sub, { recursive: true });
+  const helper = join(sub, 'agent-a1.jsonl');
+  const checkpoints = home => {
+    const dir = join(home, '.claude', 'orchestrate', 'context', sid);
+    return existsSync(dir) ? readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)) : [];
+  };
+  const payload = { hook_event_name: 'PostCompact', session_id: sid, transcript_path: transcriptPath };
+  writeFileSync(helper, line({ type: 'system', subtype: 'compact_boundary', uuid: 'h1', timestamp: new Date(Date.now() - 500).toISOString() }));
+  const a = run(payload);
+  assert.equal(a.status, 0);
+  assert.equal(checkpoints(a.home).length, 0, "a helper's compaction half a second ago: no lead checkpoint");
+  writeFileSync(helper, line({ type: 'system', subtype: 'compact_boundary', uuid: 'h1', timestamp: new Date(Date.now() - 60000).toISOString() }));
+  const b = run(payload);
+  assert.equal(checkpoints(b.home).length, 1, 'an old helper boundary: the lead checkpoint is written as before');
+});

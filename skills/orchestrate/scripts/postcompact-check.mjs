@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { sanitizeId, sessionRun } from './lib/tier.mjs';
 import { readContext } from './lib/context-scan.mjs';
 import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
+import { helperJustCompacted } from './lib/helper-compaction.mjs';
 
 export const INDEX_NAME = 'returns.jsonl';
 
@@ -76,6 +77,9 @@ function main() {
   try { run = sessionRun(input.session_id); } catch { return; }
 
   if (!input.agent_id) {
+    // A helper's compaction also arrives here with no agent_id (#91910): no
+    // lead checkpoint for it, or a later card could name this one as fresh.
+    if (helperJustCompacted(input)) return;
     try {
       const reading = readContext(input.transcript_path, { session: input.session_id });
       writeCompactionSnapshot({
