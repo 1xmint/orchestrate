@@ -62,8 +62,11 @@ and lower effort gives fewer, more consolidated tool calls.
 - `max` shows diminishing returns and can over-think.
 (platform.claude.com, optimizing-for-cost-and-intelligence, 2026-09-13; effort, 2026-09-29)
 
-The eight `orch-*` roles pin their own: implementer and researcher `medium`,
-browser `low`, and planner, reviewer, debugger, coordinator and advisor `high`.
+The eight `orch-*` roles pin their own: implementer, researcher, coordinator
+and advisor `medium`, browser `low`, and planner, reviewer and debugger `high`.
+The coordinator sorts and hands out work, and the advisor answers one short
+direction question, so neither gains much from `high`; the three that stay
+high are the ones where a shallow answer costs the most.
 Claude has no per-call effort lever; the model is the per-call lever.
 
 ## The Codex side
