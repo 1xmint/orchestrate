@@ -106,3 +106,25 @@ test('inferredReviewWord: with no heading, a risky word only inside pasted code 
 test('inferredReviewWord: with no heading, a negation still clears the word', () => {
   assert.equal(inferredReviewWord(`${'Background line.\n'.repeat(60)}Task: tidy the docs; no password changes.`), null);
 });
+
+// ---- a branch switch is not a checkout page ------------------------------------
+
+// Live, 0.17.1: the stop hook's risk line already skipped "git checkout", but
+// the dispatch gate shares this matcher and did not, so a brief saying "run
+// git checkout main" was held for a payments review.
+test('a branch switch or the CI checkout step is not a payments word', () => {
+  for (const t of [
+    'run git checkout main and fix the failing test',
+    'git -C /repo checkout -b fix/x, then fix the typo',
+    'gh pr checkout 35 and read the diff',
+    'git switch main and rebuild the docs',
+    'the workflow uses actions/checkout@v4 before npm test',
+  ]) assert.equal(reviewWordMatch(t), null, t);
+});
+
+test('a checkout page, or checkout beside a branch switch, still needs review', () => {
+  assert.equal(reviewWordMatch('fix the checkout page total'), 'checkout');
+  assert.equal(reviewWordMatch('add Stripe checkout to the shop'), 'checkout');
+  assert.equal(reviewWordMatch('git checkout main, then change the checkout page'), 'checkout');
+  assert.equal(inferredReviewWord('OBJECTIVE\ngit checkout main and fix the refund total\nDONE WHEN\ntests pass'), 'refund');
+});

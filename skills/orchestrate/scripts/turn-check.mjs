@@ -204,12 +204,6 @@ function editText(input) {
   return parts.filter(x => typeof x === 'string').join('\n');
 }
 
-// Words on the review list that mean something else here: a branch switch
-// (`git checkout`, `git switch`, `gh pr checkout`) and the CI step
-// actions/checkout. Removed before the word match, here rather than in
-// reviewWordMatch, which the dispatch gate shares.
-const NOT_PAYMENTS = /\b(?:git|gh\s+pr)\s+(?:-[Cc]\s+\S+\s+)*(?:checkout|switch)\b|\bactions\/checkout\b/gi;
-
 // The text of a change to look for review words in, or null when the change is
 // only to prose files (.md .mdx .txt .rst, by extension: a price table or a
 // design note is not the code that charges anyone). A shell command counts as
@@ -219,7 +213,7 @@ function riskText(input, fc) {
   // A shell line is searched only in the pieces that write: a grep pattern
   // beside a `git pull` is not something that was changed.
   const text = typeof fc.text === 'string' ? fc.text : editText(input);
-  return text.replace(NOT_PAYMENTS, ' ');
+  return text;
 }
 
 export function unreviewedRiskFact({ transcriptTail, goal, returned, dispatches, now = Date.now() }) {
