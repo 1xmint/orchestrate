@@ -230,8 +230,8 @@ export const NO_REVIEW_NOTE = 'done, but it was marked for an independent review
 // A reviewer's own return is never held for review: it IS the review. Only a
 // return that names no REVIEW OF can be gated by its dispatch's flag.
 export const LONG_HANDBACK_BYTES = 1200;
-// A hand-back over the limit is filed as its first five lines and its size; the
-// long form belongs in the helper's own report file.
+// A hand-back over the limit is filed as its first five lines and its size;
+// main() keeps the whole text in a `.full.md` beside it.
 export function recordBody(text) {
   const bytes = Buffer.byteLength(text);
   if (bytes <= LONG_HANDBACK_BYTES) return { body: text, bytes, long: false };
@@ -688,7 +688,15 @@ function main() {
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
     const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${dirtyNoteText}${compactNote} -->\n\n`;
-    writeFileSync(file, header + shortened.body + (shortened.body.endsWith('\n') ? '' : '\n'));
+    // A reviewer or advisor has no tool that writes files, so its hand-back is
+    // the only copy of its findings: keep the whole of it beside the record.
+    let body = shortened.body;
+    if (shortened.long) {
+      const full = file.replace(/\.md$/, '.full.md');
+      writeFileSync(full, text);
+      body = body.replace(/ bytes against 600\)\n$/, ` bytes against 600; the whole of it: ${full})\n`);
+    }
+    writeFileSync(file, header + body + (body.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
   appendIndex(dir, {

@@ -2,7 +2,7 @@
 name: orch-coordinator
 description: "Reach for this when three or more independent tracks are ready at once and running them yourself would fill your context with their output. It dispatches and collects. Not for one track — run that yourself."
 model: opus
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Agent, Write, Edit, Bash(git:*), Bash(node ${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/*:*)
 maxTurns: 150
 color: purple

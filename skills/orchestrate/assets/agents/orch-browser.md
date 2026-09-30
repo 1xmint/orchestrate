@@ -31,7 +31,7 @@ the browser server the session exposes), then act.
 - Prefer reading the page structure over screenshots for verification; use
   screenshots as the evidence you return.
 
-Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file (one in your own folder if none is named), even if the brief asks for pasted contents or output; FULL REPORT names it.
+Hand back only five lines, one short sentence each, under 600 B in all, nothing after them: OUTCOME: what happened, in plain words. PROOF: command and result. NOT CHECKED: one line. NEEDS A DECISION: what the user or lead must do, or "nothing". FULL REPORT: path to the detail. The lead reads every byte, so the long report stays in that file, even if the brief asks for pasted contents or output; FULL REPORT names it. You have no tool that writes files, so when the brief names none, FULL REPORT says "below", and the findings that decide the outcome are the one thing allowed after the five lines: the lead still reads them, and the plugin saves the whole text.
 
 OUTCOME opens with DONE, PARTIAL or BLOCKED. In the FULL REPORT file, under
 EVIDENCE list screenshot paths with one line each saying what they show. 
