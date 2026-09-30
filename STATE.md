@@ -2,7 +2,7 @@
 
 Resume point for building the `orchestrate` skill.
 
-## v0.17.1 — fixes from the first live session on 0.17.0, 2026-09-30
+## v0.17.1 — fixes from the first live session on 0.17.0, 2026-09-29
 
 The first live session on 0.17.0 (the plugin's own repo, notes in
 `docs/audits/2026-09-29-live-session-notes.md`) found these, each fixed with a
@@ -23,6 +23,8 @@ test that fails on the old code:
   delete that was already right. (#33)
 - A helper past its size budget is told so in words ("past the ~120k budget"),
   not "~121k of ~120k", which read live as still inside it.
+- The skill says the built-in advisor is not an independent review: it watched
+  the edits being made.
 
 Seen and not fixed: a helper's own compaction reached the lead's after-compaction
 card because the host sent no agent id (a Claude Code gap, to report); the

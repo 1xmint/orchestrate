@@ -677,3 +677,11 @@ test('SKILL.md buys one second opinion: the built-in advisor when present', () =
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
   assert.match(skill, /One second opinion per check\. The built-in `advisor` tool, if present, is it/);
 });
+
+test('SKILL.md says the built-in advisor is not an independent review', () => {
+  // Live, 2026-09-29: the advisor had seen a cost change and a reviewer still
+  // found three mislabels. It reads the lead's whole chat, so it shares the
+  // lead's blind spots and cannot stand in for orch-reviewer.
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  assert.match(skill, /Never review your own edits; the built-in advisor watched them made, so it is not independent\./);
+});

@@ -258,14 +258,14 @@ with a named revert, even when the main change is good. You set the row in
 **Independent review** is for the cases where being wrong is expensive and hard
 to see: an authorisation or security boundary, money moving, a destructive or
 irreversible data change, a compatibility contract someone else consumes, or
-architectural uncertainty you could not resolve. A cosmetic change to a public
-page is not one of those. Decide that work owes a review before it is
-designed and write the review's questions then, so the same list drives the
-design, the `DONE WHEN` and the reviewer's `ACCEPTANCE`. Never review your own
-edits. The reviewer runs on Opus or stronger and reviews only correctness
-against that list; the pull request stays a draft until the verdict is PASS, then
-`gh pr ready <n>` — a review that cannot stop the merge is not a gate.
-`evaluation.md`'s "Independent review" has the checklist and gate procedure.
+architectural uncertainty you could not resolve. A cosmetic change to a
+public page is not one. Decide a review is owed before design and write its
+questions then, so one list drives the design, the `DONE WHEN` and the
+reviewer's `ACCEPTANCE`. Never review your own edits; the built-in advisor
+watched them made, so it is not independent. The reviewer runs on Opus or
+stronger and reviews only correctness against that list; the pull request stays
+a draft until the verdict is PASS, then `gh pr ready <n>` — a review that
+cannot stop the merge is not a gate. Checklist: `evaluation.md`, "Independent review".
 
 ## 7. When it is not right
 
