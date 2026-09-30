@@ -930,6 +930,53 @@ test('reviewer round 2: a flag with its value attached, a backslash-newline, bra
   }
 });
 
+test('reviewer round 3: glued GraphQL names, brace expansion, brace ranges and $-quotes cannot hide a merge, and plain lines still pass', () => {
+  for (const cmd of [
+    'gh api graphql -f query="mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}"',
+    'gh api graphql -f query="mutation{enablePullRequestAutoMerge(input:{pullRequestId:1}){clientMutationId}}"',
+    'gh api graphql -f query="mutation{enqueuePullRequest(input:{pullRequestId:1}){clientMutationId}}"',
+    `curl -X POST https://api.github.com/graphql -d '{"query":"mutation{mergePullRequest(input:{pullRequestId:1}){clientMutationId}}"}'`,
+    'gh {pr,merge} 36',
+    'gh pr {merge,36}',
+    'gh pr {mer,x}ge 36',
+    'gh pr {m..m}erge 36',
+    'gh api -X PUT repos/o/r/pulls/{36..36}/merge',
+    "gh pr $'merge' 36",
+    'gh pr $"merge" 36',
+    // The gh word hidden the same ways.
+    "$'g'h pr merge 36",
+    'g{h,} pr merge 36',
+    '{gh,} pr merge 36',
+    '{gh,pr} merge 36',
+    '{g..g}h pr merge 36',
+  ]) {
+    const m = merging(prView());
+    assert.equal(decide(cmd, m.ctx).kind, 'deny', cmd);
+  }
+  // What the wider net must still leave alone.
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of [
+    'git merge main',
+    'git commit -m "Merge pull request #5 from x"',
+    "git commit -F - <<'EOF'\nFix the merge conflict in app.js\nEOF",
+    'gh pr view 36 --json mergeable,mergeStateStatus',
+    'gh pr -Ro/r view 36 --json mergeable',
+    'gh pr checks 36',
+    "gh pr list --json number,title --jq '.[] | {number,title}'",
+    'git log --merges --oneline',
+  ]) assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  assert.equal(m.calls.length, 0);
+});
+
+test('reviewer round 3: a very long line is read in well under the hook\'s time limit', () => {
+  const line = 'gh pr ' + '-a pr '.repeat(20000) + 'x; gh pr merge 36';
+  const start = Date.now();
+  const d = decide(line, merging(prView()).ctx);
+  const took = Date.now() - start;
+  assert.equal(d.kind, 'deny');
+  assert.ok(took < 1000, `took ${took} ms`);
+});
+
 test('reviewer round 1: a merge in the same line as a push, a branch switch or a change of project is refused, even when green and naming the commit', () => {
   for (const cmd of [
     `git push && gh pr merge 36 --squash --match-head-commit ${HEAD}`,
@@ -973,13 +1020,18 @@ test('a line that only mentions a merge is refused and says how to pass the text
   const d = decide('git commit -m "Refuse gh pr merge below the bar"', merging(prView()).ctx);
   assert.equal(d.kind, 'deny');
   assert.match(d.reason, /git commit -F/);
+  // The known cost of a blunt net: gh and a local merge in one line are refused,
+  // and the refusal says to split them.
+  const both = decide('gh pr checks 35 && git merge main', merging(prView()).ctx);
+  assert.equal(both.kind, 'deny');
+  assert.match(both.reason, /line of its own/);
   const m = merging(prView({ checks: [running()] }));
   for (const other of [
     'gh pr view 35 --json mergeable',
     'gh pr view 35 --json mergeStateStatus,headRefOid',
     'gh pr checks 35',
     'git merge main',
-    'gh pr checks 35 && git merge main',
+    'git fetch && git merge main',
     'git commit -m "fix the typo"',
     'gh api repos/o/r/pulls/35',
   ]) assert.equal(decide(other, m.ctx).kind, 'pass', other);

@@ -85,18 +85,39 @@ a branch switch or another project cannot slip in between the check and the
 merge. A merge without it, or with a short or wrong id, is refused with the
 exact command to run instead.
 
-**Which lines count.** Any line that mentions a merge anywhere is held to that
-shape: `pr merge` (also with flags such as `-R o/r` or `-Ro/r` between the
-two words), the REST route `…/pulls/N/merge`, or the `mergePullRequest`,
-`enablePullRequestAutoMerge` and `enqueuePullRequest` GraphQL mutations.
-Before looking, a backslash at a line end is joined up, braces and commas are
-taken out (so `{merge,}` reads as `merge`), and so are quotes, backticks and
-backslashes. Quoted text and comments count too. So a merge inside a chain, a
-pipe, `bash -c`, a wrapper such as `timeout`, `env` or `xargs`, `curl` or
-`Invoke-RestMethod`, after a `cd`, or behind a comment or heredoc is refused
-rather than read. This has one known cost: a commit message or note that
-contains "pr merge" is refused too. Put that text in a file and pass the file
-(`git commit -F msg.txt`).
+**Which lines count.** The check is blunt on purpose, because reading the
+shell's spellings exactly kept losing to one more spelling. A line counts
+when both of these hold:
+
+- its letters and digits, with everything else taken out, contain `merge` or
+  `enqueuepullrequest` (GitHub's merge queue); and
+- it names `gh` as a word (also `gh.exe`, or a path ending in either), or its
+  letters contain `pulls` or `graphql`, the REST and GraphQL addresses.
+
+Before looking, a backslash at a line end is joined up, quotes, backticks and
+`$` are taken out, and brace expansion is done the way the shell would
+(`{merge,}`, `{pr,merge}`, `{m..m}erge`); a line whose braces would make more
+than 64 copies counts on the second test alone. Quoted text and comments
+count too. So a merge inside a chain, a pipe, `bash -c`, a wrapper such as
+`timeout`, `env` or `xargs`, `curl` or `Invoke-RestMethod`, after a `cd`, or
+behind a comment or heredoc is refused rather than read.
+
+One kind of line is let off: a plain read of pull requests alone on its line —
+`gh pr view`, `checks`, `list`, `status` or `diff`, optionally with `-R
+owner/repo`, where no word holds a quote, brace, `$` or separator. So `gh pr
+view 36 --json mergeable` passes.
+
+The cost is that some harmless lines are refused. The refusal names the usual
+ways round it (a file for the text, a line of its own for the rest):
+- a commit message or note that mentions both gh and merging (pass it as a
+  file: `git commit -F msg.txt`);
+- a `gh` command and a `git merge` in one line (`gh pr checks 35 && git merge
+  main`) — run them on separate lines;
+- a `gh pr create` whose title says merge (`--title "Fix merge conflict"`);
+- a read of a pull request with quotes in it (`--jq '.mergeable'`). Drop the
+  quotes: `--jq .mergeable`.
+
+A `git merge` or a commit message on its own line is not affected.
 
 **The bar**, read with `gh pr view` at the moment of the merge:
 
@@ -118,8 +139,9 @@ contains "pr merge" is refused too. Put that text in a file and pass the file
   than 12 seconds), or checking fails for any other reason, the merge is
   refused, never waved through.
 
-Out of scope, and not caught: a command word built from a variable, `$(…)`
-or escape codes; a merge run from a script file or `node -e`; a gh alias; a
+Out of scope, and not caught: a word built from a variable, `$(…)`, escape
+codes or a file-name pattern (`mer?e`, whose result depends on the files in
+the folder); a merge run from a script file or `node -e`; a gh alias; a
 GraphQL query read from a file; and merging branches without a pull request
 at all — a push straight to the base branch (`git push origin HEAD:main`),
 the `mergeBranch` mutation or the REST route `…/merges`.

@@ -441,6 +441,18 @@ line and `gh api graphql -f query=…` a few lines later, and the push rule read
 that later `-f` as a push flag. *In the way*, the same kind as AA. The file
 tool did the job.
 
+**AK. The third review found that the second fix opened a hole.** Its first
+line read *"Removing braces joins `mutation{` onto the name, so `gh api graphql
+-f query="mutation{mergePullRequest(...)}"` now passes; at f76eea0 it was
+refused."* It also found brace ranges (`{m..m}erge`), `$'merge'`, and a line
+long enough to run the check past the hook's 20-second limit. Three rounds had each found a
+new spelling, so the check was redesigned rather than patched again. It now
+flattens the line to letters and digits and refuses any line that says merge
+next to gh or a GitHub address. The only lines let off are plain reads. The price is
+five kinds of harmless line now refused, listed in docs/safety-guard.md.
+*Helped, a lot*, and the stop rule worked twice: it brought the "another
+round?" question to the user each time instead of looping.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to

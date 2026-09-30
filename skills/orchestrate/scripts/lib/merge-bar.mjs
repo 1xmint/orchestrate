@@ -5,15 +5,16 @@
 // project's approved-commands list does not lift it.
 //
 // It does not try to read every way a merge can be spelled; a shell has too
-// many. Instead any line that mentions a merge anywhere, quotes and comments
-// included, is caught, and only one shape of it can pass: gh pr merge with a
-// number, alone on its line, naming the full id of the newest commit with
-// --match-head-commit. GitHub itself then refuses the merge if that commit is
-// no longer the newest, so nothing that runs between the check and the merge
-// can swap in an unchecked one. Out of scope, and docs/safety-guard.md says
-// so: a command word built from a variable or $(…), a script file, node -e,
-// a gh alias, a GraphQL query read from a file, and a push straight to the
-// base branch.
+// many. Instead any line whose letters say merge next to gh or a GitHub
+// address is caught (mentionsMerge), quotes and comments included, and only
+// one shape of it can pass: gh pr merge with a number, alone on its line,
+// naming the full id of the newest commit with --match-head-commit. GitHub
+// itself then refuses the merge if that commit is no longer the newest, so
+// nothing that runs between the check and the merge can swap in an unchecked
+// one. Out of scope, and docs/safety-guard.md says so: a word built from a
+// variable, $(…), escape codes or a file-name pattern (mer?e), a script file,
+// node -e, a gh alias, a GraphQL query read from a file, and merging branches
+// without a pull request.
 
 import { spawnSync } from 'node:child_process';
 
@@ -39,17 +40,88 @@ export const REVIEW_PATHS = [
   'skills/orchestrate/scripts/lib/review-words.test.mjs',
 ];
 
-// Whether a line mentions merging a pull request anywhere: `pr merge` (with
-// flags between them), the REST merge route, or the GraphQL mutations. Quotes,
-// backticks and backslashes are taken out first, so none of them can split the
-// words apart.
+// Whether a line may merge a pull request. Deliberately blunt, because every
+// attempt to read the shell's spellings exactly lost to one more spelling: the
+// line is flattened to its letters and digits, and it counts when those
+// contain "merge" (or "enqueuepullrequest", the merge queue) and the line also
+// names gh as a word, or holds "pulls" or "graphql" (the REST and GraphQL
+// addresses). Brace expansion ({merge,}, {m..m}) is expanded first, and a
+// backslash-newline joined. A plain read of one pull request passes: see
+// readsOnly. Everything here is a single pass over the text, so a long line
+// cannot run the hook out of time.
 export function mentionsMerge(line) {
-  // A backslash-newline joins two halves of a word in the shell, and braces
-  // expand into words (`{merge,}`), so both go before the quotes do.
-  const t = String(line || '').replace(/\\\r?\n/g, '').replace(/[{},]/g, '').replace(/["'`\\]/g, '').toLowerCase();
-  return /\bpr\s+(?:-\S*(?:\s+[^\s-]\S*)?\s+)*merge\b/.test(t)
-    || /pulls\/\d+\/merge\b/.test(t)
-    || /\b(?:mergepullrequest|enablepullrequestautomerge|enqueuepullrequest)\b/.test(t);
+  if (readsOnly(line)) return false;
+  const text = String(line || '').replace(/\\\r?\n/g, '').toLowerCase().replace(/["'`$]/g, '');
+  const expanded = expandBraces(text, { calls: 0 });
+  const forms = expanded || [text];
+  const flat = forms.map(f => f.replace(/[^a-z0-9]/g, '')).join(' ');
+  const says = !expanded || flat.includes('merge') || flat.includes('enqueuepullrequest');
+  return says && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql'));
+}
+
+// Any word that is gh once quotes, braces and backslashes are gone, or whose
+// last path part is gh (C:\…\gh.exe, /usr/bin/gh).
+const GH = /^gh(?:\.exe)?$/;
+function namesGh(text) {
+  return text.split(/[\s;&|()<>]+/).some(w => {
+    const bare = w.replace(/[{},]/g, '');
+    return GH.test(bare.replace(/\\/g, '')) || GH.test(bare.split(/[\\/]/).pop());
+  });
+}
+
+// The shell's brace expansion, roughly: each {a,b} or {x..y} group gives one
+// copy of the line per choice, innermost group first. Null when that makes
+// more than 64 copies, and the caller then treats the line as saying merge.
+function expandBraces(text, budget) {
+  if (++budget.calls > 400) return null;
+  const m = /\{([^{}]*(?:,|\.\.)[^{}]*)\}/.exec(text);
+  if (!m) return [text];
+  const items = braceItems(m[1]);
+  if (!items) return null;
+  const head = text.slice(0, m.index), tail = text.slice(m.index + m[0].length);
+  const out = [];
+  for (const item of items) {
+    const sub = expandBraces(head + item + tail, budget);
+    if (!sub || out.push(...sub) > 64) return null;
+  }
+  return out;
+}
+function braceItems(inner) {
+  if (inner.includes(',')) return inner.split(',');
+  const r = /^(-?\d+|[a-z])\.\.(-?\d+|[a-z])$/.exec(inner);
+  const num = r && /\d/.test(r[1]);
+  if (!r || num !== /\d/.test(r[2])) return [inner];
+  const a = num ? Number(r[1]) : r[1].charCodeAt(0), b = num ? Number(r[2]) : r[2].charCodeAt(0);
+  if (Math.abs(b - a) > 64) return null;
+  const step = a <= b ? 1 : -1, list = [];
+  for (let i = a; i !== b + step; i += step) list.push(num ? String(i) : String.fromCharCode(i));
+  return list;
+}
+
+// A plain read of pull requests, alone on its line: gh pr view, checks, list,
+// status or diff, optionally with -R owner/repo, every word made only of
+// letters, digits and . / : = , @ # + - _ (so no quotes, braces, $ or
+// separators). Such a line runs one gh read and nothing else, so
+// `gh pr view 36 --json mergeable` passes.
+const READS = new Set(['view', 'checks', 'list', 'status', 'diff']);
+function readsOnly(line) {
+  const text = String(line || '').trim();
+  if (!text || /[\r\n]/.test(text)) return false;
+  const words = text.split(/\s+/);
+  if (!GH.test(words[0].toLowerCase()) || !words.every(w => /^[\w./:=,@#+-]+$/.test(w))) return false;
+  let i = 1;
+  const skipRepo = () => {
+    for (;;) {
+      if (words[i] === '-R' || words[i] === '--repo') i += 2;
+      else if (/^(?:-R|--repo=)\S+$/.test(words[i] || '')) i += 1;
+      else return;
+    }
+  };
+  skipRepo();
+  if (words[i] !== 'pr') return false;
+  i += 1;
+  skipRepo();
+  return READS.has(words[i]);
 }
 
 const METHODS = new Set(['--merge', '-m', '--squash', '-s', '--rebase', '-r']);
@@ -94,7 +166,7 @@ export function mergeRefusal(line, { cwd = process.cwd(), ghView: view = ghView,
     const t = String(line || '').replace(/["'`\\]/g, '').toLowerCase();
     if (/pulls\/\d+\/merge\b|\b(?:mergepullrequest|enablepullrequestautomerge)\b/.test(t)) return belowBar({ kind: 'api' });
     if (/\bpr\s+merge\b[^\n]*--auto\b/.test(t)) return belowBar({ kind: 'merge', auto: true });
-    return `This line merges a pull request, or mentions merging one, in a form this check does not read, so it is refused. A merge runs only as one command: ${SHAPE}. If the line only mentions a merge (a commit message, a note), put that text in a file and pass the file, for example git commit -F msg.txt. Nothing was run.`;
+    return `This line merges a pull request, or mentions merging one, in a form this check does not read, so it is refused. A merge runs only as one command: ${SHAPE}. If the line only mentions a merge (a commit message, a note), put that text in a file and pass the file, for example git commit -F msg.txt. A read such as gh pr view 36 --json mergeable passes on its own line with no quotes, and anything else in the line can run on a line of its own. Nothing was run.`;
   }
   if (m.disableAuto) return null;
   const target = { selector: m.number, repo: m.repo };
