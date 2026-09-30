@@ -325,11 +325,14 @@ the test pattern ignores case and "pass" is a word. The compaction count
 the right session and was written without being asked, but its goal and test
 lines would mislead anyone resuming from it.
 
-**U. The first-helper nudge after the three lines were given.** The dispatch
-check said *"first helper this session: the user is owed three plain lines
-first"* on the same message whose text had just given them. It reads earlier
-messages only. *Slightly in the way:* harmless here, but it teaches the lead
-to ignore that line.
+**U. The first-helper nudge.** The dispatch check said *"first helper this
+session: the user is owed three plain lines first"*. At first I noted that
+the lines had already been given. The session's own record says otherwise.
+The message that sent the first helper held only the call, with no text for
+the user. The last text before it was the summary written after the
+compaction. So the nudge was true, and the lead had skipped the lines. *Would
+have helped, but came too late:* the nudge arrives with the helper already
+sent, so it can only prompt the lines after the fact. No code change.
 
 **V. The goal after a compaction was the app's own note.** The card after the
 second compaction read *"first request, not confirmed: <system-reminder> The
@@ -342,6 +345,27 @@ context line said *"the last hand-back was 5393 bytes against 600; in the next
 brief, ask for five lines and a file for the rest."* True: the brief had asked
 for findings in the return. *Helped a little:* the report was worth reading
 whole, but the next brief asks for five lines and a file.
+
+**X. A delete refused as if nobody were there.** Clearing an old scratch folder
+of the lead's own, the Bash guard refused with *"This would permanently delete
+files or folders… refused here because nobody is present to say yes."* The user
+was present; the lead had not been asked anything. *In the way, mildly:* a new
+folder name worked around it, but the reason given was wrong about the
+session. The refusal itself is right to keep, since a deleted folder cannot be
+brought back. The guard says this whenever a session runs in auto mode, where
+nobody approves each command. Fixed for 0.17.2: it now says *"nobody will be
+asked to say yes to it here"*, which is true in a helper and in auto mode.
+
+**Y. The goal after the third compaction was still the folder notice.** The
+card read *"first request, not confirmed: <system-reminder> The user started
+this session without choosing a project folder…"* again. This is V, still live
+because its fix waits in the unmerged checkpoint pull request. *In the way*, as
+in V.
+
+**Z. The context line after each command.** *"~72k · compacted 3× · last
+tidy-up at ~147k · newest checkpoint: …, just now"*. Short, true, and it names
+the checkpoint file to read after a summary. *Helped a little:* it confirmed a
+checkpoint existed without anyone going to look.
 
 ## Not about the plugin, but seen
 

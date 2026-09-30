@@ -366,7 +366,7 @@ test('a process kill by name from a helper or in headless mode is refused, not a
   assert.doesNotMatch(helper.reason, /Say yes/);
   const headless = decide('pkill -f node', { headless: true, mode: 'auto' });
   assert.equal(headless.kind, 'deny');
-  assert.match(headless.reason, /nobody is present to say yes/);
+  assert.match(headless.reason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(headless.reason, /Say yes|auto mode|allow-bash|\.json/);
 });
 
@@ -434,7 +434,7 @@ test('an unsafe Bash rm -rf under bypassPermissions is denied, not silently allo
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
   // Nobody can answer in this mode, so the reason must not invite a "yes".
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /allow-bash|\.json|mode/i);
 });
 
@@ -487,7 +487,7 @@ test('a session with no one able to answer an interactive prompt (bypassPermissi
 test('auto mode has nobody to answer an ask, so it is denied in plain words with no mode named', () => {
   const r = run(bash('git push --force', { permission_mode: 'auto' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /auto mode|allow-bash|\.json/i);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
 });
@@ -495,7 +495,7 @@ test('auto mode has nobody to answer an ask, so it is denied in plain words with
 test('dontAsk mode has nobody to answer an ask, so it is denied in plain words with no mode named', () => {
   const r = run(bash('git push --force', { permission_mode: 'dontAsk' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /dontAsk|allow-bash|\.json/i);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
 });
@@ -582,7 +582,7 @@ test('a helper where nobody can say yes is refused because the question cannot b
 test('the main session in auto mode is still refused, in plain words with no mode or file named', () => {
   const r = run(bash('git push --force', { permission_mode: 'auto' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody is present to say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
 });
 
 test('every refusal where nobody can say yes is plain: no mode, no file name, and a way that works', () => {
@@ -591,7 +591,7 @@ test('every refusal where nobody can say yes is plain: no mode, no file name, an
     const d = decide(c, { headless: true, mode: 'auto' });
     assert.equal(d.kind, 'deny', c);
     assert.doesNotMatch(d.reason, /\bmode\b|allow-bash|\.json|\.orchestrator|Say yes to continue/i, c);
-    if (!/branch -D/.test(c)) assert.match(d.reason, /nobody is present to say yes/, c);
+    if (!/branch -D/.test(c)) assert.match(d.reason, /nobody will be asked to say yes to it here/, c);
     if (!/branch -D/.test(c)) assert.match(d.reason, /tell the user|run it themselves/, c);
   }
 });

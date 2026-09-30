@@ -503,18 +503,20 @@ function decideOne(command, ctx = {}) {
   }
 
   if (ctx.subagent || ctx.headless) {
-    // Nobody is present to say yes, so "say yes" would be a lie. Say so in
+    // Nobody will be asked (a helper, or a session set to run without asking),
+    // so "say yes" would be a lie; "nobody is present" was wrong too, since
+    // the user may be watching an auto-mode session. Say so in
     // plain words and give the way that works, naming no mode and no file for
     // anyone to repeat. The project's own approved-commands list still works;
     // it is documented, not named in a refusal.
     const why = hit.reason.replace(ASK_TAIL_RE, '');
     if (hit.name === 'worktree-remove-dirty') {
-      return { kind: 'deny', reason: `${why} This is refused here because nobody is present to say yes. Save what is needed first: commit the changes inside that folder, or copy the files into the main folder and commit them there. Then remove the folder without force. Or leave the folder where it is and tell the user it is there.` };
+      return { kind: 'deny', reason: `${why} This is refused here because nobody will be asked to say yes to it here. Save what is needed first: commit the changes inside that folder, or copy the files into the main folder and commit them there. Then remove the folder without force. Or leave the folder where it is and tell the user it is there.` };
     }
     if (ctx.subagent) {
       return { kind: 'deny', reason: `${why} The question cannot be answered here, so this is refused: report back what you were about to run instead of retrying.` };
     }
-    return { kind: 'deny', reason: `${why} This is refused here because nobody is present to say yes. Nothing was run. Leave it and tell the user what you were about to run, or ask them to run it themselves in a normal session.` };
+    return { kind: 'deny', reason: `${why} This is refused here because nobody will be asked to say yes to it here. Nothing was run. Leave it and tell the user what you were about to run, or ask them to run it themselves in a normal session.` };
   }
   // A real interactive user who already said yes is not blocked by this: the
   // host applies their answer before the hook ever sees the next call. This
