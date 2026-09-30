@@ -28,8 +28,8 @@ test that fails on the old code:
   user typed and what the shell printed, not from host notices or file reads;
   the compaction count comes from the transcript. (#35)
 - The audit prompts no longer claim a version, and a test keeps it so. (#37)
-- A helper's own compaction no longer prints the lead's card into the helper, bumps the
-  lead's compaction count or clears its working project. The host sends those
+- A helper's own compaction no longer prints the lead's card into the helper, or clears
+  the lead's working project. The host sends those
   hooks with no helper id (anthropics/claude-code#91910), so the plugin looks
   for a helper compaction in the last 10 s instead: on this machine's records it
   caught 378 of 379 and misjudged none of 354 lead compactions. (#40)

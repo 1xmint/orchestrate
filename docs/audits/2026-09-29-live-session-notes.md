@@ -531,6 +531,15 @@ helper whose file is written late is missed, and then the card prints as
 before. *Live proof is for the next audit:* no card in helper transcripts
 dated after this fix is installed.
 
+**AP. The ninth after-compaction card, on 0.17.1.** It repeated both of AN's
+leftovers: the goal was again the app's folder notice (fixed in 0.17.2, not
+installed), and again *"checkpoint note follows at first action"*. Its count
+was right: *"Compaction 9 of this session. 8 helpers sent so far; orch-advisor
+last sent: never."*, and the transcript holds nine boundaries. "orch-advisor
+last sent: never" was true of the plugin's helper, but a second opinion had
+been taken several times through the session's own advisor. The line did not
+lead to sending a redundant helper here. *Neither helped nor got in the way.*
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to
