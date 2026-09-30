@@ -670,3 +670,10 @@ test('every role file keeps the five lines even when the brief asks for pasted c
     assert.match(text, /even if the brief asks for pasted contents or output; FULL REPORT names it\./, `${f} lacks the file-not-return sentence`);
   }
 });
+
+test('SKILL.md buys one second opinion: the built-in advisor when present', () => {
+  // With /advisor on, the host's advisor tool and orch-advisor both answer
+  // "is this the right direction"; asking both pays twice for one check.
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  assert.match(skill, /One second opinion per check\. The built-in `advisor` tool, if present, is it/);
+});
