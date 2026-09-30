@@ -32,8 +32,10 @@ test that fails on the old code:
   none, leaves the fail standing.
 - A second fail after a pass is said again, and a fresh reviewer's fail holds
   even if another reviewer passed the same work.
-- Only a reviewer's PASS or FAIL line is read as naming reviewed work, so a
-  builder quoting the brief's "REVIEW OF" is not taken for a review. A second
+- A hand-back names reviewed work only when its opening line is a PASS or FAIL
+  verdict, so a builder quoting a review anywhere is not taken for one, and a
+  look that came back with no verdict no longer counts as reviewed (the stop
+  hook says "came back with no verdict; send it again"). A second
   reviewer counts as still looking only while it has not replied and was sent
   within six hours.
 - The "this change touches ..." stop line is said once per risky edit; it no

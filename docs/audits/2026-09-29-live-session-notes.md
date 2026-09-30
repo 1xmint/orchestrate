@@ -231,7 +231,12 @@ re-sent to fix a problem could pass its own fix, and a second reviewer that
 replied without a verdict, or never replied, counted as still looking forever.
 Fixed a third time: only a PASS or FAIL line names reviewed work, and "still
 looking" means no reply yet and sent within six hours. *The review helped
-again*, on the same check.
+again*, on the same check. A third review failed it once more: a builder's
+report quoting a reviewer's verdict on a lower line still read as a review, and
+the ledger counted a look with no verdict as a pass. Fixed a fourth time, this
+time by writing every known way to fool the check as tests first: only a
+hand-back whose opening line is PASS or FAIL names reviewed work, and only a
+PASS counts as reviewed.
 
 **M. The "touches payments" line came back on a later turn.** It fired on a
 scratch script that quoted `git checkout` (0.17.1 already strips that phrase;
@@ -255,6 +260,23 @@ never been written. Before this turn ends, update the Pickup section of
 next session, so the lead declined. The installed 0.17.0 still binds a closed
 run; 0.17.1 (3ad41bb) drops that binding, so this should not recur after the
 update. Check it live on the next session.
+
+**P. The closed run's spending cap blocked a review.** Sending the third
+independent review, the helper check said *"it would cross the $205 ceiling
+... Raise the ceiling in the run's Budget section, or stop."* The spending was
+counted against the same closed run as O. *Got in the way:* a finished audit's
+cap stopped the review that the merge bar needs. The user agreed to a small
+raise, noted in that run's Budget line. Same cause as O, so the same 0.17.1
+change should end it; check it live next session.
+
+**Why three reviews for one small fix.** The user asked. The fix is to the
+check that decides whether a change was reviewed, which is what merging leans
+on, so a hole there lets any later change skip review. Each review found a real
+hole. The lead's part: it patched each finding as it came instead of writing
+the ways the check could be fooled before building, which the plugin's own
+advice for reviews ("the questions you wrote before the build") asks for. The
+plugin's part: nothing prompted that list for a change to its own safety
+check.
 
 ## Not about the plugin, but seen
 

@@ -690,6 +690,15 @@ test('reviewHoldDecision: a later reviewer that is not really still looking does
   assert.equal(hold(base, soon), false, 'sent recently with no reply, it is still looking');
 });
 
+test('reviewHoldDecision: a look with no verdict is said as that, not as a problem found', () => {
+  const returned = [fuDone[0], { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'DONE', reviewOf: 'tu-x', at: fu(16) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: [], now: Date.parse(fu(25)) });
+  assert.equal(d.block, true);
+  assert.equal(d.noVerdict, true);
+  const f = reviewHoldDecision({ returned: [fuDone[0], fuDone[3]], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: [], now: Date.parse(fu(25)) });
+  assert.equal(f.noVerdict, false, 'a real FAIL is still said as a problem found');
+});
+
 test('the hook tells the lead once, in one plain line, that a review failed', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
   const dir = join(home, '.claude', 'orchestrate', 'sessions');

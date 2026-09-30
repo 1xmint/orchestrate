@@ -74,9 +74,10 @@ export function parseReturn(text) {
     // (packet.md's Reviewer packet RETURN schema), the task id its own first
     // token. This is how a reviewer return is told from any other return —
     // never TASK, which on a reviewer return names the reviewer's own task id.
-    // The five-line hand-back carries it inside a PASS or FAIL OUTCOME line
-    // instead ("OUTCOME: PASS (REVIEW OF: tu-x) …"), so a follow-up's verdict
-    // says which work it is about (lib/review-of.mjs).
+    // The five-line hand-back carries it inside its opening PASS or FAIL
+    // OUTCOME line ("OUTCOME: PASS (REVIEW OF: tu-x) …"), so a follow-up's
+    // verdict says which work it is about; a quote anywhere else is not read
+    // (lib/review-of.mjs).
     reviewOf: reviewOfIn(t, { handBack: true }),
   };
 }
@@ -271,7 +272,7 @@ export function reviewGated(dispatch, ret) {
 
 export function reviewDowngrade(status, reviewFlagged, task, indexRows, reviewInferred = null) {
   if (status !== 'DONE' || !reviewFlagged || !task) return { status, note: null };
-  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task && row.verdict !== 'FAIL');
+  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task && row.verdict === 'PASS');
   if (reviewed) return { status, note: null };
   const note = reviewInferred
     ? `done, but its objective mentions ${reviewInferred}, so it waits for an independent review that has not returned yet.`

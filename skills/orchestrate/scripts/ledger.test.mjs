@@ -216,6 +216,15 @@ test("parseReturn: a builder's OUTCOME line quoting REVIEW OF is not a review", 
   const r = parseReturn('OUTCOME: DONE, fixed (REVIEW OF: 9-1-0001)\nPROOF: node --test, 5 pass\n');
   assert.equal(r.reviewOf, null);
   assert.equal(reviewGated({ review: true }, r), true, 'the fix still waits for its own look');
+  const quoted = parseReturn('OUTCOME: DONE fixed\n  OUTCOME: PASS (REVIEW OF: 9-1-0001) ok\n');
+  assert.equal(quoted.reviewOf, null);
+  assert.equal(reviewGated({ review: true }, quoted), true, 'a quoted verdict line lower down does not make it a review');
+});
+
+// Review of d8724f9: a look that came back with no verdict is not a pass.
+test('reviewDowngrade: a review row with no verdict does not count as reviewed', () => {
+  assert.notEqual(reviewDowngrade('DONE', true, '9-1-0001', [{ reviewOf: '9-1-0001', verdict: null }]).status, 'DONE');
+  assert.equal(reviewDowngrade('DONE', true, '9-1-0001', [{ reviewOf: '9-1-0001', verdict: 'PASS' }]).status, 'DONE');
 });
 
 test('a return whose TASK line is prose ("TASK: build the login page") is not filed under its first word', () => {

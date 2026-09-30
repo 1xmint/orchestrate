@@ -171,7 +171,7 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
     const failed = looks.length > 0;
     const key = failed ? failKey(r.task, judged.fail) : r.task;
     if (already.has(key)) continue;
-    return { block: true, task: r.task, failed, blockedFor: [...already, key] };
+    return { block: true, task: r.task, failed, noVerdict: failed && !judged.fail, blockedFor: [...already, key] };
   }
   const open = freeFormOpen(returned, dispatches, t0);
   for (const f of open) {
@@ -179,7 +179,7 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
     if (already.has(key) || skipSaid) continue;
     const later = !f.failed && open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && isReviewerRow(d) && !(d.reviewOf && dispatches.some(x => x && x.toolUseId === d.reviewOf)) && !reviewFailed(d, returned) && Date.parse(d.at) > (Number.isFinite(f.sentAt) ? f.sentAt : f.at));
     if (later) continue;
-    return { block: true, task: f.id, freeForm: true, failed: Boolean(f.failed), blockedFor: [...already, key] };
+    return { block: true, task: f.id, freeForm: true, failed: Boolean(f.failed), noVerdict: Boolean(f.failed) && !f.fail, blockedFor: [...already, key] };
   }
   return { block: false, task: null, blockedFor: [...already] };
 }
@@ -411,6 +411,7 @@ function checkHeartbeat(input) {
     updated.reviewBlockedFor = rh.blockedFor;
     store[key] = updated;
     try { writeJsonAtomic(path, store); } catch {}
+    if (rh.noVerdict) return emitBlock('orchestrate: the independent look came back with no verdict; send it again.');
     if (rh.failed) return emitBlock('orchestrate: the independent look found a problem; fix it and have it looked at again.');
     if (rh.freeForm) return emitBlock(`orchestrate: a brief flagged for independent review returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
     return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
