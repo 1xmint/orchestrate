@@ -146,3 +146,28 @@ test('writeStatusCapacity and statusCapacity round-trip in a temp dir, and a sta
   assert.equal(statusCapacity('other', { dir }), null);
   assert.equal(writeStatusCapacity('s1', 0, { dir }), false, 'a zero size is not written');
 });
+
+import { advisorSteps, advisorTotals } from './context-scan.mjs';
+
+const REAL_ADVISOR_USAGE = {
+  iterations: [
+    { type: 'message', cache_read_input_tokens: 101674 },
+    { type: 'advisor_message', model: 'claude-opus-5-5', input_tokens: 108419, output_tokens: 14312 },
+    { type: 'message', cache_read_input_tokens: 103443, cache_creation_input_tokens: 2239 },
+  ],
+};
+
+test('advisorSteps reads only the advisor steps of a real record, with absent fields as zero', () => {
+  assert.deepEqual(advisorSteps(REAL_ADVISOR_USAGE), [
+    { model: 'claude-opus-5-5', input: 108419, output: 14312, cacheRead: 0, cacheWrite: 0 },
+  ]);
+});
+
+test('advisorSteps is empty without iterations, and advisorTotals groups by model', () => {
+  assert.deepEqual(advisorSteps({ input_tokens: 5, output_tokens: 1 }), []);
+  assert.deepEqual(advisorSteps(null), []);
+  const t = advisorTotals([REAL_ADVISOR_USAGE, REAL_ADVISOR_USAGE]);
+  assert.equal(t.length, 1);
+  assert.equal(t[0].calls, 2);
+  assert.equal(t[0].input, 216838);
+});

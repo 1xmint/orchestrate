@@ -27,7 +27,8 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
-import { dollars, family, normalizeRole } from './lib/prices.mjs';
+import { dollars, family, normalizeRole, advisorDollars } from './lib/prices.mjs';
+import { advisorTotals } from './lib/context-scan.mjs';
 import { roleMaxTurns, segmentTurns, runningExternal } from './lib/workers.mjs';
 import { checkReturn } from './lib/report.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
@@ -101,6 +102,8 @@ export function sumUsage(transcriptPath) {
       if (typeof m.model === 'string' && m.model !== '<synthetic>') model = m.model;
       byId.set(m.id || `anon-${anon++}`, u);
     }
+    const adv = advisorTotals(byId.values());
+    if (adv.length) totals.advisor = adv;
     for (const u of byId.values()) {
       totals.turns++;
       totals.input += Number(u.input_tokens) || 0;
@@ -124,6 +127,11 @@ export const COSTS_MAX = 500;
 export function costLine(role, model, usage, agentId = null) {
   const fam = family(model);
   const d = dollars(usage, model);
+  const adv = usage.advisor && usage.advisor.length ? usage.advisor : null;
+  const ad = adv ? advisorDollars(adv) : null;
+  // The advisor is priced at its own model's rate. A main model nobody can
+  // price still leaves the whole record unpriced, as before.
+  const total = d == null ? null : d + (ad ? ad.dollars : 0);
   return {
     at: new Date().toISOString(),
     role: normalizeRole(role || 'claude'),
@@ -131,7 +139,14 @@ export function costLine(role, model, usage, agentId = null) {
     priced: Boolean(fam),
     ...(agentId ? { agent: String(agentId) } : {}),
     input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite,
-    dollars: d == null ? null : Number(d.toFixed(4)),
+    ...(adv ? {
+      advisorCalls: adv.reduce((n, b) => n + b.calls, 0),
+      advisorModel: adv.map(b => family(b.model || '') || b.model || 'unknown').join(','),
+      advisorInput: adv.reduce((n, b) => n + b.input, 0), advisorOutput: adv.reduce((n, b) => n + b.output, 0),
+      advisorCacheRead: adv.reduce((n, b) => n + b.cacheRead, 0), advisorCacheWrite: adv.reduce((n, b) => n + b.cacheWrite, 0),
+      advisorDollars: Number(ad.dollars.toFixed(4)), advisorUnpriced: ad.unpriced,
+    } : {}),
+    dollars: total == null ? null : Number(total.toFixed(4)),
   };
 }
 

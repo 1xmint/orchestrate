@@ -249,3 +249,32 @@ test('lookups before the first edit are counted apart from later ones, and test 
   const text = treeReport({ session: 's', lead: { type: 'lead', depth: 0, agentId: null, ...r }, agents: [], codex: [], totals: { agents: 0, nestedAgents: 0, calls: 5, input: 0, cacheRead: 0, cacheWrite: 0, output: 50, retries: 0 } });
   assert.match(text, /2 lookups before first edit, ≈3k read, ≈30% of context growth, context 15k at that edit, re-read ≈10k by later calls/);
 });
+
+import { dollars as dollarsAdv } from './lib/prices.mjs';
+
+const advLine = (id, u) => JSON.stringify({ type: 'assistant', sessionId: 's', message: { id, model: 'claude-sonnet-5-5', usage: u } });
+const ADV_U = {
+  input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+  iterations: [
+    { type: 'message', input_tokens: 1000, output_tokens: 100 },
+    { type: 'advisor_message', model: 'claude-opus-5-5', input_tokens: 108419, output_tokens: 14312 },
+  ],
+};
+const ADV_WANT = dollarsAdv({ input: 1500, output: 150 }, 'claude-sonnet-5-5') + dollarsAdv({ input: 108419, output: 14312 }, 'claude-opus-5-5');
+
+test('the session total includes the advisor at opus rates, once per message id', () => {
+  const text = [advLine('a', { input_tokens: 500, output_tokens: 50 }), advLine('b', ADV_U), advLine('b', ADV_U), advLine('b', ADV_U)].join('\n');
+  const r = measure(text);
+  assert.equal(r.advisor.length, 1);
+  assert.equal(r.advisor[0].calls, 1);
+  const out = dollarReport(r, 'api', null);
+  assert.ok(out.includes(`$${ADV_WANT.toFixed(2)} on sonnet plus the advisor`), out);
+  assert.match(out, /advisor: 1 call, 108k read, 14k written, \$\d+\.\d\d at list price on opus/);
+});
+
+test('the growth price includes the advisor', () => {
+  const text = [advLine('a', { input_tokens: 500, output_tokens: 50 }), advLine('b', ADV_U)].join('\n');
+  const g = measureGrowth(text);
+  assert.ok(Math.abs(g.price - ADV_WANT) < 1e-9);
+  assert.match(growthReport(g), /advisor: 1 call/);
+});

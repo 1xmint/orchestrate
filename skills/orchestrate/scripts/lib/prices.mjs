@@ -70,6 +70,27 @@ export function dollars({ input = 0, output = 0, cacheRead = 0, cacheWrite = 0 }
   return (input * p.in + output * p.out + cacheRead * p.in * cacheReadShare(model) + cacheWrite * p.in * 1.25) / m;
 }
 
+// List-price dollars for advisorTotals() rows, each at its own model's rate.
+// A row whose model nobody can price adds nothing and is counted in `unpriced`.
+export function advisorDollars(rows) {
+  let total = 0, unpriced = 0;
+  for (const b of rows || []) {
+    const d = dollars(b, b.model || '');
+    if (d == null) unpriced += b.calls; else total += d;
+  }
+  return { dollars: total, unpriced };
+}
+
+// Plain report lines, one per advisor model, or null when it was never called.
+export function advisorLine(rows) {
+  if (!rows || !rows.length) return null;
+  const k = n => `${Math.round(n / 1000)}k`;
+  return rows.map(b => {
+    const d = dollars(b, b.model || '');
+    return `advisor: ${b.calls} call${b.calls === 1 ? '' : 's'}, ${k(b.input + b.cacheRead)} read, ${k(b.output + b.cacheWrite)} written, ${d == null ? `not priced (model ${b.model || 'unnamed'})` : `$${d.toFixed(2)} at list price on ${family(b.model)}`}`;
+  }).join('\n');
+}
+
 // The starting table, for a role and model nobody has measured here yet. Every
 // number is reasoned from the per-token prices above and one observed fan-out,
 // and says so wherever it is printed.
