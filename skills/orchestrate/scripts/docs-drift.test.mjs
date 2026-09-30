@@ -236,3 +236,13 @@ test('README\'s "What the hooks do" table has a row for every script hooks.json 
       `README's hooks table has no row for ${script}`);
   }
 });
+
+test('no current doc claims to be current for a version: the version lives only in plugin.json', () => {
+  const docs = join(ROOT, 'docs');
+  const stale = [];
+  for (const f of readdirSync(docs).filter(n => n.endsWith('.md'))) {
+    const m = /current (?:for|as of) v?\d+\.\d+(?:\.\d+)?/i.exec(readFileSync(join(docs, f), 'utf8'));
+    if (m) stale.push(`docs/${f}: "${m[0]}" (plugin.json says ${PLUGIN.version})`);
+  }
+  assert.deepEqual(stale, []);
+});

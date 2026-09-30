@@ -5,7 +5,8 @@ grades every area with a number, runs the plugin live, compares it to the
 field, and returns ranked changes. Paste into a fresh session on the strongest
 model available. Replace `<PATH>` and `<BUDGET>`. Run twice (Fable and Opus);
 any area where the two scores differ by three or more is unresolved, not an
-average. Current for v0.16.1.
+average. It names no version: it is kept in step with the code, and the version
+is whatever `.claude-plugin/plugin.json` says.
 
 ```
 You are auditing a Claude Code plugin called `orchestrate` (repo:
