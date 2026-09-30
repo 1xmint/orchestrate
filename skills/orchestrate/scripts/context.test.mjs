@@ -58,6 +58,22 @@ test('inputSide: uncached input plus cache reads and writes; all-null usage is n
   assert.equal(inputSide({ input_tokens: 12 }), 12);
 });
 
+test('inputSide: a response that called the advisor is sized by its last own step', () => {
+  // The shape seen live: two main-model steps around one advisor call. The
+  // top-level fields add both steps together (205117 read), which read as a
+  // context twice its size; the advisor's own read is its context, not ours.
+  const usage = {
+    input_tokens: 4, cache_read_input_tokens: 205117, cache_creation_input_tokens: 4008, output_tokens: 1121,
+    iterations: [
+      { type: 'message', input_tokens: 2, cache_read_input_tokens: 101674, cache_creation_input_tokens: 1769, output_tokens: 738 },
+      { type: 'advisor_message', model: 'claude-opus-5-5', input_tokens: 108419, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 14312 },
+      { type: 'message', input_tokens: 2, cache_read_input_tokens: 103443, cache_creation_input_tokens: 2239, output_tokens: 383 },
+    ],
+  };
+  assert.equal(inputSide(usage), 105684);
+  assert.equal(inputSide({ ...usage, iterations: [] }), 209129, 'no steps listed: the top-level fields as before');
+});
+
 test('a compaction boundary ends the scan: an old 311k reading never survives a 17k summary', () => {
   const { p, dir } = file([user('go', 0), assistant(250000, { min: 1 }), assistant(311000, { min: 2 }), boundary(311000, 17000, 3), summary(3)]);
   const r = readContext(p, { now: NOW, policy, capacity: null });

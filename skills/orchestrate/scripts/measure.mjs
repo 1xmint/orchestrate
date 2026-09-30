@@ -27,6 +27,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dollars, family } from './lib/prices.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
+import { inputSide } from './lib/context-scan.mjs';
 import { detectTier, readJson, PROFILE_PATH } from './lib/tier.mjs';
 
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -227,7 +228,9 @@ export function growthReport(r) {
 // never count twice. Context is per request (the input side of each call);
 // totals are consumption, and the two are never mixed.
 
-const inputOf = u => num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens);
+// The context of one call: the same reader the size line uses, so a response
+// that called the advisor is not read as the sum of its steps.
+const inputOf = u => inputSide(u) ?? 0;
 
 // Finding the way: tool results that only read or search, split at the agent's
 // first edit. Characters, not tokens; ÷4 is an estimate. A Bash call counts only
