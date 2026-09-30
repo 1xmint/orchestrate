@@ -402,8 +402,10 @@ export function missingFact(role, prompt, planMode, readFile = readFileSync) {
     return Boolean(file) && re.test(file);
   };
   const lacks = [];
-  if (!has(/(^|\s)FOR:\s*\S/)) lacks.push('what it is for');
-  if (!has(/(^|\s)DONE WHEN\b/)) lacks.push('a check it is done');
+  // The packet capitals anywhere, or the same label in any case at the start
+  // of a line: a brief the lead wrote by hand says "For:" and "Done when:".
+  if (!has(/(^|\s)FOR:\s*\S/) && !has(/^[ \t]*(?:for|objective|goal)\s*:\s*\S/im)) lacks.push('what it is for');
+  if (!has(/(^|\s)DONE WHEN\b/) && !has(/^[ \t]*done[ -]when\b/im)) lacks.push('a check it is done');
   if (progressFact(role, prompt, planMode, readFile)) lacks.push('a PROGRESS path');
   return lacks.length ? `brief lacks: ${lacks.join(', ')}` : '';
 }

@@ -22,6 +22,14 @@ test('missingFact says what a building brief lacks as one line, in a fixed order
   assert.equal(missingFact('orch-implementer', 'FOR: x\nDONE WHEN (evidence)\n- t\nPROGRESS: /r/p.md', false), '');
 });
 
+test('missingFact reads a brief written in ordinary case, not only the packet capitals', () => {
+  const brief = 'For: the orchestrate plugin repo\nObjective: count the advisor\nDone when:\n- the suite passes\nPROGRESS: /r/p.md';
+  assert.equal(missingFact('orch-implementer', brief, false), '');
+  assert.equal(missingFact('orch-implementer', 'Objective: count it\ndone when: tests pass\nPROGRESS: /r/p.md', false), '');
+  // "for:" inside a sentence is not the label.
+  assert.equal(missingFact('orch-implementer', 'look for: the flag\nDONE WHEN tests pass\nPROGRESS: /r/p.md', false), 'brief lacks: what it is for');
+});
+
 test('missingFact is no longer than the PROGRESS sentence it replaces, and silent where that was', () => {
   const worst = missingFact('orch-implementer', 'TASK: 1', false);
   assert.ok(Buffer.byteLength(worst) <= Buffer.byteLength('no PROGRESS line: a capped return will have nothing to resume from'));
