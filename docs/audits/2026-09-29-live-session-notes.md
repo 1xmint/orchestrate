@@ -479,6 +479,23 @@ and really merges a pull request."* PR #36 then merged with
 open-ended rounds could not. The cost was five review rounds for one check,
 and a known gap named in the docs rather than closed.
 
+**AN. The eighth after-compaction card still pinned the app's folder notice as
+the goal.** The card read *"[orchestrate · goal] first request, not confirmed:
+&lt;system-reminder&gt; The user started this session without choosing a
+project folder…"*. That is the desktop app's notice, not the user's brief. The
+installed copy is still 0.17.1, and #35 fixed this in 0.17.2. One replay of
+this session's first three prompts through main pinned the real brief
+(*"advisor is running opus 5.5, go: …"*) and skipped the `/advisor` command
+line. *Got in the way; fixed in 0.17.2, not yet installed.* Two smaller
+things:
+- The pinned brief still begins with the host's `<pasted_content id="…">`
+  tag. It is harmless, but it is noise on every goal line. Not fixed.
+- The same card said *"checkpoint note follows at first action"*. What
+  followed, on the second tool call, was the checkpoint's path in the size
+  line. The lead did not open it, because the summary already held the
+  pending work. *Neither helped nor got in the way this time.* "Note follows"
+  promises more than a path.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to
