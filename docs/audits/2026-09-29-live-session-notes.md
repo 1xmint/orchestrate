@@ -47,8 +47,15 @@ long brief, not a short fix request.
 **6. A helper's size note.** Not seen. The researcher finished well inside its
 budget.
 
-**7. Money or sign-in work held for review.** Not seen. Nothing in this
-session touched money or sign-in.
+**7. Money or sign-in work held for review.** Seen, as a false alarm. At the
+end of a turn the stop check held the finish, saying the change touched money
+and nobody independent had looked at it. Nothing touched money. The two
+matches were the cost column in `references/models.md` and the git command for
+throwing away edits, quoted in item 4 of these notes. *Got in the way, mildly:*
+it cost one extra turn, and after a second look the lead finished without a
+review. Suggest the stop check skip edits to `docs/` and `references/` Markdown
+(notes about money are not money moving), and not count the git command. A
+real payment change would still be caught through its code files.
 
 ## Other things that came up
 
