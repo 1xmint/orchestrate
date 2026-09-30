@@ -211,6 +211,13 @@ test('parseReturn reads REVIEW OF from inside the five-line OUTCOME line', () =>
   assert.equal(parseReturn('PROOF: the brief said REVIEW OF: 9-1-0034\n').reviewOf, null, 'only the OUTCOME line or its own line');
 });
 
+// Review of e77b94e: a builder re-sent to fix a review quotes its REVIEW OF.
+test("parseReturn: a builder's OUTCOME line quoting REVIEW OF is not a review", () => {
+  const r = parseReturn('OUTCOME: DONE, fixed (REVIEW OF: 9-1-0001)\nPROOF: node --test, 5 pass\n');
+  assert.equal(r.reviewOf, null);
+  assert.equal(reviewGated({ review: true }, r), true, 'the fix still waits for its own look');
+});
+
 test('a return whose TASK line is prose ("TASK: build the login page") is not filed under its first word', () => {
   const r = parseReturn('TASK: build the login page\nSTATUS: DONE\nEVIDENCE: it loads\n');
   assert.equal(r.task, null);

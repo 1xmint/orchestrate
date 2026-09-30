@@ -225,7 +225,13 @@ naming the same work undoes a FAIL. The same review found two older holes that
 matter now merging leans on this check: a second FAIL after a PASS was never
 said, and one reviewer's PASS outweighed a fresh reviewer's later FAIL. Both
 fixed. *The review helped:* it caught a hole in a fix to the review check
-itself, which the lead's own tests had passed.
+itself, which the lead's own tests had passed. A second review failed the
+second fix too: any line quoting "REVIEW OF" was read as a review, so a builder
+re-sent to fix a problem could pass its own fix, and a second reviewer that
+replied without a verdict, or never replied, counted as still looking forever.
+Fixed a third time: only a PASS or FAIL line names reviewed work, and "still
+looking" means no reply yet and sent within six hours. *The review helped
+again*, on the same check.
 
 **M. The "touches payments" line came back on a later turn.** It fired on a
 scratch script that quoted `git checkout` (0.17.1 already strips that phrase;
@@ -241,6 +247,14 @@ contract; the change made since the review has not been looked at."* True, but
 the look was under way, and the line does not say so. *Slightly in the way:* it
 cost one turn saying "the reviewer is working". Not fixed; a candidate for the
 next round (say "a reviewer is still working on it" when one is).
+
+**O. The stop hook asked for a Pickup on a closed run.** It said *"Pickup has
+never been written. Before this turn ends, update the Pickup section of
+…\20260924-audit-to-ten\RUN.md"*. That run carries `Closed: 2026-09-30`.
+*Got in the way:* writing a resume note into a finished run would mislead the
+next session, so the lead declined. The installed 0.17.0 still binds a closed
+run; 0.17.1 (3ad41bb) drops that binding, so this should not recur after the
+update. Check it live on the next session.
 
 ## Not about the plugin, but seen
 

@@ -32,6 +32,7 @@ import { advisorTotals } from './lib/context-scan.mjs';
 import { roleMaxTurns, segmentTurns, runningExternal } from './lib/workers.mjs';
 import { checkReturn } from './lib/report.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
+import { reviewOfIn } from './lib/review-of.mjs';
 import { addSuggestion } from './suggest.mjs';
 export { roleMaxTurns };
 
@@ -73,10 +74,10 @@ export function parseReturn(text) {
     // (packet.md's Reviewer packet RETURN schema), the task id its own first
     // token. This is how a reviewer return is told from any other return —
     // never TASK, which on a reviewer return names the reviewer's own task id.
-    // The five-line hand-back carries it inside the OUTCOME line instead
-    // ("OUTCOME: PASS (REVIEW OF: tu-x) …"), so a follow-up's verdict says
-    // which work it is about.
-    reviewOf: ((/^\s*(?:OUTCOME:[^\n]*?\b)?REVIEW OF:\s*([^\s,;()]+)/im.exec(t) || [])[1] || '').replace(/\.+$/, '') || null,
+    // The five-line hand-back carries it inside a PASS or FAIL OUTCOME line
+    // instead ("OUTCOME: PASS (REVIEW OF: tu-x) …"), so a follow-up's verdict
+    // says which work it is about (lib/review-of.mjs).
+    reviewOf: reviewOfIn(t, { handBack: true }),
   };
 }
 

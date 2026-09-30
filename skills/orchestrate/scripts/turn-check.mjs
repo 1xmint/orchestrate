@@ -107,17 +107,23 @@ const standingVerdict = (d, returned) => {
 const reviewFailed = (d, returned) => (standingVerdict(d, returned) || {}).verdict === 'FAIL';
 const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id);
 
-// Several reviewers of the same work. One still running, or back with no
-// verdict, is a look. Otherwise the newest standing verdict among them decides,
-// so a fresh reviewer's FAIL after another's PASS holds. `fail` is the FAIL that
+// Several reviewers of the same work. One still running (no reply on file, sent
+// within six hours, the bound anyHelperRunning uses) is a look. One that replied
+// with no verdict that stands (capped, no OUTCOME, a PASS naming other work) is
+// neither a pass nor a fail. Otherwise the newest standing verdict decides, so a
+// fresh reviewer's FAIL after another's PASS holds. `fail` is the FAIL that
 // stands, whose time keys the ask-once memory: a second FAIL after a PASS is
 // news and is said again.
-const judgeLooks = (looks, returned) => {
+const sameHelper = (r, d) => Boolean(r && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId)));
+const judgeLooks = (looks, returned, now = Date.now()) => {
   const rs = Array.isArray(returned) ? returned : [];
   let newest = null;
   for (const d of looks) {
     const v = standingVerdict(d, rs);
-    if (!v) return { passed: true, fail: null };
+    if (!v) {
+      if (!rs.some(r => sameHelper(r, d)) && !(Date.parse(d.at) < now - 6 * 3600 * 1000)) return { passed: true, fail: null };
+      continue;
+    }
     if (!newest || rs.indexOf(v) > rs.indexOf(newest)) newest = v;
   }
   return newest && newest.verdict === 'FAIL' ? { passed: false, fail: newest } : { passed: Boolean(newest), fail: null };
@@ -134,7 +140,7 @@ export function anyHelperRunning({ dispatches, returned, now }) {
     && !rs.some(r => r && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId))));
 }
 
-function freeFormOpen(returned, dispatches) {
+function freeFormOpen(returned, dispatches, now) {
   const ds = Array.isArray(dispatches) ? dispatches : [];
   const out = [];
   for (const r of Array.isArray(returned) ? returned : []) {
@@ -146,27 +152,28 @@ function freeFormOpen(returned, dispatches) {
       : (r.agentId ? ds.find(x => x && x.agentId === r.agentId) : null);
     if (!d || !d.toolUseId || d.task || !d.review || isReviewerRow(d)) continue;
     const looks = looksAt(ds, returned, d.toolUseId);
-    const judged = judgeLooks(looks, returned);
+    const judged = judgeLooks(looks, returned, now);
     if (judged.passed) continue;
     out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at), failed: looks.length > 0, fail: judged.fail });
   }
   return out;
 }
 
-export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedFor }) {
+export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedFor, now }) {
+  const t0 = Number.isFinite(now) ? now : Date.now();
   const already = new Set(Array.isArray(blockedFor) ? blockedFor : []);
   const gated = (Array.isArray(returned) ? returned : []).filter(r => r && r.reviewGated && r.task);
   const skipSaid = SKIP_EXPLAINED.test(String(lastMessage || ''));
   for (const r of gated) {
     const looks = looksAt(Array.isArray(dispatches) ? dispatches : [], returned, r.task);
-    const judged = judgeLooks(looks, returned);
+    const judged = judgeLooks(looks, returned, t0);
     if (judged.passed || skipSaid) continue;
     const failed = looks.length > 0;
     const key = failed ? failKey(r.task, judged.fail) : r.task;
     if (already.has(key)) continue;
     return { block: true, task: r.task, failed, blockedFor: [...already, key] };
   }
-  const open = freeFormOpen(returned, dispatches);
+  const open = freeFormOpen(returned, dispatches, t0);
   for (const f of open) {
     const key = f.failed ? failKey(f.id, f.fail) : f.id;
     if (already.has(key) || skipSaid) continue;

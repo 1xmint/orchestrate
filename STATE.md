@@ -32,6 +32,10 @@ test that fails on the old code:
   none, leaves the fail standing.
 - A second fail after a pass is said again, and a fresh reviewer's fail holds
   even if another reviewer passed the same work.
+- Only a reviewer's PASS or FAIL line is read as naming reviewed work, so a
+  builder quoting the brief's "REVIEW OF" is not taken for a review. A second
+  reviewer counts as still looking only while it has not replied and was sent
+  within six hours.
 - The "this change touches ..." stop line is said once per risky edit; it no
   longer comes back as the chat grows.
 

@@ -24,6 +24,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, readTail } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
+import { reviewOfIn } from './lib/review-of.mjs';
 import { roleModel, helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
 import { family, normalizeRole, costLabel, estimateDollars, SOLO_RATIO } from './lib/prices.mjs';
 import { readCosts } from './ledger.mjs';
@@ -773,7 +774,7 @@ function recordDispatch(input, ti) {
       // (packet.md). Recorded on the reviewer's own dispatch row so
       // turn-check.mjs can tell a review was actually sent for a tagged task
       // without re-reading any packet text.
-      ...((/^\s*REVIEW OF:\s*(\S+)/im.exec(String(ti.prompt || '')) || [])[1] ? { reviewOf: (/^\s*REVIEW OF:\s*(\S+)/im.exec(String(ti.prompt || '')))[1] } : {}),
+      ...(reviewOfIn(ti.prompt) ? { reviewOf: reviewOfIn(ti.prompt) } : {}),
       ...(input.agent_id ? { parent: String(input.agent_id) } : {}),
     });
     state.lastDispatchAt = state.dispatches[state.dispatches.length - 1].at;
