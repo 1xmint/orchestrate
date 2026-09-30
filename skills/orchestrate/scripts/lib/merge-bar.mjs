@@ -44,10 +44,12 @@ export const REVIEW_PATHS = [
 // backticks and backslashes are taken out first, so none of them can split the
 // words apart.
 export function mentionsMerge(line) {
-  const t = String(line || '').replace(/["'`\\]/g, '').toLowerCase();
-  return /\bpr\s+(?:--?[a-z][\w-]*(?:[=\s]+[^\s-]\S*)?\s+)*merge\b/.test(t)
+  // A backslash-newline joins two halves of a word in the shell, and braces
+  // expand into words (`{merge,}`), so both go before the quotes do.
+  const t = String(line || '').replace(/\\\r?\n/g, '').replace(/[{},]/g, '').replace(/["'`\\]/g, '').toLowerCase();
+  return /\bpr\s+(?:-\S*(?:\s+[^\s-]\S*)?\s+)*merge\b/.test(t)
     || /pulls\/\d+\/merge\b/.test(t)
-    || /\b(?:mergepullrequest|enablepullrequestautomerge)\b/.test(t);
+    || /\b(?:mergepullrequest|enablepullrequestautomerge|enqueuepullrequest)\b/.test(t);
 }
 
 const METHODS = new Set(['--merge', '-m', '--squash', '-s', '--rebase', '-r']);

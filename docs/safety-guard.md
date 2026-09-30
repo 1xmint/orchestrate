@@ -86,10 +86,12 @@ merge. A merge without it, or with a short or wrong id, is refused with the
 exact command to run instead.
 
 **Which lines count.** Any line that mentions a merge anywhere is held to that
-shape: `pr merge` (with flags between the two words), the REST route
-`…/pulls/N/merge`, or the `mergePullRequest` and `enablePullRequestAutoMerge`
-GraphQL mutations. Quotes, backticks and backslashes are taken out before
-looking, and quoted text and comments count too. So a merge inside a chain, a
+shape: `pr merge` (also with flags such as `-R o/r` or `-Ro/r` between the
+two words), the REST route `…/pulls/N/merge`, or the `mergePullRequest`,
+`enablePullRequestAutoMerge` and `enqueuePullRequest` GraphQL mutations.
+Before looking, a backslash at a line end is joined up, braces and commas are
+taken out (so `{merge,}` reads as `merge`), and so are quotes, backticks and
+backslashes. Quoted text and comments count too. So a merge inside a chain, a
 pipe, `bash -c`, a wrapper such as `timeout`, `env` or `xargs`, `curl` or
 `Invoke-RestMethod`, after a `cd`, or behind a comment or heredoc is refused
 rather than read. This has one known cost: a commit message or note that
@@ -118,8 +120,9 @@ contains "pr merge" is refused too. Put that text in a file and pass the file
 
 Out of scope, and not caught: a command word built from a variable, `$(…)`
 or escape codes; a merge run from a script file or `node -e`; a gh alias; a
-GraphQL query read from a file; and a push straight to the base branch
-(`git push origin HEAD:main`), which skips pull requests altogether.
+GraphQL query read from a file; and merging branches without a pull request
+at all — a push straight to the base branch (`git push origin HEAD:main`),
+the `mergeBranch` mutation or the REST route `…/merges`.
 
 ## What happens when one of these is about to run
 

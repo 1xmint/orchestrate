@@ -909,6 +909,27 @@ test('reviewer round 1: a comment, a heredoc or an escaped quote cannot hide a m
   ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
 });
 
+test('reviewer round 2: a flag with its value attached, a backslash-newline, braces or the merge queue cannot hide a merge', () => {
+  for (const cmd of [
+    'git push && gh pr -Ro/r merge 36 --merge',
+    'timeout 5 gh pr -Ro/r merge 36 --merge',
+    'gh pr -Ro/r merge 36 --auto',
+    'gh pr -R"o/r" merge 36 --admin',
+    'gh pr mer\\\nge 36 --merge',
+    'gh p\\\nr merge 36 --merge',
+    'gh pr {merge,} 36 --merge',
+    'gh pr me{r,}ge 36 --merge',
+    `gh api graphql -f query='mutation { enqueuePullRequest(input: {pullRequestId: "x"}) { clientMutationId } }'`,
+  ]) {
+    const m = merging(prView());
+    assert.equal(decide(cmd, m.ctx).kind, 'deny', cmd);
+  }
+  // The wider net still leaves reading a pull request alone.
+  for (const ok of ['gh pr -Ro/r view 36 --json mergeable', 'gh pr view 36 --json mergeable,title', 'gh pr list --json number,title']) {
+    assert.equal(decide(ok, merging(prView()).ctx).kind, 'pass', ok);
+  }
+});
+
 test('reviewer round 1: a merge in the same line as a push, a branch switch or a change of project is refused, even when green and naming the commit', () => {
   for (const cmd of [
     `git push && gh pr merge 36 --squash --match-head-commit ${HEAD}`,

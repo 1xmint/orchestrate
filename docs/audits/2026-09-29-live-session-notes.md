@@ -418,6 +418,29 @@ the word that set it off and count a review already under way.
 card text as V, Y and AB, for the same reason: this session runs the 0.17.1
 hooks. *In the way*, as in V.
 
+**AH. The second review found a hole the first fix left.** Its first line read
+*"OUTCOME: FAIL (REVIEW OF: f76eea0). `gh pr -Ro/r merge 36 --merge` merges
+with no check, because mentionsMerge misses a flag with its value attached when
+it sits before `merge`."* It also found that a backslash at a line end, or
+braces (`{merge,}`), split the word so the net missed it. *Helped, a lot:* a
+check that shows it has missed something twice needs a third look, and
+the stop rule (two rounds, then ask) brought that choice to the user instead of
+looping.
+
+**AI. "This change touches payments" from a word in a test.** After the round 1
+fix the stop hook said *"orchestrate: this change touches payments; the change
+made since the review has not been looked at."* Nothing touched payments; a new
+test uses a folder called `billing`. The second half was right, though: the
+fix had not been reviewed yet. *Helped the right way, but mislabelled*, as in
+AF.
+
+**AJ. The installed guard refused a harmless script.** Writing a check script
+through a heredoc was refused as *"This would overwrite the history of a shared
+branch"*. Nothing was being pushed. The file's text held `git push` on one
+line and `gh api graphql -f query=…` a few lines later, and the push rule read
+that later `-f` as a push flag. *In the way*, the same kind as AA. The file
+tool did the job.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to
