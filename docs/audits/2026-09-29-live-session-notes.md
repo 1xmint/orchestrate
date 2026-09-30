@@ -186,10 +186,18 @@ sent so far; orch-advisor last sent: never."*, plus the finished run's goal
   either.
 - *Got in the way, mildly:* a helper told it is the lead with a finished run
   could act on either. This one did not.
+- It is not a one-off. Checked later (09-30) across every helper transcript
+  on this machine: all 291 helper compactions since the card existed (09-21 to
+  09-30) show the card's hook output recorded inside the helper.
+- Already reported as anthropics/claude-code#91910: open since 09-03,
+  labelled bug and "has repro", with seven user confirmations. The comments
+  name the cause: the compaction hooks' input is built without the helper's
+  details. No Anthropic reply in four weeks.
 
-*Suggestions:* report the missing helper id to the host. Meanwhile, take the
-compaction number from the lead transcript's own records, as the size line
-does, rather than a counter any compaction hook can bump.
+*Suggestions:* take the compaction number from the lead transcript's own
+records, as the size line does, rather than a counter any compaction hook can
+bump (done in #35). Tell a helper's compaction apart some other way until the
+host sends the id.
 
 **I. The stop check does not count the built-in advisor as a second opinion.**
 The stop hook said *"a brief flagged for independent review returned done with
