@@ -147,3 +147,11 @@ test('priceTagPair falls back to the plain tag when there is no figure to pair (
   assert.equal(priceTagPair('orch-implementer', '', [], 'pro', null), priceTag('orch-implementer', '', [], 'pro', null));
   assert.doesNotMatch(priceTagPair('mystery-role', 'opus', [], 'pro', null), /done in this chat/);
 });
+
+test('a cost row whose advisor went unpriced is not averaged as a measurement', () => {
+  const rows = [
+    { agent: 'a1', role: 'orch-implementer', model: 'sonnet', dollars: 1.0 },
+    { agent: 'a2', role: 'orch-implementer', model: 'sonnet', dollars: 0.01, advisorUnpriced: 1 },
+  ];
+  assert.equal(estimateDollars('orch-implementer', 'sonnet', rows), 1.0);
+});

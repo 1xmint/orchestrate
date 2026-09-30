@@ -72,6 +72,39 @@ export function inputSide(usage) {
   return f.reduce((s, k) => s + (fin(usage[k]) ? Number(usage[k]) : 0), 0);
 }
 
+// The advisor's own steps in one response's usage. Top-level usage is the
+// executor only, so these never overlap it. Empty when there are none.
+export function advisorSteps(usage) {
+  const its = usage && typeof usage === 'object' && Array.isArray(usage.iterations) ? usage.iterations : [];
+  const n = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return its.filter(i => i && i.type === 'advisor_message').map(i => ({
+    model: typeof i.model === 'string' ? i.model : null,
+    input: n(i.input_tokens), output: n(i.output_tokens),
+    cacheRead: n(i.cache_read_input_tokens), cacheWrite: n(i.cache_creation_input_tokens),
+  }));
+}
+
+// Advisor steps of many responses (one usage per message id, so the caller's
+// dedupe holds), summed per advisor model:
+// [{model, calls, input, output, cacheRead, cacheWrite}].
+export function advisorTotals(usages) {
+  const steps = [];
+  for (const u of usages) for (const s of advisorSteps(u)) steps.push({ ...s, calls: 1 });
+  return mergeAdvisor([steps]);
+}
+
+// Sum lists of {model, calls, input, output, cacheRead, cacheWrite} by model.
+export function mergeAdvisor(lists) {
+  const by = new Map();
+  for (const list of lists) for (const s of list || []) {
+    const k = s.model || '';
+    const b = by.get(k) || { model: s.model, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    for (const f of ['calls', 'input', 'output', 'cacheRead', 'cacheWrite']) b[f] += s[f] || 0;
+    by.set(k, b);
+  }
+  return [...by.values()];
+}
+
 export function isBoundary(rec) {
   return Boolean(rec && rec.type === 'system' && rec.subtype === 'compact_boundary');
 }

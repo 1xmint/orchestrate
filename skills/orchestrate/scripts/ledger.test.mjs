@@ -530,3 +530,55 @@ test('the record files a five-line DONE with its status, and a reviewer FAIL as 
   assert.equal(b.row.status, 'FAIL');
   assert.equal(b.row.verdict, 'FAIL');
 });
+
+import { sumUsage, costLine } from './ledger.mjs';
+import { dollars } from './lib/prices.mjs';
+
+const advRec = (id, usage) => JSON.stringify({ type: 'assistant', message: { id, model: 'claude-sonnet-5-5', usage } });
+const ADV_USAGE = {
+  input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+  iterations: [
+    { type: 'message', input_tokens: 1000, output_tokens: 100 },
+    { type: 'advisor_message', model: 'claude-opus-5-5', input_tokens: 108419, output_tokens: 14312, cache_read_input_tokens: 1000, cache_creation_input_tokens: 500 },
+  ],
+};
+
+test('a helper transcript cost includes the advisor at the advisor model rate', () => {
+  const p = writeTranscript([advRec('m1', { input_tokens: 500, output_tokens: 50 }), advRec('m2', ADV_USAGE)]);
+  const u = sumUsage(p);
+  assert.equal(u.input, 1500);
+  const advD = dollars({ input: 108419, output: 14312, cacheRead: 1000, cacheWrite: 500 }, 'claude-opus-5-5');
+  const mainD = dollars(u, 'claude-sonnet-5-5');
+  const line = costLine('orch-implementer', 'claude-sonnet-5-5', u);
+  assert.equal(line.dollars, Number((mainD + advD).toFixed(4)));
+  assert.equal(line.advisorCalls, 1);
+  assert.equal(line.advisorModel, 'opus');
+  assert.equal(line.advisorInput, 108419);
+  assert.equal(line.advisorDollars, Number(advD.toFixed(4)));
+});
+
+test('the same message id three times counts the advisor once', () => {
+  const p = writeTranscript([advRec('m2', ADV_USAGE), advRec('m2', ADV_USAGE), advRec('m2', ADV_USAGE)]);
+  const u = sumUsage(p);
+  assert.equal(u.turns, 1);
+  assert.equal(u.advisor[0].calls, 1);
+  assert.equal(u.advisor[0].output, 14312);
+});
+
+test('an advisor model nobody can price stays unpriced and adds nothing', () => {
+  const odd = { ...ADV_USAGE, iterations: [{ type: 'advisor_message', model: 'mystery-1', input_tokens: 9e6, output_tokens: 1 }] };
+  const u = sumUsage(writeTranscript([advRec('m1', odd)]));
+  const line = costLine('x', 'claude-sonnet-5-5', u);
+  assert.equal(line.advisorDollars, 0);
+  assert.equal(line.advisorUnpriced, 1);
+  assert.equal(line.dollars, Number(dollars(u, 'claude-sonnet-5-5').toFixed(4)));
+});
+
+test('a return whose advisor cannot be priced says the price leaves it out', async () => {
+  const { priceText } = await import('./ledger.mjs');
+  const odd = { ...ADV_USAGE, iterations: [{ type: 'advisor_message', model: 'mystery-1', input_tokens: 100000, output_tokens: 10000 }] };
+  const line = costLine('x', 'claude-sonnet-5-5', sumUsage(writeTranscript([advRec('m1', odd)])));
+  assert.match(priceText(line), /^\$\d+\.\d\d at list price \(advisor not priced, left out\)$/);
+  assert.match(priceText(costLine('x', 'claude-sonnet-5-5', sumUsage(writeTranscript([advRec('m2', ADV_USAGE)])))), /^\$\d+\.\d\d at list price$/);
+  assert.equal(priceText({ dollars: null }), 'unpriced (no model named)');
+});
