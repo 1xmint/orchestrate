@@ -30,6 +30,13 @@ fetched directly).
   dollar cap and a stale branch rule. The cause is item A below. It goes away
   once `--close` (PR #26) is released and the run is closed.
 - Seen again at compaction 2, with the same old goal re-injected.
+- Seen a third time at compaction 3. The checkpoint the plugin writes on its
+  own at a summary carried the same old goal too: *"Goal: Raise every area of
+  the 2026-09-24 scoresheet audit to 10/10 …"*. Same cause, same fix.
+- *Got in the way:* that checkpoint also said *"Last test result: 11 Last test
+  result: ℹ fail 1"* while the suite passed. It had taken the line from the
+  lead's own read of an older checkpoint (the `11` is the line number the read
+  printed). Suggest taking test lines only from shell command results.
 
 **3. Tidy-up after helpers.** Not seen. The only helper was read-only and had
 no helper folder, so there was nothing to tidy.
@@ -53,9 +60,11 @@ and nobody independent had looked at it. Nothing touched money. The two
 matches were the cost column in `references/models.md` and the git command for
 throwing away edits, quoted in item 4 of these notes. *Got in the way, mildly:*
 it cost one extra turn, and after a second look the lead finished without a
-review. Suggest the stop check skip edits to `docs/` and `references/` Markdown
-(notes about money are not money moving), and not count the git command. A
-real payment change would still be caught through its code files.
+review. Suggest the stop check skip edits to prose files, known by their
+extension (`.md`, `.txt`) rather than their folder, since every repo lays out
+folders its own way (notes about money are not money moving), and not count the
+git command. A real payment change would still be caught through its code
+files. Being built on `fix/shell-edits-count`, together with item B.
 
 ## Other things that came up
 
@@ -97,6 +106,27 @@ web page was a useful warning to keep big reads out of the main chat.
 24 tool calls since your last edit · write the checkpoint now (goal, decisions,
 files changed, verification, next action) to …"*. The checkpoint path it named
 was then used after the summary (item 2). *Helped.*
+
+**F. The size line doubled after an advisor call.** With the built-in advisor
+on, the size line read *"~209k"* and later *"~217k"* when the real size was
+about 106k and 95k. A response that calls the advisor lists its steps
+separately, and the plugin added the main model's steps together. *Got in the
+way:* a doubled number pushes the lead to tidy up or start fresh for no reason.
+**Fixed** in PR #28: the size is what the last main-model step read. The
+advisor's own tokens were not counted in any spend total either; being built
+on `fix/count-advisor-spend`.
+
+**G. Dispatch-guard false alarms.**
+- *"brief lacks: what it is for, a check it is done"* on a brief that had
+  `For:` and `Done when:` lines. The guard knew only the capitals. **Fixed** in
+  PR #30.
+- *"this task will wait for an independent review because its objective
+  mentions billing"*. The brief was about counting the advisor's tokens and
+  quoted the docs heading "Usage and billing". Twice the same: "payment" in a
+  brief whose job was the payment detector itself. Left alone for now. The
+  list is eager on purpose, and one extra line costs little.
+- *"this brief asks for contents to be pasted back"* on "paste the failing
+  line in your report". Borderline, since one line is not a dump. Left alone.
 
 ## Not about the plugin, but seen
 
