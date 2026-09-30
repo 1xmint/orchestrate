@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -202,6 +202,31 @@ test('parseReturn: no REVIEW OF line reads as null', () => {
   assert.equal(parseReturn('TASK: 9-1-0001\nSTATUS: DONE\n').reviewOf, null);
 });
 
+test('parseReturn reads REVIEW OF from inside the five-line OUTCOME line', () => {
+  const r = parseReturn('OUTCOME: PASS (REVIEW OF: tu-x) the hold now releases.\nPROOF: node --test, 66 pass\n');
+  assert.equal(r.reviewOf, 'tu-x');
+  assert.equal(r.verdict, 'PASS');
+  assert.equal(parseReturn('OUTCOME: FAIL (REVIEW OF: release/0.17.1). At x.\n').reviewOf, 'release/0.17.1');
+  assert.equal(parseReturn('OUTCOME: FAIL, REVIEW OF: 9-1-0034.\n').reviewOf, '9-1-0034');
+  assert.equal(parseReturn('PROOF: the brief said REVIEW OF: 9-1-0034\n').reviewOf, null, 'only the OUTCOME line or its own line');
+});
+
+// Review of e77b94e: a builder re-sent to fix a review quotes its REVIEW OF.
+test("parseReturn: a builder's OUTCOME line quoting REVIEW OF is not a review", () => {
+  const r = parseReturn('OUTCOME: DONE, fixed (REVIEW OF: 9-1-0001)\nPROOF: node --test, 5 pass\n');
+  assert.equal(r.reviewOf, null);
+  assert.equal(reviewGated({ review: true }, r), true, 'the fix still waits for its own look');
+  const quoted = parseReturn('OUTCOME: DONE fixed\n  OUTCOME: PASS (REVIEW OF: 9-1-0001) ok\n');
+  assert.equal(quoted.reviewOf, null);
+  assert.equal(reviewGated({ review: true }, quoted), true, 'a quoted verdict line lower down does not make it a review');
+});
+
+// Review of d8724f9: a look that came back with no verdict is not a pass.
+test('reviewDowngrade: a review row with no verdict does not count as reviewed', () => {
+  assert.notEqual(reviewDowngrade('DONE', true, '9-1-0001', [{ reviewOf: '9-1-0001', verdict: null }]).status, 'DONE');
+  assert.equal(reviewDowngrade('DONE', true, '9-1-0001', [{ reviewOf: '9-1-0001', verdict: 'PASS' }]).status, 'DONE');
+});
+
 test('a return whose TASK line is prose ("TASK: build the login page") is not filed under its first word', () => {
   const r = parseReturn('TASK: build the login page\nSTATUS: DONE\nEVIDENCE: it loads\n');
   assert.equal(r.task, null);
@@ -392,6 +417,21 @@ test('the filed return is the hand-back report, not the 27-byte stub, and the ro
   assert.equal(row.evidence, true);
 });
 
+test('a long hand-back keeps its whole text in a .full.md beside the five-line record', () => {
+  // A reviewer has no tool that writes files, so its findings live only in
+  // the hand-back; cutting them to five lines lost them.
+  const report = bigReport('9-1-0009', 'PARTIAL');
+  const tp = writeTranscript([handbackLine(report), plainLine(STUB)]);
+  const { row, filed } = runHook(hookInput({ agent_type: 'orchestrate:orch-reviewer', agent_transcript_path: tp, last_assistant_message: STUB }));
+  const full = row.file.replace(/\.md$/, '.full.md');
+  assert.ok(existsSync(full), 'the whole hand-back is kept');
+  assert.equal(readFileSync(full, 'utf8'), report);
+  assert.ok(filed.includes(full), 'and the short record names where');
+  const short = 'TASK: 9-1-0010\nSTATUS: PARTIAL\nEVIDENCE: ran it, 3 pass\n';
+  const s = runHook(hookInput({ last_assistant_message: short }));
+  assert.ok(!existsSync(s.row.file.replace(/\.md$/, '.full.md')), 'a short one needs no second file');
+});
+
 test('no hand-back in the transcript: the filed text is the last plain message', () => {
   const msg = 'TASK: 9-1-0002\nSTATUS: PARTIAL\nEVIDENCE: ran it, 3 pass\n';
   const tp = writeTranscript([plainLine('hello'), plainLine(msg)]);
@@ -514,4 +554,56 @@ test('the record files a five-line DONE with its status, and a reviewer FAIL as 
   const b = runHook(hookInput({ agent_type: 'orchestrate:orch-reviewer', last_assistant_message: fail }));
   assert.equal(b.row.status, 'FAIL');
   assert.equal(b.row.verdict, 'FAIL');
+});
+
+import { sumUsage, costLine } from './ledger.mjs';
+import { dollars } from './lib/prices.mjs';
+
+const advRec = (id, usage) => JSON.stringify({ type: 'assistant', message: { id, model: 'claude-sonnet-5-5', usage } });
+const ADV_USAGE = {
+  input_tokens: 1000, output_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0,
+  iterations: [
+    { type: 'message', input_tokens: 1000, output_tokens: 100 },
+    { type: 'advisor_message', model: 'claude-opus-5-5', input_tokens: 108419, output_tokens: 14312, cache_read_input_tokens: 1000, cache_creation_input_tokens: 500 },
+  ],
+};
+
+test('a helper transcript cost includes the advisor at the advisor model rate', () => {
+  const p = writeTranscript([advRec('m1', { input_tokens: 500, output_tokens: 50 }), advRec('m2', ADV_USAGE)]);
+  const u = sumUsage(p);
+  assert.equal(u.input, 1500);
+  const advD = dollars({ input: 108419, output: 14312, cacheRead: 1000, cacheWrite: 500 }, 'claude-opus-5-5');
+  const mainD = dollars(u, 'claude-sonnet-5-5');
+  const line = costLine('orch-implementer', 'claude-sonnet-5-5', u);
+  assert.equal(line.dollars, Number((mainD + advD).toFixed(4)));
+  assert.equal(line.advisorCalls, 1);
+  assert.equal(line.advisorModel, 'opus');
+  assert.equal(line.advisorInput, 108419);
+  assert.equal(line.advisorDollars, Number(advD.toFixed(4)));
+});
+
+test('the same message id three times counts the advisor once', () => {
+  const p = writeTranscript([advRec('m2', ADV_USAGE), advRec('m2', ADV_USAGE), advRec('m2', ADV_USAGE)]);
+  const u = sumUsage(p);
+  assert.equal(u.turns, 1);
+  assert.equal(u.advisor[0].calls, 1);
+  assert.equal(u.advisor[0].output, 14312);
+});
+
+test('an advisor model nobody can price stays unpriced and adds nothing', () => {
+  const odd = { ...ADV_USAGE, iterations: [{ type: 'advisor_message', model: 'mystery-1', input_tokens: 9e6, output_tokens: 1 }] };
+  const u = sumUsage(writeTranscript([advRec('m1', odd)]));
+  const line = costLine('x', 'claude-sonnet-5-5', u);
+  assert.equal(line.advisorDollars, 0);
+  assert.equal(line.advisorUnpriced, 1);
+  assert.equal(line.dollars, Number(dollars(u, 'claude-sonnet-5-5').toFixed(4)));
+});
+
+test('a return whose advisor cannot be priced says the price leaves it out', async () => {
+  const { priceText } = await import('./ledger.mjs');
+  const odd = { ...ADV_USAGE, iterations: [{ type: 'advisor_message', model: 'mystery-1', input_tokens: 100000, output_tokens: 10000 }] };
+  const line = costLine('x', 'claude-sonnet-5-5', sumUsage(writeTranscript([advRec('m1', odd)])));
+  assert.match(priceText(line), /^\$\d+\.\d\d at list price \(advisor not priced, left out\)$/);
+  assert.match(priceText(costLine('x', 'claude-sonnet-5-5', sumUsage(writeTranscript([advRec('m2', ADV_USAGE)])))), /^\$\d+\.\d\d at list price$/);
+  assert.equal(priceText({ dollars: null }), 'unpriced (no model named)');
 });

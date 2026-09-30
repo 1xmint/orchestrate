@@ -27,10 +27,12 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
-import { dollars, family, normalizeRole } from './lib/prices.mjs';
+import { dollars, family, normalizeRole, advisorDollars } from './lib/prices.mjs';
+import { advisorTotals } from './lib/context-scan.mjs';
 import { roleMaxTurns, segmentTurns, runningExternal } from './lib/workers.mjs';
 import { checkReturn } from './lib/report.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
+import { reviewOfIn } from './lib/review-of.mjs';
 import { addSuggestion } from './suggest.mjs';
 export { roleMaxTurns };
 
@@ -72,7 +74,11 @@ export function parseReturn(text) {
     // (packet.md's Reviewer packet RETURN schema), the task id its own first
     // token. This is how a reviewer return is told from any other return —
     // never TASK, which on a reviewer return names the reviewer's own task id.
-    reviewOf: field(/^\s*REVIEW OF:\s*(\S+)/im),
+    // The five-line hand-back carries it inside its opening PASS or FAIL
+    // OUTCOME line ("OUTCOME: PASS (REVIEW OF: tu-x) …"), so a follow-up's
+    // verdict says which work it is about; a quote anywhere else is not read
+    // (lib/review-of.mjs).
+    reviewOf: reviewOfIn(t, { handBack: true }),
   };
 }
 
@@ -101,6 +107,8 @@ export function sumUsage(transcriptPath) {
       if (typeof m.model === 'string' && m.model !== '<synthetic>') model = m.model;
       byId.set(m.id || `anon-${anon++}`, u);
     }
+    const adv = advisorTotals(byId.values());
+    if (adv.length) totals.advisor = adv;
     for (const u of byId.values()) {
       totals.turns++;
       totals.input += Number(u.input_tokens) || 0;
@@ -121,9 +129,21 @@ export function sumUsage(transcriptPath) {
 export const COSTS_PATH = join(DIR, 'costs.jsonl');
 export const COSTS_MAX = 500;
 
+// The price a return's header shows. An advisor nobody can price is left out
+// of the figure, and the header says so rather than passing it off as whole.
+export function priceText(cost) {
+  if (cost.dollars == null) return 'unpriced (no model named)';
+  return `$${cost.dollars.toFixed(2)} at list price${cost.advisorUnpriced ? ' (advisor not priced, left out)' : ''}`;
+}
+
 export function costLine(role, model, usage, agentId = null) {
   const fam = family(model);
   const d = dollars(usage, model);
+  const adv = usage.advisor && usage.advisor.length ? usage.advisor : null;
+  const ad = adv ? advisorDollars(adv) : null;
+  // The advisor is priced at its own model's rate. A main model nobody can
+  // price still leaves the whole record unpriced, as before.
+  const total = d == null ? null : d + (ad ? ad.dollars : 0);
   return {
     at: new Date().toISOString(),
     role: normalizeRole(role || 'claude'),
@@ -131,7 +151,14 @@ export function costLine(role, model, usage, agentId = null) {
     priced: Boolean(fam),
     ...(agentId ? { agent: String(agentId) } : {}),
     input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite,
-    dollars: d == null ? null : Number(d.toFixed(4)),
+    ...(adv ? {
+      advisorCalls: adv.reduce((n, b) => n + b.calls, 0),
+      advisorModel: adv.map(b => family(b.model || '') || b.model || 'unknown').join(','),
+      advisorInput: adv.reduce((n, b) => n + b.input, 0), advisorOutput: adv.reduce((n, b) => n + b.output, 0),
+      advisorCacheRead: adv.reduce((n, b) => n + b.cacheRead, 0), advisorCacheWrite: adv.reduce((n, b) => n + b.cacheWrite, 0),
+      advisorDollars: Number(ad.dollars.toFixed(4)), advisorUnpriced: ad.unpriced,
+    } : {}),
+    dollars: total == null ? null : Number(total.toFixed(4)),
   };
 }
 
@@ -230,8 +257,8 @@ export const NO_REVIEW_NOTE = 'done, but it was marked for an independent review
 // A reviewer's own return is never held for review: it IS the review. Only a
 // return that names no REVIEW OF can be gated by its dispatch's flag.
 export const LONG_HANDBACK_BYTES = 1200;
-// A hand-back over the limit is filed as its first five lines and its size; the
-// long form belongs in the helper's own report file.
+// A hand-back over the limit is filed as its first five lines and its size;
+// main() keeps the whole text in a `.full.md` beside it.
 export function recordBody(text) {
   const bytes = Buffer.byteLength(text);
   if (bytes <= LONG_HANDBACK_BYTES) return { body: text, bytes, long: false };
@@ -245,7 +272,7 @@ export function reviewGated(dispatch, ret) {
 
 export function reviewDowngrade(status, reviewFlagged, task, indexRows, reviewInferred = null) {
   if (status !== 'DONE' || !reviewFlagged || !task) return { status, note: null };
-  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task && row.verdict !== 'FAIL');
+  const reviewed = (indexRows || []).some(row => row && row.reviewOf === task && row.verdict === 'PASS');
   if (reviewed) return { status, note: null };
   const note = reviewInferred
     ? `done, but its objective mentions ${reviewInferred}, so it waits for an independent review that has not returned yet.`
@@ -663,7 +690,7 @@ function main() {
   const { run, how, candidates } = resolveReturnRun(input, r, dispatch);
   const dir = run ? join(run.dir, 'returns') : orphanDir(input.session_id);
   const file = join(dir, returnFilename(agent, input, text));
-  const priced = cost.dollars == null ? 'unpriced (no model named)' : `$${cost.dollars.toFixed(2)} at list price`;
+  const priced = priceText(cost);
 
   // A task flagged REVIEW: yes at dispatch (guard-agent.mjs's recordDispatch)
   // cannot be filed DONE until a reviewer return naming it under "REVIEW OF:"
@@ -688,7 +715,15 @@ function main() {
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
     const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${dirtyNoteText}${compactNote} -->\n\n`;
-    writeFileSync(file, header + shortened.body + (shortened.body.endsWith('\n') ? '' : '\n'));
+    // A reviewer or advisor has no tool that writes files, so its hand-back is
+    // the only copy of its findings: keep the whole of it beside the record.
+    let body = shortened.body;
+    if (shortened.long) {
+      const full = file.replace(/\.md$/, '.full.md');
+      writeFileSync(full, text);
+      body = body.replace(/ bytes against 600\)\n$/, ` bytes against 600; the whole of it: ${full})\n`);
+    }
+    writeFileSync(file, header + body + (body.endsWith('\n') ? '' : '\n'));
   } catch { return; }
 
   appendIndex(dir, {
@@ -725,7 +760,7 @@ function main() {
       // yes or an inferred word) and none has come back yet — turn-check.mjs
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
-      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(shortened.long ? { longBytes: shortened.bytes } : {}), ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
+      state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}), ...(shortened.long ? { longBytes: shortened.bytes } : {}), ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
       saveSession(state);
     }
   } catch {}

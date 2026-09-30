@@ -138,8 +138,8 @@ function progressFact(progress) {
 // `progress` is `{ path, minutesAgo }` or null. Returns `{ key, text }` or
 // null when there is nothing to say. `size-return` outranks `size-warn`: a
 // helper that jumps straight past returnAt hears only the return notice, and
-// each key is said once. The same shape fires at both thresholds — at
-// returnAt the numbers just say the budget is the smaller one.
+// each key is said once. At returnAt the line says "past the budget" in
+// words, since "~121k of ~120k" read live as still inside it.
 export function helperSizeNotice({ role, tokens, budget, announced = null, turn = null, maxTurns = null, callsSinceEdit = null, progress = null } = {}) {
   if (!budget || tokens == null || !Number.isFinite(tokens)) return null;
   const n = Math.round(tokens / 1000);
@@ -147,7 +147,8 @@ export function helperSizeNotice({ role, tokens, budget, announced = null, turn 
   if (tokens >= budget.returnAt) { key = 'size-return'; }
   else if (tokens >= budget.warnAt) { key = 'size-warn'; }
   if (!key || key === announced) return null;
-  const parts = [`~${n}k of ~${Math.round(budget.returnAt / 1000)}k budget`];
+  const cap = Math.round(budget.returnAt / 1000);
+  const parts = [key === 'size-return' ? `~${n}k, past the ~${cap}k budget` : `~${n}k of ~${cap}k budget`];
   if (Number.isFinite(turn) && Number.isFinite(maxTurns)) parts.push(`turn ${turn} of ${maxTurns}`);
   if (Number.isFinite(callsSinceEdit)) parts.push(`${callsSinceEdit} tool call${callsSinceEdit === 1 ? '' : 's'} since your last edit`);
   parts.push(progressFact(progress));

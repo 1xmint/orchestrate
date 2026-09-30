@@ -22,6 +22,7 @@ Direction checked: <never | date and verdict>
 
 - <evidence that would prove it, one line each; a command, a file, a page state>
 - Stops anyway when: <what ends the work if the measure stalls or the judge disagrees with itself>
+- When it ends, met or dropped: `run-init.mjs --close <run id> --reason "…"`, or every new session in this repo is told it continues this run.
 
 ## Constraints and non-goals
 

@@ -213,10 +213,11 @@ test('reviewHoldDecision leaves a task already in blockedFor alone, resolved or 
 
 // A free-form brief has no task id: the hold keys on the dispatch call's id.
 const FF_DISPATCH = { at: '2026-09-29T10:00:00.000Z', agent: 'orch-implementer', task: null, toolUseId: 'toolu_A', review: true };
+const FF_NOW = Date.parse('2026-09-29T10:30:00.000Z');
 const FF_RETURN = { at: '2026-09-29T10:05:00.000Z', agent: 'orch-implementer', toolUseId: 'toolu_A', task: null, status: 'DONE' };
 
 test('reviewHoldDecision holds a flagged free-form dispatch that returned DONE with no review', () => {
-  const d = reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH], lastMessage: '', blockedFor: [] });
+  const d = reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH], lastMessage: '', blockedFor: [], now: FF_NOW });
   assert.equal(d.block, true);
   assert.equal(d.task, 'toolu_A');
   assert.deepEqual(d.blockedFor, ['toolu_A']);
@@ -224,25 +225,25 @@ test('reviewHoldDecision holds a flagged free-form dispatch that returned DONE w
 
 test('reviewHoldDecision lets a free-form return through once a reviewer was dispatched after it', () => {
   const later = { at: '2026-09-29T10:10:00.000Z', agent: 'orch-reviewer', task: null, toolUseId: 'toolu_R' };
-  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH, later], lastMessage: '', blockedFor: [] }).block, false);
+  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH, later], lastMessage: '', blockedFor: [], now: FF_NOW }).block, false);
   const named = { ...later, reviewOf: 'toolu_A' };
-  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH, named], lastMessage: '', blockedFor: [] }).block, false);
+  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH, named], lastMessage: '', blockedFor: [], now: FF_NOW }).block, false);
 });
 
 test('reviewHoldDecision does not hold an unflagged free-form dispatch, nor a reviewer\'s own return', () => {
   const plain = { ...FF_DISPATCH }; delete plain.review;
-  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [plain], lastMessage: '', blockedFor: [] }).block, false);
+  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [plain], lastMessage: '', blockedFor: [], now: FF_NOW }).block, false);
   const rev = { ...FF_DISPATCH, agent: 'orch-reviewer', reviewOf: 'toolu_Z' };
-  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [rev], lastMessage: '', blockedFor: [] }).block, false);
+  assert.equal(reviewHoldDecision({ returned: [FF_RETURN], dispatches: [rev], lastMessage: '', blockedFor: [], now: FF_NOW }).block, false);
 });
 
 test('reviewHoldDecision with two open free-form returns does not let one unnamed reviewer clear both', () => {
   const two = { ...FF_DISPATCH, toolUseId: 'toolu_B' };
   const retB = { ...FF_RETURN, toolUseId: 'toolu_B' };
   const later = { at: '2026-09-29T10:10:00.000Z', agent: 'orch-reviewer', task: null, toolUseId: 'toolu_R' };
-  const d = reviewHoldDecision({ returned: [FF_RETURN, retB], dispatches: [FF_DISPATCH, two, later], lastMessage: '', blockedFor: [] });
+  const d = reviewHoldDecision({ returned: [FF_RETURN, retB], dispatches: [FF_DISPATCH, two, later], lastMessage: '', blockedFor: [], now: FF_NOW });
   assert.equal(d.block, true);
-  const named = reviewHoldDecision({ returned: [FF_RETURN, retB], dispatches: [FF_DISPATCH, two, { ...later, reviewOf: 'toolu_A' }], lastMessage: '', blockedFor: [] });
+  const named = reviewHoldDecision({ returned: [FF_RETURN, retB], dispatches: [FF_DISPATCH, two, { ...later, reviewOf: 'toolu_A' }], lastMessage: '', blockedFor: [], now: FF_NOW });
   assert.equal(named.task, 'toolu_B', 'only the one the reviewer named is cleared');
 });
 
@@ -251,13 +252,13 @@ test('reviewHoldDecision with two open free-form returns does not let one unname
 test('reviewHoldDecision matches a live return (toolUseId null) to its dispatch by agent id', () => {
   const disp = { ...FF_DISPATCH, agentId: 'a8c3248b76def6836' };
   const live = { ...FF_RETURN, toolUseId: null, agentId: 'a8c3248b76def6836' };
-  const d = reviewHoldDecision({ returned: [live], dispatches: [disp], lastMessage: '', blockedFor: [] });
+  const d = reviewHoldDecision({ returned: [live], dispatches: [disp], lastMessage: '', blockedFor: [], now: FF_NOW });
   assert.equal(d.block, true);
   assert.equal(d.task, 'toolu_A');
   const named = { at: '2026-09-29T10:10:00.000Z', agent: 'orch-reviewer', task: null, toolUseId: 'toolu_R', reviewOf: 'toolu_A' };
-  assert.equal(reviewHoldDecision({ returned: [live], dispatches: [disp, named], lastMessage: '', blockedFor: [] }).block, false);
+  assert.equal(reviewHoldDecision({ returned: [live], dispatches: [disp, named], lastMessage: '', blockedFor: [], now: FF_NOW }).block, false);
   const other = { ...live, agentId: 'not-a-dispatched-agent' };
-  assert.equal(reviewHoldDecision({ returned: [other], dispatches: [disp], lastMessage: '', blockedFor: [] }).block, false);
+  assert.equal(reviewHoldDecision({ returned: [other], dispatches: [disp], lastMessage: '', blockedFor: [], now: FF_NOW }).block, false);
 });
 
 // ---- risky work the lead built alone ---------------------------------------------
@@ -291,6 +292,23 @@ test('unreviewedRiskFact is silent once a reviewer returned after the last risky
   const f = unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [before] });
   assert.equal(f.text, 'this change touches sign-in; the change made since the review has not been looked at.');
   assert.ok(!/nobody/.test(f.text), 'a review exists, so it must not say nobody looked');
+});
+
+test('unreviewedRiskFact keeps one key for the same risky edit as the transcript window slides', () => {
+  // Live, 2026-09-29: the stop hook reads the last 1 MB of the transcript, and
+  // the key was the risky edit's line number in that window plus the edit
+  // count, so the same old edit was raised again on a later turn. The key is
+  // now the edit's own tool-call id; a new risky edit still gets a new key.
+  const withId = (id, name, input, at) => JSON.stringify({ type: 'assistant', timestamp: at, message: { content: [{ type: 'tool_use', id, name, input }] } });
+  const older = withId('tu-0', 'Edit', { file_path: 'a.js', new_string: 'const x = 1;' }, '2026-09-29T09:00:00.000Z');
+  const risky = withId('tu-1', 'Edit', { file_path: 's.js', new_string: '// check the password here' }, '2026-09-29T10:00:00.000Z');
+  const bland = withId('tu-2', 'Edit', { file_path: 'b.js', new_string: 'const y = 2;' }, '2026-09-29T10:10:00.000Z');
+  const k1 = unreviewedRiskFact({ transcriptTail: [older, risky].join('\n'), goal: '', returned: [] }).key;
+  const slid = unreviewedRiskFact({ transcriptTail: [risky, bland].join('\n'), goal: '', returned: [] }).key;
+  assert.equal(slid, k1, 'an older line left the window and a bland edit came in: same risky edit, same key');
+  const risky2 = withId('tu-3', 'Edit', { file_path: 's.js', new_string: '// and the password reset' }, '2026-09-29T10:20:00.000Z');
+  const k2 = unreviewedRiskFact({ transcriptTail: [risky, bland, risky2].join('\n'), goal: '', returned: [] }).key;
+  assert.notEqual(k2, k1, 'a new risky edit is raised again');
 });
 
 test('Stop: a lead-built password edit gets the one-line fact once, then the same edits are silent', () => {
@@ -576,6 +594,111 @@ test('reviewHoldDecision is released by a later PASS on the same work', () => {
   assert.equal(d.block, false);
 });
 
+test('reviewHoldDecision is released by a PASS from the same reviewer, sent the fix as a follow-up', () => {
+  // Live, 2026-09-29: the fixes went back to the same reviewer, so its FAIL and
+  // its later PASS carried one dispatch id; the stop hook still said the
+  // review had found a problem. The newest verdict for a dispatch decides.
+  const t = (m) => new Date(Date.UTC(2026, 8, 30, 2, m)).toISOString();
+  const tagged = { toolUseId: 'tu-b', agentId: 'ag-b', agent: 'orch-implementer', review: true, at: t(1) };
+  const rev = { toolUseId: 'tu-r', agentId: 'ag-r', agent: 'orchestrate:orch-reviewer', reviewOf: 'tu-b', at: t(26) };
+  const returned = [
+    { toolUseId: 'tu-b', agentId: 'ag-b', status: 'DONE', at: t(9) },
+    { toolUseId: 'tu-r', agentId: 'ag-r', status: 'FAIL', verdict: 'FAIL', at: t(32) },
+    { toolUseId: 'tu-r', agentId: 'ag-r', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-b', at: t(41) },
+  ];
+  const d = reviewHoldDecision({ returned, dispatches: [tagged, rev], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, false);
+  const failedLast = [returned[0], returned[2], returned[1]].map((r, i) => ({ ...r, at: t(30 + i * 5) }));
+  const still = reviewHoldDecision({ returned: failedLast, dispatches: [tagged, rev], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(still.block, true, 'a FAIL after the PASS still holds');
+  assert.equal(still.failed, true);
+});
+
+// Review of 1be1f60 (2026-09-30): the same reviewer's follow-up can be about
+// other work, and its reply carries no dispatch of its own.
+const fu = (m) => new Date(Date.UTC(2026, 8, 30, 5, m)).toISOString();
+const fuX = { toolUseId: 'tu-x', agentId: 'ag-x', agent: 'orch-implementer', review: true, at: fu(1) };
+const fuY = { toolUseId: 'tu-y', agentId: 'ag-y', agent: 'orch-implementer', review: true, at: fu(2) };
+const fuR = { toolUseId: 'tu-rx', agentId: 'ag-rx', agent: 'orch-reviewer', reviewOf: 'tu-x', at: fu(10) };
+const fuR2 = { toolUseId: 'tu-ry', agentId: 'ag-ry', agent: 'orch-reviewer', reviewOf: 'tu-y', at: fu(11) };
+const fuDone = [
+  { toolUseId: 'tu-x', agentId: 'ag-x', status: 'DONE', at: fu(5) },
+  { toolUseId: 'tu-y', agentId: 'ag-y', status: 'DONE', at: fu(6) },
+  { toolUseId: 'tu-ry', agentId: 'ag-ry', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-y', at: fu(15) },
+  { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-x', at: fu(16) },
+];
+
+test('reviewHoldDecision: a follow-up PASS from the same reviewer about other work does not clear its FAIL', () => {
+  const returned = [...fuDone, { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-y', at: fu(20) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, fuY, fuR, fuR2], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.task, 'tu-x');
+  assert.equal(d.failed, true);
+});
+
+test('reviewHoldDecision: a follow-up PASS that names no work does not clear a FAIL', () => {
+  const returned = [...fuDone, { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'DONE', verdict: 'PASS', at: fu(20) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, fuY, fuR, fuR2], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.task, 'tu-x');
+});
+
+test('reviewHoldDecision: a FAIL that names other work still counts', () => {
+  const returned = [fuDone[0], { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-typo', at: fu(16) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.failed, true);
+});
+
+test('reviewHoldDecision says a second FAIL after a PASS again', () => {
+  const pass = { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-x', at: fu(20) };
+  const fail2 = { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-x', at: fu(30) };
+  const first = reviewHoldDecision({ returned: [fuDone[0], fuDone[3]], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(first.block, true);
+  const quiet = reviewHoldDecision({ returned: [fuDone[0], fuDone[3], pass], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: first.blockedFor });
+  assert.equal(quiet.block, false);
+  const again = reviewHoldDecision({ returned: [fuDone[0], fuDone[3], pass, fail2], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: quiet.blockedFor });
+  assert.equal(again.block, true, 'the second FAIL is news');
+  const once = reviewHoldDecision({ returned: [fuDone[0], fuDone[3], pass, fail2], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: again.blockedFor });
+  assert.equal(once.block, false, 'and is said once');
+});
+
+test('reviewHoldDecision holds when a fresh reviewer FAILs work another reviewer passed', () => {
+  const rA = { ...fuR, toolUseId: 'tu-ra', agentId: 'ag-ra' };
+  const rB = { ...fuR, toolUseId: 'tu-rb', agentId: 'ag-rb', at: fu(12) };
+  const returned = [fuDone[0],
+    { toolUseId: 'tu-ra', agentId: 'ag-ra', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-x', at: fu(15) },
+    { toolUseId: 'tu-rb', agentId: 'ag-rb', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-x', at: fu(18) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, rA, rB], lastMessage: 'Done.', blockedFor: [] });
+  assert.equal(d.block, true);
+  assert.equal(d.failed, true);
+  const running = { ...fuR, toolUseId: 'tu-rc', agentId: 'ag-rc', at: fu(19) };
+  assert.equal(reviewHoldDecision({ returned, dispatches: [fuX, rA, rB, running], lastMessage: 'Done.', blockedFor: [], now: Date.parse(fu(25)) }).block, false, 'a reviewer still running is a look');
+});
+
+// Review of e77b94e (2026-09-30): only a reviewer with no reply yet, sent
+// recently, is still looking; anything else must not release a standing FAIL.
+test('reviewHoldDecision: a later reviewer that is not really still looking does not release a FAIL', () => {
+  const rB = { ...fuR, toolUseId: 'tu-rb', agentId: 'ag-rb', at: fu(12) };
+  const rC = { ...fuR, toolUseId: 'tu-rc', agentId: 'ag-rc', at: fu(19) };
+  const base = [fuDone[0], { toolUseId: 'tu-rb', agentId: 'ag-rb', status: 'FAIL', verdict: 'FAIL', reviewOf: 'tu-x', at: fu(18) }];
+  const hold = (returned, now) => reviewHoldDecision({ returned, dispatches: [fuX, rB, rC], lastMessage: 'Done.', blockedFor: [], now }).block;
+  const soon = Date.parse(fu(25));
+  assert.equal(hold([...base, { toolUseId: 'tu-rc', agentId: 'ag-rc', status: 'DONE', at: fu(22) }], soon), true, 'it replied with no verdict');
+  assert.equal(hold(base, soon + 7 * 3600 * 1000), true, 'it was sent over six hours ago and never replied');
+  assert.equal(hold([...base, { toolUseId: 'tu-rc', agentId: 'ag-rc', status: 'DONE', verdict: 'PASS', reviewOf: 'tu-xx', at: fu(22) }], soon), true, 'its PASS names mistyped work');
+  assert.equal(hold(base, soon), false, 'sent recently with no reply, it is still looking');
+});
+
+test('reviewHoldDecision: a look with no verdict is said as that, not as a problem found', () => {
+  const returned = [fuDone[0], { toolUseId: 'tu-rx', agentId: 'ag-rx', status: 'DONE', reviewOf: 'tu-x', at: fu(16) }];
+  const d = reviewHoldDecision({ returned, dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: [], now: Date.parse(fu(25)) });
+  assert.equal(d.block, true);
+  assert.equal(d.noVerdict, true);
+  const f = reviewHoldDecision({ returned: [fuDone[0], fuDone[3]], dispatches: [fuX, fuR], lastMessage: 'Done.', blockedFor: [], now: Date.parse(fu(25)) });
+  assert.equal(f.noVerdict, false, 'a real FAIL is still said as a problem found');
+});
+
 test('the hook tells the lead once, in one plain line, that a review failed', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
   const dir = join(home, '.claude', 'orchestrate', 'sessions');
@@ -624,4 +747,68 @@ test('Stop: merged helper folders are not named while another helper is still wo
   assert.equal(run(input, home).stdout.trim(), '', 'a helper is still working: quiet');
   writeFileSync(join(dir, 'run-1.json'), JSON.stringify({ v: 1, session_id: 'run-1', cwd: repo, dispatches, returned: [{ agentId: 'a1b2', toolUseId: 'tu-1', status: 'DONE' }, { agentId: 'z9', toolUseId: 'tu-2', status: 'DONE' }] }));
   assert.equal(run(input, home).stdout.trim(), '', 'all returned: still not said at stop');
+});
+
+// ---- shell edits, prose files, and "checkout" as a git command ------------------------
+
+test('unreviewedRiskFact counts a shell edit: sed -i on auth code returns the sign-in fact', () => {
+  const tail = editLine('Bash', { command: "sed -i 's/token = null/token = req.token/' src/auth.ts" });
+  const f = unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] });
+  assert.equal(f.topic, 'sign-in');
+  assert.equal(f.text, 'this change touches sign-in; nobody independent has looked at it.');
+});
+
+test('unreviewedRiskFact counts a heredoc write and a PowerShell write', () => {
+  const heredoc = editLine('Bash', { command: 'cat > src/pay.js <<EOF\nexport const refund = 1;\nEOF' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: heredoc, goal: '', returned: [] }).topic, 'payments');
+  const ps = editLine('PowerShell', { command: "Set-Content -Path lib/login.js -Value 'password'" });
+  assert.equal(unreviewedRiskFact({ transcriptTail: ps, goal: '', returned: [] }).topic, 'sign-in');
+});
+
+test('unreviewedRiskFact ignores an edit to a prose file, by extension', () => {
+  const md = editLine('Edit', { file_path: 'docs/notes.md', new_string: '| Plan | pricing |' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: md, goal: '', returned: [] }), null);
+  // The folder name says nothing: a .ts file under docs/ is still code.
+  const ts = editLine('Edit', { file_path: 'docs/pay.ts', new_string: 'pricing' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: ts, goal: '', returned: [] }).topic, 'payments');
+});
+
+test('unreviewedRiskFact skips a shell write only when every path it writes is prose', () => {
+  const prose = editLine('Bash', { command: 'cat > notes.md <<EOF\npricing table\nEOF' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: prose, goal: '', returned: [] }), null);
+  const mixed = editLine('Bash', { command: 'echo pricing >> notes.md && echo pricing >> tiers.ts' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: mixed, goal: '', returned: [] }).topic, 'payments');
+  const unknown = editLine('Bash', { command: 'node -e "require(\'fs\').writeFileSync(\'a.md\',\'pricing\')"' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: unknown, goal: '', returned: [] }).topic, 'payments', 'paths not known, so not skipped');
+});
+
+test('unreviewedRiskFact still fires for a code edit that names payment', () => {
+  const tail = editLine('Edit', { file_path: 'src/pay.ts', new_string: 'charge the payment for the card' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }).topic, 'payments');
+});
+
+test('unreviewedRiskFact: a read-only shell command is not an edit', () => {
+  const tail = editLine('Bash', { command: 'grep -rn payment src' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: GOAL, returned: [] }), null, 'no edit, nothing to say');
+});
+
+test('unreviewedRiskFact: git checkout and actions/checkout are not payments', () => {
+  const g = editLine('Bash', { command: 'git checkout -- src/app.ts' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: g, goal: '', returned: [] }), null);
+  const wf = editLine('Write', { file_path: '.github/workflows/ci.yml', content: '- uses: actions/checkout@v4' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: wf, goal: '', returned: [] }), null);
+  const real = editLine('Edit', { file_path: 'src/cart.ts', new_string: 'function checkout(cart) {}' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: real, goal: '', returned: [] }).topic, 'payments', 'a checkout flow is still payments');
+});
+
+test('unreviewedRiskFact searches only the pieces of a shell line that write', () => {
+  const tail = editLine('Bash', { command: 'git checkout -q main && git pull -q && grep -n -E "price|PRICE" file' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }), null);
+  const heredoc = editLine('Bash', { command: 'cat > f.js <<EOF\nexport const payments = 1;\nEOF' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: heredoc, goal: '', returned: [] }).topic, 'payments');
+});
+
+test('unreviewedRiskFact: the bare word price is payments', () => {
+  const tail = editLine('Edit', { file_path: 'src/cart.ts', new_string: 'const price = 5;' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }).topic, 'payments');
 });

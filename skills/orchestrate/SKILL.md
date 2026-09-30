@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.17.0"
+  version: "0.17.1"
 ---
 
 # Orchestrate
@@ -198,15 +198,16 @@ A fix with no named cause is `orch-debugger`'s first; pilot one helper before ma
 only `orch-coordinator` may dispatch a child, and only the bounded roles the
 guard allows. `references/dispatch.md` has the other Agent fields.
 
-**Advisor.** Its description lists the moments and the bound. Send it the
-advisor packet (`assets/packet.md`), keep preparing whatever does not hang on
-its answer, and take CHANGE COURSE or CAN'T TELL as a finding, not a veto.
+**Advisor.** One second opinion per check. The built-in `advisor` tool, if
+present, is it; send orch-advisor (`assets/packet.md`) when there is none or the
+check needs files read. Keep working on what does not hang on it; CHANGE COURSE
+or CAN'T TELL is a finding, not a veto.
 
 **Coordinator.** Send a wave to `orch-coordinator` — never for one task — when
 it has at least three independent tasks with `OWNS` and `DONE WHEN` filled in,
 or one plan step has independent parts you would otherwise dispatch one by
 one. It dispatches, grades, integrates in dependency order and gates once, then
-returns one summary. `references/dispatch.md` has more.
+returns one summary.
 
 **Codex workers.** Codex for workers until it runs out; Claude for judgment,
 and for planner work, browser work, or anything needing this session's MCP
@@ -217,7 +218,7 @@ then grade its report against `DONE WHEN`.
 
 A background dispatch hands control straight back: **do not sit and wait on it
 while the plan has a task whose blockers have all landed** — start that task
-instead, unless the right answer really is to wait. `references/dispatch.md` says why.
+instead, unless waiting is right (`references/dispatch.md` says why).
 
 `assets/packet.md` is the template: the task and its objective, the context
 and decisions it needs, the scope boundaries, and the evidence that means
@@ -257,14 +258,14 @@ with a named revert, even when the main change is good. You set the row in
 **Independent review** is for the cases where being wrong is expensive and hard
 to see: an authorisation or security boundary, money moving, a destructive or
 irreversible data change, a compatibility contract someone else consumes, or
-architectural uncertainty you could not resolve. A cosmetic change to a public
-page is not one of those. Decide that work owes a review before it is
-designed and write the review's questions then, so the same list drives the
-design, the `DONE WHEN` and the reviewer's `ACCEPTANCE`. Never review your own
-edits. The reviewer runs on Opus or stronger and reviews only correctness
-against that list; the pull request stays a draft until the verdict is PASS, then
-`gh pr ready <n>` — a review that cannot stop the merge is not a gate.
-`evaluation.md`'s "Independent review" has the checklist and gate procedure.
+architectural uncertainty you could not resolve. A cosmetic change to a
+public page is not one. Decide a review is owed before design and write its
+questions then, so one list drives the design, the `DONE WHEN` and the
+reviewer's `ACCEPTANCE`. Never review your own edits; the built-in advisor
+watched them made, so it is not independent. The reviewer runs on Opus or
+stronger and reviews only correctness against that list; the pull request stays
+a draft until the verdict is PASS, then `gh pr ready <n>` — a review that
+cannot stop the merge is not a gate. Checklist: `evaluation.md`, "Independent review".
 
 ## 7. When it is not right
 

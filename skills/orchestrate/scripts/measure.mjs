@@ -25,8 +25,9 @@ import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { dollars, family } from './lib/prices.mjs';
+import { dollars, family, advisorDollars, advisorLine } from './lib/prices.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
+import { inputSide, advisorTotals, mergeAdvisor } from './lib/context-scan.mjs';
 import { detectTier, readJson, PROFILE_PATH } from './lib/tier.mjs';
 
 const num = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
@@ -37,7 +38,7 @@ export function measure(text) {
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
     dispatches: [], routerInjections: 0, routerBytes: 0, routerReread: 0,
     hookContext: 0, returns: [], started: null, ended: null, records: 0, skipped: 0,
-    stopBlocks: 0,
+    stopBlocks: 0, advisor: [],
   };
   const marks = [];
   // One API call is written as several records sharing `message.id`, each with
@@ -114,6 +115,7 @@ export function measure(text) {
     r.cacheRead += num(u.cache_read_input_tokens);
     r.cacheWrite += num(u.cache_creation_input_tokens);
   }
+  r.advisor = advisorTotals(calls.values());
   for (const m of marks) r.routerReread += m.bytes * m.after;
   return r;
 }
@@ -149,7 +151,7 @@ export function measureGrowth(text) {
   const r = {
     toolInputChars: {}, toolResultChars: {}, largestInputs: [], largestResults: [],
     hookAttachmentChars: 0, contexts: [], input: 0, output: 0, cacheRead: 0,
-    cacheWrite: 0, turns: 0, price: null, priceModel: null,
+    cacheWrite: 0, turns: 0, price: null, priceModel: null, advisor: [],
   };
   const tools = new Map();
   const calls = new Map();
@@ -206,15 +208,25 @@ export function measureGrowth(text) {
   r.largestResults = r.largestResults.slice(0, 10);
   const families = models.map(family).filter(Boolean);
   r.priceModel = families.length ? families.sort((a, b) => families.filter(x => x === b).length - families.filter(x => x === a).length)[0] : null;
-  r.price = r.priceModel ? dollars(r, r.priceModel) : null;
+  r.advisor = advisorTotals(calls.values());
+  r.price = r.priceModel ? dollars(r, r.priceModel) + advisorDollars(r.advisor).dollars : null;
   return r;
+}
+
+// What a headline total says about the advisor: added when it was priced, and
+// said to be left out when a model nobody can price means it was not.
+function advisorSuffix(adv) {
+  if (adv.dollars && adv.unpriced) return ' plus the advisor, except one advisor model that is not priced and is left out';
+  return (adv.dollars ? ' plus the advisor' : '') + (adv.unpriced ? '; the advisor is not priced and is left out' : '');
 }
 
 export function growthReport(r) {
   const chars = rows => Object.entries(rows).sort((a, b) => b[1] - a[1]).map(([tool, n]) => `${tool} ${n}`).join(', ') || 'none';
   const largest = rows => rows.length ? rows.map(x => `  ${x.tool} ${x.chars} chars — ${x.label}`).join('\n') : '  none';
   const L = ['main-session context growth', `tool input chars: ${chars(r.toolInputChars)}`, `tool result chars: ${chars(r.toolResultChars)}`, 'largest tool inputs:', largest(r.largestInputs), 'largest tool results:', largest(r.largestResults), `hook attachments: ${r.hookAttachmentChars} chars`, `context every 10th response: ${r.contexts.map(x => `#${x.response} ${x.tokens}`).join(', ') || 'fewer than 10 responses'}`, `tokens: ${r.input} input, ${r.cacheRead} cache-read, ${r.cacheWrite} cache-write, ${r.output} output`];
-  L.push(r.price == null ? 'list price: not priced — no known model' : `list price: $${r.price.toFixed(2)} on ${r.priceModel}`);
+  L.push(r.price == null ? 'list price: not priced — no known model' : `list price: $${r.price.toFixed(2)} on ${r.priceModel}${advisorSuffix(advisorDollars(r.advisor))}`);
+  const av = advisorLine(r.advisor);
+  if (av) L.push(av);
   return L.join('\n');
 }
 
@@ -227,7 +239,9 @@ export function growthReport(r) {
 // never count twice. Context is per request (the input side of each call);
 // totals are consumption, and the two are never mixed.
 
-const inputOf = u => num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens);
+// The context of one call: the same reader the size line uses, so a response
+// that called the advisor is not read as the sum of its steps.
+const inputOf = u => inputSide(u) ?? 0;
 
 // Finding the way: tool results that only read or search, split at the agent's
 // first edit. Characters, not tokens; ÷4 is an estimate. A Bash call counts only
@@ -253,7 +267,7 @@ function resultChars(content) {
 }
 
 export function callsOf(text, { lead = false, seen = new Set() } = {}) {
-  const r = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, maxContext: 0, lastContext: null, contexts: [], models: [], retries: 0, nestedDispatches: 0, compactions: 0 };
+  const r = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0, maxContext: 0, lastContext: null, advisor: [], contexts: [], models: [], retries: 0, nestedDispatches: 0, compactions: 0 };
   const byId = new Map();
   const models = new Set();
   const toolUses = new Set();
@@ -311,6 +325,7 @@ export function callsOf(text, { lead = false, seen = new Set() } = {}) {
     r.lastContext = c;
     r.contexts.push(c);
   }
+  r.advisor = advisorTotals(byId.values());
   r.models = [...models];
   // Growth is first request to peak. The share is how much of it the lookups
   // before the first edit could explain; capped at 1 because ÷4 is rough.
@@ -379,6 +394,7 @@ export function measureTree(leadTranscript, { reportsPath = WORKER_REPORTS_PATH 
       calls: sum('calls'), input: sum('input'), cacheRead: sum('cacheRead'), cacheWrite: sum('cacheWrite'), output: sum('output'),
       retries: sum('retries'), nestedDispatches: agents.reduce((s, a) => s + a.nestedDispatches, 0),
       maxHelperContext: agents.reduce((m, a) => Math.max(m, a.maxContext), 0),
+      advisor: mergeAdvisor(all.map(a => a.advisor)),
       codexRuns: codex.length,
       fallbacks: codex.filter(c => c.fallback).length,
     },
@@ -409,6 +425,8 @@ export function treeReport(t) {
   for (const c of t.codex) L.push(`  codex ${c.taskId}: ${c.status}${c.usage ? ` · ${k(c.usage.input)} in / ${k(c.usage.output)} out` : ''}${c.fallback ? ' · handed to Claude' : ''}`);
   const x = t.totals;
   L.push(`total: ${x.calls} Claude calls across the lead and ${x.agents} helper(s)${x.nestedAgents ? ` (${x.nestedAgents} started by other helpers)` : ''} · ${k(x.input + x.cacheRead + x.cacheWrite)} input read · ${k(x.output)} out${x.retries ? ` · ${x.retries} retries` : ''}${x.codexRuns ? ` · ${x.codexRuns} Codex run(s), ${x.fallbacks} fallback(s)` : ''}`);
+  const av = advisorLine(x.advisor);
+  if (av) L.push(av);
   L.push('consumption totals are summed over calls; context is per request and is never summed');
   return L.join('\n');
 }
@@ -458,12 +476,18 @@ export function dollarReport(r, tier, profile) {
   const fam = Object.keys(r.models).map(family);
   const named = fam.filter(Boolean);
   const main = named.length ? named.sort((a, b) => named.filter(x => x === b).length - named.filter(x => x === a).length)[0] : null;
-  const total = main ? dollars({ input: r.input, output: r.output, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }, main) : null;
+  // The advisor is priced at its own model's rate and added to the total; one
+  // nobody can price adds nothing and is said so on its own line.
+  const adv = advisorDollars(r.advisor);
+  const mainOnly = main ? dollars({ input: r.input, output: r.output, cacheRead: r.cacheRead, cacheWrite: r.cacheWrite }, main) : null;
+  const total = mainOnly == null ? null : mainOnly + adv.dollars;
   L.push('');
   // A session whose transcript never names a model is not priced as the cheap
   // one. Unknown stays unknown until something resolves it.
   if (total == null) L.push('this session: not priced — the transcript names no model, and guessing one would invent the figure');
-  else L.push(`this session, at list price: $${total.toFixed(2)} on ${main}`);
+  else L.push(`this session, at list price: $${total.toFixed(2)} on ${main}${advisorSuffix(adv)}`);
+  const av = advisorLine(r.advisor);
+  if (av) L.push(av);
   if (r.dispatches.length) {
     const by = {};
     for (const d of r.dispatches) { const k = `${d.agent} on ${d.model}`; by[k] = (by[k] || 0) + 1; }

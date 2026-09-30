@@ -70,6 +70,27 @@ export function dollars({ input = 0, output = 0, cacheRead = 0, cacheWrite = 0 }
   return (input * p.in + output * p.out + cacheRead * p.in * cacheReadShare(model) + cacheWrite * p.in * 1.25) / m;
 }
 
+// List-price dollars for advisorTotals() rows, each at its own model's rate.
+// A row whose model nobody can price adds nothing and is counted in `unpriced`.
+export function advisorDollars(rows) {
+  let total = 0, unpriced = 0;
+  for (const b of rows || []) {
+    const d = dollars(b, b.model || '');
+    if (d == null) unpriced += b.calls; else total += d;
+  }
+  return { dollars: total, unpriced };
+}
+
+// Plain report lines, one per advisor model, or null when it was never called.
+export function advisorLine(rows) {
+  if (!rows || !rows.length) return null;
+  const k = n => `${Math.round(n / 1000)}k`;
+  return rows.map(b => {
+    const d = dollars(b, b.model || '');
+    return `advisor: ${b.calls} call${b.calls === 1 ? '' : 's'}, ${k(b.input + b.cacheRead + b.cacheWrite)} read, ${k(b.output)} written, ${d == null ? `not priced (model ${b.model || 'unnamed'})` : `$${d.toFixed(2)} at list price on ${family(b.model)}`}`;
+  }).join('\n');
+}
+
 // The starting table, for a role and model nobody has measured here yet. Every
 // number is reasoned from the per-token prices above and one observed fan-out,
 // and says so wherever it is printed.
@@ -112,9 +133,10 @@ export function estimateDollars(role, model, rows) {
 // helper that ran spent tokens, so a row priced at $0 is a stop hook that saw
 // no usage (a helper that died at its cap, a transcript it could not read),
 // not a cheap run. Averaging those in would drag the mean to nothing and
-// switch the run ceiling off after two empty returns.
+// switch the run ceiling off after two empty returns. A row whose advisor could
+// not be priced holds only part of what the helper spent, so it is left out too.
 function measuredRows(role, fam, rows) {
-  return (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === fam && r.dollars != null && Number.isFinite(Number(r.dollars)) && Number(r.dollars) > 0);
+  return (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === fam && r.dollars != null && Number.isFinite(Number(r.dollars)) && Number(r.dollars) > 0 && !(Number(r.advisorUnpriced) > 0));
 }
 
 // The dollar figure a price tag would print, plus whether it was measured

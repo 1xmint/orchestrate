@@ -22,6 +22,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, copyFil
 import { dirname, join, basename } from 'node:path';
 import { CONTEXT_DIR, isBoundary } from './context-scan.mjs';
 import { checkpointPath } from './context-advice.mjs';
+import { fileChange } from './file-change.mjs';
 import { loadSession } from './tier.mjs';
 import { unreturned } from './recover.mjs';
 import { readGoal, clipWords } from './goal.mjs';
@@ -58,7 +59,6 @@ function toolResultText(content) {
   }).join('\n');
 }
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const TEST_LINE = /(\bTests?:\s*\d+|\bpassed?\b[:=]?\s*\d+|\bfailed?\b[:=]?\s*\d+|✔|✖|✓|✗|\bPASS\b|\bFAIL\b)/i;
 
 // One forward pass of the transcript: the newest boundary, a running count of
@@ -109,12 +109,13 @@ function scanTranscript(text) {
       const t = textOf(rec.message.content);
       if (t.trim()) lastAssistantText = t;
       for (const b of Array.isArray(rec.message.content) ? rec.message.content : []) {
-        if (!b || b.type !== 'tool_use' || !EDIT_TOOLS.has(b.name)) continue;
-        const p = b.input && (b.input.file_path || b.input.path);
-        if (!p || typeof p !== 'string') continue;
-        const i = paths.indexOf(p);
-        if (i >= 0) paths.splice(i, 1);
-        paths.push(p);
+        if (!b || b.type !== 'tool_use') continue;
+        // Edit tools, and shell commands that write (where the command names the file).
+        for (const p of fileChange(b.name, b.input).paths) {
+          const i = paths.indexOf(p);
+          if (i >= 0) paths.splice(i, 1);
+          paths.push(p);
+        }
       }
     }
   }

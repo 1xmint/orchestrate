@@ -4,6 +4,7 @@
 //   node run-init.mjs <slug> [--repo <path>] [--goal "text"] [--tier max5]
 //                     [--host claude-code] [--providers "..."] [--session-id <id>]
 //   node run-init.mjs --bind <path to RUN.md> --session-id <id>
+//   node run-init.mjs --close <run id> [--reason "goal met"]   (--reopen undoes it)
 //
 // Creates .orchestrator/runs/<yyyymmdd>-<slug>/RUN.md from assets/RUN.md,
 // fills the placeholders it can, keeps .orchestrator/ out of git through
@@ -51,6 +52,7 @@ function sessionStartMs(sessionId) {
   return Number.isFinite(t) ? t : null;
 }
 
+const CLOSED_LINE = /^Closed:.*(\r?\n){0,2}/m;
 const args = process.argv.slice(2);
 const positional = [];
 const opts = {};
@@ -66,10 +68,28 @@ if (opts.reopen) {
   const base = join(findRepoRoot(opts.repo || process.cwd()) || process.cwd(), '.orchestrator', 'runs');
   const runMd = /RUN\.md$/i.test(id) ? resolve(id) : join(base, id, 'RUN.md');
   if (!existsSync(runMd)) { console.error(`no RUN.md for ${id} under ${base}`); process.exit(2); }
+  const text = readFileSync(runMd, 'utf8');
+  if (CLOSED_LINE.test(text)) writeFileSync(runMd, text.replace(CLOSED_LINE, ''));
   const now = new Date();
   utimesSync(runMd, now, now);
   console.log(`reopened ${readRun(runMd).runId}: it is live again for 48 hours of inactivity`);
   if (opts['session-id']) bindSessionRun(opts['session-id'], readRun(runMd));
+  process.exit(0);
+}
+
+// Close mode: the goal was met or dropped. One `Closed:` line under the title
+// is the whole record; a closed run is never bound or reported again, even
+// with blocked rows left in it, until --reopen removes the line.
+if (opts.close) {
+  const id = opts.close;
+  const base = join(findRepoRoot(opts.repo || process.cwd()) || process.cwd(), '.orchestrator', 'runs');
+  const runMd = /RUN\.md$/i.test(id) ? resolve(id) : join(base, id, 'RUN.md');
+  if (!existsSync(runMd)) { console.error(`no RUN.md for ${id} under ${base}`); process.exit(2); }
+  const text = readFileSync(runMd, 'utf8').replace(CLOSED_LINE, '');
+  const line = `Closed: ${new Date().toISOString().slice(0, 10)} — ${(opts.reason || 'goal met').replace(/\s+/g, ' ').trim()}`;
+  writeFileSync(runMd, /^# .*$/m.test(text) ? text.replace(/^(# .*)$/m, `$1\n\n${line}`) : `${line}\n\n${text}`);
+  const runId = readRun(runMd).runId;
+  console.log(`closed ${runId}; --reopen ${runId} makes it live again`);
   process.exit(0);
 }
 
@@ -88,7 +108,7 @@ if (opts.bind) {
 
 const slug = (positional[0] || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 if (!slug) {
-  console.error('usage: run-init.mjs <slug> [--goal "text"] [--tier t] [--host h] [--providers "p"] [--session-id id]\n       run-init.mjs --bind <RUN.md> --session-id <id>');
+  console.error('usage: run-init.mjs <slug> [--goal "text"] [--tier t] [--host h] [--providers "p"] [--session-id id]\n       run-init.mjs --bind <RUN.md> --session-id <id>\n       run-init.mjs --close <run id> [--reason "why"]');
   process.exit(2);
 }
 

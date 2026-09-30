@@ -28,6 +28,7 @@
 // (lib/context-advice.mjs); those import from here, not the other way round.
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { fileChange, isShellTool } from './file-change.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadPolicy } from './policy.mjs';
@@ -58,11 +59,51 @@ export function readRange(path, start, end) {
 // The input side of one response, or null when the record carries no usable
 // numbers. A usage object whose three input fields are all null or absent is
 // not a measurement of zero.
+//
+// A response that called a server tool such as the advisor lists its steps
+// under `iterations`, and the top-level fields add every main-model step
+// together: two steps of ~100k read as ~200k. The context is what the last
+// own step read; an advisor step's read is the advisor's context, not ours.
 export function inputSide(usage) {
   if (!usage || typeof usage !== 'object') return null;
+  const own = Array.isArray(usage.iterations) ? usage.iterations.filter(i => i && i.type === 'message') : [];
+  if (own.length) return inputSide({ ...own[own.length - 1], iterations: undefined });
   const f = ['input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
   if (!f.some(k => fin(usage[k]))) return null;
   return f.reduce((s, k) => s + (fin(usage[k]) ? Number(usage[k]) : 0), 0);
+}
+
+// The advisor's own steps in one response's usage. Top-level usage is the
+// executor only, so these never overlap it. Empty when there are none.
+export function advisorSteps(usage) {
+  const its = usage && typeof usage === 'object' && Array.isArray(usage.iterations) ? usage.iterations : [];
+  const n = v => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  return its.filter(i => i && i.type === 'advisor_message').map(i => ({
+    model: typeof i.model === 'string' ? i.model : null,
+    input: n(i.input_tokens), output: n(i.output_tokens),
+    cacheRead: n(i.cache_read_input_tokens), cacheWrite: n(i.cache_creation_input_tokens),
+  }));
+}
+
+// Advisor steps of many responses (one usage per message id, so the caller's
+// dedupe holds), summed per advisor model:
+// [{model, calls, input, output, cacheRead, cacheWrite}].
+export function advisorTotals(usages) {
+  const steps = [];
+  for (const u of usages) for (const s of advisorSteps(u)) steps.push({ ...s, calls: 1 });
+  return mergeAdvisor([steps]);
+}
+
+// Sum lists of {model, calls, input, output, cacheRead, cacheWrite} by model.
+export function mergeAdvisor(lists) {
+  const by = new Map();
+  for (const list of lists) for (const s of list || []) {
+    const k = s.model || '';
+    const b = by.get(k) || { model: s.model, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    for (const f of ['calls', 'input', 'output', 'cacheRead', 'cacheWrite']) b[f] += s[f] || 0;
+    by.set(k, b);
+  }
+  return [...by.values()];
 }
 
 export function isBoundary(rec) {
@@ -118,7 +159,7 @@ export function scanSlice(text, { partialHead = false, lead = true } = {}) {
       const toolId = b.id || `tool-anon-${anonTool++}`;
       if (seenTools.has(toolId)) continue;
       seenTools.add(toolId);
-      out.toolUses.push(b.name);
+      out.toolUses.push(isShellTool(b.name) ? { name: b.name, input: { command: b.input && b.input.command } } : b.name);
     }
     const tokens = inputSide(msg.usage);
     if (tokens == null) continue;
@@ -131,17 +172,19 @@ export function scanSlice(text, { partialHead = false, lead = true } = {}) {
   return out;
 }
 
-// Tool names that count as an edit for the "tool calls since your last edit"
-// counter: anything that changes a file. Reading, searching and dispatching
-// helpers do not reset it.
-export const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-
 // Step a running "tool calls since the last edit" count over one slice's tool
-// uses, in order: an edit tool resets it to 0, anything else adds one. Pure,
-// so an incremental read and a full read use it the same way.
+// uses, in order: a call that changes a file (an edit tool, or a shell command
+// that writes; lib/file-change.mjs) resets it to 0, anything else adds one.
+// An entry is a tool name, or {name, input} for a shell call, whose command
+// text is what says whether it wrote. Reading, searching and dispatching
+// helpers do not reset it. Pure, so an incremental read and a full read use it
+// the same way.
 export function stepEditCounter(count, toolUses) {
   let c = Number.isFinite(count) ? count : 0;
-  for (const name of toolUses || []) c = EDIT_TOOLS.has(name) ? 0 : c + 1;
+  for (const t of toolUses || []) {
+    const u = typeof t === 'string' ? { name: t } : t || {};
+    c = fileChange(u.name, u.input).changes ? 0 : c + 1;
+  }
   return c;
 }
 

@@ -2,6 +2,51 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.17.1 — fixes from the first live session on 0.17.0, 2026-09-29
+
+The first live session on 0.17.0 (the plugin's own repo, notes in
+`docs/audits/2026-09-29-live-session-notes.md`) found these, each fixed with a
+test that fails on the old code:
+
+- A finished run can be closed (`run-init.mjs --close <id> --reason`), so it
+  stops binding every new session. (#26)
+- A long helper hand-back is kept in full; default helper effort is documented. (#27)
+- The size reading after a built-in advisor call counted both models' input,
+  about double; it now reads the main model's own steps. (#28)
+- The card names the built-in advisor first for a second opinion. (#29)
+- The pre-dispatch check reads brief labels in any case ("For:", "Done when:"). (#30)
+- File changes made through the shell count as edits; notes files and
+  `git checkout` no longer trip the review alarm. (#31)
+- The built-in advisor's tokens are counted in cost totals at the advisor
+  model's own rate, and a total says when an unpriced advisor is left out. (#32)
+- A refused shell line names the part that stopped it, not a lowercase branch
+  delete that was already right. (#33)
+- A helper past its size budget is told so in words ("past the ~120k budget"),
+  not "~121k of ~120k", which read live as still inside it.
+- The skill says the built-in advisor is not an independent review: it watched
+  the edits being made.
+- A review that failed and then passed on a follow-up to the same reviewer
+  no longer makes the stop hook say the review found a problem, when the pass
+  names the same work. The reviewer's first line now says which work it judged
+  ("OUTCOME: PASS (REVIEW OF: <id>)"); a pass about other work, or naming
+  none, leaves the fail standing.
+- A second fail after a pass is said again, and a fresh reviewer's fail holds
+  even if another reviewer passed the same work.
+- A hand-back names reviewed work only when its opening line is a PASS or FAIL
+  verdict, so a builder quoting a review anywhere is not taken for one, and a
+  look that came back with no verdict no longer counts as reviewed (the stop
+  hook says "came back with no verdict; send it again"). A second
+  reviewer counts as still looking only while it has not replied and was sent
+  within six hours.
+- The "this change touches ..." stop line is said once per risky edit; it no
+  longer comes back as the chat grows.
+
+Seen and not fixed: a helper's own compaction reached the lead's after-compaction
+card because the host sent no agent id (a Claude Code gap, to report); the
+compaction count is one high as a result. The built-in advisor is not treated as
+an independent review: in this session it had seen the cost change and a
+reviewer still found three mislabels.
+
 ## v0.17.0 — the scoresheet audit, and rules that can be measured, 2026-09-29
 
 A scored audit (`docs/scoresheet-audit-prompt.md`, report
@@ -162,106 +207,9 @@ gain. Live runs found the faults a user would meet; repeated scoresheets
 mostly re-measured. A run whose measure is a judge needs a written stop rule
 before it starts, which is why the run template now asks for one.
 
-## v0.16.1 — a review that can stop the merge, 2026-09-21
-
-Plan: `~/.claude/plans/we-are-looking-into-spicy-abelson.md` (replaced the
-0.16.0 steering plan). Two pull requests: #23 (guard floor) and this release.
-
-**What happened.** A Cortex session built live-call billing
-(`1xmint/cortex` #20). Times UTC, from that session's records and GitHub:
-
-| When | What | Model |
-|---|---|---|
-| 15:36 | design for the voice phase written (`voice_plan.md`) | Fable |
-| 16:50 | builder sent, from a spec the lead wrote from that design | Sonnet |
-| 17:10 | #20 opened, not as a draft | |
-| 17:11 | review 1 sent; FAIL, two findings | Sonnet |
-| 17:17 | fresh builder sent to fix; redesigns the segment accounting | Sonnet |
-| 17:53 | tests green, Cortex's auto-merge merges #20; review 2 sent that minute | Opus |
-| 17:56 | review 2: FAIL, three blocking payment findings, none fixed in main | |
-| 17:57 | another fresh builder sent to fix | Sonnet |
-
-**Three causes.**
-1. The flaws were in the design, and the hard questions came after the build.
-   The design already held the settle rule that later failed CI and accepted
-   "one credit rounding per segment" (a 2.5-credit segment charged as 3, the
-   last segment free when the final deduction fails). It said nothing about
-   two sessions at once, a cancelled start, a dropped connection or a restart.
-   The lead wrote six sharp questions at 17:11 — for the reviewer, after about
-   a thousand lines rested on the design. A stronger builder would have built
-   the same design.
-2. The first review ran on the builder's own model and nothing refused it.
-   `routing.md` said a reviewer is never weaker than the author; the guard
-   enforced only the executor rows. The Sonnet review missed the overcharge;
-   the Opus review found it in four minutes. The user's note said "never send a
-   helper without naming a cheap model", with no exception for judges.
-3. On a repo that merges by itself, opening a ready pull request is the merge
-   decision, and the builder made it. Cortex's `automerge.yml` arms auto-merge
-   on every non-draft pull request; review 1's FAIL stopped nothing.
-
-Cost: each review read about 70k tokens; each fix went to a fresh builder that
-grew to about 145k over 56 and 110 steps, more than the build. Fix rounds are
-the expensive part, so the lever is fewer of them.
-
-**Decisions.** None is a new lesson: the floor enforces a rule already in
-`routing.md`, the draft default hands a decision back to its owner, and the
-questions move an existing sentence earlier.
-- **Guard floor (#23).** `JUDGES = {orch-reviewer, orch-advisor}`; a dispatch
-  naming a family weaker than Opus is refused with "resend on Opus, or hold the
-  merge and tell the user". No model named falls to the role file's Opus; an
-  unknown family passes; `normalizeRole` already folds `orchestrate:` names.
-  The `APPROVED BY USER:` header only unlocks Fable on plans without it; the
-  floor does not honour it, since a user approving a cheaper review is not a
-  reason to bank its verdict. Codex review does not pass through this hook.
-- **Drafts.** `orch-implementer` and `orch-debugger` (it has a shell and pushes,
-  so it can open one) open pull requests as drafts; SKILL.md §8 says marking
-  ready is the lead's merge decision. Orchestrate's CI runs on every
-  `pull_request` event, drafts included; where a repo skips CI on drafts, the
-  lead marks ready to get CI and merges by hand after PASS.
-- **Questions first.** SKILL.md §6: decide a review is owed before the design,
-  write its questions then, and use one list three times (planner packet,
-  builder DONE WHEN, reviewer ACCEPTANCE). `packet.md` gains the optional
-  `REVIEW QUESTIONS:` field and the reviewer's ACCEPTANCE points at it. To stay
-  under the 7,000-byte cap, the paragraph repeating the GATE field's own
-  "verbatim from gate.json" was cut.
-- **Reviewer description** carries the three points (send at push, draft until
-  PASS, Opus or stronger), because the helper list is what survives a summary;
-  the Cortex lead had been summarised 13 times.
-- **The user's note** now separates judging helpers (Opus or stronger) from bulk
-  helpers (Sonnet or Haiku). That line caused the Sonnet review, so it is
-  changed rather than answered with a louder one.
-
-**Left alone, on purpose.** Fable for money reviews stays "judge on its
-merits" (Opus found all three in four minutes). The builder stays on Sonnet:
-the evidence blames the design and the late questions. A fresh builder per fix
-round stays (helper cache lasts five minutes, a review takes longer;
-`subagentPromptCacheTtl: "1h"` stays off, its plan-quota effect undocumented).
-No path-based auto-merge block in Cortex (upkeep, and misses sign-in and
-deletion). No card change, no scheduled reviews, no hook reading packets for a
-draft flag, no floor for the planner or debugger (authors whose work gets
-checked).
-
-Evals 28-30: a payment pull request stays a draft until PASS; a Sonnet review
-is refused and resent on Opus, not dropped; the review questions exist before
-the planner or builder is sent and reach the reviewer word for word.
-
-Guidance pages (prompting best practices; memory; context window) as checked
-2026-09-21 for 0.16.0: reason given with each rule; the helper described by its
-moment; the limit is a hook, the judgement is prose.
-
-**Judge it from records, nothing staged.** Over the next five risky changes
-(money, sign-in, data deletion) on any repo: every review on Opus or stronger
-(`measure.mjs <transcript> --tree`); each pull request a draft until PASS
-(GitHub's timeline); the questions in the builder's packet word for word; one
-fix round or none. Two or more with the questions asked first means the builder
-is the weak point: move risky builds to Opus then, not now.
-
-Cortex itself is fixed from its own session (another repo, mid-fix in the same
-checkout): the user pastes it a short note to open the follow-up as a draft, review
-on Opus at push, ready only on PASS, and add the draft rule to its AGENTS.md.
-
 ## Earlier releases
 
+- [v0.16.1 — a review that can stop the merge, 2026-09-21](docs/state/v0.16.1.md)
 - [v0.16.0 — from work dispatcher to engineering partner, 2026-09-21](docs/state/v0.16.0.md)
 - [v0.15.8 — a scoped model grant, an outbox, honest Codex state, and helper compactions made visible, 2026-09-18](docs/state/v0.15.8.md)
 - [v0.15.7 — the lead hears facts, not orders, 2026-09-14](docs/state/v0.15.7.md)

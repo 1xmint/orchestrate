@@ -65,7 +65,7 @@ test('every role pins a quota-first effort and a step cap', () => {
   const want = {
     'orch-implementer': ['medium', 100], 'orch-debugger': ['high', 120], 'orch-researcher': ['medium', 80],
     'orch-browser': ['low', 80], 'orch-planner': ['high', 80], 'orch-reviewer': ['high', 60],
-    'orch-coordinator': ['high', 150], 'orch-advisor': ['high', 12],
+    'orch-coordinator': ['medium', 150], 'orch-advisor': ['medium', 12],
   };
   for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
     const fm = frontmatter(readFileSync(join(AGENTS, f), 'utf8'));
@@ -78,7 +78,7 @@ test('every role pins a quota-first effort and a step cap', () => {
 
 test('the coordinator owns one bounded wave and one graded return', () => {
   const text = readFileSync(join(AGENTS, 'orch-coordinator.md'), 'utf8').replace(/\s+/g, ' ');
-  assert.match(text, /^--- name: orch-coordinator .* model: opus effort: high /);
+  assert.match(text, /^--- name: orch-coordinator .* model: opus effort: medium /);
   assert.match(text, /depth 1 and may dispatch capped workers only one level down/);
   assert.match(text, /codex-worker\.mjs run --model <model> --effort <effort>/);
   assert.match(text, /Use Claude workers when Codex cannot do the task/);
@@ -669,4 +669,19 @@ test('every role file keeps the five lines even when the brief asks for pasted c
     const text = readFileSync(join(AGENTS, f), 'utf8');
     assert.match(text, /even if the brief asks for pasted contents or output; FULL REPORT names it\./, `${f} lacks the file-not-return sentence`);
   }
+});
+
+test('SKILL.md buys one second opinion: the built-in advisor when present', () => {
+  // With /advisor on, the host's advisor tool and orch-advisor both answer
+  // "is this the right direction"; asking both pays twice for one check.
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  assert.match(skill, /One second opinion per check\. The built-in `advisor` tool, if present, is it/);
+});
+
+test('SKILL.md says the built-in advisor is not an independent review', () => {
+  // Live, 2026-09-29: the advisor had seen a cost change and a reviewer still
+  // found three mislabels. It reads the lead's whole chat, so it shares the
+  // lead's blind spots and cannot stand in for orch-reviewer.
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  assert.match(skill, /Never review your own edits; the built-in advisor watched them made, so it is not independent\./);
 });

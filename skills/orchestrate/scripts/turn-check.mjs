@@ -27,6 +27,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail } from './lib/tier.mjs';
 import { reviewWordMatch } from './lib/review-words.mjs';
+import { fileChange, isProsePath } from './lib/file-change.mjs';
 
 export function pickupSection(runMdText) {
   const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
@@ -86,12 +87,48 @@ const SKIP_EXPLAINED = /\bskip(?:ped|ping)?\b[^.\n]{0,80}\breview\b|\breview\b[^
 // is never held, and a dispatch that was not flagged is never held.
 const isReviewerRow = d => Boolean(d && (d.reviewOf || /reviewer/i.test(String(d.agent || ''))));
 
-// A reviewer dispatch counts as a look unless its return is on file with a FAIL
-// verdict. One still running, or one that passed, is a look; a returned FAIL is
-// not, and a later PASS on the same work is.
-const reviewFailed = (d, returned) => (Array.isArray(returned) ? returned : []).some(r => r && r.verdict === 'FAIL'
-  && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId)));
+// The verdict that stands for one reviewer dispatch: the newest on file for its
+// ids, in file order (`returned` is append-only). A follow-up SendMessage to the
+// same reviewer shares the dispatch's ids but may be about other work, so a
+// PASS naming other work under REVIEW OF is skipped, and a PASS that names no
+// work cannot undo a FAIL: only a PASS naming the same work can. A FAIL always
+// counts, whatever it names: a mistyped id must not hide one.
+const standingVerdict = (d, returned) => {
+  let last = null;
+  for (const r of Array.isArray(returned) ? returned : []) {
+    if (!r || !r.verdict) continue;
+    if (!((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId))) continue;
+    if (r.verdict !== 'FAIL' && r.reviewOf && d.reviewOf && r.reviewOf !== d.reviewOf) continue;
+    if (last && last.verdict === 'FAIL' && r.verdict !== 'FAIL' && !(r.reviewOf && r.reviewOf === d.reviewOf)) continue;
+    last = r;
+  }
+  return last;
+};
+const reviewFailed = (d, returned) => (standingVerdict(d, returned) || {}).verdict === 'FAIL';
 const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id);
+
+// Several reviewers of the same work. One still running (no reply on file, sent
+// within six hours, the bound anyHelperRunning uses) is a look. One that replied
+// with no verdict that stands (capped, no OUTCOME, a PASS naming other work) is
+// neither a pass nor a fail. Otherwise the newest standing verdict decides, so a
+// fresh reviewer's FAIL after another's PASS holds. `fail` is the FAIL that
+// stands, whose time keys the ask-once memory: a second FAIL after a PASS is
+// news and is said again.
+const sameHelper = (r, d) => Boolean(r && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId)));
+const judgeLooks = (looks, returned, now = Date.now()) => {
+  const rs = Array.isArray(returned) ? returned : [];
+  let newest = null;
+  for (const d of looks) {
+    const v = standingVerdict(d, rs);
+    if (!v) {
+      if (!rs.some(r => sameHelper(r, d)) && !(Date.parse(d.at) < now - 6 * 3600 * 1000)) return { passed: true, fail: null };
+      continue;
+    }
+    if (!newest || rs.indexOf(v) > rs.indexOf(newest)) newest = v;
+  }
+  return newest && newest.verdict === 'FAIL' ? { passed: false, fail: newest } : { passed: Boolean(newest), fail: null };
+};
+const failKey = (id, fail) => (fail && fail.at ? `${id}:failed@${fail.at}` : `${id}:failed`);
 
 // A dispatch of this session with no return yet, sent within the last six
 // hours (an older one is a helper that died without a return, not one working).
@@ -103,7 +140,7 @@ export function anyHelperRunning({ dispatches, returned, now }) {
     && !rs.some(r => r && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId))));
 }
 
-function freeFormOpen(returned, dispatches) {
+function freeFormOpen(returned, dispatches, now) {
   const ds = Array.isArray(dispatches) ? dispatches : [];
   const out = [];
   for (const r of Array.isArray(returned) ? returned : []) {
@@ -115,31 +152,34 @@ function freeFormOpen(returned, dispatches) {
       : (r.agentId ? ds.find(x => x && x.agentId === r.agentId) : null);
     if (!d || !d.toolUseId || d.task || !d.review || isReviewerRow(d)) continue;
     const looks = looksAt(ds, returned, d.toolUseId);
-    if (looks.some(x => !reviewFailed(x, returned))) continue;
-    out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at), failed: looks.length > 0 });
+    const judged = judgeLooks(looks, returned, now);
+    if (judged.passed) continue;
+    out.push({ id: d.toolUseId, at: Date.parse(r.at), sentAt: Date.parse(d.at), failed: looks.length > 0, fail: judged.fail });
   }
   return out;
 }
 
-export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedFor }) {
+export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedFor, now }) {
+  const t0 = Number.isFinite(now) ? now : Date.now();
   const already = new Set(Array.isArray(blockedFor) ? blockedFor : []);
   const gated = (Array.isArray(returned) ? returned : []).filter(r => r && r.reviewGated && r.task);
   const skipSaid = SKIP_EXPLAINED.test(String(lastMessage || ''));
   for (const r of gated) {
     const looks = looksAt(Array.isArray(dispatches) ? dispatches : [], returned, r.task);
-    if (looks.some(d => !reviewFailed(d, returned)) || skipSaid) continue;
+    const judged = judgeLooks(looks, returned, t0);
+    if (judged.passed || skipSaid) continue;
     const failed = looks.length > 0;
-    const key = failed ? `${r.task}:failed` : r.task;
+    const key = failed ? failKey(r.task, judged.fail) : r.task;
     if (already.has(key)) continue;
-    return { block: true, task: r.task, failed, blockedFor: [...already, key] };
+    return { block: true, task: r.task, failed, noVerdict: failed && !judged.fail, blockedFor: [...already, key] };
   }
-  const open = freeFormOpen(returned, dispatches);
+  const open = freeFormOpen(returned, dispatches, t0);
   for (const f of open) {
-    const key = f.failed ? `${f.id}:failed` : f.id;
+    const key = f.failed ? failKey(f.id, f.fail) : f.id;
     if (already.has(key) || skipSaid) continue;
     const later = !f.failed && open.length === 1 && (Array.isArray(dispatches) ? dispatches : []).some(d => d && isReviewerRow(d) && !(d.reviewOf && dispatches.some(x => x && x.toolUseId === d.reviewOf)) && !reviewFailed(d, returned) && Date.parse(d.at) > (Number.isFinite(f.sentAt) ? f.sentAt : f.at));
     if (later) continue;
-    return { block: true, task: f.id, freeForm: true, failed: Boolean(f.failed), blockedFor: [...already, key] };
+    return { block: true, task: f.id, freeForm: true, failed: Boolean(f.failed), noVerdict: Boolean(f.failed) && !f.fail, blockedFor: [...already, key] };
   }
   return { block: false, task: null, blockedFor: [...already] };
 }
@@ -152,33 +192,53 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
 // reviewer has returned since its last edit, it yields one plain fact. Nothing
 // is asked for: the host can hold a finish only by blocking it, so the fact is
 // the whole reason given, and the key makes it once per set of edits.
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pricing?)$/.test(w) ? 'payments'
+const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pric(?:e|es|ing))$/.test(w) ? 'payments'
   : /^(auth|authentication|authorization|login|password|credentials?|token|oauth|permission)$/.test(w) ? 'sign-in'
   : /^(drop table|truncate|delete rows|delete records|purge|migration)$/.test(w) ? 'stored data'
   : 'a shared contract');
 
 function editText(input) {
   const i = input || {};
-  const parts = [i.file_path, i.notebook_path, i.new_string, i.content, i.new_source];
+  const parts = [i.file_path, i.notebook_path, i.new_string, i.content, i.new_source, i.command];
   for (const e of Array.isArray(i.edits) ? i.edits : []) parts.push(e && e.new_string);
   return parts.filter(x => typeof x === 'string').join('\n');
 }
 
+// Words on the review list that mean something else here: a branch switch
+// (`git checkout`, `git switch`, `gh pr checkout`) and the CI step
+// actions/checkout. Removed before the word match, here rather than in
+// reviewWordMatch, which the dispatch gate shares.
+const NOT_PAYMENTS = /\b(?:git|gh\s+pr)\s+(?:-[Cc]\s+\S+\s+)*(?:checkout|switch)\b|\bactions\/checkout\b/gi;
+
+// The text of a change to look for review words in, or null when the change is
+// only to prose files (.md .mdx .txt .rst, by extension: a price table or a
+// design note is not the code that charges anyone). A shell command counts as
+// prose only when every path it writes is known and is a prose file.
+function riskText(input, fc) {
+  if (fc.exact && fc.paths.length && fc.paths.every(isProsePath)) return null;
+  // A shell line is searched only in the pieces that write: a grep pattern
+  // beside a `git pull` is not something that was changed.
+  const text = typeof fc.text === 'string' ? fc.text : editText(input);
+  return text.replace(NOT_PAYMENTS, ' ');
+}
+
 export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
-  let edits = 0; let lastEditAt = 0; let word = null; let lastRiskAt = 0; let lastRiskIdx = -1;
+  let edits = 0; let lastEditAt = 0; let word = null; let lastRiskAt = 0; let lastRiskId = null;
   const lines = String(transcriptTail || '').split('\n');
   lines.forEach((line, idx) => {
     if (!line.includes('"tool_use"')) return;
     let o; try { o = JSON.parse(line); } catch { return; }
     const content = o && o.message && Array.isArray(o.message.content) ? o.message.content : [];
     for (const c of content) {
-      if (!c || c.type !== 'tool_use' || !EDIT_TOOLS.has(c.name)) continue;
+      if (!c || c.type !== 'tool_use') continue;
+      const fc = fileChange(c.name, c.input);
+      if (!fc.changes) continue;
       edits++;
       const at = Date.parse(o.timestamp) || 0;
       if (at > lastEditAt) lastEditAt = at;
-      const w = reviewWordMatch(editText(c.input));
-      if (w) { word = w; lastRiskIdx = idx; if (at > lastRiskAt) lastRiskAt = at; }
+      const text = riskText(c.input, fc);
+      const w = text == null ? null : reviewWordMatch(text);
+      if (w) { word = w; lastRiskId = c.id || o.uuid || `${o.timestamp}#${idx}`; if (at > lastRiskAt) lastRiskAt = at; }
     }
   });
   if (!edits) return null;
@@ -193,7 +253,12 @@ export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
   const text = reviews.length
     ? `this change touches ${topic}; the change made since the review has not been looked at.`
     : `this change touches ${topic}; nobody independent has looked at it.`;
-  return { topic, key: `${word || goalWord}@${lastRiskIdx}:${edits}`, text };
+  // The key names the risky edit itself (its tool-call id), never its place in
+  // the transcript tail: the tail is the last 1 MB, so a line number or an edit
+  // count moves as the chat grows and the same edit would be raised again. With
+  // only the request to go on, it is raised once per review.
+  const lastReview = reviews.reduce((m, r) => Math.max(m, Date.parse(r.at) || 0), 0);
+  return { topic, key: word ? `${word}@${lastRiskId}` : `${goalWord}@review:${lastReview}`, text };
 }
 
 // Helper folders and branches left behind. A helper that works in its own
@@ -346,6 +411,7 @@ function checkHeartbeat(input) {
     updated.reviewBlockedFor = rh.blockedFor;
     store[key] = updated;
     try { writeJsonAtomic(path, store); } catch {}
+    if (rh.noVerdict) return emitBlock('orchestrate: the independent look came back with no verdict; send it again.');
     if (rh.failed) return emitBlock('orchestrate: the independent look found a problem; fix it and have it looked at again.');
     if (rh.freeForm) return emitBlock(`orchestrate: a brief flagged for independent review returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
     return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);

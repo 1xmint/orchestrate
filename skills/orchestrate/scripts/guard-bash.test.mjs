@@ -735,3 +735,16 @@ test('a refused line with several parts ends by saying nothing in it ran; a sing
     assert.doesNotMatch(decide('git push --force', opts).reason, /Nothing in this line ran/);
   }
 });
+
+// Seen live: a refusal blamed a lowercase `branch -d` and said to use the
+// lowercase flag, when the part that stopped the line was an `rm -rf`.
+test('a line refused for another part names that part, not a lowercase branch delete', () => {
+  for (const opts of [{ headless: true, mode: 'auto' }, { subagent: true }]) {
+    const withRm = decide('rm -rf src && git branch -d worktree-agent-abc123', opts);
+    assert.equal(withRm.kind, 'deny');
+    assert.doesNotMatch(withRm.reason, /lowercase flag/);
+    assert.match(withRm.reason, /permanently delete files or folders/);
+    assert.match(decide('git branch -D worktree-agent-abc123 && rm -rf src', opts).reason, /lowercase flag/);
+    assert.match(decide('git branch -d feature-x && git branch -D y', opts).reason, /lowercase flag/);
+  }
+});
