@@ -22,7 +22,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, copyFil
 import { dirname, join, basename } from 'node:path';
 import { CONTEXT_DIR, isBoundary } from './context-scan.mjs';
 import { checkpointPath } from './context-advice.mjs';
-import { fileChange } from './file-change.mjs';
+import { fileChange, isShellTool } from './file-change.mjs';
 import { loadSession } from './tier.mjs';
 import { unreturned } from './recover.mjs';
 import { readGoal, clipWords } from './goal.mjs';
@@ -43,6 +43,24 @@ function textOf(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n');
+}
+
+// What the user typed, not what the host wrapped around it: a block that is
+// only a host wrapper (a local-command caveat, a system reminder, a slash
+// command's own echo, hook feedback) is dropped, and system-reminder blocks
+// stuck to the front or back of real text are cut off it.
+const HOST_WRAPPER = /^\s*(<(local-command-caveat|system-reminder|command-name|command-message|command-args|local-command-stdout)>|Stop hook feedback:)/;
+const REMINDER = '<system-reminder>[\\s\\S]*?</system-reminder>';
+const LEADING_REMINDERS = new RegExp(`^(\\s*${REMINDER})+`);
+const TRAILING_REMINDERS = new RegExp(`(${REMINDER}\\s*)+$`);
+
+function userTextOf(content) {
+  const blocks = typeof content === 'string' ? [content]
+    : Array.isArray(content) ? content.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text) : [];
+  return blocks
+    .map(t => t.replace(LEADING_REMINDERS, '').replace(TRAILING_REMINDERS, ''))
+    .filter(t => t.trim() && !HOST_WRAPPER.test(t))
+    .join('\n');
 }
 
 function toolResultText(content) {
@@ -75,6 +93,9 @@ function scanTranscript(text) {
   let lastAssistantText = null;
   let testLine = null;
   let paths = [];
+  // tool_use id -> tool name, so a result is read as a test result only when
+  // a shell command produced it: a Read of source that says "pass" is not one.
+  const toolNames = new Map();
   for (const line of String(text || '').split('\n')) {
     if (!line.trim()) continue;
     let rec;
@@ -95,14 +116,16 @@ function scanTranscript(text) {
       continue;
     }
     if (rec.type === 'user' && rec.message) {
-      const t = textOf(rec.message.content);
+      const t = rec.isMeta === true ? '' : userTextOf(rec.message.content);
       if (t.trim()) {
         if (firstUserText == null) firstUserText = t;
         lastUserText = t;
       }
-      const rt = toolResultText(rec.message.content);
-      const m = rt.split('\n').filter(l => TEST_LINE.test(l));
-      if (m.length) testLine = m[m.length - 1].trim();
+      for (const b of Array.isArray(rec.message.content) ? rec.message.content : []) {
+        if (!b || b.type !== 'tool_result' || !isShellTool(toolNames.get(b.tool_use_id))) continue;
+        const m = toolResultText([b]).split('\n').filter(l => TEST_LINE.test(l));
+        if (m.length) testLine = m[m.length - 1].trim();
+      }
       continue;
     }
     if (rec.type === 'assistant' && rec.message) {
@@ -110,6 +133,7 @@ function scanTranscript(text) {
       if (t.trim()) lastAssistantText = t;
       for (const b of Array.isArray(rec.message.content) ? rec.message.content : []) {
         if (!b || b.type !== 'tool_use') continue;
+        if (b.id) toolNames.set(b.id, b.name);
         // Edit tools, and shell commands that write (where the command names the file).
         for (const p of fileChange(b.name, b.input).paths) {
           const i = paths.indexOf(p);

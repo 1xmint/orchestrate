@@ -35,7 +35,7 @@ import {
   SESSIONS_DIR, PROFILE_PATH,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext } from './lib/context-store.mjs';
-import { readContext, idPart } from './lib/context-scan.mjs';
+import { readContext, idPart, countBoundaries } from './lib/context-scan.mjs';
 import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
 import { readGoal, goalLine, goalDue, markShown } from './lib/goal.mjs';
 import { modeNote } from './lib/modes.mjs';
@@ -222,6 +222,8 @@ function promptText(input) {
 // Everything the model cannot see, once; then nothing until one of those facts
 // changes. A message whose wording differs from the last one is not a change of
 // state, and the old router treated it as one.
+const HOST_TAGS = /<(system-reminder|local-command-caveat|local-command-stdout|command-name|command-message|command-args)>[\s\S]*?<\/\1>/g;
+
 function handlePrompt(input) {
   // A hook fires inside a subagent's own call too, with `agent_id` set on the
   // stdin payload (hooks doc, "common input fields"). Nothing here is about
@@ -242,7 +244,11 @@ function handlePrompt(input) {
   if (promptKey && state.lastPromptId === promptKey) return;
   if (promptKey) state.lastPromptId = promptKey;
 
-  const trimmed = text.trim();
+  // The host's own tagged text around what the user typed (the desktop app's
+  // folder notice in a system-reminder, a slash command's caveat and echo) is
+  // cut out first: none of it is the user's words, and once it was pinned as
+  // the goal.
+  const trimmed = text.replace(HOST_TAGS, ' ').trim();
 
   // The host also submits its own notices through this hook: a background
   // task finishing arrives as a prompt that opens "[SYSTEM NOTIFICATION - NOT
@@ -489,6 +495,24 @@ function handlePrompt(input) {
   emit('UserPromptSubmit', out.join('\n'));
 }
 
+// The compaction number this hook announces, read from the lead transcript's
+// own boundary records instead of a counter any compaction hook can bump (a
+// helper's compaction has reached the lead with no agent_id). This hook runs
+// before the host writes the new boundary — on both live transcripts checked
+// the hook's record is stamped 0.4 to 0.6 s before its boundary's — so the
+// boundaries on file are the earlier compactions and this one is one more.
+// A hook that finds no boundary beyond the last one counted is not a new
+// compaction of the lead: the number stays. No readable transcript: +1, as before.
+export function nextCompactions(state, transcriptPath) {
+  const before = state.compactions || 0;
+  const seen = transcriptPath ? countBoundaries(transcriptPath) : null;
+  if (seen == null) return before + 1;
+  const last = state.boundariesCounted;
+  state.boundariesCounted = seen;
+  if (last === seen && before > 0) return before;
+  return seen + 1;
+}
+
 // Resume and compaction are the two moments the goal is actually at risk, so
 // this is where the excerpt earns its tokens.
 function handleSessionStart(input) {
@@ -510,7 +534,7 @@ function handleSessionStart(input) {
   // into it, so without this the rest of a long session runs with no card.
   // The working project is learned from touched paths since the last
   // compaction (context-check.mjs), so it is relearned after this one too.
-  if (source === 'compact') { state.compactions = (state.compactions || 0) + 1; state.work = null; }
+  if (source === 'compact') { state.compactions = nextCompactions(state, input.transcript_path); state.work = null; }
   // Write the plugin's own checkpoint before anything below names it, so the
   // compacted line names the file whichever hook ran first — this one, or
   // postcompact-check.mjs on the lead side. Idempotent and silent on error.

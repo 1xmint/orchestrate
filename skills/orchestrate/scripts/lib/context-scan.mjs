@@ -110,6 +110,20 @@ export function isBoundary(rec) {
   return Boolean(rec && rec.type === 'system' && rec.subtype === 'compact_boundary');
 }
 
+// How many compaction boundaries the transcript file holds, read whole (a
+// compaction keeps the file), or null when it cannot be read. The same count
+// lib/measure.mjs reports, so a number built from it agrees with the report.
+export function countBoundaries(path) {
+  try {
+    let n = 0;
+    for (const l of readFileSync(path, 'utf8').split('\n')) {
+      if (!l.includes('"compact_boundary"')) continue;
+      try { if (isBoundary(JSON.parse(l))) n++; } catch { /* a torn line is not a boundary */ }
+    }
+    return n;
+  } catch { return null; }
+}
+
 // Forward scan of a slice of JSONL. `partialHead` drops the first line, which
 // starts mid-record whenever the slice does not start at byte 0. A trailing
 // line with no newline is a write in progress: it is not consumed, and
