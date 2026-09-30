@@ -28,6 +28,7 @@
 // (lib/context-advice.mjs); those import from here, not the other way round.
 
 import { readFileSync, writeFileSync, mkdirSync, renameSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { fileChange, isShellTool } from './file-change.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { loadPolicy } from './policy.mjs';
@@ -158,7 +159,7 @@ export function scanSlice(text, { partialHead = false, lead = true } = {}) {
       const toolId = b.id || `tool-anon-${anonTool++}`;
       if (seenTools.has(toolId)) continue;
       seenTools.add(toolId);
-      out.toolUses.push(b.name);
+      out.toolUses.push(isShellTool(b.name) ? { name: b.name, input: { command: b.input && b.input.command } } : b.name);
     }
     const tokens = inputSide(msg.usage);
     if (tokens == null) continue;
@@ -171,17 +172,19 @@ export function scanSlice(text, { partialHead = false, lead = true } = {}) {
   return out;
 }
 
-// Tool names that count as an edit for the "tool calls since your last edit"
-// counter: anything that changes a file. Reading, searching and dispatching
-// helpers do not reset it.
-export const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-
 // Step a running "tool calls since the last edit" count over one slice's tool
-// uses, in order: an edit tool resets it to 0, anything else adds one. Pure,
-// so an incremental read and a full read use it the same way.
+// uses, in order: a call that changes a file (an edit tool, or a shell command
+// that writes; lib/file-change.mjs) resets it to 0, anything else adds one.
+// An entry is a tool name, or {name, input} for a shell call, whose command
+// text is what says whether it wrote. Reading, searching and dispatching
+// helpers do not reset it. Pure, so an incremental read and a full read use it
+// the same way.
 export function stepEditCounter(count, toolUses) {
   let c = Number.isFinite(count) ? count : 0;
-  for (const name of toolUses || []) c = EDIT_TOOLS.has(name) ? 0 : c + 1;
+  for (const t of toolUses || []) {
+    const u = typeof t === 'string' ? { name: t } : t || {};
+    c = fileChange(u.name, u.input).changes ? 0 : c + 1;
+  }
   return c;
 }
 

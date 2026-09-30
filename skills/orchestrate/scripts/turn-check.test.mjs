@@ -625,3 +625,67 @@ test('Stop: merged helper folders are not named while another helper is still wo
   writeFileSync(join(dir, 'run-1.json'), JSON.stringify({ v: 1, session_id: 'run-1', cwd: repo, dispatches, returned: [{ agentId: 'a1b2', toolUseId: 'tu-1', status: 'DONE' }, { agentId: 'z9', toolUseId: 'tu-2', status: 'DONE' }] }));
   assert.equal(run(input, home).stdout.trim(), '', 'all returned: still not said at stop');
 });
+
+// ---- shell edits, prose files, and "checkout" as a git command ------------------------
+
+test('unreviewedRiskFact counts a shell edit: sed -i on auth code returns the sign-in fact', () => {
+  const tail = editLine('Bash', { command: "sed -i 's/token = null/token = req.token/' src/auth.ts" });
+  const f = unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] });
+  assert.equal(f.topic, 'sign-in');
+  assert.equal(f.text, 'this change touches sign-in; nobody independent has looked at it.');
+});
+
+test('unreviewedRiskFact counts a heredoc write and a PowerShell write', () => {
+  const heredoc = editLine('Bash', { command: 'cat > src/pay.js <<EOF\nexport const refund = 1;\nEOF' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: heredoc, goal: '', returned: [] }).topic, 'payments');
+  const ps = editLine('PowerShell', { command: "Set-Content -Path lib/login.js -Value 'password'" });
+  assert.equal(unreviewedRiskFact({ transcriptTail: ps, goal: '', returned: [] }).topic, 'sign-in');
+});
+
+test('unreviewedRiskFact ignores an edit to a prose file, by extension', () => {
+  const md = editLine('Edit', { file_path: 'docs/notes.md', new_string: '| Plan | pricing |' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: md, goal: '', returned: [] }), null);
+  // The folder name says nothing: a .ts file under docs/ is still code.
+  const ts = editLine('Edit', { file_path: 'docs/pay.ts', new_string: 'pricing' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: ts, goal: '', returned: [] }).topic, 'payments');
+});
+
+test('unreviewedRiskFact skips a shell write only when every path it writes is prose', () => {
+  const prose = editLine('Bash', { command: 'cat > notes.md <<EOF\npricing table\nEOF' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: prose, goal: '', returned: [] }), null);
+  const mixed = editLine('Bash', { command: 'echo pricing >> notes.md && echo pricing >> tiers.ts' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: mixed, goal: '', returned: [] }).topic, 'payments');
+  const unknown = editLine('Bash', { command: 'node -e "require(\'fs\').writeFileSync(\'a.md\',\'pricing\')"' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: unknown, goal: '', returned: [] }).topic, 'payments', 'paths not known, so not skipped');
+});
+
+test('unreviewedRiskFact still fires for a code edit that names payment', () => {
+  const tail = editLine('Edit', { file_path: 'src/pay.ts', new_string: 'charge the payment for the card' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }).topic, 'payments');
+});
+
+test('unreviewedRiskFact: a read-only shell command is not an edit', () => {
+  const tail = editLine('Bash', { command: 'grep -rn payment src' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: GOAL, returned: [] }), null, 'no edit, nothing to say');
+});
+
+test('unreviewedRiskFact: git checkout and actions/checkout are not payments', () => {
+  const g = editLine('Bash', { command: 'git checkout -- src/app.ts' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: g, goal: '', returned: [] }), null);
+  const wf = editLine('Write', { file_path: '.github/workflows/ci.yml', content: '- uses: actions/checkout@v4' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: wf, goal: '', returned: [] }), null);
+  const real = editLine('Edit', { file_path: 'src/cart.ts', new_string: 'function checkout(cart) {}' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: real, goal: '', returned: [] }).topic, 'payments', 'a checkout flow is still payments');
+});
+
+test('unreviewedRiskFact searches only the pieces of a shell line that write', () => {
+  const tail = editLine('Bash', { command: 'git checkout -q main && git pull -q && grep -n -E "price|PRICE" file' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }), null);
+  const heredoc = editLine('Bash', { command: 'cat > f.js <<EOF\nexport const payments = 1;\nEOF' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: heredoc, goal: '', returned: [] }).topic, 'payments');
+});
+
+test('unreviewedRiskFact: the bare word price is payments', () => {
+  const tail = editLine('Edit', { file_path: 'src/cart.ts', new_string: 'const price = 5;' });
+  assert.equal(unreviewedRiskFact({ transcriptTail: tail, goal: '', returned: [] }).topic, 'payments');
+});

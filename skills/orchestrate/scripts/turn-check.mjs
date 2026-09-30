@@ -27,6 +27,7 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail } from './lib/tier.mjs';
 import { reviewWordMatch } from './lib/review-words.mjs';
+import { fileChange, isProsePath } from './lib/file-change.mjs';
 
 export function pickupSection(runMdText) {
   const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
@@ -152,17 +153,34 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
 // reviewer has returned since its last edit, it yields one plain fact. Nothing
 // is asked for: the host can hold a finish only by blocking it, so the fact is
 // the whole reason given, and the key makes it once per set of edits.
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pricing?)$/.test(w) ? 'payments'
+const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pric(?:e|es|ing))$/.test(w) ? 'payments'
   : /^(auth|authentication|authorization|login|password|credentials?|token|oauth|permission)$/.test(w) ? 'sign-in'
   : /^(drop table|truncate|delete rows|delete records|purge|migration)$/.test(w) ? 'stored data'
   : 'a shared contract');
 
 function editText(input) {
   const i = input || {};
-  const parts = [i.file_path, i.notebook_path, i.new_string, i.content, i.new_source];
+  const parts = [i.file_path, i.notebook_path, i.new_string, i.content, i.new_source, i.command];
   for (const e of Array.isArray(i.edits) ? i.edits : []) parts.push(e && e.new_string);
   return parts.filter(x => typeof x === 'string').join('\n');
+}
+
+// Words on the review list that mean something else here: a branch switch
+// (`git checkout`, `git switch`, `gh pr checkout`) and the CI step
+// actions/checkout. Removed before the word match, here rather than in
+// reviewWordMatch, which the dispatch gate shares.
+const NOT_PAYMENTS = /\b(?:git|gh\s+pr)\s+(?:-[Cc]\s+\S+\s+)*(?:checkout|switch)\b|\bactions\/checkout\b/gi;
+
+// The text of a change to look for review words in, or null when the change is
+// only to prose files (.md .mdx .txt .rst, by extension: a price table or a
+// design note is not the code that charges anyone). A shell command counts as
+// prose only when every path it writes is known and is a prose file.
+function riskText(input, fc) {
+  if (fc.exact && fc.paths.length && fc.paths.every(isProsePath)) return null;
+  // A shell line is searched only in the pieces that write: a grep pattern
+  // beside a `git pull` is not something that was changed.
+  const text = typeof fc.text === 'string' ? fc.text : editText(input);
+  return text.replace(NOT_PAYMENTS, ' ');
 }
 
 export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
@@ -173,11 +191,14 @@ export function unreviewedRiskFact({ transcriptTail, goal, returned }) {
     let o; try { o = JSON.parse(line); } catch { return; }
     const content = o && o.message && Array.isArray(o.message.content) ? o.message.content : [];
     for (const c of content) {
-      if (!c || c.type !== 'tool_use' || !EDIT_TOOLS.has(c.name)) continue;
+      if (!c || c.type !== 'tool_use') continue;
+      const fc = fileChange(c.name, c.input);
+      if (!fc.changes) continue;
       edits++;
       const at = Date.parse(o.timestamp) || 0;
       if (at > lastEditAt) lastEditAt = at;
-      const w = reviewWordMatch(editText(c.input));
+      const text = riskText(c.input, fc);
+      const w = text == null ? null : reviewWordMatch(text);
       if (w) { word = w; lastRiskIdx = idx; if (at > lastRiskAt) lastRiskAt = at; }
     }
   });

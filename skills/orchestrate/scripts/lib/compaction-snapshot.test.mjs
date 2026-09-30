@@ -189,3 +189,21 @@ test('copies the file to <run dir>/checkpoints/<same name> when a run is bound',
   assert.ok(existsSync(copy));
   assert.equal(readFileSync(copy, 'utf8'), readFileSync(path, 'utf8'));
 });
+
+test('a file changed by a shell write is in the changed-files list, a read-only command is not', () => {
+  const home = makeHome();
+  const dir = join(home, 'store');
+  const bash = command => line({ type: 'assistant', message: { id: `a-${Math.random()}`, model: 'claude-sonnet-5', usage: { input_tokens: 100 }, content: [{ type: 'tool_use', name: 'Bash', input: { command } }] } });
+  const text = [
+    user('fix it'),
+    bash("sed -i 's/a/b/' /repo/src/shelled.mjs"),
+    bash('grep -rn payment /repo/src/readonly.mjs'),
+    boundary('b1'),
+  ].join('');
+  const transcriptPath = writeTranscript(home, text);
+  const reading = readContext(transcriptPath, { session: 's-shell' });
+  const path = writeCompactionSnapshot({ session: 's-shell', reading, transcriptPath, ctx: { dir } });
+  const body = readFileSync(path, 'utf8');
+  assert.match(body, /\/repo\/src\/shelled\.mjs/);
+  assert.doesNotMatch(body, /readonly\.mjs/);
+});

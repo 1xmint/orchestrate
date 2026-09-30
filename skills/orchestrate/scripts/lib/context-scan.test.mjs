@@ -171,3 +171,18 @@ test('advisorSteps is empty without iterations, and advisorTotals groups by mode
   assert.equal(t[0].calls, 2);
   assert.equal(t[0].input, 216838);
 });
+
+// ---- shell edits reset the counter ---------------------------------------------------
+
+const toolLine = (name, input, id) => JSON.stringify({ type: 'assistant', message: { id, model: 'claude-sonnet-5', content: [{ type: 'tool_use', id: `tu-${id}`, name, input }] } }) + '\n';
+
+test('a shell write resets the tool-calls-since-edit counter; a read-only shell command does not', () => {
+  const text = toolLine('Read', { file_path: 'a' }, 1) + toolLine('Bash', { command: "sed -i 's/a/b/' src/x.ts" }, 2) + toolLine('Bash', { command: 'grep -rn payment src' }, 3) + toolLine('Read', {}, 4);
+  assert.equal(stepEditCounter(0, scanSlice(text).toolUses), 2, 'the sed resets it, then grep and Read add two');
+  const readOnly = toolLine('Read', {}, 1) + toolLine('Bash', { command: 'grep -rn payment src' }, 2) + toolLine('Bash', { command: 'git status' }, 3);
+  assert.equal(stepEditCounter(0, scanSlice(readOnly).toolUses), 3);
+});
+
+test('stepEditCounter still takes plain tool names', () => {
+  assert.equal(stepEditCounter(4, ['Bash', 'Edit', 'Read']), 1);
+});
