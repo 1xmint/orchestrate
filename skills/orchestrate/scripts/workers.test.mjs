@@ -121,9 +121,10 @@ test('helperSizeNotice: one fact line, no orders, said once per threshold, retur
   assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 81000, budget, announced: 'size-warn' }), null, 'said once');
   const ret = helperSizeNotice({ role: 'orch-implementer', tokens: 125000, budget, announced: 'size-warn', progress: null });
   assert.equal(ret.key, 'size-return');
-  // At returnAt the same shape fires again; the budget number is just the
-  // smaller one now crossed, and no order is given either time.
-  assert.equal(ret.text, '[orchestrate · size] ~125k of ~120k budget · progress file: none given');
+  // At returnAt the line says the budget is passed, in words: live, "~121k of
+  // ~120k budget" read as still inside it and the helper ran on to ~140k. It
+  // is still a fact, not an order; the role file says what "past" means.
+  assert.equal(ret.text, '[orchestrate · size] ~125k, past the ~120k budget · progress file: none given');
   assert.doesNotMatch(ret.text, /return|start no new work|PARTIAL/i);
   // A jump straight past returnAt hears only the return notice.
   const jump = helperSizeNotice({ role: 'orch-implementer', tokens: 205000, budget, announced: null });
@@ -203,7 +204,7 @@ test('context-check gives a coordinator one fact line at warnAt and again at ret
   const secondText = JSON.parse(second.stdout).hookSpecificOutput.additionalContext;
   assert.doesNotMatch(secondText, /write|return PARTIAL|do not/i);
   // ~205k has crossed both warnAt and returnAt; only the return key is said.
-  assert.match(secondText, /^\[orchestrate · size\] ~205k of ~200k budget · turn 2 of \d+ · 1 tool call since your last edit · /);
+  assert.match(secondText, /^\[orchestrate · size\] ~205k, past the ~200k budget · turn 2 of \d+ · 1 tool call since your last edit · /);
   assert.match(secondText, new RegExp(`progress file: ${progressPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, written (just now|0 min ago)$`));
 
   // Said once: a third call with no growth repeats nothing.

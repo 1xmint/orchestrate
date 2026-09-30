@@ -194,9 +194,11 @@ The stop hook said *"a brief flagged for independent review returned done with
 none sent. Dispatch orch-reviewer … or tell the user it was skipped and why"*
 after the built-in advisor had reviewed the change and asked for a replay
 against a real transcript, which was done. The lead told the user it was
-skipped and why, as the hook allows. *Got in the way, mildly:* the skill (PR
-#29) now says the built-in advisor comes first, and the stop check does not
-know it.
+skipped and why, as the hook allows. *First read as getting in the way; it
+helped.* Later in the session the reviewer found three mislabels in the cost
+change (#32) after the built-in advisor had already seen it. The advisor sees
+the lead's whole conversation and shares its blind spots, so it is a second
+opinion, not an independent review. The stop check is right not to count it.
 
 **J. The guard reads the text inside heredocs and `node -e` scripts.** Two
 test scripts that only mentioned `rm -rf` and `git branch -d` as strings were

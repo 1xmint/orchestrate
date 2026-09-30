@@ -216,6 +216,7 @@ export function measureGrowth(text) {
 // What a headline total says about the advisor: added when it was priced, and
 // said to be left out when a model nobody can price means it was not.
 function advisorSuffix(adv) {
+  if (adv.dollars && adv.unpriced) return ' plus the advisor, except one advisor model that is not priced and is left out';
   return (adv.dollars ? ' plus the advisor' : '') + (adv.unpriced ? '; the advisor is not priced and is left out' : '');
 }
 

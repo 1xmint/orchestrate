@@ -298,3 +298,9 @@ test('the growth price says when it includes the advisor', () => {
   assert.ok(growthReport(g).includes(`list price: $${ADV_WANT.toFixed(2)} on sonnet plus the advisor\n`), growthReport(g));
   assert.match(growthReport(measureGrowth(advLine('a', { input_tokens: 500, output_tokens: 50 }))), /list price: \$\d+\.\d\d on sonnet$/m);
 });
+
+test('a session with one priced and one unpriced advisor model does not contradict itself', () => {
+  const mixed = { ...ADV_U, iterations: [...ADV_U.iterations, { type: 'advisor_message', model: 'mystery-1', input_tokens: 5, output_tokens: 5 }] };
+  const out = dollarReport(measure(advLine('b', mixed)), 'api', null);
+  assert.match(out, /on sonnet plus the advisor, except one advisor model that is not priced and is left out/, out);
+});
