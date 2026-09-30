@@ -58,8 +58,15 @@ export function readRange(path, start, end) {
 // The input side of one response, or null when the record carries no usable
 // numbers. A usage object whose three input fields are all null or absent is
 // not a measurement of zero.
+//
+// A response that called a server tool such as the advisor lists its steps
+// under `iterations`, and the top-level fields add every main-model step
+// together: two steps of ~100k read as ~200k. The context is what the last
+// own step read; an advisor step's read is the advisor's context, not ours.
 export function inputSide(usage) {
   if (!usage || typeof usage !== 'object') return null;
+  const own = Array.isArray(usage.iterations) ? usage.iterations.filter(i => i && i.type === 'message') : [];
+  if (own.length) return inputSide({ ...own[own.length - 1], iterations: undefined });
   const f = ['input_tokens', 'cache_read_input_tokens', 'cache_creation_input_tokens'];
   if (!f.some(k => fin(usage[k]))) return null;
   return f.reduce((s, k) => s + (fin(usage[k]) ? Number(usage[k]) : 0), 0);
