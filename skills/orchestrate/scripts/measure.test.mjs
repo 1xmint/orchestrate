@@ -284,3 +284,17 @@ test('the advisor line counts cache writes as read in, not as written out', asyn
   const line = advisorLine([{ model: 'claude-opus-5-5', calls: 2, input: 1000, output: 2000, cacheRead: 3000, cacheWrite: 5000 }]);
   assert.match(line, /^advisor: 2 calls, 9k read, 2k written, /);
 });
+
+const ODD_U = { ...ADV_U, iterations: [ADV_U.iterations[0], { type: 'advisor_message', model: 'mystery-1', input_tokens: 100000, output_tokens: 10000 }] };
+
+test('an advisor nobody can price is said to be left out, not added', () => {
+  const out = dollarReport(measure(advLine('b', ODD_U)), 'api', null);
+  assert.doesNotMatch(out, /plus the advisor/, out);
+  assert.match(out, /on sonnet; the advisor is not priced and is left out/, out);
+});
+
+test('the growth price says when it includes the advisor', () => {
+  const g = measureGrowth([advLine('a', { input_tokens: 500, output_tokens: 50 }), advLine('b', ADV_U)].join('\n'));
+  assert.ok(growthReport(g).includes(`list price: $${ADV_WANT.toFixed(2)} on sonnet plus the advisor\n`), growthReport(g));
+  assert.match(growthReport(measureGrowth(advLine('a', { input_tokens: 500, output_tokens: 50 }))), /list price: \$\d+\.\d\d on sonnet$/m);
+});

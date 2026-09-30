@@ -124,6 +124,13 @@ export function sumUsage(transcriptPath) {
 export const COSTS_PATH = join(DIR, 'costs.jsonl');
 export const COSTS_MAX = 500;
 
+// The price a return's header shows. An advisor nobody can price is left out
+// of the figure, and the header says so rather than passing it off as whole.
+export function priceText(cost) {
+  if (cost.dollars == null) return 'unpriced (no model named)';
+  return `$${cost.dollars.toFixed(2)} at list price${cost.advisorUnpriced ? ' (advisor not priced, left out)' : ''}`;
+}
+
 export function costLine(role, model, usage, agentId = null) {
   const fam = family(model);
   const d = dollars(usage, model);
@@ -678,7 +685,7 @@ function main() {
   const { run, how, candidates } = resolveReturnRun(input, r, dispatch);
   const dir = run ? join(run.dir, 'returns') : orphanDir(input.session_id);
   const file = join(dir, returnFilename(agent, input, text));
-  const priced = cost.dollars == null ? 'unpriced (no model named)' : `$${cost.dollars.toFixed(2)} at list price`;
+  const priced = priceText(cost);
 
   // A task flagged REVIEW: yes at dispatch (guard-agent.mjs's recordDispatch)
   // cannot be filed DONE until a reviewer return naming it under "REVIEW OF:"

@@ -558,3 +558,12 @@ test('an advisor model nobody can price stays unpriced and adds nothing', () => 
   assert.equal(line.advisorUnpriced, 1);
   assert.equal(line.dollars, Number(dollars(u, 'claude-sonnet-5-5').toFixed(4)));
 });
+
+test('a return whose advisor cannot be priced says the price leaves it out', async () => {
+  const { priceText } = await import('./ledger.mjs');
+  const odd = { ...ADV_USAGE, iterations: [{ type: 'advisor_message', model: 'mystery-1', input_tokens: 100000, output_tokens: 10000 }] };
+  const line = costLine('x', 'claude-sonnet-5-5', sumUsage(writeTranscript([advRec('m1', odd)])));
+  assert.match(priceText(line), /^\$\d+\.\d\d at list price \(advisor not priced, left out\)$/);
+  assert.match(priceText(costLine('x', 'claude-sonnet-5-5', sumUsage(writeTranscript([advRec('m2', ADV_USAGE)])))), /^\$\d+\.\d\d at list price$/);
+  assert.equal(priceText({ dollars: null }), 'unpriced (no model named)');
+});

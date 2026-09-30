@@ -213,11 +213,17 @@ export function measureGrowth(text) {
   return r;
 }
 
+// What a headline total says about the advisor: added when it was priced, and
+// said to be left out when a model nobody can price means it was not.
+function advisorSuffix(adv) {
+  return (adv.dollars ? ' plus the advisor' : '') + (adv.unpriced ? '; the advisor is not priced and is left out' : '');
+}
+
 export function growthReport(r) {
   const chars = rows => Object.entries(rows).sort((a, b) => b[1] - a[1]).map(([tool, n]) => `${tool} ${n}`).join(', ') || 'none';
   const largest = rows => rows.length ? rows.map(x => `  ${x.tool} ${x.chars} chars — ${x.label}`).join('\n') : '  none';
   const L = ['main-session context growth', `tool input chars: ${chars(r.toolInputChars)}`, `tool result chars: ${chars(r.toolResultChars)}`, 'largest tool inputs:', largest(r.largestInputs), 'largest tool results:', largest(r.largestResults), `hook attachments: ${r.hookAttachmentChars} chars`, `context every 10th response: ${r.contexts.map(x => `#${x.response} ${x.tokens}`).join(', ') || 'fewer than 10 responses'}`, `tokens: ${r.input} input, ${r.cacheRead} cache-read, ${r.cacheWrite} cache-write, ${r.output} output`];
-  L.push(r.price == null ? 'list price: not priced — no known model' : `list price: $${r.price.toFixed(2)} on ${r.priceModel}`);
+  L.push(r.price == null ? 'list price: not priced — no known model' : `list price: $${r.price.toFixed(2)} on ${r.priceModel}${advisorSuffix(advisorDollars(r.advisor))}`);
   const av = advisorLine(r.advisor);
   if (av) L.push(av);
   return L.join('\n');
@@ -478,7 +484,7 @@ export function dollarReport(r, tier, profile) {
   // A session whose transcript never names a model is not priced as the cheap
   // one. Unknown stays unknown until something resolves it.
   if (total == null) L.push('this session: not priced — the transcript names no model, and guessing one would invent the figure');
-  else L.push(`this session, at list price: $${total.toFixed(2)} on ${main}${adv.dollars || adv.unpriced ? ' plus the advisor' : ''}`);
+  else L.push(`this session, at list price: $${total.toFixed(2)} on ${main}${advisorSuffix(adv)}`);
   const av = advisorLine(r.advisor);
   if (av) L.push(av);
   if (r.dispatches.length) {

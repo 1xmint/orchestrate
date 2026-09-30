@@ -133,9 +133,10 @@ export function estimateDollars(role, model, rows) {
 // helper that ran spent tokens, so a row priced at $0 is a stop hook that saw
 // no usage (a helper that died at its cap, a transcript it could not read),
 // not a cheap run. Averaging those in would drag the mean to nothing and
-// switch the run ceiling off after two empty returns.
+// switch the run ceiling off after two empty returns. A row whose advisor could
+// not be priced holds only part of what the helper spent, so it is left out too.
 function measuredRows(role, fam, rows) {
-  return (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === fam && r.dollars != null && Number.isFinite(Number(r.dollars)) && Number(r.dollars) > 0);
+  return (rows || []).filter(r => r && r.agent && normalizeRole(r.role) === normalizeRole(role) && family(r.model) === fam && r.dollars != null && Number.isFinite(Number(r.dollars)) && Number(r.dollars) > 0 && !(Number(r.advisorUnpriced) > 0));
 }
 
 // The dollar figure a price tag would print, plus whether it was measured
