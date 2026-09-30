@@ -465,6 +465,18 @@ every one was real. The stop rule agreed before the round held, so the pull
 request stayed a draft and the question went back to the user rather than
 into round five.
 
+**AM. A narrowed fifth review passed, and the merge went through the bar.**
+The user chose to fix round four's findings and judge round five on two
+questions only: is each finding fixed, and does any real merge now pass that
+used to be refused. A command name built from pieces (`& ('g'+'h')`) went into
+the out-of-scope list, since no split into words can ever catch it. The
+reviewer's first line read *"OUTCOME: PASS (REVIEW OF: 09d3495). Every round-4
+finding is fixed, and I found no line that 8b64472 refused which now passes
+and really merges a pull request."* PR #36 then merged with
+`--match-head-commit`. *Helped*: a written scope ended the loop that four
+open-ended rounds could not. The cost was five review rounds for one check,
+and a known gap named in the docs rather than closed.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to
