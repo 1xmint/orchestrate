@@ -66,6 +66,39 @@ Options written before git's command word (`git -C <folder> push --force`)
 are taken out before any rule reads the line, so the word order cannot step
 round a check.
 
+## Merging a pull request
+
+`gh pr merge` is refused until the pull request clears a bar, in every mode,
+whoever is present. The bar is read with `gh pr view` at the moment of the
+merge, and the approved-commands list below does not lift it, since Claude can
+write that file itself:
+
+- every check on the pull request's newest commit has passed. A check still
+  running, a failed check, or no check reported yet is refused. A project with
+  no automatic checks at all never clears this, so its user merges by hand;
+- when the change touches one of the plugin's own safety checks (the list is
+  `REVIEW_PATHS` in `skills/orchestrate/scripts/lib/merge-bar.mjs`, and
+  includes `hooks/hooks.json`), a reviewer in this session handed back PASS
+  for that same commit, named as `REVIEW OF: <first 7 or more characters of
+  the commit>`. The newest verdict on that commit decides, and a push after
+  the review needs a new one. A file list too long to read in full counts as
+  touching them;
+- switching on automatic merging (`--auto`) is always refused: it later
+  merges whatever the newest commit is, including one nobody checked;
+- merging through the raw API (`gh api …/pulls/N/merge` with PUT, or the
+  `mergePullRequest` and `enablePullRequestAutoMerge` GraphQL mutations) is
+  refused, so the merge goes through the command this check reads;
+- when the checks cannot be read (gh missing, signed out, offline, or slower
+  than 12 seconds), the merge is refused, never waved through.
+
+The merge is found however it is spelled: a quoted or full-path `gh`,
+`-R`/`--repo` before `merge`, `GH_REPO=`, inside a chain or pipe, inside
+`bash -c` or `pwsh -c`, and after a `cd` or `Set-Location`, whose folder is
+the one the checks are read from. Out of scope, and not caught: a merge run
+from a script file or `node -e`, a gh alias, a GraphQL query read from a
+file, and a push straight to the base branch (`git push origin HEAD:main`),
+which skips pull requests altogether.
+
 ## What happens when one of these is about to run
 
 - **From the main, interactive session:** the command is held and the

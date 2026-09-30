@@ -367,6 +367,26 @@ tidy-up at ~147k · newest checkpoint: …, just now"*. Short, true, and it name
 the checkpoint file to read after a summary. *Helped a little:* it confirmed a
 checkpoint existed without anyone going to look.
 
+**AA. A file write refused as a branch delete.** Saving new guard tests with a
+shell heredoc, the Bash guard refused with *"This would permanently delete a
+branch on the shared remote… refused here because nobody is present to say
+yes."* Nothing was deleting a branch. The text being written held the words
+`git push` and `--delete-branch` as test data, and the rule reads the whole
+line, including text on its way into a file. *In the way:* the file editor
+worked instead, but a commit message that mentions a force push would be
+refused the same way. Not fixed in 0.17.2; it needs the rule to tell a command
+from text handed to one, which is its own change.
+
+**AB. The goal after the fourth compaction was still the folder notice.** Same
+card text as V and Y. The fix is merged now (pull request #35) and reaches the
+plugin with 0.17.2; this session still runs the 0.17.1 hooks. *In the way*, as
+in V.
+
+**AC. The helper count after a long run of edits.** *"[orchestrate · context]
+100 work calls since your last dispatch"*. True. The work was one thread of
+small edits and test runs, which a helper would have had to learn from the
+start. *Neither:* it changed nothing, and it did not repeat.
+
 ## Not about the plugin, but seen
 
 The app started the session in a folder of its own and asked the user to

@@ -28,7 +28,10 @@ import { resolve as resolvePath, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId } from './lib/tier.mjs';
+import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId, loadSession } from './lib/tier.mjs';
+import { mergesIn, ghView, belowBar, REVIEW_PATHS } from './lib/merge-bar.mjs';
+
+export { REVIEW_PATHS };
 
 // Reproducible or already-ephemeral folders: losing one costs a re-run of a
 // build tool, not real work. Named by their last path segment only, so
@@ -464,6 +467,22 @@ export function recordAsked(sessionId, command) {
 function decideOne(command, ctx = {}) {
   const asSent = String(command || '').replace(/\s+/g, ' ').trim();
   if (!asSent) return { kind: 'pass' };
+
+  // A merge below the bar (lib/merge-bar.mjs) is refused in every mode: the
+  // bar is a fact gh can read, not a question for whoever is present. Read
+  // from the line as sent, since a newline separates commands too.
+  const merges = mergesIn(String(command), ctx.cwd || process.cwd());
+  if (merges.length) {
+    let session = null;
+    for (const m of merges) {
+      const view = m.kind === 'merge' && !m.auto ? (ctx.ghView || ghView)(m.target, m.cwd) : null;
+      if (view && view.ok && session === null) {
+        try { session = ctx.session || (ctx.sessionId && loadSession(ctx.sessionId)) || {}; } catch { session = {}; }
+      }
+      const why = belowBar(m, view, session || {});
+      if (why) return { kind: 'deny', reason: why };
+    }
+  }
   const cmd = plainGit(asSent);
 
   let hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
@@ -578,7 +597,9 @@ function main() {
   const command = String(ti.command || '');
   if (!command) return;
 
-  if (isAllowed(command, input.cwd)) return;
+  // The approved-commands list never lifts the merge bar: Claude can write that
+  // file itself, so it cannot be what vouches for a merge.
+  if (isAllowed(command, input.cwd) && !mergesIn(command, input.cwd || process.cwd()).length) return;
 
   // `bypassPermissions`, `auto`, and `dontAsk` are the permission_modes where
   // nobody sees an interactive prompt at all — an "ask" would just sit there
