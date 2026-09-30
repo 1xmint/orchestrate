@@ -278,3 +278,9 @@ test('the growth price includes the advisor', () => {
   assert.ok(Math.abs(g.price - ADV_WANT) < 1e-9);
   assert.match(growthReport(g), /advisor: 1 call/);
 });
+
+test('the advisor line counts cache writes as read in, not as written out', async () => {
+  const { advisorLine } = await import('./lib/prices.mjs');
+  const line = advisorLine([{ model: 'claude-opus-5-5', calls: 2, input: 1000, output: 2000, cacheRead: 3000, cacheWrite: 5000 }]);
+  assert.match(line, /^advisor: 2 calls, 9k read, 2k written, /);
+});

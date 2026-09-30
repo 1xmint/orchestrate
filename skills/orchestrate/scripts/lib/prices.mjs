@@ -87,7 +87,7 @@ export function advisorLine(rows) {
   const k = n => `${Math.round(n / 1000)}k`;
   return rows.map(b => {
     const d = dollars(b, b.model || '');
-    return `advisor: ${b.calls} call${b.calls === 1 ? '' : 's'}, ${k(b.input + b.cacheRead)} read, ${k(b.output + b.cacheWrite)} written, ${d == null ? `not priced (model ${b.model || 'unnamed'})` : `$${d.toFixed(2)} at list price on ${family(b.model)}`}`;
+    return `advisor: ${b.calls} call${b.calls === 1 ? '' : 's'}, ${k(b.input + b.cacheRead + b.cacheWrite)} read, ${k(b.output)} written, ${d == null ? `not priced (model ${b.model || 'unnamed'})` : `$${d.toFixed(2)} at list price on ${family(b.model)}`}`;
   }).join('\n');
 }
 
