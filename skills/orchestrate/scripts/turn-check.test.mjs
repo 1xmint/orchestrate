@@ -216,6 +216,33 @@ const FF_DISPATCH = { at: '2026-09-29T10:00:00.000Z', agent: 'orch-implementer',
 const FF_NOW = Date.parse('2026-09-29T10:30:00.000Z');
 const FF_RETURN = { at: '2026-09-29T10:05:00.000Z', agent: 'orch-implementer', toolUseId: 'toolu_A', task: null, status: 'DONE' };
 
+// Only a reviewer looks. A session file written before 0.17.2 can hold a
+// builder's dispatch with reviewOf (its brief quoted a review), and none of
+// these may stand in for one.
+test('reviewHoldDecision: a builder dispatch naming the task under REVIEW OF is not a look', () => {
+  const gated = { task: '9-9-0001', status: 'PARTIAL', reviewGated: true };
+  const builder = { at: new Date().toISOString(), task: '9-9-0600', agent: 'orch-implementer', reviewOf: '9-9-0001', toolUseId: 'tu-b1', agentId: 'ag-b1' };
+  assert.equal(reviewHoldDecision({ returned: [gated], dispatches: [builder], lastMessage: '', blockedFor: [] }).block, true, 'still running');
+  const passed = { agent: 'implementer', agentId: 'ag-b1', toolUseId: 'tu-b1', status: 'DONE', verdict: 'PASS' };
+  assert.equal(reviewHoldDecision({ returned: [gated, passed], dispatches: [builder], lastMessage: '', blockedFor: [] }).block, true, 'returned PASS');
+  const general = { ...builder, agent: 'general-purpose' };
+  assert.equal(reviewHoldDecision({ returned: [gated], dispatches: [general], lastMessage: '', blockedFor: [] }).block, true, 'a general helper');
+});
+
+test('reviewHoldDecision: a builder with REVIEW OF sent after a free-form return does not release it', () => {
+  const builder = { at: '2026-09-29T10:10:00.000Z', agent: 'orch-implementer', task: null, toolUseId: 'toolu_B', reviewOf: 'toolu_Z' };
+  const d = reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH, builder], lastMessage: '', blockedFor: [], now: FF_NOW });
+  assert.equal(d.block, true);
+  assert.equal(d.task, 'toolu_A');
+});
+
+test('reviewHoldDecision: a flagged builder whose brief quoted a review is still held', () => {
+  const quoted = { ...FF_DISPATCH, reviewOf: 'toolu_Z' };
+  const d = reviewHoldDecision({ returned: [FF_RETURN], dispatches: [quoted], lastMessage: '', blockedFor: [], now: FF_NOW });
+  assert.equal(d.block, true);
+  assert.equal(d.task, 'toolu_A');
+});
+
 test('reviewHoldDecision holds a flagged free-form dispatch that returned DONE with no review', () => {
   const d = reviewHoldDecision({ returned: [FF_RETURN], dispatches: [FF_DISPATCH], lastMessage: '', blockedFor: [], now: FF_NOW });
   assert.equal(d.block, true);

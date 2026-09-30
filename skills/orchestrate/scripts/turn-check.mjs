@@ -85,7 +85,10 @@ const SKIP_EXPLAINED = /\bskip(?:ped|ping)?\b[^.\n]{0,80}\breview\b|\breview\b[^
 // still open, until a reviewer is dispatched after it. With two or more open,
 // only the explicit id clears one; nothing is guessed. A reviewer's own return
 // is never held, and a dispatch that was not flagged is never held.
-const isReviewerRow = d => Boolean(d && (d.reviewOf || /reviewer/i.test(String(d.agent || ''))));
+// A reviewer is known by its role alone. A session file written before 0.17.2
+// can hold a builder's dispatch with reviewOf (its brief quoted a review), and
+// that builder is not a look.
+const isReviewerRow = d => Boolean(d && /reviewer/i.test(String(d.agent || '')));
 
 // The verdict that stands for one reviewer dispatch: the newest on file for its
 // ids, in file order (`returned` is append-only). A follow-up SendMessage to the
@@ -105,7 +108,7 @@ const standingVerdict = (d, returned) => {
   return last;
 };
 const reviewFailed = (d, returned) => (standingVerdict(d, returned) || {}).verdict === 'FAIL';
-const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id);
+const looksAt = (ds, returned, id) => ds.filter(x => x && x.reviewOf === id && isReviewerRow(x));
 
 // Several reviewers of the same work. One still running (no reply on file, sent
 // within six hours, the bound anyHelperRunning uses) is a look. One that replied

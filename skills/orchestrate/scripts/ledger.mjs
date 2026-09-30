@@ -68,8 +68,10 @@ export function parseReturn(text) {
     // easier. Read only by suggest.mjs, on request — never injected anywhere.
     suggest: field(/^\s*SUGGEST:\s*(.+)$/im),
     // `VERDICT: PASS` is the schema; a bare leading PASS/FAIL is what older
-    // reviewer instructions produced, and is still read.
-    verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || (outcome ? [null, outcome] : null) || /^\s*(PASS|FAIL)\b/m.exec(t) || [])[1] || null,
+    // reviewer instructions produced, and is still read, but only as the
+    // report's first word: pasted test output ("PASS src/a.test.js") further
+    // down is not a verdict.
+    verdict: (/^\s*VERDICT:\s*(PASS|FAIL)\b/im.exec(t) || (outcome ? [null, outcome] : null) || /^\s*(PASS|FAIL)\b/.exec(t) || [])[1] || null,
     // A reviewer's own return names the task it reviewed under "REVIEW OF:"
     // (packet.md's Reviewer packet RETURN schema), the task id its own first
     // token. This is how a reviewer return is told from any other return —
@@ -416,6 +418,20 @@ function dispatchFor(sessionId, task) {
   } catch { return null; }
 }
 
+// What a reviewer that named no work in its return was sent to review: its own
+// dispatch row's REVIEW OF, found by the call id the two share. Not the newest
+// dispatch of any kind (dispatchFor with no task), which with two reviewers
+// out filed one's verdict under the other's work.
+function ownReviewOf(input) {
+  try {
+    const state = loadSession(input.session_id);
+    const ds = state && Array.isArray(state.dispatches) ? state.dispatches : [];
+    const id = returnToolUseId(input, ds);
+    const d = id ? ds.find(x => x && x.toolUseId === id) : null;
+    return (d && d.reviewOf) || null;
+  } catch { return null; }
+}
+
 // A name that is unique per return and stable for one event, derived from who
 // returned and which invocation it was. Counting the files in the directory
 // gave two concurrent returns the same number, and the second overwrote the
@@ -667,6 +683,12 @@ function main() {
   if (alreadyHandled(input, agent, text)) return;
 
   const r = parseReturn(text);
+  // Only a reviewer's own return is a review. A builder whose hand-back opens
+  // "OUTCOME: PASS (REVIEW OF: …)", pastes a review block, or ends on test
+  // output starting "PASS" was filed as a look at that work, which let a
+  // later DONE on it through unheld, and cleared the builder's own hold.
+  const reviewer = /reviewer/i.test(String(agentType));
+  if (!reviewer) { r.verdict = null; r.reviewOf = null; }
   const shortened = recordBody(text);
   if (r.suggest) { try { addSuggestion(r.suggest, { source: r.task || r.run || null }); } catch {} }
   const usage = sumUsage(input.agent_transcript_path);
@@ -740,7 +762,7 @@ function main() {
     ...(noEvidence.note ? { noEvidence: true } : {}),
     ...(review.note ? { reviewGated: true } : {}),
     ...(dirty.note ? { dirtyWorktree: true } : {}),
-    ...(r.reviewOf || (dispatch && dispatch.reviewOf) ? { reviewOf: r.reviewOf || dispatch.reviewOf } : {}),
+    ...(reviewer && (r.reviewOf || ownReviewOf(input)) ? { reviewOf: r.reviewOf || ownReviewOf(input) } : {}),
     verdict: r.verdict || null,
     evidence: r.evidence,
     file,

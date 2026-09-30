@@ -110,6 +110,20 @@ test('an explicit REVIEW: yes still sets review:true with no reviewInferred word
   assert.equal(d.reviewInferred, undefined);
 });
 
+test('only a reviewer\'s dispatch records what it reviews: a builder sent a pasted REVIEW OF line does not', () => {
+  // A reviewer's report holds a "REVIEW OF:" line, and a lead can paste that
+  // report into a fix builder's brief; the builder is then not a look at it.
+  // One session each: the pro tier runs two helpers at once, and a third waits.
+  const home = sandboxHome();
+  const brief = 'TASK: x\nOBJECTIVE\nFix what the review found\nCONTEXT\nThe review said:\nREVIEW OF: tu-abc\nVERDICT: FAIL\n';
+  dispatch(home, 's-rof-1', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: brief });
+  assert.equal(lastDispatch(home, 's-rof-1').reviewOf, undefined, 'a builder');
+  dispatch(home, 's-rof-2', { subagent_type: 'general-purpose', model: 'sonnet', prompt: brief });
+  assert.equal(lastDispatch(home, 's-rof-2').reviewOf, undefined, 'a general helper');
+  dispatch(home, 's-rof-3', { subagent_type: 'orchestrate:orch-reviewer', model: 'opus', prompt: 'TASK: y\nREVIEW OF: tu-abc\nOBJECTIVE\nJudge the fix\n' });
+  assert.equal(lastDispatch(home, 's-rof-3').reviewOf, 'tu-abc', 'a reviewer still does');
+});
+
 test('a dispatch note names the helper by what it does, never by role id', () => {
   const home = sandboxHome();
   const { stdout } = dispatch(home, 's-plain', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-1-0100\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
