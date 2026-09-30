@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -390,6 +390,21 @@ test('the filed return is the hand-back report, not the 27-byte stub, and the ro
   assert.equal(row.task, '9-1-0001');
   assert.equal(row.status, 'PARTIAL');
   assert.equal(row.evidence, true);
+});
+
+test('a long hand-back keeps its whole text in a .full.md beside the five-line record', () => {
+  // A reviewer has no tool that writes files, so its findings live only in
+  // the hand-back; cutting them to five lines lost them.
+  const report = bigReport('9-1-0009', 'PARTIAL');
+  const tp = writeTranscript([handbackLine(report), plainLine(STUB)]);
+  const { row, filed } = runHook(hookInput({ agent_type: 'orchestrate:orch-reviewer', agent_transcript_path: tp, last_assistant_message: STUB }));
+  const full = row.file.replace(/\.md$/, '.full.md');
+  assert.ok(existsSync(full), 'the whole hand-back is kept');
+  assert.equal(readFileSync(full, 'utf8'), report);
+  assert.ok(filed.includes(full), 'and the short record names where');
+  const short = 'TASK: 9-1-0010\nSTATUS: PARTIAL\nEVIDENCE: ran it, 3 pass\n';
+  const s = runHook(hookInput({ last_assistant_message: short }));
+  assert.ok(!existsSync(s.row.file.replace(/\.md$/, '.full.md')), 'a short one needs no second file');
 });
 
 test('no hand-back in the transcript: the filed text is the last plain message', () => {
