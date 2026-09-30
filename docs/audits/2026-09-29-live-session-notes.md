@@ -177,8 +177,10 @@ sent so far; orch-advisor last sent: never."*, plus the finished run's goal
   turn said *"compacted 4×"*. The lead's transcript has four.
 - The router already skips a compaction hook that carries a helper id
   (`agent_id`), and the installed 0.17.0 has that line. So the host sent this
-  hook from inside the helper with no helper id, although its docs say hooks
-  fired inside a helper carry one.
+  hook from inside the helper with no helper id. Its docs say the id is
+  present "only when the hook fires inside a subagent call", but promise it in
+  so many words only for tool hooks. They say nothing about compaction inside
+  a helper.
 - No checkpoint was written for the helper's compaction, so the hook read the
   lead's transcript. A check on the transcript path would not have caught it
   either.
