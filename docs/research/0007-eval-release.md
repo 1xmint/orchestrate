@@ -114,7 +114,8 @@ second the flaw is unchanged.
 - **Two measuring faults, both biased against the plugin:** an LLM judge that
   passed untouched code (note V), and judges that read a run record with its
   middle cut out (note X). The first is fixed; the second is named, with six
-  rules still exposed.
+  rules still exposed. (Since then, in 0.20.1, those six read the last message
+  and a test holds it; not re-measured.)
 - What 0.20.0 adds that these cases do not test: the run-wide model grant and
   the merge check, each held by tests (1244/1244) and three independent
   reviews, and the owner's words kept in the goal across a restart.
