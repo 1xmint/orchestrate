@@ -97,6 +97,10 @@ const MERGE_MUST_REFUSE = [
   `D=.git; cd $D && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
   `D=.g; cd "$D"it && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
   `D=.g; printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> "$D"it/config && git status`,
+  `cd .gi? && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> .gi[t]/config && git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> .gi*/config && git status`,
+  `echo .git > /dev/null; cd "$_" && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
   `printf 'gitdir: x\\n' > sub/.git && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> sub/x/config && cd sub && git status`,
   `D=.git; printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> $D/config && git status`,
 ];

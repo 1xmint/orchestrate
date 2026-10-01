@@ -221,8 +221,7 @@ function unmodelled(s) {
 function plainSegment(seg) {
   const all = words(seg);
   const w = plainWords(seg);
-  // `D=.git` lets a later `cd $D` or `>> $D/config` reach git's settings.
-  if (!w.length) return !all.some(a => RUN_CONFIG_RE.test(a.replace(/^[^=]*=/, '')));
+  if (!w.length) return true;
   if (w.length !== all.length) return false; // `PAGER=… git log` runs the assignment
   const b = base(w[0]);
   // Text into git's or rg's own settings is not inert: a git read on the same
@@ -263,17 +262,19 @@ export function plainLine(text) {
   if (unmodelled(line)) return false;
   if (bodies.some(b => !b.toFile || (b.expands && /\$\(|`/.test(b.text)))) return false;
   const segs = segments(line);
-  // A variable set on this line can be spelled into `.git` (`D=.g; cd "$D"it`),
-  // so then a variable in a cd path or a write target is not plain. One from
-  // the environment ($HOME, $TMP) is.
-  if (segs.some(s => !plainWords(s).length)) {
-    const varPath = s => {
-      const w = plainWords(s);
-      const b = base(w[0] || '');
-      return [...textTargets(s, b), ...(b === 'cd' ? w.slice(1) : [])].some(t => /[$%]/.test(t));
-    };
-    if (segs.some(varPath)) return false;
-  }
+  // With a git read or rg on the line, a cd path or write target that is not
+  // plain text could be expanded into `.git` (`"$D"it`, `$_`, `.gi?`, `.gi[t]`,
+  // `~`), so every one must be. Without one, `cd "$REPO"` stays plain.
+  const reads = segs.some(s => {
+    const w = plainWords(s);
+    const b = base(w[0] || '');
+    return b === 'rg' || (b === 'git' && GIT_READ_RE.test(w[1] || ''));
+  });
+  if (reads && segs.some(s => {
+    const w = plainWords(s);
+    const b = base(w[0] || '');
+    return [...textTargets(s, b), ...(b === 'cd' ? w.slice(1) : [])].some(t => !/^&\d?-?$/.test(t) && !/^[\w .\/\\:@+,=-]+$/.test(t));
+  })) return false;
   return segs.every(plainSegment);
 }
 

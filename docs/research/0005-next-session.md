@@ -95,8 +95,11 @@ Full gate at the release: 1230 pass, 0 fail; `evals/no-machinery` 14/0.
   `.git/hooks` was refused. Fix 4 (7b78874) reads only where the text lands.
   Its review FAILED too: `1>`, `&>` and a reader such as `grep` redirected
   into `.git/config` got through, and `cd "$REPO"` was refused. Fix 5 checks
-  every redirect, whatever the command, and treats a variable in a `cd` path or
-  a write target as unsafe only when the same line sets a variable. Each fix's
+  every redirect, whatever the command, and treated a variable in a `cd` path
+  or a write target as unsafe only when the same line set one. Its review
+  FAILED: a file-name pattern (`.gi?`, `.gi[t]`) or bash's `$_` still reached
+  `.git`. Fix 6 closes the class: on a line with a git read or `rg`, every `cd`
+  path and write target must be plain text. Each fix's
   new test lines were run against the reviewed code and the fixed code. The
   merge to main needed a reviewer's PASS naming its final commit. The rest (`git add -e`, textconv and
   external diff, `rg -z`, `RIPGREP_CONFIG_PATH`) act only through settings

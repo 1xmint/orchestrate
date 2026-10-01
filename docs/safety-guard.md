@@ -50,10 +50,10 @@ those. Everything else, including loud everyday commands like `npm test` or
   lands decides this, not what it says: a file inside a `.git` folder, a
   `.git` gitdir file, `.gitattributes`, a gitconfig or `.ripgreprc`, whatever
   command writes it (`>`, `1>>`, `&>`, `tee`). A `cd` into a `.git` folder also
-  makes the line not plain. A variable set on the same line can be spelled into
-  `.git` (`D=.g; cd "$D"it`), so then a variable in a `cd` path or a write
-  target makes the line not plain too; one from the environment, such as
-  `cd "$REPO"`, does not. Any other line with the word `stripe` or a payment
+  makes the line not plain. A path the shell rewrites can still land in `.git`
+  (`"$D"it`, `$_`, `.gi?`, `.gi[t]`, `~`), so on a line that also has a git
+  read or `rg`, every `cd` path and write target must be plain text, or the
+  line is not plain. Without one, `cd "$REPO" && grep …` stays plain. Any other line with the word `stripe` or a payment
   API host in it asks: a host reached through a script file, `curl -K` or
   `wsl` asks too. So `grep -n stripe README.md` passes and
   `for c in …; do stripe refunds create …; done` asks. The price: a line that
@@ -193,10 +193,8 @@ the `mergeBranch` mutation or the REST route `…/merges`. Settings made before
 the line are not read either: a git config, `.gitattributes` or environment
 variable already in place can make a plain read run a program (an external
 diff, a textconv, `core.fsmonitor`, an editor for `git add -e`,
-`RIPGREP_CONFIG_PATH`, a `curl -K` file written earlier, a link made
-earlier that points an ordinary-looking file at `.git/config`, or an
-environment variable that already names a `.git` folder, used in a `cd` or a
-write target). The check
+`RIPGREP_CONFIG_PATH`, a `curl -K` file written earlier, or a link made
+earlier that points an ordinary-looking file at `.git/config`). The check
 reads only the line in front of it.
 
 ## What happens when one of these is about to run
