@@ -288,11 +288,12 @@ test('plugin-wide Stop: silent below compactAt, once a checkpoint exists, and wh
 // plugin's own file — the host's plan file in Plan mode, or the bound run's
 // written Pickup — because a session already holding one of those does not
 // need a second file nobody asked it to write.
-function bigTranscript(dir, name, startedAgoMs = 3600000) {
+function bigTranscript(dir, name, startedAgoMs = 3600000, planFilePath = null) {
   const p = join(dir, name);
   const started = new Date(Date.now() - startedAgoMs).toISOString();
   writeFileSync(p, JSON.stringify({ type: 'user', timestamp: started, message: { role: 'user', content: 'go' } }) + '\n'
-    + JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { id: 'm', model: 'claude-opus-5', role: 'assistant', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 2, cache_read_input_tokens: 158000, cache_creation_input_tokens: 1000, output_tokens: 50 } } }) + '\n');
+    + JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { id: 'm', model: 'claude-opus-5', role: 'assistant', content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 2, cache_read_input_tokens: 158000, cache_creation_input_tokens: 1000, output_tokens: 50 } } }) + '\n'
+    + (planFilePath ? JSON.stringify({ type: 'attachment', attachment: { type: 'plan_mode', planFilePath } }) + '\n' : ''));
   return p;
 }
 
@@ -303,9 +304,24 @@ test('plan mode: a plan file touched this epoch is a real checkpoint', () => {
   mkdirSync(plansDir, { recursive: true });
 
   // The plan file was touched after the session (and so the epoch) started.
-  const t1 = bigTranscript(dir, 'plan-fresh.jsonl');
+  const t1 = bigTranscript(dir, 'plan-fresh.jsonl', 3600000, join(plansDir, 'fresh.md'));
   writeFileSync(join(plansDir, 'fresh.md'), '# plan\n');
   assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'pm1', cwd: dir, transcript_path: t1, permission_mode: 'plan' }, home).stdout.trim(), '', 'a fresh plan file stands in for the checkpoint');
+});
+
+test('plan mode: another project\'s fresh plan file is not this session\'s checkpoint', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
+  const plansDir = join(home, '.claude', 'plans');
+  mkdirSync(plansDir, { recursive: true });
+  writeFileSync(join(plansDir, 'theirs.md'), '# the other project\'s plan\n');
+  // This session names its own plan file, which has not been written yet.
+  const mine = bigTranscript(dir, 'plan-mine.jsonl', 3600000, join(plansDir, 'mine.md'));
+  const blocked = run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'pm3', cwd: dir, transcript_path: mine, permission_mode: 'plan' }, home);
+  assert.equal(blocked.json.decision, 'block', 'the newest file in the shared folder belongs to someone else');
+  // And a transcript that names no plan file has no plan-file checkpoint at all.
+  const none = bigTranscript(dir, 'plan-none.jsonl');
+  assert.equal(run('persist-check.mjs', { hook_event_name: 'Stop', session_id: 'pm4', cwd: dir, transcript_path: none, permission_mode: 'plan' }, home).json.decision, 'block');
 });
 
 test('plan mode: a plan file older than the epoch does not stand in for a checkpoint', () => {
@@ -313,7 +329,7 @@ test('plan mode: a plan file older than the epoch does not stand in for a checkp
   const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
   const plansDir = join(home, '.claude', 'plans');
   mkdirSync(plansDir, { recursive: true });
-  const t = bigTranscript(dir, 'plan-stale.jsonl', 3600000);
+  const t = bigTranscript(dir, 'plan-stale.jsonl', 3600000, join(plansDir, 'old.md'));
   writeFileSync(join(plansDir, 'old.md'), '# old plan\n');
   const oldTime = new Date(Date.now() - 7200000); // touched before the session started
   utimesSync(join(plansDir, 'old.md'), oldTime, oldTime);

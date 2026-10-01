@@ -37,15 +37,8 @@ Next deliverable: <the next thing that will exist and be checkable>
 ## Budget
 
 Ceiling: {{BUDGET}} · sessions: <~N fresh sessions you expect this to take> · set {{DATE}}
-Per wave: <optional per-wave estimate, so on-track can be told from runaway>
 
-Optional. Leave `none` on a subscription; set a dollar ceiling only on pay-per-use billing, or
-when the user asks for a limit. With `none` nothing is refused over cost and nobody is asked. A
-set ceiling is enforced: the dispatch gate refuses a subagent that would cross it and asks; raise
-it here and it will not ask again. `$` is list price, not what a subscription is billed. A run
-this size is executed as a relay across fresh sessions, not one marathon: each session does a
-wave or two, writes the Pickup line, and hands off, so the conversation never grows into the
-thing that costs the most.
+Optional: leave `none` on a subscription. A dollar ceiling (list price) is enforced by the dispatch gate.
 
 ## Shape
 
