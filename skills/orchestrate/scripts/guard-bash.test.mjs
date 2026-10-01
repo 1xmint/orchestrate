@@ -1580,6 +1580,49 @@ test('a heredoc is found only outside quotes and comments, and a cd is checked f
   assert.equal(decide(`cat > notes.md <<'X'\ncat <<EOF and | pipes are text here\nX\ngit -C ${clean.replace(/\\/g, '/')} worktree remove .claude/worktrees/agent-2`, { cwd: root, ...headless }).kind, 'pass');
 });
 
+test('PowerShell and bash folder changes, a shift inside (( )) and quotes the two shells read differently are all checked (review of 10ddd9f)', () => {
+  // The helper with unsaved work is only under sub, so only a folder change reaches it.
+  const root = mkdtempSync(join(tmpdir(), 'orch-wt-ps-'));
+  const helper = join(root, 'sub', '.claude', 'worktrees', 'agent-1');
+  mkdirSync(helper, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: helper });
+  writeFileSync(join(helper, 'u.txt'), 'work');
+  const rm = 'git worktree remove --force .claude/worktrees/agent-1';
+  for (const c of [
+    `pushd sub && ${rm}`,
+    `Set-Location sub; ${rm}`,
+    `Set-Location -Path sub; ${rm}`,
+    `sl sub; ${rm}`,
+    `chdir sub; ${rm}`,
+    `Push-Location sub; ${rm}`,
+    `CD sub; ${rm}`,
+    `if cd sub; then ls; fi; ${rm}`,
+  ]) {
+    const d = decide(c, { cwd: root, ...headless });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /never saved to git/, c);
+  }
+  // Here the helper with unsaved work is where the shell starts.
+  const top = join(root, 'sub');
+  for (const c of [
+    `echo $((1<<X))\n${rm}\nX`,
+    `echo $'it\\'s' ; ${rm} ; echo \\'`,
+    `echo \`"; ${rm}; echo \`"`,
+    // bash reads one quoted word; PowerShell ends the quote at the curly one.
+    `echo '‘; ${rm} ;’'`,
+  ]) {
+    const d = decide(c, { cwd: top, ...headless });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /never saved to git/, c);
+  }
+  const clean = mkdtempSync(join(tmpdir(), 'orch-wt-psc-'));
+  const ch = join(clean, '.claude', 'worktrees', 'agent-2');
+  mkdirSync(ch, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: ch });
+  assert.equal(decide(`Set-Location sub; git -C ${clean.replace(/\\/g, '/')} worktree remove .claude/worktrees/agent-2`, { cwd: root, ...headless }).kind, 'pass');
+  assert.equal(decide(`cd ${clean.replace(/\\/g, '/')}; git worktree remove .claude/worktrees/agent-2`, { cwd: root, ...headless }).kind, 'pass');
+});
+
 test('a read of one pull request after one plain cd passes; other shapes with a cd still refuse', () => {
   const ctx = merging(prView()).ctx;
   for (const ok of [

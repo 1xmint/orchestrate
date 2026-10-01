@@ -24,7 +24,9 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   comments and heredoc bodies are now read where bash reads them. The fourth
   found a `<<EOF` inside quotes, a piped heredoc, a cd in `( )` and a `\"` read
   by PowerShell; a relative folder is now checked from every place a cd could
-  leave the shell.
+  leave the shell. The fifth found PowerShell's `Set-Location`, `pushd`, `sl`
+  and `CD` were not read as a cd; every way either shell moves now is, and
+  `$'…'`, a backtick before a quote and curly quotes refuse a removal line.
 - A clean-up line that removes a clean worktree and deletes branches with
   lowercase `-d` now passes. When a branch-delete line is refused although it
   already uses `-d`, the refusal names the part that was actually refused
@@ -48,7 +50,7 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   Not re-measured.
 
 Replayed against `decide()`, each refused line from this session now gives the
-intended answer. Gate: 1258/1258, 22/22.
+intended answer. Gate: 1259/1259, 22/22.
 
 ## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
 

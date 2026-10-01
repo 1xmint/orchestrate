@@ -124,12 +124,16 @@ unreadable, the same way the merge check works, because each attempt to follow
 one more spelling left another open. Quotes are read where bash reads them: a
 `#` starting a word is a comment to the end of its line, and a heredoc
 (`<<X` outside quotes and comments) has its body skipped as text unless its
-line pipes it or starts a shell (`cat <<X | bash`, `bash <<X`). A quote that
-cannot be closed (`$'a\'b'`), or a `\"` inside double quotes, which PowerShell
-reads differently from bash, refuses a removal line. A relative folder after a
-plain `cd` is checked from the starting folder and from where the `cd` leads,
-because a `cd` in `( )`, or into a folder that is not there, leaves the shell
-where it was. A message that
+line pipes it or starts a shell (`cat <<X | bash`, `bash <<X`); a `<<` inside
+`(( ))` is a shift, not a heredoc. A quote that is never closed, or one that
+PowerShell reads differently from bash (`\"` inside double quotes, `$'…'`, a
+backtick before a quote, a curly quote), refuses a removal line. A relative
+folder after a plain `cd <folder>`, or PowerShell's or bash's other ways to
+move (`pushd`, `Set-Location`, `sl`, `chdir`, `Push-Location`, any case), is
+checked from the starting folder and from where the move leads, because a
+`cd` in `( )`, or into a folder that is not there, leaves the shell where it
+was. A move the check cannot follow (`if cd x`, `Set-Location -Path x`,
+`popd`) refuses a relative folder after it. A message that
 only quotes the words (`git commit -m "…worktree remove…"`, or a `-F -` heredoc)
 is not a removal and passes.
 

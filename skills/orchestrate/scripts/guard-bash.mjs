@@ -216,15 +216,16 @@ const SAFE_REDIRECT_RE = /(^|\s)(?:\d?>{1,2}|&>)\s*(?:\/dev\/null|&\d)(?=[\s;&|)
 // outside quotes joins the lines. A heredoc (<<WORD outside quotes and
 // comments) has its body skipped as text, unless its line pipes or starts a
 // shell (cat <<X | bash, bash <<X): then the body is read as command lines.
-// `unclear` is a quote left unclosed ($'a\'b' is one) or a \" inside double
-// quotes, which PowerShell, unlike bash, reads as a backslash and the end of
-// the quote; after either, this cannot tell where a command starts.
+// A << inside (( )) is a shift, not a heredoc. `unclear` is a quote left
+// unclosed or a \" inside double quotes, which PowerShell, unlike bash, reads
+// as a backslash and the end of the quote; after either, this cannot tell
+// where a command starts.
 const SHELL_WORD_RE = /^(?:.*[\/\\])?(?:(?:ba|da|z|k)?sh|pwsh|powershell|cmd)(?:\.exe)?$|^(?:eval|source|\.|xargs|exec)$/i;
 const HEREDOC_RE = /^<<(-?)[ \t]*(["']?)([A-Za-z_][\w.-]*)\2/;
 function lineParts(text) {
   const parts = [];
   let words = [], value = '', plain = true, started = false, q = '', escapedQuote = false;
-  let pending = [], lineRuns = false;
+  let pending = [], lineRuns = false, arith = 0;
   const endWord = () => {
     if (started) { words.push({ value, plain }); if (SHELL_WORD_RE.test(value)) lineRuns = true; }
     value = ''; plain = true; started = false;
@@ -260,7 +261,9 @@ function lineParts(text) {
     }
     if (c === '\\' && /^\r?\n/.test(text.slice(i + 1, i + 3))) { i += text[i + 1] === '\r' ? 2 : 1; continue; }
     if (c === '#' && !started) { while (i + 1 < text.length && text[i + 1] !== '\n') i++; continue; }
-    if (c === '<' && text[i - 1] !== '<' && text[i + 1] === '<' && text[i + 2] !== '<') {
+    if (c === '(' && text[i + 1] === '(') arith++;
+    if (c === ')' && text[i + 1] === ')' && arith) arith--;
+    if (!arith && c === '<' && text[i - 1] !== '<' && text[i + 1] === '<' && text[i + 2] !== '<') {
       const m = HEREDOC_RE.exec(text.slice(i));
       if (m) pending.push({ dash: Boolean(m[1]), word: m[3] });
     }
@@ -313,6 +316,12 @@ function readWorktreeRemove(words) {
   }
   return { dirs, forced, paths };
 }
+// Quotes bash and PowerShell read differently: $'…' (bash ends it only at an
+// unescaped '), a backtick before a quote (PowerShell's escape) and curly
+// quotes (PowerShell's quotes, plain letters to bash).
+const MIXED_QUOTE_RE = /\$'|`["']|[‘-‟]/;
+// Every word bash or PowerShell uses to move the shell to another folder.
+const CD_WORD_RE = /^(?:cd|chdir|pushd|popd|sl|set-location|push-location|pop-location)$/i;
 // A cd is not followed to one place: a cd inside ( ), after ;, or into a
 // folder that is not there leaves the shell where it was. So a relative folder
 // is checked from the starting folder and from every place a plain cd could
@@ -321,13 +330,19 @@ function readWorktreeRemove(words) {
 function worktreeRemoveRule(cmd, cwd) {
   const text = String(cmd).replace(SAFE_REDIRECT_RE, '$1 ');
   const { parts, unclear } = lineParts(text);
-  if (unclear && /worktree\s+remove/i.test(text)) {
-    return { name: 'worktree-remove-unreadable', reason: `This line removes a worktree folder, but it has a quote that is never closed, or a \\" inside double quotes, which bash and PowerShell read differently, so this check cannot tell where the removal starts or whether work that was never saved to git would be lost. Written plainly, git worktree remove <folder>, alone or joined with ; or &&, it is checked and passes when the folder is clean. ${ASK_TAIL}` };
+  if ((unclear || MIXED_QUOTE_RE.test(text)) && /worktree\s+remove/i.test(text)) {
+    return { name: 'worktree-remove-unreadable', reason: `This line removes a worktree folder, but it has a quote that is never closed, or one that bash and PowerShell read differently (\\" inside double quotes, $'…', a backtick before a quote, or a curly quote), so this check cannot tell where the removal starts or whether work that was never saved to git would be lost. Written plainly, git worktree remove <folder>, alone or joined with ; or &&, it is checked and passes when the folder is clean. ${ASK_TAIL}` };
   }
   let bases = [cwd || process.cwd()], cdUnread = '';
   for (const words of parts) {
-    if (words[0].value === 'cd') {
-      if (words.length === 2 && words[1].plain && words[1].value !== '-') {
+    // A plain cd <folder> (or pushd, Set-Location, sl …) as a part's first
+    // word adds a place; any other folder change (if cd x, Set-Location -Path
+    // x, popd) cannot be followed.
+    // A removal part is read as one even when a folder in it is named cd.
+    const at = words.findIndex((w, k) => w.value.toLowerCase() === 'worktree' && words[k + 1]?.value.toLowerCase() === 'remove');
+    const moves = words.findIndex(w => CD_WORD_RE.test(w.value));
+    if (at < 0 && moves >= 0) {
+      if (moves === 0 && words.length === 2 && words[1].plain && words[1].value !== '-' && !/^pop/i.test(words[0].value)) {
         try {
           const moved = bases.map(b => resolvePath(b, gitBashPath(words[1].value)));
           bases = [...new Set([...bases, ...moved])];
@@ -335,7 +350,6 @@ function worktreeRemoveRule(cmd, cwd) {
       } else cdUnread = words.map(w => w.value).join(' ');
       continue;
     }
-    const at = words.findIndex((w, k) => w.value.toLowerCase() === 'worktree' && words[k + 1]?.value.toLowerCase() === 'remove');
     if (at < 0) continue;
     const r = readWorktreeRemove(words);
     if (!r) {
