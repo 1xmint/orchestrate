@@ -391,6 +391,18 @@ and again when you add one.
 Install from a terminal with `/plugin install <name>@claude-plugins-official`,
 or from the Claude app under Customize → Plugins → Discover.
 
+**Alongside orchestrate.** These do jobs orchestrate leaves out on purpose.
+Nothing here is installed for you. Links and licences checked 2026-09-30.
+
+| Tool | What it does for you | Licence | Cost |
+|---|---|---|---|
+| [ccusage](https://github.com/ccusage/ccusage) | Your usage by 5-hour block and by day, read from Claude's own logs on your disk. Orchestrate's `measure.mjs` covers one session, not the week | MIT | none; runs locally |
+| `receipts` (Anthropic catalog) | A plain report of what your Claude Code use actually produced, built from your own session files | Apache-2.0 | small: one session's reading |
+| [Playwright MCP](https://github.com/microsoft/playwright-mcp) | Proves a web change works in a real page: click, type, read what shows | Apache-2.0 | your usage, per page read; no key |
+| [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) | Console errors, network and speed problems in a real Chrome | Apache-2.0 | your usage, per page read; no key |
+| `claude-md-management` (Anthropic catalog) | Checks and tidies CLAUDE.md so it stays true; a different job from orchestrate's project page | Apache-2.0 | small |
+| `security-guidance` (Anthropic catalog), reviews off | A free pattern check on every file Claude writes | Apache-2.0 | free with its reviews off; **billed to your key if `ANTHROPIC_API_KEY` is set** (see below) |
+
 **For web pages, use what is built in first.** A page fetch comes back already
 summarised, web search is included in your plan, and the browser handles pages
 that need JavaScript. Scraping plugins (Bright Data, Firecrawl, Tavily, Exa,
@@ -414,9 +426,14 @@ loop), and `code-simplifier` (Claude Code's built-in `/simplify` covers it).
 **`security-guidance`** is on by default in Claude Code. Its warnings while
 editing are free: pattern checks run on your machine. Its reviews at the end of
 each turn and on every commit and push call Opus whenever it finds credentials.
-On one machine every review was skipped for lack of credentials, so they
-cost nothing there. To make sure only the free warnings ever run, add this to
-`~/.claude/settings.json` under `"env"`: `"ENABLE_CODE_SECURITY_REVIEW": "0"`.
+**If `ANTHROPIC_API_KEY` is set, it uses that key, so those reviews are billed to
+that key, outside your subscription** (its `hooks/llm.py` uses your
+subscription's sign-in only when no key is set). On one machine every review
+was skipped for lack of credentials, so they cost nothing there. To make sure
+only the free warnings ever run, add both of these to `~/.claude/settings.json`
+under `"env"`: `"ENABLE_CODE_SECURITY_REVIEW": "0"` and
+`"ENABLE_COMMIT_REVIEW": "0"` (the second is the commit and push reviewer's own
+switch).
 
 Business plugins (sales, finance, legal, HR, marketing, bio research, ads,
 market data) are fine if that is your work. For a coding session they are pure
