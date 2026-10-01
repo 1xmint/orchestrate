@@ -2,6 +2,24 @@
 
 Resume point for building the `orchestrate` skill.
 
+## Unreleased — plan 0005 on `phase/0005-reaim`, 2026-09-30
+
+Built from docs/research/0005-next-phase.md; not pushed, tagged or released.
+What each step did, its evidence and what is left is in
+docs/research/0005-next-session.md ("What is built"), which is also the brief
+for the next session: a live watch of this build, a fresh gap audit, and a
+rerun of the ability tests against docs/research/0005-baseline-0.17.2.md.
+
+- The guard reads what runs instead of guessing from words (step 2). Its first
+  commit went in before its review, and that review failed. Two fixes followed,
+  each reviewed independently. No one has yet done an open-ended search for
+  ways past it; do that before a release.
+- A project page, `.orchestrator/PROJECT.md`, keeps purpose, standing and next
+  steps in view. The first writing helper waits for its Next (step 4).
+- A bug fix starts from a reproduced, named cause (step 5).
+- The README and the project installer list the tools to use alongside
+  orchestrate (step 6).
+
 ## v0.17.2 — a merge waits for its checks, 2026-09-30
 
 The second live session on the plugin's own repo (0.17.1; notes items Q–AL in
