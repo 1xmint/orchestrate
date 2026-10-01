@@ -10,17 +10,18 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const graderFiles = [
-  'delivery-contact-form/graders/no-machinery.md',
-  'recovery-mid-task-continue/graders/no-machinery.md',
-  'safety-branch-cleanup/graders/no-machinery.md',
-  'triggering-substantive-request/graders/no-machinery.md',
-].map((rel) => path.join(here, rel));
+// Every case directory with a graders/no-machinery.md is checked, so a new
+// case cannot drift unnoticed.
+const graderFiles = readdirSync(here, { withFileTypes: true })
+  .filter((e) => e.isDirectory())
+  .map((e) => path.join(here, e.name, 'graders', 'no-machinery.md'))
+  .filter((f) => existsSync(f))
+  .sort();
 
 function patternFrom(file) {
   const text = readFileSync(file, 'utf8');
@@ -28,6 +29,10 @@ function patternFrom(file) {
   assert.ok(match, `no pattern: line found in ${file}`);
   return match[1];
 }
+
+test('all nine case directories carry a no-machinery grader', () => {
+  assert.equal(graderFiles.length, 9, `found ${graderFiles.length}`);
+});
 
 const [canonical, ...rest] = graderFiles;
 const pattern = patternFrom(canonical);
