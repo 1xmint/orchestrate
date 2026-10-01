@@ -1510,6 +1510,43 @@ test('a worktree removal not written in plain words is refused, not read past (r
   ]) assert.equal(decide(c, { cwd: clean.root, ...headless }).kind, 'pass', c);
 });
 
+test('quotes, comments and heredocs are read where bash reads them (review of 2dc4c13)', () => {
+  const { root, wt } = tempWorktree();
+  writeFileSync(join(wt, 'unsaved.txt'), 'work');
+  const fwd = wt.replace(/\\/g, '/');
+  for (const c of [
+    // An escaped quote inside a message does not end it.
+    `git commit -m "Fix \\"x\\" bug" && git worktree remove --force ${fwd}`,
+    // A quote in a comment opens nothing; a comment ends at the newline, even after a backslash.
+    `# don't keep it\ngit worktree remove --force ${fwd}`,
+    `# note \\\ngit worktree remove --force ${fwd}`,
+    // A heredoc body is text; what follows it is command.
+    `cat > f <<'X'\ndon't\nX\ngit worktree remove --force ${fwd}`,
+    // A body fed to a shell is command.
+    `bash <<'X'\ngit worktree remove --force ${fwd}\nX`,
+    // A quote this cannot close ($'…' escapes) is refused, not read past.
+    `echo $'a\\'b' && git worktree remove --force ${fwd}`,
+  ]) {
+    const d = decide(c, { cwd: root, ...headless });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /never saved to git/, c);
+  }
+  const clean = tempWorktree('clean');
+  const cleanFwd = clean.wt.replace(/\\/g, '/');
+  for (const c of [
+    // A double-quoted folder keeps its backslashes as bash does (a Windows path here).
+    `cd "${clean.base}" && git worktree remove --force clean`,
+    `git commit -m "Fix \\"x\\" bug" && git worktree remove --force ${cleanFwd}`,
+    "git commit -F - <<'X'\nGuard: git worktree remove --force is checked\nX",
+    '# git worktree remove --force anything\ngit worktree list',
+  ]) assert.equal(decide(c, { cwd: clean.root, ...headless }).kind, 'pass', c);
+  // A cd it cannot read is named as the reason, not a missing folder.
+  const d = decide('cd "$HOME" && git worktree remove --force clean', { cwd: clean.root, ...headless });
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /cd/);
+  assert.doesNotMatch(d.reason, /not there under that name/);
+});
+
 test('a read of one pull request after one plain cd passes; other shapes with a cd still refuse', () => {
   const ctx = merging(prView()).ctx;
   for (const ok of [

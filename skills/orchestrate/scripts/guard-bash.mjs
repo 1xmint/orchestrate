@@ -210,7 +210,11 @@ function worktreeState(folder, missingIsClean) {
 // moves where later relative folders are read from.
 const SAFE_REDIRECT_RE = /(^|\s)(?:\d?>{1,2}|&>)\s*(?:\/dev\/null|&\d)(?=[\s;&|)]|$)/g;
 // The line in parts, split at ; & | ( ) or a newline outside quotes, each part
-// its words: { value, plain }. An unclosed quote makes its word not plain.
+// its words: { value, plain }, read where bash reads them: inside double
+// quotes a backslash escapes only " \ $ ` or a newline and is kept before
+// anything else (C:\repo); a # starting a word is a comment to the end of the
+// line; a backslash-newline outside one joins the lines. `open` is a quote
+// left unclosed ($'a\'b' is one), after which nothing can be read.
 function lineParts(text) {
   const parts = [];
   let words = [], value = '', plain = true, started = false, q = '';
@@ -219,10 +223,13 @@ function lineParts(text) {
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
     if (q) {
-      if (c === q) q = '';
-      else { if (q === '"' && /[$`\\]/.test(c)) plain = false; value += c; }
+      if (q === '"' && c === '\\' && /["\\$`\n]/.test(text[i + 1] ?? '')) { plain = false; if (text[++i] !== '\n') value += text[i]; }
+      else if (c === q) q = '';
+      else { if (q === '"' && /[$`]/.test(c)) plain = false; value += c; }
       continue;
     }
+    if (c === '\\' && /^\r?\n/.test(text.slice(i + 1, i + 3))) { i += text[i + 1] === '\r' ? 2 : 1; continue; }
+    if (c === '#' && !started) { while (i + 1 < text.length && text[i + 1] !== '\n') i++; continue; }
     if (c === '"' || c === "'") { q = c; started = true; continue; }
     if (/[;&|()\n]/.test(c)) { endPart(); continue; }
     if (/\s/.test(c)) { endWord(); continue; }
@@ -240,7 +247,28 @@ function lineParts(text) {
   }
   if (q) plain = false;
   endPart();
-  return parts;
+  return { parts, open: Boolean(q) };
+}
+// The line with each heredoc body taken out: a body is text bash does not run
+// (a commit message, a file being written), unless the line that opens it
+// starts a shell (bash <<X), and then it stays as command lines. A body runs
+// from the line after <<WORD to a line that is WORD alone; with no such line
+// it is not a heredoc and stays.
+const SHELL_WORD_RE = /(?:^|[\s;&|(])(?:\S*\/)?(?:ba|da|z)?sh(?:\.exe)?(?=[\s<]|$)/;
+function withoutHeredocBodies(text) {
+  const lines = text.split('\n'), kept = [];
+  for (let i = 0; i < lines.length; i++) {
+    kept.push(lines[i]);
+    const toShell = SHELL_WORD_RE.test(lines[i]);
+    const marks = [...lines[i].matchAll(/<<(-?)\s*(["']?)([A-Za-z_][\w.-]*)\2/g)].filter(m => lines[i][m.index - 1] !== '<');
+    for (const m of marks) {
+      const end = lines.findIndex((l, j) => j > i && (m[1] ? l.replace(/^\t+/, '') : l).replace(/\r$/, '') === m[3]);
+      if (end < 0) break;
+      if (toShell) kept.push(...lines.slice(i + 1, end));
+      i = end;
+    }
+  }
+  return kept.join('\n');
 }
 const GIT_WORD_RE = /^(?:.*\/)?git(?:\.exe)?$/i;
 // The folders and force of a plain `git … worktree remove …`, or null when the
@@ -266,13 +294,17 @@ function readWorktreeRemove(words) {
   return { dirs, forced, paths };
 }
 function worktreeRemoveRule(cmd, cwd) {
-  const text = String(cmd).replace(/\\\r?\n/g, '').replace(SAFE_REDIRECT_RE, '$1 ');
-  let here = cwd || process.cwd(), hereKnown = true;
-  for (const words of lineParts(text)) {
+  const text = withoutHeredocBodies(String(cmd)).replace(SAFE_REDIRECT_RE, '$1 ');
+  const { parts, open } = lineParts(text);
+  if (open && /worktree\s+remove/i.test(text)) {
+    return { name: 'worktree-remove-unreadable', reason: `This line removes a worktree folder, but a quote in it is never closed as this check reads it, so it cannot tell where the removal starts or whether work that was never saved to git would be lost. Written plainly, git worktree remove <folder>, alone or joined with ; or &&, it is checked and passes when the folder is clean. ${ASK_TAIL}` };
+  }
+  let here = cwd || process.cwd(), cdUnread = '';
+  for (const words of parts) {
     if (words[0].value === 'cd') {
       if (words.length === 2 && words[1].plain && words[1].value !== '-') {
-        try { here = resolvePath(here, gitBashPath(words[1].value)); } catch { hereKnown = false; }
-      } else hereKnown = false;
+        try { here = resolvePath(here, gitBashPath(words[1].value)); } catch { cdUnread = words.map(w => w.value).join(' '); }
+      } else cdUnread = words.map(w => w.value).join(' ');
       continue;
     }
     const at = words.findIndex((w, k) => w.value.toLowerCase() === 'worktree' && words[k + 1]?.value.toLowerCase() === 'remove');
@@ -290,7 +322,8 @@ function worktreeRemoveRule(cmd, cwd) {
       const helper = isHelperPath(path.toLowerCase());
       if (!helper && !r.forced) continue;
       let folder = null;
-      if (base && (hereKnown || isAbsolute(gitBashPath(path)))) {
+      const absolute = isAbsolute(gitBashPath(path));
+      if (base && (!cdUnread || absolute)) {
         try { folder = resolvePath(base, gitBashPath(path)); } catch { folder = null; }
       }
       const state = folder ? worktreeState(folder, helper) : 'unknown';
@@ -298,6 +331,10 @@ function worktreeRemoveRule(cmd, cwd) {
       const what = helper ? 'the helper folder' : 'the folder';
       if (state === 'dirty') {
         return { name: 'worktree-remove-dirty', reason: `This would delete ${what} ${path}, which still has changes that were never saved to git. ${ASK_TAIL}` };
+      }
+      if (state === 'unknown' && cdUnread && !absolute) {
+        const shown = cdUnread.length > 60 ? `${cdUnread.slice(0, 60)}…` : cdUnread;
+        return { name: 'worktree-remove-unknown', reason: `This would ${forced ? 'force-delete' : 'delete'} ${what} ${path}, but the cd before it ("${shown}") is not in plain words this check can follow, so it cannot tell which folder that is or whether it holds work that was never saved to git. Use the folder's full path, or a plain cd <folder>. ${ASK_TAIL}` };
       }
       if (state === 'unknown') {
         return { name: 'worktree-remove-unknown', reason: `This would ${forced ? 'force-delete' : 'delete'} ${what} ${path}, and this check cannot tell whether it holds work that was never saved to git (the folder is not there under that name, or git could not read it). ${ASK_TAIL}` };

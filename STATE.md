@@ -19,6 +19,9 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   -i`, `\git`) still slipped past. So the check now reads like the merge check:
   a part holding `worktree remove` must be plain words, or it is refused as
   unreadable; a plain `cd <folder>` before it moves where folders are read.
+  The third review found an escaped quote (`-m "Fix \"x\" bug"`) hid a forced
+  removal after it, and a quoted Windows folder after `cd` was refused; quotes,
+  comments and heredoc bodies are now read where bash reads them.
 - A clean-up line that removes a clean worktree and deletes branches with
   lowercase `-d` now passes. When a branch-delete line is refused although it
   already uses `-d`, the refusal names the part that was actually refused
@@ -42,7 +45,7 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   Not re-measured.
 
 Replayed against `decide()`, each refused line from this session now gives the
-intended answer. Gate: 1256/1256, 22/22.
+intended answer. Gate: 1257/1257, 22/22.
 
 ## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
 
