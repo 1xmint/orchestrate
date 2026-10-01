@@ -270,7 +270,8 @@ export function folderIsClean(dir) {
 // check in guard-agent.mjs is where a missing page is raised).
 export const PROJECT_TURNS = 3;
 
-const norm = p => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+// Case folds only where the file system does; git check-ignore gets this path.
+const norm = p => { const r = String(p || '').replace(/\\/g, '/').replace(/\/+$/, ''); return process.platform === 'win32' ? r.toLowerCase() : r; };
 
 // The edits since the last real user message in a transcript tail. A user line
 // whose content is only tool results is not a new turn.

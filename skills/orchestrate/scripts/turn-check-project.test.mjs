@@ -72,6 +72,16 @@ test('Stop: holds once on the third edit turn without a PROJECT.md edit, not bef
   assert.notEqual(stop([src], 8), '');
 });
 
+// The real git check-ignore, on a path with capitals: a case-sensitive git
+// must get the path as written, not lowercased.
+test('Stop: edits only to git-ignored files never draw the note', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
+  const repo = projectRepo();
+  writeFileSync(join(repo, '.gitignore'), 'dist/\nBuild/\n');
+  const edits = [join(repo, 'dist', 'a.js'), join(repo, 'Build', 'Out.js')];
+  for (let i = 1; i <= 4; i++) assert.equal(run({ hook_event_name: 'Stop', session_id: 'proj-i', cwd: repo, transcript_path: turnTranscript(home, edits, i) }, home), '', `turn ${i}`);
+});
+
 test('Stop: no note when stop_hook_active, with no PROJECT.md, or outside a git repo', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-turncheck-home-'));
   const repo = projectRepo();
