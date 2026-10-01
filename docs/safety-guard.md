@@ -115,6 +115,14 @@ is not there under that name, or git cannot read it, the guard cannot tell
 whether work would be lost, so it refuses ("can't tell") rather than treating
 it as clean. A plain removal without force of a folder outside
 `.claude/worktrees/` is left to git, which refuses a folder with changes.
+The line must say it in plain words: git, its `-C` folder, `worktree
+remove`, the force flag (any start of `--force`, quoted or not) and folders,
+alone or joined with `;`, `&&` or a plain `cd <folder>`. A brace, `$`, a
+backtick, a leading backslash, a redirect other than to `/dev/null` or `&1`, or
+anything in front of git (`if`, `!`, `env`, `sudo`, `eval`) is refused as
+unreadable, the same way the merge check works, because each attempt to follow
+one more spelling left another open. A message that only quotes the words
+(`git commit -m "…worktree remove…"`) is not a removal and passes.
 
 Options written before git's command word (`git -C <folder> push --force`)
 are taken out before any rule reads the line, so the word order cannot step

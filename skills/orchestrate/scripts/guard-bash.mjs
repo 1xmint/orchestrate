@@ -24,7 +24,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { resolve as resolvePath, basename } from 'node:path';
+import { resolve as resolvePath, basename, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -200,27 +200,101 @@ function worktreeState(folder, missingIsClean) {
 // other folder removed with force, alone or in a chain, passes only when the
 // folder has no uncommitted changes. A forced removal of a folder that is
 // missing or unreadable cannot be told apart from lost work, so it is refused.
-// Read from the line as sent: a redirect is dropped as a word, not as the rest
-// of the part (`remove 2>/dev/null --force <p>` is still forced), and every
-// separator, a newline, a lone `&`, a pipe or brackets, starts a new part.
-const REDIRECT_RE = /(^|\s)\d+(?=[<>])|&?(?:<|>{1,2})&?\s*[^\s;&|()]+/g;
-const LEAD_RE = /^(?:(?:\w+=\S*|command|env|exec|time|nohup|sudo)\s+)+/;
+// Read the way the merge check is, because every attempt to follow the shell's
+// spellings lost to one more spelling: a part holding the words `worktree
+// remove` must be plain, or it is refused as unreadable. Plain is git, its -C,
+// -c and --no-pager options, worktree remove, --force (any start of it, quoted
+// or not) and folders, each word plain or simply quoted. A brace, $, a
+// backtick, a backslash, a redirect other than to /dev/null or &1, or anything
+// before git (if, then, !, env, sudo, VAR=) is not. A plain `cd <folder>` part
+// moves where later relative folders are read from.
+const SAFE_REDIRECT_RE = /(^|\s)(?:\d?>{1,2}|&>)\s*(?:\/dev\/null|&\d)(?=[\s;&|)]|$)/g;
+// The line in parts, split at ; & | ( ) or a newline outside quotes, each part
+// its words: { value, plain }. An unclosed quote makes its word not plain.
+function lineParts(text) {
+  const parts = [];
+  let words = [], value = '', plain = true, started = false, q = '';
+  const endWord = () => { if (started) words.push({ value, plain }); value = ''; plain = true; started = false; };
+  const endPart = () => { endWord(); if (words.length) parts.push(words); words = []; };
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === q) q = '';
+      else { if (q === '"' && /[$`\\]/.test(c)) plain = false; value += c; }
+      continue;
+    }
+    if (c === '"' || c === "'") { q = c; started = true; continue; }
+    if (/[;&|()\n]/.test(c)) { endPart(); continue; }
+    if (/\s/.test(c)) { endWord(); continue; }
+    // Inside a word, a backslash is kept as written (C:\repo\x); at the start
+    // of one (\git, \-f), or before a space, quote or separator, it is not plain.
+    if (c === '\\') {
+      const next = text[i + 1];
+      if (!started || next === undefined || /[\s"';&|()\\]/.test(next)) { plain = false; if (next !== undefined) value += text[++i]; }
+      else value += c;
+      started = true;
+      continue;
+    }
+    if (!/[\w./:=,@#+%-]/.test(c)) plain = false;
+    value += c; started = true;
+  }
+  if (q) plain = false;
+  endPart();
+  return parts;
+}
+const GIT_WORD_RE = /^(?:.*\/)?git(?:\.exe)?$/i;
+// The folders and force of a plain `git … worktree remove …`, or null when the
+// part is not that in plain words.
+function readWorktreeRemove(words) {
+  if (!words.every(w => w.plain) || !GIT_WORD_RE.test(words[0].value)) return null;
+  const dirs = [];
+  let i = 1;
+  for (; i < words.length && words[i].value !== 'worktree'; i++) {
+    const v = words[i].value;
+    if (v === '-C' && i + 1 < words.length) dirs.push(words[++i].value);
+    else if (v === '-c' && i + 1 < words.length) i++;
+    else if (v !== '--no-pager') return null;
+  }
+  if (words[i + 1]?.value !== 'remove') return null;
+  let forced = false;
+  const paths = [];
+  for (const { value } of words.slice(i + 2)) {
+    if (isForce(value)) forced = true;
+    else if (value.startsWith('-')) return null;
+    else paths.push(value);
+  }
+  return { dirs, forced, paths };
+}
 function worktreeRemoveRule(cmd, cwd) {
-  const text = withoutStderrJoin(String(cmd)).replace(REDIRECT_RE, '$1 ');
-  for (const part of text.split(/&&|\|\||[;\n&|(){}]/)) {
-    const seg = part.trim().replace(LEAD_RE, '');
-    const t = plainGit(seg).trim().split(/\s+/);
-    if (t[0] !== 'git' || t[1] !== 'worktree' || t[2] !== 'remove') continue;
-    const forced = t.slice(3).some(isForce);
-    const base = resolvePath(cwd || process.cwd(), ...gitFolders(seg).map(f => gitBashPath(f)));
-    for (const raw of t.slice(3)) {
-      if (raw.startsWith('-')) continue;
-      const path = normSlashes(unquote(raw));
+  const text = String(cmd).replace(/\\\r?\n/g, '').replace(SAFE_REDIRECT_RE, '$1 ');
+  let here = cwd || process.cwd(), hereKnown = true;
+  for (const words of lineParts(text)) {
+    if (words[0].value === 'cd') {
+      if (words.length === 2 && words[1].plain && words[1].value !== '-') {
+        try { here = resolvePath(here, gitBashPath(words[1].value)); } catch { hereKnown = false; }
+      } else hereKnown = false;
+      continue;
+    }
+    const at = words.findIndex((w, k) => w.value.toLowerCase() === 'worktree' && words[k + 1]?.value.toLowerCase() === 'remove');
+    if (at < 0) continue;
+    const r = readWorktreeRemove(words);
+    if (!r) {
+      const said = words.map(w => w.value).join(' ');
+      const shown = said.length > 60 ? `${said.slice(0, 60)}…` : said;
+      return { name: 'worktree-remove-unreadable', reason: `This removes a worktree folder, but not in plain words this check can read ("${shown}"), so it cannot tell whether work that was never saved to git would be lost. Written plainly, git worktree remove <folder>, alone or joined with ; or &&, it is checked and passes when the folder is clean. ${ASK_TAIL}` };
+    }
+    let base;
+    try { base = resolvePath(here, ...r.dirs.map(f => gitBashPath(f))); } catch { base = null; }
+    for (const raw of r.paths) {
+      const path = normSlashes(raw);
       const helper = isHelperPath(path.toLowerCase());
-      if (!helper && !forced) continue;
-      let folder;
-      try { folder = resolvePath(base, gitBashPath(path)); } catch { continue; }
-      const state = worktreeState(folder, helper);
+      if (!helper && !r.forced) continue;
+      let folder = null;
+      if (base && (hereKnown || isAbsolute(gitBashPath(path)))) {
+        try { folder = resolvePath(base, gitBashPath(path)); } catch { folder = null; }
+      }
+      const state = folder ? worktreeState(folder, helper) : 'unknown';
+      const forced = r.forced;
       const what = helper ? 'the helper folder' : 'the folder';
       if (state === 'dirty') {
         return { name: 'worktree-remove-dirty', reason: `This would delete ${what} ${path}, which still has changes that were never saved to git. ${ASK_TAIL}` };
@@ -269,7 +343,7 @@ function isSafeWorktreeCleanupChain(cmd) {
     if (t[1] === 'worktree' && t[2] === 'list' && t.length === 3) continue;
     if (t[1] === 'worktree' && t[2] === 'remove' && t.length > 3) {
       for (const raw of t.slice(3)) {
-        if (isForce(raw)) continue;
+        if (isForce(unquote(raw))) continue;
         if (unquote(raw).startsWith('-')) return false;
       }
       continue;
@@ -343,7 +417,7 @@ function chainRestIsSafe(raw, flags) {
       const t = seg.split(/\s+/);
       if (t.length < 4 || CHAIN_META_RE.test(seg)) return false;
       for (const raw of t.slice(3)) {
-        if (isForce(raw)) continue;
+        if (isForce(unquote(raw))) continue;
         if (unquote(raw).startsWith('-')) return false;
       }
     } else if (!segmentPasses(seg)) return false;
@@ -556,7 +630,7 @@ function decideOne(command, ctx = {}) {
   // A branch delete that nobody can approve: say in plain words what is refused
   // and what works instead, with nothing about modes or files to repeat.
   if (hit.name === 'branch-delete-local' && (ctx.subagent || ctx.headless)) {
-    const allLower = segmentsOf(withoutStderrJoin(cmd)).filter(isBranchDeleteSeg).every(s => /\s(-d|--delete)(\s|$)/.test(s) && !/\s(-D|--force-delete)(\s|$)/.test(s) && !/\s-[a-zA-Z]*D[a-zA-Z]*(\s|$)/.test(s) && !/\s(--force|-[a-zA-Z]*f[a-zA-Z]*)(\s|$)/.test(s));
+    const allLower = segmentsOf(withoutStderrJoin(cmd)).filter(isBranchDeleteSeg).every(s => /\s(-d|--delete)(\s|$)/.test(s) && !/\s(-D|--force-delete)(\s|$)/.test(s) && !/\s-[a-zA-Z]*D[a-zA-Z]*(\s|$)/.test(s) && !s.split(/\s+/).map(unquote).some(w => isForce(w) || /^-[a-zA-Z]*f[a-zA-Z]*$/.test(w)));
     if (allLower) {
       const parts = segmentsOf(withoutStderrJoin(cmd));
       const part = parts.find(s => isBranchDeleteSeg(s) ? !isPlainBranchDelete(s, ['-d', '--delete']) : !segmentPasses(s)) || String(command).trim();

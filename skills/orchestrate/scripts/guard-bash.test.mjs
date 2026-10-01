@@ -1452,7 +1452,7 @@ test('when every branch delete already uses -d, the refusal never advises the lo
   assert.doesNotMatch(other.reason, /lowercase flag/);
   assert.match(other.reason, /publish/);
   // -d with --force deletes unmerged work like -D, so it is not "the lowercase flag".
-  for (const c of ['git branch -d task/x --force && git worktree list', 'git branch -df task/x && git worktree list']) {
+  for (const c of ['git branch -d task/x --force && git worktree list', 'git branch -df task/x && git worktree list', 'git branch -d task/x --forc && git worktree list']) {
     const d = decide(c, headless);
     assert.equal(d.kind, 'deny', c);
     assert.doesNotMatch(d.reason, /already uses the lowercase flag/, c);
@@ -1465,9 +1465,49 @@ test('a redirect before the force flag on a dirty helper folder is still refused
   mkdirSync(helper, { recursive: true });
   spawnSync('git', ['init', '-q'], { cwd: helper });
   writeFileSync(join(helper, 'u.txt'), 'work');
-  for (const c of ['git worktree remove 2>/dev/null --force .claude/worktrees/agent-abc', 'git worktree remove >/dev/null -f .claude/worktrees/agent-abc']) {
+  for (const c of ['git worktree remove 2>/dev/null --force .claude/worktrees/agent-abc', 'git worktree remove >/dev/null -f .claude/worktrees/agent-abc',
+    // Not forced, on a continuation line (review of 826d997).
+    'git worktree remove \\\n.claude/worktrees/agent-abc']) {
     assert.equal(decide(c, { cwd: root, headless: true, mode: 'auto' }).kind, 'deny', c);
   }
+});
+
+test('a worktree removal not written in plain words is refused, not read past (review of 826d997)', () => {
+  const { root, wt, base } = tempWorktree();
+  writeFileSync(join(wt, 'unsaved.txt'), 'work');
+  const fwd = wt.replace(/\\/g, '/');
+  for (const c of [
+    `git worktree remove -f {${fwd},}`,
+    `git worktree remove -f {../o190,}`,
+    `git worktree remove \\\n-f ${fwd}`,
+    `git worktree remove "-f" ${fwd}`,
+    `git worktree remove '--force' ${fwd}`,
+    `if true; then git worktree remove -f ${fwd}; fi`,
+    `while false; do :; done; ! git worktree remove -f ${fwd}`,
+    `\\git worktree remove -f ${fwd}`,
+    `"git" worktree remove -f ${fwd}`,
+    `env -i git worktree remove -f ${fwd}`,
+    `sudo -u x git worktree remove -f ${fwd}`,
+    `nice git worktree remove -f ${fwd}`,
+    `eval git worktree remove -f ${fwd}`,
+    `git worktree remove -f >| out ${fwd}`,
+    `git worktree remove -f $DIR`,
+    `{ git worktree remove -f ${fwd}; }`,
+    `cd ${base.replace(/\\/g, '/')} && git worktree remove --force o190`,
+  ]) {
+    const d = decide(c, { cwd: root, ...headless });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /never saved to git/, c);
+  }
+  // Plain lines still pass: a clean folder after a cd, a message that only
+  // mentions the words, the redirects that hide nothing.
+  const clean = tempWorktree('clean');
+  for (const c of [
+    `cd ${clean.base.replace(/\\/g, '/')} && git worktree remove --force clean`,
+    `git worktree remove "${clean.wt.replace(/\\/g, '/')}" "--force" 2>/dev/null`,
+    'git commit -m "note: git worktree remove --force is checked"',
+    'git worktree list',
+  ]) assert.equal(decide(c, { cwd: clean.root, ...headless }).kind, 'pass', c);
 });
 
 test('a read of one pull request after one plain cd passes; other shapes with a cd still refuse', () => {

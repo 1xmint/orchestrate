@@ -14,8 +14,11 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   is translated before the check, because Node read it as a missing folder,
   which counted as clean. The first review found a redirect before the flag
   (`remove 2>/dev/null --force`) hid it, and `--fo` was not read as force;
-  both fixed, and the removal is now also found after a newline, `&`, a pipe,
-  brackets, `VAR=` or `command`.
+  both fixed. The second review found a brace (`{../dirty,}`), a
+  backslash-newline, a quoted flag and a word before git (`if … then`, `env
+  -i`, `\git`) still slipped past. So the check now reads like the merge check:
+  a part holding `worktree remove` must be plain words, or it is refused as
+  unreadable; a plain `cd <folder>` before it moves where folders are read.
 - A clean-up line that removes a clean worktree and deletes branches with
   lowercase `-d` now passes. When a branch-delete line is refused although it
   already uses `-d`, the refusal names the part that was actually refused
@@ -39,7 +42,7 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   Not re-measured.
 
 Replayed against `decide()`, each refused line from this session now gives the
-intended answer. Gate: 1255/1255, 22/22.
+intended answer. Gate: 1256/1256, 22/22.
 
 ## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
 
