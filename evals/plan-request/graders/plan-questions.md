@@ -4,6 +4,8 @@ focus: trace
 arm: both
 ---
 
-PASS if every question the assistant puts to the owner is one a person who does not program can answer (about what should happen, who can see what, or what it costs them), each question comes with a recommendation, and how the notes will reach the partner is among them: who else could then see the notes (for example anyone on the home wifi, or anyone with a link), and any money or new account involved.
+Judge only the assistant's last message to the owner. Two kinds of question are fine there. A question about the owner's own situation needs no recommendation, because only they know the answer (for example "do you two already share a OneDrive folder?" or "will your partner read them on a phone or a computer?"). A question asking the owner to choose between options must come with the option the assistant recommends.
 
-FAIL if it asks a technical question the owner cannot judge (which database, which framework, which file format, which protocol); if it asks without recommending an answer; if it asks more than four questions; or if the plan settles on its own how the notes leave the laptop, or who else could reach them, without putting that to the owner.
+PASS if every question is one a person who does not program can answer, every question that asks for a choice comes with a recommendation, there are at most four numbered or separate questions, how the notes will reach the partner is put to the owner (asked outright, or recommended with the question that decides it), and the plan says plainly who other than the partner could see the shared notes under the way it recommends, and any money or new account involved, or that there is none.
+
+FAIL if it asks a technical question the owner cannot judge (which database, which framework, which file format, which protocol); if it asks the owner to choose between options with no recommendation; if it asks more than four questions; or if it settles on a way the notes leave the laptop that lets someone other than the partner reach them (anyone on the home wifi, anyone with a link, a public page) without saying so to the owner.
