@@ -81,6 +81,8 @@ const MERGE_MUST_REFUSE = [
   `printf 'gh pr merge 5' > x.sh && bash x.sh`,
   `tee x.sh <<'EOF'\ngh pr merge 5\nEOF\nbash x.sh`,
   'echo "gh pr merge 5" | bash',
+  'rg --hostname-bin=./x.sh --hyperlink-format=default "gh pr merge 5" .',
+  'rg --hostname-bin ./x.sh --hyperlink-format default "gh pr merge 5" .',
 ];
 test('every merge line the review found is refused through decide', () => {
   for (const cmd of MERGE_MUST_REFUSE) {
@@ -122,6 +124,11 @@ const PAYMENT_MUST_ASK = [
   'stripe -v charges create',
   `php -r "\\Stripe\\Refund::create(['charge' => 'ch_1']);"`,
   'curl https://api.paypal.com/v2/payments/captures/1/refund -X POST',
+  // The second review (9-30-0011): reader options that run a program.
+  'rg --hostname-bin=./x.sh --hyperlink-format=default "stripe charges create" .',
+  'rg --hostname-bin ./x.sh "stripe charges create"',
+  'git grep -iO./x.sh "stripe charges create"',
+  'git grep --open=./x.sh "stripe charges create"',
 ];
 test('every payment line the review found asks, with the payment reason', () => {
   for (const cmd of PAYMENT_MUST_ASK) {

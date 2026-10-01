@@ -204,15 +204,17 @@ function plainSegment(seg) {
   if (w.length !== all.length) return false; // `PAGER=… git log` runs the assignment
   const b = base(w[0]);
   if (TEXT_CMDS.has(b) && isTextToFile(seg)) return true;
-  if (b === 'rg' && w.some(x => /^--pre(=|$)/.test(x))) return false;
+  // rg runs a program for --pre and --hostname-bin; git grep for -O, which
+  // groups with other short flags (-iO) and takes any long prefix (--open).
+  if (b === 'rg' && w.some(x => /^--(pre|hostname-bin|hyperlink)/.test(x))) return false;
   if (READERS.has(b)) return true;
-  if (b === 'git') return GIT_READ_RE.test(w[1] || '') && !(w[1] === 'grep' && w.some(x => /^(-O|--open-files-in-pager)/.test(x)));
+  if (b === 'git') return GIT_READ_RE.test(w[1] || '') && !(w[1] === 'grep' && w.some(x => /^-[^-]*O|^--(no-)?o/.test(x)));
   if (b === 'stripe') return STRIPE_SAFE_RE.test(w[1] || '') && (!/^-/.test(w[1]) || w.length === 2);
   if (b === 'node') return w.length === 3 && /^(-e|-p|--eval|--print)$/.test(w[1]) && pureInline(w[2]);
   return false;
 }
 
-// Inline node code that can only read local files and print (note I): its
+// Inline node code that can only touch local files and print (note I): its
 // only require is fs, path or a relative .json, and nothing that reaches a
 // process, the network or dynamic code.
 const INLINE_IO_RE = /child_process|\bexec|spawn|\bfork\b|fetch|https?\b|\bnet\b|\bdgram\b|\btls\b|request|axios|undici|import\s*\(|\bimport\b|\beval\b|Function|\bprocess\.(binding|dlopen|env)\b|worker_threads|\bvm\b|\bmodule\b|globalThis|\bglobal\b|\[\s*['"]/;
