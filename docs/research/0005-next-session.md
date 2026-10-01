@@ -1,30 +1,22 @@
 # Next session: watch the 0005 build live, audit what is left, rerun the comparison
 
 Written 2026-09-30 at the end of the build session for plan 0005
-(docs/research/0005-next-phase.md). The build is on branch `phase/0005-reaim`,
-not pushed, not released. The state of each step is in "What is built" below;
-read it before trusting any line of this file about a step.
+(docs/research/0005-next-phase.md). The build was released as 0.18.0 on main.
+The state of each step is in "What is built" below; read it before trusting
+any line of this file about a step.
 
-## 1. Put the build in place (the owner's call)
+## 1. Put the build in place
 
-The installed plugin comes from GitHub main (`~/.claude/plugins/known_marketplaces.json`
-→ `1xmint/orchestrate`), which is still 0.17.2. A live session sees the new
-build only after one of these, each the owner's decision:
+The installed plugin comes from GitHub main. Update it from a terminal:
 
-- **Push the branch and open a draft pull request**, then install from it. The
-  public route; it publishes the work.
-- **Add this checkout as a local catalog** and install from it, from a terminal:
-  `claude plugin marketplace add C:/Users/Josh/Desktop/GitHub/orchestrate`,
-  then install `orchestrate` from that catalog. Nothing is published. Undo by
-  removing the catalog and reinstalling from GitHub.
+    claude plugin marketplace update orchestrate
+    claude plugin update orchestrate@orchestrate
 
-Either way, start a fresh session afterwards: a plugin installed mid-session is
-not live in that session.
+Then start a fresh session: a plugin updated mid-session is not live in that
+session.
 
 Then check that the session runs this build, before watching anything. The
-build still says version 0.17.2, so an install can quietly reuse the cached
-0.17.2 copy. Also, a local catalog has the same name as the GitHub one, and
-that may clash. The check: the loaded plugin's
+loaded copy's folder should end in `0.18.0`. The check: the loaded plugin's
 `skills/orchestrate/scripts/project.mjs` exists (0.17.2 has no such file), and
 `node <that scripts dir>/install-project.mjs --dry-run` prints "Alongside
 orchestrate". If either fails, stop: a watch of the old build measures nothing.
@@ -79,7 +71,7 @@ one pass, and a 2-to-1 judge vote can flip.
 
 Filled in at the end of the build session; see the run ledger
 `.orchestrator/runs/20260930-build-0005/RUN.md` (local, not in git) for detail.
-Full gate on the branch at the end: 1229 pass, 0 fail; `evals/no-machinery` 14/0.
+Full gate at the release: 1230 pass, 0 fail; `evals/no-machinery` 14/0.
 
 - **Step 0, docs answers**: done. docs/research/0005-step0-answers.md: what survives a
   compaction and on permission rules a plugin can ship.
@@ -94,19 +86,26 @@ Full gate on the branch at the end: 1229 pass, 0 fail; `evals/no-machinery` 14/0
   shortened). Fix 2 (560de4b) closes both. Its first review FAILED on one test
   line that the old code already refused. That line was swapped, and all six new
   lines were run against the old and the new code. The second review PASSED,
-  and the fix was merged as c1691ca. Optional notes from the reviewers, not
-  acted on: `git add -e`, textconv and external diff set by config, `rg -z`,
-  `RIPGREP_CONFIG_PATH`, `curl -K`.
-  Nobody has done the open-ended hunt for new ways past the guard. Do it
-  before a release.
+  and the fix was merged as c1691ca. Fix 3 (44b82f8, reviewed independently
+  before the release) acts on the reviewers' optional notes. Two of them were
+  real on a single line: text written into `.git/config` or `.gitattributes`
+  and then a git read, and a payment host reached through a script file,
+  `curl -K` or `wsl`. Both now stop. The rest (`git add -e`, textconv and
+  external diff, `rg -z`, `RIPGREP_CONFIG_PATH`) act only through settings
+  made before the line. They are listed as not caught in `docs/safety-guard.md`.
+  The open-ended hunt for new ways past the guard was started twice. A safety
+  classifier stopped it both times, before any test ran. It is still owed, and
+  belongs to the owner: run it by hand, or in a setting where that classifier
+  allows it.
 - **Step 3, records right**: done (f5988be), each fix with its test.
 - **Step 4, project page and visible plan**: done. Independent review PASS
   of 0fd416a, merged b8a1eea. `.orchestrator/PROJECT.md` (60-line cap) is
   created by `install-project.mjs` or `project.mjs init`. The first writing
   helper waits until its Next is filled. A Stop note fires after three edit
   turns without a page update. The page is re-shown after compaction and on
-  "continue". Not checked: case-sensitive git (Linux, WSL), where turn-check
-  passes a lowercased path to `git check-ignore`.
+  "continue". Since 666caeb, turn-check lowercases a path only on Windows.
+  A test shows that edits only to git-ignored files, one of them in a
+  capitalised folder, never draw the note. CI runs that test on Linux.
 - **Step 5, diagnose first**: done (f48f62f). The routine is in the card,
   SKILL.md §5 and the plain style. It adds about 52 tokens always on (cap 100).
   Its ability test (misleading-bug) was not run: it needs a shell sandbox.
