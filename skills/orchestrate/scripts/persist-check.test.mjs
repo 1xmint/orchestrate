@@ -73,6 +73,11 @@ test('scanTurn recognizes the goal-met phrasing and a denied dispatch from a too
   assert.equal(denied.denied, true);
 });
 
+test('an "orchestrate project:" denial is one the lead fixes in a step, so it does not end auto-continue', () => {
+  const denied = scanTurn(line({ type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: 'orchestrate project: no project page yet' }] } }));
+  assert.equal(denied.denied, false);
+});
+
 test('scanTurn ignores a line that fails to parse and one with no recognizable shape', () => {
   const scan = scanTurn('not json\n' + line({ type: 'other' }));
   assert.equal(scan.progressed, false);
