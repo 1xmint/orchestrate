@@ -136,6 +136,19 @@ test('a directory that is not a repo still gets a gate and says why there is no 
   assert.ok(existsSync(join(dir, '.orchestrator', 'gate.json')));
 });
 
+test('it copies the project page once, never over a filled one, and a dry run writes none', () => {
+  const dir = repo({ 'README.md': 'hi\n' });
+  const page = join(dir, '.orchestrator', 'PROJECT.md');
+  run(dir, '--dry-run');
+  assert.equal(existsSync(page), false);
+  const r = run(dir);
+  assert.match(r.stdout, /project -> .*created from the template/);
+  assert.match(readFileSync(page, 'utf8'), /^# Project page/);
+  writeFileSync(page, 'filled by the lead\n');
+  assert.match(run(dir).stdout, /already there; left alone/);
+  assert.equal(readFileSync(page, 'utf8'), 'filled by the lead\n');
+});
+
 test('a missing directory is an error the user can act on', () => {
   const r = spawnSync(process.execPath, [SCRIPT, join(tmpdir(), 'orch-not-here-999')], { encoding: 'utf8' });
   assert.equal(r.status, 2);
