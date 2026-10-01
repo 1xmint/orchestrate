@@ -4,11 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { measure, measureGrowth, growthReport, report, treeReport, withoutToolResults } from './measure.mjs';
+import { measure, measureGrowth, measureTree, growthReport, report, treeReport, withoutToolResults } from './measure.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -303,4 +303,32 @@ test('a session with one priced and one unpriced advisor model does not contradi
   const mixed = { ...ADV_U, iterations: [...ADV_U.iterations, { type: 'advisor_message', model: 'mystery-1', input_tokens: 5, output_tokens: 5 }] };
   const out = dollarReport(measure(advLine('b', mixed)), 'api', null);
   assert.match(out, /on sonnet plus the advisor, except one advisor model that is not priced and is left out/, out);
+});
+
+// A dispatch a PreToolUse hook refused never started a helper: counting it made
+// the meter say four helpers where two had run.
+test('dispatches a hook refused are not counted as helpers, and the lead and the whole session are priced apart', () => {
+  const dispatch = id => ({ type: 'assistant', message: { id: 'm' + id, model: 'claude-opus-5', usage: usage(250000, 0, 0, 0), content: [
+    { type: 'tool_use', id, name: 'Agent', input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'x' } } ] } });
+  const result = (id, err) => ({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: err, content: err ? 'PreToolUse:Agent hook blocking error: refused' : 'started' }] } });
+  const text = [dispatch('t1'), result('t1', true), dispatch('t2'), result('t2', false), dispatch('t3'), result('t3', true), dispatch('t4'), result('t4', false)].map(o => JSON.stringify(o)).join('\n');
+  const r = measure(text);
+  assert.equal(r.dispatches.length, 2);
+  assert.equal(r.refused, 2);
+  assert.match(report(r), /dispatches: 2 .*\(2 more refused by a hook, not run\)/);
+  // on disk: a lead transcript with two helper transcripts beside it
+  const dir = mkdtempSync(join(tmpdir(), 'orch-sess-'));
+  const lead = join(dir, 'sess1.jsonl');
+  writeFileSync(lead, text + '\n');
+  const sub = join(dir, 'sess1', 'subagents');
+  mkdirSync(sub, { recursive: true });
+  for (const id of ['aaa', 'bbb']) {
+    writeFileSync(join(sub, `agent-${id}.meta.json`), JSON.stringify({ agentType: 'orch-implementer' }));
+    writeFileSync(join(sub, `agent-${id}.jsonl`), JSON.stringify({ type: 'assistant', message: { id: 'h' + id, model: 'claude-sonnet-5', usage: usage(1000000, 0, 0, 0), content: [] } }) + '\n');
+  }
+  const out = dollarReport(r, 'api', null, measureTree(lead));
+  assert.match(out, /the lead \(this transcript\), at list price: \$4\.00 on opus/);
+  const whole = /the whole session \(the lead and 2 helpers that ran\), at list price: \$(\d+\.\d\d)/.exec(out);
+  assert.ok(whole, out);
+  assert.ok(Number(whole[1]) > 4, 'the helpers add to the lead');
 });
