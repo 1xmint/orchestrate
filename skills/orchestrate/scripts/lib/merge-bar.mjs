@@ -34,10 +34,11 @@ export const REVIEW_PATHS = [
   'skills/orchestrate/scripts/turn-check.mjs',
   'skills/orchestrate/scripts/turn-check.test.mjs',
   'skills/orchestrate/scripts/lib/merge-bar.mjs',
+  'skills/orchestrate/scripts/lib/shell-run.mjs',
   'skills/orchestrate/scripts/lib/review-of.mjs',
   'skills/orchestrate/scripts/lib/review-of.test.mjs',
-  'skills/orchestrate/scripts/lib/review-words.mjs',
-  'skills/orchestrate/scripts/lib/review-words.test.mjs',
+  'skills/orchestrate/scripts/lib/shell-run.test.mjs',
+  'skills/orchestrate/scripts/live-misfires.test.mjs',
 ];
 
 // Whether a line may merge a pull request. Deliberately blunt, because every

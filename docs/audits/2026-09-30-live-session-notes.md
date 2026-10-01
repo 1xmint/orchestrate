@@ -219,3 +219,10 @@ does not read, so it is refused."* The text said a change would go to review
 "before merge". Nothing in the command touched git. The file editor wrote the
 same text. A seventh word-match false alarm. The refusal does name a way around
 (pass text from a file), but a lead writing prose has no reason to expect it.
+
+**V. Two more word-matches while building.** Sending a read-only docs lookup
+drew *"this task will wait for an independent review because its objective
+mentions permission"*: the lookup asks what the docs say about permission
+rules, and changes nothing. Sending the step-2 builder with a short prompt
+naming its brief file drew R again: *"brief lacks: what it is for, a PROGRESS
+path"*, both of which are in the brief file it names.

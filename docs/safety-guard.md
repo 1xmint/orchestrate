@@ -36,7 +36,12 @@ those. Everything else, including loud everyday commands like `npm test` or
 - `vercel --prod`, `fly deploy`, `wrangler publish`/`deploy`,
   `netlify deploy --prod`
 - any `stripe` CLI command other than a read-only one (`login`, `logout`,
-  `config`, `version`, `help`, `listen`, `status`, `samples`, `open`)
+  `config`, `version`, `help`, `listen`, `status`, `samples`, `open`), run
+  directly or through `bash -c`, `$( )`, `env`, `sudo` or `npx`; a web call
+  (`curl`, `wget` and the like) to a payment service's API host; or code run
+  with `node -e`, `python -c` or a heredoc that loads a payment library. The
+  word alone, in a search pattern or text written to a file, is not a payment
+  (`lib/shell-run.mjs`)
 - dropping or truncating a database: `drop database`/`drop table`/`drop
   schema`/`truncate` on a `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo`, or
   `redis-cli` command line, including inside a `-c`/`-e`/`--eval` string;
@@ -239,6 +244,7 @@ is too broad is exactly as costly as a missing one, just quieter about it.
 ## The dispatch guard's own review gate
 
 A different guard, `guard-agent.mjs`, holds a task's DONE return back for
-independent review not only when its packet says `REVIEW: yes`, but also
-when the packet's own OBJECTIVE mentions money, auth, destructive data, or a
-shared contract — the word list lives in `REVIEW_WORDS` in that file.
+independent review when its packet says `REVIEW: yes`. Whether a review is
+owed is the lead's judgment, written into the packet; a word in the objective
+no longer decides it (live notes Q and V, 2026-09-30: a docs lookup about
+permission rules and two markdown files were flagged).

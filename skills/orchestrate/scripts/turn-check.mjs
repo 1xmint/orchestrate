@@ -25,9 +25,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail } from './lib/tier.mjs';
-import { reviewWordMatch } from './lib/review-words.mjs';
-import { fileChange, isProsePath } from './lib/file-change.mjs';
+import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession } from './lib/tier.mjs';
 
 export function pickupSection(runMdText) {
   const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
@@ -187,89 +185,6 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   return { block: false, task: null, blockedFor: [...already] };
 }
 
-// Work the lead built alone. The hold above only reads a helper's return, so a
-// lead that edits sign-in, money or stored personal data itself and finishes
-// never meets it. This reads the lead's own transcript (helpers keep theirs
-// apart): if the request or an edit it made touches one of the plugin's review
-// words (lib/review-words.mjs, the same list that flags a brief) and no
-// reviewer has returned since its last edit, it yields one plain fact. Nothing
-// is asked for: the host can hold a finish only by blocking it, so the fact is
-// the whole reason given, and the key makes it once per set of edits.
-const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pric(?:e|es|ing))$/.test(w) ? 'payments'
-  : /^(auth|authentication|authorization|login|password|credentials?|token|oauth|permission)$/.test(w) ? 'sign-in'
-  : /^(drop table|truncate|delete rows|delete records|purge|migration)$/.test(w) ? 'stored data'
-  : 'a shared contract');
-
-function editText(input) {
-  const i = input || {};
-  const parts = [i.file_path, i.notebook_path, i.new_string, i.content, i.new_source, i.command];
-  for (const e of Array.isArray(i.edits) ? i.edits : []) parts.push(e && e.new_string);
-  return parts.filter(x => typeof x === 'string').join('\n');
-}
-
-// The text of a change to look for review words in, or null when the change is
-// only to prose files (.md .mdx .txt .rst, by extension: a price table or a
-// design note is not the code that charges anyone). A shell command counts as
-// prose only when every path it writes is known and is a prose file.
-function riskText(input, fc) {
-  if (fc.exact && fc.paths.length && fc.paths.every(isProsePath)) return null;
-  // A shell line is searched only in the pieces that write: a grep pattern
-  // beside a `git pull` is not something that was changed.
-  const text = typeof fc.text === 'string' ? fc.text : editText(input);
-  return text;
-}
-
-export function unreviewedRiskFact({ transcriptTail, goal, returned, dispatches, now = Date.now() }) {
-  let edits = 0; let lastEditAt = 0; let word = null; let lastRiskAt = 0; let lastRiskId = null;
-  const lines = String(transcriptTail || '').split('\n');
-  lines.forEach((line, idx) => {
-    if (!line.includes('"tool_use"')) return;
-    let o; try { o = JSON.parse(line); } catch { return; }
-    const content = o && o.message && Array.isArray(o.message.content) ? o.message.content : [];
-    for (const c of content) {
-      if (!c || c.type !== 'tool_use') continue;
-      const fc = fileChange(c.name, c.input);
-      if (!fc.changes) continue;
-      edits++;
-      const at = Date.parse(o.timestamp) || 0;
-      if (at > lastEditAt) lastEditAt = at;
-      const text = riskText(c.input, fc);
-      const w = text == null ? null : reviewWordMatch(text);
-      if (w) { word = w; lastRiskId = c.id || o.uuid || `${o.timestamp}#${idx}`; if (at > lastRiskAt) lastRiskAt = at; }
-    }
-  });
-  if (!edits) return null;
-  const goalWord = reviewWordMatch(String(goal || ''));
-  if (!word && !goalWord) return null;
-  const since = word ? lastRiskAt : lastEditAt;
-  const reviews = (Array.isArray(returned) ? returned : []).filter(r => r && /reviewer/i.test(String(r.agent || '')));
-  if (reviews.some(r => (Date.parse(r.at) || 0) >= since)) return null;
-  // A reviewer sent after that change, within six hours and with no reply yet,
-  // is looking at it now. Only a reviewer by role counts: a builder whose brief
-  // carries a REVIEW OF id, or the advisor, is not a look at the change.
-  const rs = Array.isArray(returned) ? returned : [];
-  const looking = (Array.isArray(dispatches) ? dispatches : []).some(d => d && /reviewer/i.test(String(d.agent || ''))
-    && Date.parse(d.at) >= since && Date.parse(d.at) >= now - 6 * 3600 * 1000 && !rs.some(r => sameHelper(r, d)));
-  if (looking) return null;
-  const topic = TOPIC_OF(word || goalWord);
-  // The word itself is named, so a reader can see why: "token" in a comment
-  // and a token check read the same to this list. A review that came before
-  // the last change means the reviewed version was looked at; only what was
-  // changed since is not.
-  const said = word
-    ? `this change contains "${word}", a word on the review list for ${topic}`
-    : `the request mentions "${goalWord}", a word on the review list for ${topic}`;
-  const text = reviews.length
-    ? `${said}; the change made since the review has not been looked at.`
-    : `${said}; nobody independent has looked at ${word ? 'it' : 'the change'}.`;
-  // The key names the risky edit itself (its tool-call id), never its place in
-  // the transcript tail: the tail is the last 1 MB, so a line number or an edit
-  // count moves as the chat grows and the same edit would be raised again. With
-  // only the request to go on, it is raised once per review.
-  const lastReview = reviews.reduce((m, r) => Math.max(m, Date.parse(r.at) || 0), 0);
-  return { topic, key: word ? `${word}@${lastRiskId}` : `${goalWord}@review:${lastReview}`, text };
-}
-
 // Helper folders and branches left behind. A helper that works in its own
 // worktree leaves a folder `<cwd>/.claude/worktrees/agent-<id>` and a branch
 // `worktree-agent-<id>`. Both stay unless someone removes them, and the person
@@ -426,18 +341,6 @@ function checkHeartbeat(input) {
     return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
-
-  // Risky work the lead did itself and no reviewer has seen: one fact, once per
-  // set of edits. Quiet, and no file read beyond the transcript tail, otherwise.
-  if (input.transcript_path) {
-    const fact = unreviewedRiskFact({ transcriptTail: readTail(input.transcript_path, 1048576), goal: state.goal, returned: state.returned, dispatches: state.dispatches });
-    if (fact && rec.riskNotedFor !== fact.key) {
-      updated.riskNotedFor = fact.key;
-      store[key] = updated;
-      try { writeJsonAtomic(path, store); } catch {}
-      return emitBlock(`orchestrate: ${fact.text}`);
-    }
-  }
 
   // Helper folders and branches left behind are not raised here: the note goes
   // to the lead on its next tool call (context-check.mjs), so a closing message

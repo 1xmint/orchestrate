@@ -1,8 +1,5 @@
-// guard-agent.test.mjs — the review gate a dispatch's own OBJECTIVE can
-// trigger, with no REVIEW: yes line at all: the hook process's actual
-// dispatch record. The pure functions behind the gate (objectiveSection,
-// reviewWordMatch, inferredReviewWord) have their own tests in
-// lib/review-words.test.mjs.
+// guard-agent.test.mjs — the Agent guard as the hook process runs it: the
+// dispatch record, the brief facts, and what is no longer said (live notes R, V).
 //   node --test skills/orchestrate/scripts/guard-agent.test.mjs
 
 import { test } from 'node:test';
@@ -13,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { asksForPastedContents, leadTextWithRetry, plainRole, missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
+import { asksForPastedContents, plainRole, missingFact, estimateWording, sizeRatio, sizePhrase, dollarsShown } from './guard-agent.mjs';
 
 test('missingFact says what a building brief lacks as one line, in a fixed order', () => {
   assert.equal(missingFact('orch-implementer', 'TASK: 1\nfind it', false), 'brief lacks: what it is for, a check it is done, a PROGRESS path');
@@ -83,15 +80,6 @@ function lastDispatch(home, sid) {
 
 // ---- the dispatch record itself --------------------------------------------
 
-test('a dispatch with no REVIEW line but an objective mentioning Stripe payment records review:true and reviewInferred', () => {
-  const home = sandboxHome();
-  const sid = 's-payment';
-  dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
-  const d = lastDispatch(home, sid);
-  assert.equal(d.review, true);
-  assert.match(d.reviewInferred, /^(payment|stripe)$/);
-});
-
 test('a dispatch whose objective just renames a CSS class records no review', () => {
   const home = sandboxHome();
   const sid = 's-css';
@@ -133,15 +121,6 @@ test('a dispatch note names the helper by what it does, never by role id', () =>
   assert.equal(plainRole('orchestrate:orch-planner'), 'a planner');
 });
 
-test('an inferred review adds a plain-language additionalContext note naming the word and how to dispatch a reviewer', () => {
-  const home = sandboxHome();
-  const sid = 's-note';
-  const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-1-0099\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
-  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /will wait for an independent review because its objective mentions payment/);
-  assert.match(ctx, /send a reviewer on opus with REVIEW OF: 9-1-0099/);
-});
-
 test('a reviewer dispatch is never itself flagged for review, whatever its brief mentions', () => {
   const home = sandboxHome();
   const sid = 's-reviewer';
@@ -159,15 +138,6 @@ test('an explicit REVIEW: yes dispatch gets no duplicate inferred-review sentenc
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 9-1-0099\nREVIEW: yes\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
   assert.doesNotMatch(ctx, /will wait for an independent review/);
-});
-
-test('a prose TASK line ("TASK: build the login page") holds for review under "this task", never the first word', () => {
-  const home = sandboxHome();
-  const sid = 's-prose-task';
-  const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: build the login page\nOBJECTIVE\nAdd Stripe payment capture\nCONTEXT\nmore' });
-  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /REVIEW OF: this task$/);
-  assert.doesNotMatch(ctx, /REVIEW OF: build\b/);
 });
 
 // ---- the solo/helper pair (round-9 audit Part C item 3, area 2) -----------
@@ -273,78 +243,6 @@ function dispatchFull(home, sid, ti, lines) {
   try { return r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput : {}; } catch { return {}; }
 }
 
-test('first helper: a lead message naming no model is refused once, with the three lines owed; sent again it goes through', () => {
-  const home = sandboxHome();
-  const first = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('I will have a builder do it in a separate copy, then commit.'), toolUse]);
-  assert.equal(first.permissionDecision, 'deny');
-  assert.match(first.permissionDecisionReason, /the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked/);
-  assert.doesNotMatch(first.permissionDecisionReason, /unchanged/);
-  const again = dispatchFull(home, 's-fh-a', PKT, [userPrompt, leadSaid('Here are the three lines: Sonnet builds it, and I test it.'), toolUse]);
-  assert.notEqual(again.permissionDecision, 'deny');
-  const later = dispatchFull(home, 's-fh-a', { ...PKT, prompt: `${PKT.prompt} again` }, [userPrompt, leadSaid('one more'), toolUse]);
-  assert.notEqual(later.permissionDecision, 'deny');
-});
-
-test('first helper: helpers sent together are all refused while no model is named, up to three, then never', () => {
-  const home = sandboxHome();
-  const t = [userPrompt, leadSaid('Working on it.'), toolUse];
-  for (let i = 0; i < 3; i++) {
-    assert.equal(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} ${i}` }, t).permissionDecision, 'deny', `helper ${i} is refused`);
-  }
-  assert.notEqual(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} 4` }, t).permissionDecision, 'deny', 'the fourth goes through');
-  assert.notEqual(dispatchFull(home, 's-fh-e', { ...PKT, prompt: `${PKT.prompt} 5` }, t).permissionDecision, 'deny');
-});
-
-test('first helper: three helpers sent at the same moment are all refused', async () => {
-  const home = sandboxHome();
-  const tp = join(mkdtempSync(join(tmpdir(), 'orch-guard-tr-')), 't.jsonl');
-  writeFileSync(tp, [userPrompt, leadSaid('Working on it.'), toolUse].map(l => JSON.stringify(l)).join('\n') + '\n');
-  const one = i => new Promise(done => {
-    const c = spawn(process.execPath, [GUARD], { env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' } });
-    let out = '';
-    c.stdout.on('data', d => { out += d; });
-    c.on('close', () => { try { done(JSON.parse(out).hookSpecificOutput); } catch { done({}); } });
-    c.stdin.end(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 's-fh-par', cwd: home, transcript_path: tp, tool_use_id: `u-par-${i}`, tool_input: { ...PKT, prompt: `${PKT.prompt} ${i}` } }));
-  });
-  const all = await Promise.all([0, 1, 2].map(one));
-  all.forEach((o, i) => assert.equal(o.permissionDecision, 'deny', `helper ${i} is refused`));
-});
-
-test('first helper: the bare word "model" does not count as naming one; a described model does', () => {
-  const bare = dispatchFull(sandboxHome(), 's-fh-h', PKT, [userPrompt, leadSaid('I will update the data model and then test it.'), toolUse]);
-  assert.equal(bare.permissionDecision, 'deny');
-  const described = dispatchFull(sandboxHome(), 's-fh-i', PKT, [userPrompt, leadSaid('A helper on a cheaper model builds it, and I test it.'), toolUse]);
-  assert.notEqual(described.permissionDecision, 'deny');
-});
-
-test('first helper: once a message names a model, no later helper is refused', () => {
-  const home = sandboxHome();
-  assert.equal(dispatchFull(home, 's-fh-g', PKT, [userPrompt, leadSaid('Working on it.'), toolUse]).permissionDecision, 'deny');
-  assert.notEqual(dispatchFull(home, 's-fh-g', PKT, [userPrompt, leadSaid('Sonnet builds it.'), toolUse]).permissionDecision, 'deny');
-  assert.notEqual(dispatchFull(home, 's-fh-g', { ...PKT, prompt: `${PKT.prompt} x` }, [userPrompt, leadSaid('Nothing more.'), toolUse]).permissionDecision, 'deny');
-});
-
-test('first helper: a lead message that names a model is not refused', () => {
-  const o = dispatchFull(sandboxHome(), 's-fh-f', PKT, [userPrompt, leadSaid('A helper on Sonnet builds it.'), toolUse]);
-  assert.notEqual(o.permissionDecision, 'deny');
-});
-
-test('first helper: nothing said when the lead message names a model and a check', () => {
-  const ctx = dispatchWithTranscript(sandboxHome(), 's-fh-b', PKT, [userPrompt, leadSaid('The job needs a search. A helper on Sonnet builds it because it is routine. I check it by running the tests.'), toolUse]);
-  assert.doesNotMatch(ctx, /first helper this session/);
-});
-
-test('first helper: an older turn\'s message is not mistaken for this turn\'s; the plain fact is sent', () => {
-  const ctx = dispatchWithTranscript(sandboxHome(), 's-fh-c', PKT, [leadSaid('Sonnet builds it and I test it.'), userPrompt, toolUse]);
-  assert.match(ctx, /first helper this session: the user is owed three plain lines first: what the job needs, who does it on what model and why, and how it is checked/);
-});
-
-test('first helper: with no transcript at all the plain fact is sent, and the dispatch is not refused', () => {
-  const { json } = dispatch(sandboxHome(), 's-fh-d', PKT);
-  assert.equal(json.hookSpecificOutput.permissionDecision, undefined);
-  assert.match(json.hookSpecificOutput.additionalContext, /first helper this session: the user is owed three plain lines first/);
-});
-
 // ---- a made-up test value is not a secret --------------------------------
 
 test('a quoted value that is plainly made up for a test is not refused; a real-looking one still is', () => {
@@ -369,34 +267,6 @@ test('a quoted value that is plainly made up for a test is not refused; a real-l
 // ---- a brief with no task id and no headings (a real run: a password check) ----
 
 const NO_HEADINGS_BRIEF = `Repo: a small club server (clean).\n\nFull current contents:\n\n\`\`\`js\n${'const members = [];\n'.repeat(40)}\`\`\`\n\nTask: add a password check so only people who know the password can see /members.\n\nReport back what you changed.`;
-
-test('a brief with no task id and no headings still gets the review note and is recorded as risky work', () => {
-  const home = sandboxHome();
-  const sid = 's-no-headings';
-  const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: NO_HEADINGS_BRIEF });
-  const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /will wait for an independent review because its objective mentions password/);
-  const d = lastDispatch(home, sid);
-  assert.equal(d.review, true);
-  assert.equal(d.reviewInferred, 'password');
-  assert.equal(d.task, null);
-});
-
-test('the lead message is read again when it has not reached the transcript yet', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'g-retry-'));
-  const f = join(dir, 't.jsonl');
-  const user = JSON.stringify({ type: 'user', message: { role: 'user', content: 'do it' } });
-  const lead = JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Plan: sonnet builds it, tests check it.' }] } });
-  writeFileSync(f, user + '\n');
-  let sleeps = 0;
-  const text = leadTextWithRetry(f, { sleep: () => { if (++sleeps === 2) writeFileSync(f, user + '\n' + lead + '\n'); } });
-  assert.match(text, /sonnet builds it/);
-  assert.equal(sleeps, 2);
-  writeFileSync(f, user + '\n');
-  let n = 0;
-  assert.equal(leadTextWithRetry(f, { tries: 3, sleep: () => { n++; } }), null);
-  assert.equal(n, 2);
-});
 
 test('a brief that asks for pasted contents gets a note to ask for a file path; one that does not, none', () => {
   const home = sandboxHome();
