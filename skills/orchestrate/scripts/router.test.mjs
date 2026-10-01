@@ -674,6 +674,9 @@ test('scope words elsewhere in the sentence, or a not or an only beside them, ar
     'every task gets a review; put opus on the migration only',
     'fix the opus bug in the router throughout the file',
     'stop using opus for all the helpers',
+    // Second review: a question asks, and a sentence naming sonnet splits the run.
+    'should we use opus for every task?',
+    'reviewers on opus for all the tasks, implementers on sonnet',
   ]) assert.equal(runFamilyIn(t, fams), null, t);
   for (const [t, f] of [
     ['Use however many opus 5.5 high agents you need', 'opus'],

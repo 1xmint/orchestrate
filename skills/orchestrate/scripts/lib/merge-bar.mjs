@@ -53,10 +53,16 @@ export const REVIEW_PATHS = [
 // out of time.
 export function mentionsMerge(line) {
   if (readsOnly(line) || plainGitMerge(line)) return false;
-  const text = String(line || '').replace(/\\\r?\n/g, '').replace(/["'`$]/g, '');
+  // A heredoc's body is not command text: bash expands no braces and reads no
+  // quotes in it, so a file written with cat <<EOF (JSON, code, "shop's") is
+  // read word by word on its own, below, and never expanded with the line.
+  // Read that way it still counts, so a body fed to bash is caught.
+  const { command, bodies } = splitHeredocs(String(line || '').replace(/\\\r?\n/g, ''));
+  const text = command.replace(/["'`$]/g, '');
   const expanded = expandBraces(text, { calls: 0 });
   const forms = (expanded || [text]).map(f => f.toLowerCase());
   const flat = forms.map(f => f.replace(/[^a-z0-9]/g, '')).join(' ');
+  const bodyWords = bodies.flatMap(b => shellWords(b.toLowerCase()));
   // Braces this cannot expand can hide letters between the ones that stay, but
   // not move a letter out of its shell word: the shell expands braces inside
   // one word, and the first copy of a word is made of letters written in it.
@@ -64,18 +70,57 @@ export function mentionsMerge(line) {
   // enqueuepullrequest) and one holds g then h (or pulls, or graphql), with
   // anything between. A g ending one word beside an h starting the next is not
   // gh, which is what refused ordinary scripts before. A word with no brace in
-  // it is not changed by expansion, so it must spell the word outright.
-  if (!expanded) {
-    const words = text.toLowerCase().split(/[\s;&|()<>]+/);
-    const holds = (w, n) => {
-      if (/[{}]/.test(w)) return inOrder(w, n);
-      return n === 'gh' ? namesGh(w) : w.replace(/[^a-z0-9]/g, '').includes(n);
-    };
-    const has = (...needles) => needles.some(n => words.some(w => holds(w, n)));
-    return has('merge', 'enqueuepullrequest') && has('gh', 'pulls', 'graphql');
+  // it is not changed by expansion, so it must spell the word outright. Words
+  // split where bash splits them: g{";",}h and g{\ ,}h are one word, gh in one
+  // copy.
+  const words = expanded ? bodyWords : [...shellWords(command.toLowerCase()), ...bodyWords];
+  const holds = (w, n) => {
+    if (/[{}]/.test(w)) return inOrder(w, n);
+    return n === 'gh' ? namesGh(w) : w.replace(/[^a-z0-9]/g, '').includes(n);
+  };
+  const has = (...needles) => needles.some(n => words.some(w => holds(w, n)));
+  const says = has('merge', 'enqueuepullrequest') || (expanded && (flat.includes('merge') || flat.includes('enqueuepullrequest')));
+  const names = has('gh', 'pulls', 'graphql') || (expanded && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql')));
+  return Boolean(says && names);
+}
+
+// The line with each heredoc body taken out, and the bodies. A body runs from
+// the line after <<WORD (or <<-WORD, <<'WORD', <<"WORD"; not <<<) to a line
+// that is WORD alone. With no such line it is not a heredoc and stays command.
+function splitHeredocs(text) {
+  const lines = text.split('\n'), command = [], bodies = [];
+  for (let i = 0; i < lines.length; i++) {
+    command.push(lines[i]);
+    const marks = [...lines[i].matchAll(/<<(-?)\s*(["']?)([A-Za-z_][\w.-]*)\2/g)]
+      .filter(m => lines[i][m.index - 1] !== '<');
+    for (const m of marks) {
+      const end = lines.findIndex((l, j) => j > i && (m[1] ? l.replace(/^\t+/, '') : l).replace(/\r$/, '') === m[3]);
+      if (end < 0) break;
+      bodies.push(lines.slice(i + 1, end).join('\n'));
+      i = end;
+    }
   }
-  const says = flat.includes('merge') || flat.includes('enqueuepullrequest');
-  return says && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql'));
+  return { command: command.join('\n'), bodies };
+}
+
+// The words as bash splits them: at a space or ; & | ( ) < > that is neither
+// quoted nor after a backslash. Quotes, backticks and $ are dropped; a
+// backslash stays, for a path such as C:\…\gh.exe. Braces and commas inside
+// quotes are text to bash, so they become \u0003, which joins nothing. An
+// unclosed quote runs to the end.
+function shellWords(text) {
+  const words = [];
+  let w = '', q = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === q) q = ''; else if (/[{},]/.test(c)) w += '\u0003'; else if (!/["'`$]/.test(c)) w += c; continue; }
+    if (c === '\\' && i + 1 < text.length) { w += c + text[++i]; continue; }
+    if (c === '"' || c === "'") { q = c; continue; }
+    if (/[\s;&|()<>]/.test(c)) { if (w) words.push(w); w = ''; continue; }
+    if (c !== '$' && c !== '`') w += c;
+  }
+  if (w) words.push(w);
+  return words;
 }
 
 // Whether some expansion of `word` could bring the letters of `needle`

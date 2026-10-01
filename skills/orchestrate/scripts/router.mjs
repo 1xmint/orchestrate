@@ -235,8 +235,12 @@ export function runFamilyIn(text, families) {
   let best = null;
   for (const f of families) {
     const m = runScope(f).exec(text);
-    if (!m || NOT_BLANKET.test(sentenceAt(text, m.index))) continue;
-    if (!best || m.index < best.at) best = { family: f, at: m.index, sentence: sentenceAt(text, m.index) };
+    const s = m && sentenceAt(text, m.index);
+    // A question asks, it does not grant; a sentence that names sonnet or
+    // haiku too splits the run between models. A missed grant costs one ask,
+    // a wrong one costs the user money.
+    if (!m || NOT_BLANKET.test(s) || /\?\s*$/.test(s) || /\b(?:sonnet|haiku)\b/i.test(s)) continue;
+    if (!best || m.index < best.at) best = { family: f, at: m.index, sentence: s };
   }
   return best;
 }

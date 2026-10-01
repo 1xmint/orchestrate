@@ -151,7 +151,12 @@ or `graphql`). Between two of those letters there may be punctuation, or
 other letters only across a brace or comma, which a choice can cut through:
 the shell expands braces inside a word, so they can pad a word but not join
 two, and `grantCheck` never becomes `gh`. A word with no brace must spell
-the word outright.
+the word outright. Words split where bash splits them, never at a quoted or
+escaped separator (`g{";",}h` is one word, and `gh` in one copy), and braces
+inside quotes are text. A heredoc's body (the lines after `<<EOF` up to
+`EOF`) is not command text: it is never brace-expanded with the line, but
+read word by word on its own the same way, so a file of JSON or code written
+with `cat <<EOF` passes and a body fed to `bash` is still caught.
 Quoted text and comments count too. So a merge inside a chain, a pipe,
 `bash -c`, a wrapper such as `timeout`, `env` or `xargs`, `curl` or
 `Invoke-RestMethod`, after a `cd`, or behind a comment or heredoc is refused

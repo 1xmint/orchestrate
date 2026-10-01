@@ -30,8 +30,8 @@ function patternFrom(file) {
   return match[1];
 }
 
-test('all twelve case directories carry a no-machinery grader', () => {
-  assert.equal(graderFiles.length, 12, `found ${graderFiles.length}`);
+test('all thirteen case directories carry a no-machinery grader', () => {
+  assert.equal(graderFiles.length, 13, `found ${graderFiles.length}`);
 });
 
 const [canonical, ...rest] = graderFiles;
