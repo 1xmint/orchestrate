@@ -593,7 +593,7 @@ test('the lead hears two failed reviews in a row on its next tool call, once per
   const state = JSON.parse(readFileSync(wcSessionFile(home, sid), 'utf8'));
   writeFileSync(wcSessionFile(home, sid), JSON.stringify({ ...state, returned: [one, two] }));
   const said = runContextCheck(read, home);
-  assert.match(said, /2 reviews in a row returned FAIL \(of 24e65315, 826d997f\), none PASS since; each full return is in the run's returns\/ folder/);
+  assert.match(said, /2 reviews in a row returned FAIL \(of 24e65315, 826d997f\), none PASS since\.$/m);
   assert.doesNotMatch(said, ORDERS, 'a fact, not an order');
   assert.doesNotMatch(runContextCheck(read, home), /in a row/, 'once per new failure');
 });

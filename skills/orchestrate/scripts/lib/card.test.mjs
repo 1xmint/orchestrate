@@ -99,7 +99,7 @@ test('the model the card names for each helper matches that helper\'s own defini
 test('the card says not to test what can be known, and to stop at the same kind of failure twice', () => {
   // 0.20.1's session spent $10 on a test whose result was predictable from the
   // last one, and seven review rounds on cases of a kind the decisions ruled out.
-  assert.match(CARD, /Don't run a test whose result you can predict, read or look up\./);
+  assert.match(CARD, /Proof of your change runs; an experiment you can predict, read or look up does not\./);
   assert.match(CARD, /The same kind of failure twice: stop and name what they share\./);
   assert.match(CARD, /show a test that failed before, look for the same mistake elsewhere\./);
 });

@@ -318,7 +318,7 @@ export function check(input) {
     const streak = failStreak(state.returned);
     let streakTold = false;
     if (streak.count >= 2 && state.failStreakTold !== streak.key) {
-      out.push(`[orchestrate · context] ${streak.count} reviews in a row returned FAIL (of ${streak.of.join(', ')}), none PASS since; each full return is in the run's returns/ folder.`);
+      out.push(`[orchestrate · context] ${streak.count} reviews in a row returned FAIL (of ${streak.of.join(', ')}), none PASS since.`);
       state.failStreakTold = streak.key;
       streakTold = true;
     }

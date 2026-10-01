@@ -128,8 +128,8 @@ documentation, source, release note or issue that answers it, before building
 your own version of something established. One authoritative source can
 settle a question; several weak ones do not. Write what you learn into the
 run's Facts or Decisions, with its source. External research settles how
-something works; only running your change here shows it works here. Before
-any other test or experiment, write the result you expect and what it would
+something works; only running your change here shows it works here, so run that; before
+any other test or experiment, write what you expect and what it would
 change: if you can predict it, read it or look it up, don't run it.
 `evaluation.md`'s "Research results" has the grading.
 
