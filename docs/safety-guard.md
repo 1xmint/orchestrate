@@ -105,6 +105,42 @@ it passes, and so does a discard that names single files. A commit dropped
 by `git reset --hard <older commit>` is not what is guarded here: git keeps
 it for weeks and `git reflog` finds it.
 
+Removing a git worktree folder (`git worktree remove`) is stopped when the
+folder holds changes that were never saved to git. A helper folder under
+`.claude/worktrees/` is checked whether or not force is used; a missing
+helper folder counts as clean. Any other folder removed with force
+(`-f`, `-ff`, `--force`) is checked too, wherever it is, including the Git Bash
+spelling of a Windows drive (`/c/path` is read as `C:/path`). If such a folder
+is not there under that name, or git cannot read it, the guard cannot tell
+whether work would be lost, so it refuses ("can't tell") rather than treating
+it as clean. A plain removal without force of a folder outside
+`.claude/worktrees/` is left to git, which refuses a folder with changes.
+The line must say it in plain words: git, its `-C` folder, `worktree
+remove`, the force flag (any start of `--force`, quoted or not) and folders,
+alone or joined with `;`, `&&` or a plain `cd <folder>`. A brace, `$`, a
+backtick, a leading backslash, a redirect other than to `/dev/null` or `&1`, or
+anything in front of git (`if`, `!`, `env`, `sudo`, `eval`) is refused as
+unreadable, the same way the merge check works, because each attempt to follow
+one more spelling left another open. Quotes are read where bash reads them: a
+`#` starting a word is a comment to the end of its line, and a heredoc
+(`<<X` outside quotes and comments) has its body skipped as text unless its
+line pipes it or starts a shell (`cat <<X | bash`, `bash <<X`); a `<<` inside
+`(( ))` is a shift, not a heredoc. A quote that is never closed, or one that
+PowerShell reads differently from bash (`\"` inside double quotes, `$'…'`, a
+backtick before a quote, a curly quote), refuses a removal line. A PowerShell
+here-string (`@'` … `'@`) is read both as PowerShell reads it, as text, and
+as bash reads it, as quotes; either refusal holds, so an apostrophe in its
+body before a removal refuses the line, and the removal runs as its own
+command. A relative
+folder after a plain `cd <folder>`, or PowerShell's or bash's other ways to
+move (`pushd`, `Set-Location`, `sl`, `chdir`, `Push-Location`, any case), is
+checked from the starting folder and from where the move leads, because a
+`cd` in `( )`, or into a folder that is not there, leaves the shell where it
+was. A move the check cannot follow (`if cd x`, `Set-Location -Path x`,
+`popd`) refuses a relative folder after it. A message that
+only quotes the words (`git commit -m "…worktree remove…"`, or a `-F -` heredoc)
+is not a removal and passes.
+
 Options written before git's command word (`git -C <folder> push --force`)
 are taken out before any rule reads the line, so the word order cannot step
 round a check.
@@ -255,6 +291,12 @@ reads only the line in front of it.
   treated as headless here; it still gets asked. If that turns out wrong in
   practice, the fix is a better-documented field to key on, not guessing at
   one now.
+- **A yes given in chat does not reach a session that shows no prompts:** a
+  hook cannot see the conversation, so in a session like that an owner's yes
+  typed in chat changes nothing for the guard. The owner runs the command
+  themselves, or adds that exact line to `.orchestrator/allow-bash.json`
+  (see below). Claude may write a line there only when the owner has
+  approved that exact line; Claude never lifts a refusal on its own.
 - **The same command asked twice in one session:** the second identical
   command gets the same "ask" decision, but the reason starts "Asked
   already: " instead of reading like the first time. This is for a model

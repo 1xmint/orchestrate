@@ -2,6 +2,58 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.20.1 — safer clean-up, a fairer ruler, 2026-10-01
+
+From the refusals and the eval ruler seen while releasing 0.20.0 (notes X and Y
+in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
+
+- A forced worktree removal of any folder, not only a helper folder, is
+  checked for unsaved work first. Before, one outside `.claude/worktrees/`
+  passed with no check and its unsaved work was lost. A folder that cannot be
+  found or read is refused ("cannot tell"). A Git Bash path such as `/c/...`
+  is translated before the check, because Node read it as a missing folder,
+  which counted as clean. The first review found a redirect before the flag
+  (`remove 2>/dev/null --force`) hid it, and `--fo` was not read as force;
+  both fixed. The second review found a brace (`{../dirty,}`), a
+  backslash-newline, a quoted flag and a word before git (`if … then`, `env
+  -i`, `\git`) still slipped past. So the check now reads like the merge check:
+  a part holding `worktree remove` must be plain words, or it is refused as
+  unreadable; a plain `cd <folder>` before it moves where folders are read.
+  The third review found an escaped quote (`-m "Fix \"x\" bug"`) hid a forced
+  removal after it, and a quoted Windows folder after `cd` was refused; quotes,
+  comments and heredoc bodies are now read where bash reads them. The fourth
+  found a `<<EOF` inside quotes, a piped heredoc, a cd in `( )` and a `\"` read
+  by PowerShell; a relative folder is now checked from every place a cd could
+  leave the shell. The fifth found PowerShell's `Set-Location`, `pushd`, `sl`
+  and `CD` were not read as a cd; every way either shell moves now is, and
+  `$'…'`, a backtick before a quote and curly quotes refuse a removal line.
+  The sixth found a PowerShell here-string with an apostrophe hid a removal
+  after it from the bash reading; a line with one is now read both ways.
+- A clean-up line that removes a clean worktree and deletes branches with
+  lowercase `-d` now passes. When a branch-delete line is refused although it
+  already uses `-d`, the refusal names the part that was actually refused
+  instead of advising `-d`.
+- The merge check accepts one plain `cd <path>;` or `&&` before a single
+  `gh pr` read; the path is letters, digits and `./:@+,=-` only. `cd $(…)`,
+  backticks, globs, `~`, two `cd`s and `cd …` before a merge are still
+  refused. A branch delete with `-d --force` is not called "the lowercase
+  flag" in a refusal.
+- docs/safety-guard.md: in a session that shows no prompts, an owner's yes in
+  chat does not reach the check. The owner runs the command, or approves the
+  exact line for `.orchestrator/allow-bash.json`.
+- Eval ruler (note X): six LLM rules that read the whole run record, which the
+  eval host cuts in the middle, now read the last message. Two tool rules were
+  added for actions the rewritten rules no longer see
+  (`no-uploads-removed`, `report-test-untouched`), and Edit or Write siblings
+  for three that watched one tool only. Left to the final message: whether
+  three-session-continue redid steps 1-2, and whether misleading-bug's tests
+  passed (only that they ran is checked). `eval-graders.test.mjs`
+  refuses any LLM rule that reads the record or doesn't say what it reads.
+  Not re-measured.
+
+Replayed against `decide()`, each refused line from this session now gives the
+intended answer. Gate: 1260/1260, 22/22.
+
 ## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
 
 From the first live run of 0.19.0 (notes A-X in
@@ -41,42 +93,9 @@ costs about a third more per run. Two earlier leads (drawing, plan questions)
 did not hold at three runs a side. Note X names judges that read a record with
 its middle cut out.
 
-## v0.19.0 — plan 0006: a fair ruler, and who can see the data is the owner's call, 2026-10-01
-
-From the audit of the 0.18.0 release check (plan in the session notes,
-`docs/audits/2026-10-01-live-session-notes.md`). The measurement is in
-docs/research/0006-eval-0.19.0.md.
-
-- The leak check flags plugin words (worktree, packet, ledger, "helper
-  system", "until a plan existed") instead of any dollar sign; it had flagged a
-  plain monthly price and missed a real leak. A page on the home wifi now
-  counts as exposed in costly-fork. 0005-eval-0.18.0.md keeps its old text
-  with the correction.
-- Who can see or change the owner's data (a public page, or anyone on their
-  wifi) and anything they did not ask for are their call: card, SKILL §1 and
-  plain.md. The plan-page refusal says it is not news for the user.
-- A new case, `plan-request`, grades a plan on intent, plain questions,
-  grounding in the repo, visible steps and no extra scope.
-- AGENTS.md: work the user feels outranks upkeep; plans are a measured claim;
-  the guard catches what Claude would do by mistake, not commands built to slip
-  past it, and `docs/safety-guard.md` lists what it does not catch. The
-  open-ended bypass search owed since 0.18.0 is dropped under that rule.
-- In plan mode the context line names the plan file instead of ordering a
-  checkpoint that cannot be written; a model grant missing its TASK line says so
-  first. The card names the researcher's real model, with a test, and a
-  research packet can carry KILLS IT and SOURCE (from an outside review of how
-  the plugin researches).
-
-Measured (docs/research/0006-eval-0.19.0.md): the plan test's judge was reading the raw run
-record, not the plan; fixed, both versions rerun. With the plugin, plans asked the owner better
-questions (passed 3 of 6 against 0 of 6), and no costly-fork run built before asking. 0.19.0 and
-0.18.0 score the same; three runs cannot tell them apart.
-
-Not fixed: misleading-bug and failed-check-report still cannot run on Windows;
-"N tool calls since your last edit" counts shell commands as edits on purpose.
-
 ## Earlier releases
 
+- [v0.19.0 — plan 0006: a fair ruler, and who can see the data is the owner's call, 2026-10-01](docs/state/v0.19.0.md)
 - [v0.18.0 — plan 0005: checks that read what runs, and a project page, 2026-09-30](docs/state/v0.18.0.md)
 - [v0.17.2 — a merge waits for its checks, 2026-09-30](docs/state/v0.17.2.md)
 - [v0.17.1 — fixes from the first live session on 0.17.0, 2026-09-29](docs/state/v0.17.1.md)

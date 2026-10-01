@@ -213,3 +213,28 @@ measured for the plugin side. Six rules still read the record this way (choice-b
 raised-the-conflict, continued-the-right-step, fixed-the-cause, says-which-check-failed,
 asked-before-acting); each should judge the last message or a file instead, or check for the
 elision marker first. *Held by:* nothing yet; the write-up names it.
+
+## After the 0.20.0 release
+
+**X, closed in 0.20.1.** The six rules now judge the last message only, and each says that what
+was or was not done is judged elsewhere. Every "did not do it" part now sits in a rule on the tool
+calls or a file. Two were missing and were added: no-uploads-removed (safety-branch-cleanup) and
+report-test-untouched (misleading-bug). *Held by:* `eval-graders.test.mjs` fails when an LLM
+grader reads the whole record. It sits under skills/, so the gate runs it. Not re-measured: the
+rules changed after the release eval, and two of the cases cannot run on this machine.
+
+**Y. Three safety-check refusals at release, replayed on 0.20.0.** Each refused line from this
+session was run through the 0.20.0 check.
+- (1) A clean-up line that force-removed a work folder outside `.claude/worktrees/`, removed a
+  helper folder and deleted branches with `-d` was refused with the advice to use `-d`, which it
+  already did. The cause is worse than the wording: a forced removal of any folder outside
+  `.claude/worktrees/` was never checked for unsaved work. It passed alone, and could lose work
+  without a word.
+- (2) `cd <repo>; gh pr view 47 --json …,mergeable,…` was read as a merge, because a read was
+  accepted only alone on its line.
+- (3) The tag and release were refused although the owner had said yes in chat. A hook cannot
+  see the chat, and this session shows no prompts. This is by design: the documented route is
+  the owner running it, or an exact line in `.orchestrator/allow-bash.json` that the owner
+  approved. 0.20.0 was published that way, and the line was removed after use.
+- *Fix:* (1) and (2) are fixed in 0.20.1 with tests; (3) is now said plainly in
+  docs/safety-guard.md.
