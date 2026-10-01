@@ -21,6 +21,14 @@ build only after one of these, each the owner's decision:
 Either way, start a fresh session afterwards: a plugin installed mid-session is
 not live in that session.
 
+Then check that the session runs this build, before watching anything. The
+build still says version 0.17.2, so an install can quietly reuse the cached
+0.17.2 copy. Also, a local catalog has the same name as the GitHub one, and
+that may clash. The check: the loaded plugin's
+`skills/orchestrate/scripts/project.mjs` exists (0.17.2 has no such file), and
+`node <that scripts dir>/install-project.mjs --dry-run` prints "Alongside
+orchestrate". If either fails, stop: a watch of the old build measures nothing.
+
 ## 2. Watch it live
 
 Same form as docs/audits/2026-09-30-live-session-notes.md: one note per thing
