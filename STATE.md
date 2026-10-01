@@ -12,9 +12,10 @@ in docs/research/0005-eval-0.18.0.md, against
 docs/research/0005-baseline-0.17.2.md.
 
 - The guard reads what runs instead of guessing from words (step 2). Its first
-  commit went in before its review, and that review failed. Three fixes
-  followed, each reviewed independently. The third closes two leads the
-  reviews named: text written into git's or rg's own settings on the same line
+  commit went in before its review, and that review failed. Five fixes
+  followed, each reviewed independently. Reviews of the first four found real
+  gaps, each answered by the next fix (fix 2 then passed on its second
+  review), and the merge needed a PASS naming the last. Fixes 3 to 5 close two leads the reviews named: text written into git's or rg's own settings on the same line
   as a git read, and a payment host reached through a script file, `curl -K`
   or `wsl`. Settings made before the line are still not read; that is written
   down in `docs/safety-guard.md`. An open-ended search for other ways past the

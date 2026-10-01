@@ -24,9 +24,8 @@ const WRAPPER_ARG_FLAGS = { nice: /^-n$/, sudo: /^-[ugCDhpRrT]$/, xargs: /^-[nIP
 // Not sed, awk, find or xargs: each has a way to run a command.
 const READERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls', 'findstr', 'cat', 'head', 'tail', 'wc', 'ls', 'pwd', 'cd', 'mkdir', 'echo', 'printf', 'type', 'get-content', 'write-output']);
 const GIT_READ_RE = /^(grep|log|show|diff|status|blame|add)$/;
-// A file git or rg reads its settings from, a `.git` folder or gitdir file, or
-// a path built from a variable, which could be any of those.
-const RUN_CONFIG_RE = /(^|[\\/])\.git($|[\\/])|gitattributes|gitconfig|ripgreprc|(^|[\\/])\.config[\\/]git($|[\\/])|[$%]/i;
+// A file git or rg reads its settings from, or a `.git` folder or gitdir file.
+const RUN_CONFIG_RE = /(^|[\\/])\.git($|[\\/])|gitattributes|gitconfig|ripgreprc|(^|[\\/])\.config[\\/]git($|[\\/])/i;
 const FETCHERS = new Set(['curl', 'wget', 'http', 'https', 'xh', 'invoke-webrequest', 'invoke-restmethod', 'iwr', 'irm']);
 
 // Payment services' API hosts: a web call to one of these is a payment action.
@@ -222,14 +221,17 @@ function unmodelled(s) {
 function plainSegment(seg) {
   const all = words(seg);
   const w = plainWords(seg);
-  if (!w.length) return true;
+  // `D=.git` lets a later `cd $D` or `>> $D/config` reach git's settings.
+  if (!w.length) return !all.some(a => RUN_CONFIG_RE.test(a.replace(/^[^=]*=/, '')));
   if (w.length !== all.length) return false; // `PAGER=… git log` runs the assignment
   const b = base(w[0]);
   // Text into git's or rg's own settings is not inert: a git read on the same
   // line runs what it names (core.fsmonitor, a textconv, a filter). Only where
   // it lands counts, so a note that mentions .git/hooks stays plain; a `cd`
   // into a .git folder makes a bare `>> config` land there.
-  if (TEXT_CMDS.has(b) && isTextToFile(seg)) return !textTargets(seg, b).some(t => RUN_CONFIG_RE.test(t));
+  // Any redirect counts (`1>`, `&>`), whatever the command.
+  if (textTargets(seg, b).some(t => RUN_CONFIG_RE.test(t))) return false;
+  if (TEXT_CMDS.has(b) && isTextToFile(seg)) return true;
   if (b === 'cd' && w.slice(1).some(t => RUN_CONFIG_RE.test(t))) return false;
   // rg runs a program for --pre and --hostname-bin; git grep for -O, which
   // groups with other short flags (-iO) and takes any long prefix (--open).
@@ -260,7 +262,19 @@ export function plainLine(text) {
   const { line, bodies } = splitHeredocs(String(text || ''));
   if (unmodelled(line)) return false;
   if (bodies.some(b => !b.toFile || (b.expands && /\$\(|`/.test(b.text)))) return false;
-  return segments(line).every(plainSegment);
+  const segs = segments(line);
+  // A variable set on this line can be spelled into `.git` (`D=.g; cd "$D"it`),
+  // so then a variable in a cd path or a write target is not plain. One from
+  // the environment ($HOME, $TMP) is.
+  if (segs.some(s => !plainWords(s).length)) {
+    const varPath = s => {
+      const w = plainWords(s);
+      const b = base(w[0] || '');
+      return [...textTargets(s, b), ...(b === 'cd' ? w.slice(1) : [])].some(t => /[$%]/.test(t));
+    };
+    if (segs.some(varPath)) return false;
+  }
+  return segs.every(plainSegment);
 }
 
 // Does this line act on a payment account? What it runs (runsPayment), or,

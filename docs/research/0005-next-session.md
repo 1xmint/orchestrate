@@ -86,11 +86,19 @@ Full gate at the release: 1230 pass, 0 fail; `evals/no-machinery` 14/0.
   shortened). Fix 2 (560de4b) closes both. Its first review FAILED on one test
   line that the old code already refused. That line was swapped, and all six new
   lines were run against the old and the new code. The second review PASSED,
-  and the fix was merged as c1691ca. Fix 3 (44b82f8, reviewed independently
-  before the release) acts on the reviewers' optional notes. Two of them were
-  real on a single line: text written into `.git/config` or `.gitattributes`
-  and then a git read, and a payment host reached through a script file,
-  `curl -K` or `wsl`. Both now stop. The rest (`git add -e`, textconv and
+  and the fix was merged as c1691ca. Fix 3 (44b82f8) acts on the reviewers'
+  optional notes. Two of them were real on a single line: text written into
+  `.git/config` or `.gitattributes` and then a git read, and a payment host
+  reached through a script file, `curl -K` or `wsl`. Its review FAILED: the
+  check read the whole line, so a `cd .git` then a bare `>> config`, or a
+  quoted `".git"/config`, got through, and a note that only mentioned
+  `.git/hooks` was refused. Fix 4 (7b78874) reads only where the text lands.
+  Its review FAILED too: `1>`, `&>` and a reader such as `grep` redirected
+  into `.git/config` got through, and `cd "$REPO"` was refused. Fix 5 checks
+  every redirect, whatever the command, and treats a variable in a `cd` path or
+  a write target as unsafe only when the same line sets a variable. Each fix's
+  new test lines were run against the reviewed code and the fixed code. The
+  merge to main needed a reviewer's PASS naming its final commit. The rest (`git add -e`, textconv and
   external diff, `rg -z`, `RIPGREP_CONFIG_PATH`) act only through settings
   made before the line. They are listed as not caught in `docs/safety-guard.md`.
   The open-ended hunt for new ways past the guard was started twice. A safety

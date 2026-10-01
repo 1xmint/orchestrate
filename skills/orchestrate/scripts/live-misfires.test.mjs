@@ -90,6 +90,13 @@ const MERGE_MUST_REFUSE = [
   `cd .git && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
   `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> ".git"/config && git status`,
   `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n'>>.git/config && git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' 1> .git/config && git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' &> .git/config && git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' 1>> .git/config && git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' > n.txt && grep "" n.txt > .git/config && git status`,
+  `D=.git; cd $D && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
+  `D=.g; cd "$D"it && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
+  `D=.g; printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> "$D"it/config && git status`,
   `printf 'gitdir: x\\n' > sub/.git && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> sub/x/config && cd sub && git status`,
   `D=.git; printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> $D/config && git status`,
 ];
@@ -165,6 +172,8 @@ const MUST_PASS = [
   'grep -rn "api.paypal.com" docs/',
   'echo "dist/" >> .gitignore && git status',
   'echo "hooks live in .git/hooks; gh pr merge after review" >> NOTES.md',
+  'cd "$REPO" && grep -rn "gh pr merge" docs/',
+  'grep -rn "gh pr merge" docs/ > "$TMP/hits.txt"',
 ];
 test('the read-only and file-text lines pass through decide', () => {
   for (const cmd of MUST_PASS) assert.equal(decide(cmd, noGh).kind, 'pass', cmd);
