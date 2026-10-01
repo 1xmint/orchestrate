@@ -2,6 +2,37 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.20.1 — safer clean-up, a fairer ruler, 2026-10-01
+
+From the refusals and the eval ruler seen while releasing 0.20.0 (notes X and Y
+in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
+
+- A forced worktree removal of any folder, not only a helper folder, is
+  checked for unsaved work first. Before, one outside `.claude/worktrees/`
+  passed with no check and its unsaved work was lost. A folder that cannot be
+  found or read is refused ("cannot tell"). A Git Bash path such as `/c/...`
+  is translated before the check, because Node read it as a missing folder,
+  which counted as clean.
+- A clean-up line that removes a clean worktree and deletes branches with
+  lowercase `-d` now passes. When a branch-delete line is refused although it
+  already uses `-d`, the refusal names the part that was actually refused
+  instead of advising `-d`.
+- The merge check accepts one plain `cd <path>;` or `&&` before a single
+  `gh pr` read. `cd $(…)`, backticks, two `cd`s and `cd …` before a merge are
+  still refused.
+- docs/safety-guard.md: in a session that shows no prompts, an owner's yes in
+  chat does not reach the check. The owner runs the command, or approves the
+  exact line for `.orchestrator/allow-bash.json`.
+- Eval ruler (note X): six LLM rules that read the whole run record, which the
+  eval host cuts in the middle, now read the last message. Two tool rules were
+  added for actions the rewritten rules no longer see
+  (`no-uploads-removed`, `report-test-untouched`). `eval-graders.test.mjs`
+  refuses any LLM rule that reads the record or doesn't say what it reads.
+  Not re-measured.
+
+Replayed against `decide()`, each refused line from this session now gives the
+intended answer. Gate: 1254/1254, 22/22.
+
 ## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
 
 From the first live run of 0.19.0 (notes A-X in
