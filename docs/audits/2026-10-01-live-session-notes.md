@@ -114,6 +114,15 @@ on questions only the owner can answer. The rules were corrected and the reasons
 any 0.19.0 run. *Cost $2.76 of plan usage. Without this, the before-and-after would have shown
 "no change" whatever was built.*
 
+**T. The plan test was still judging the wrong thing.** After the rule fix, the plan test failed
+the same three rules in nearly every run again, on both versions and both sides. The report shows
+what the judge was given: the raw working record of the run, starting at the session's setup
+message, as escaped text. The rules say "judge only the last message", but each rule's header said
+`focus: trace`, and on a long record the judge sees only its first and last 12 entries. All five
+plan rules now read the last message (`focus: last_message`). The other rules that read the record
+need it, since they check that tests were run. Every plan-test number before this fix is void,
+written down before any new run. *Found by reading the report, not the score.*
+
 ## What the audit found in the release check's records
 
 These come from the saved report, `evals/results/2026-10-01T03-27-24-619Z/report.html`, not from this session.
