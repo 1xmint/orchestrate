@@ -56,7 +56,11 @@ export function parseReturn(text) {
   const said = word ? (outcome === 'PASS' ? 'DONE' : word.toUpperCase()) : null;
   const status = said || (field(/^\s*STATUS\s*[:\-–—]\s*(DONE|PARTIAL|BLOCKED)\b/im) || '').toUpperCase() || null;
   const lines = t.trim() ? t.trim().split('\n').length : 0;
+  // An OUTCOME line that opens with something other than the five words: no
+  // status is read from it, and the opening is kept so the record can say so.
+  const off = word ? null : /^\s*OUTCOME\s*[:\-–—]\s*(\S+)/im.exec(t);
   return {
+    outcomeOpening: off ? off[1].replace(/[.,;:]+$/, '').slice(0, 40) : null,
     task: taskIdIn(t, { caseInsensitive: true }),
     run: field(/^\s*RUN:\s*(\S+)/im),
     status,
@@ -410,9 +414,31 @@ export function returnToolUseId(input, dispatches) {
   return row ? String(row.toolUseId) : null;
 }
 
-function dispatchFor(sessionId, task) {
+// A return joins its own dispatch row by agent id: the row's agentId is set by
+// context-check.mjs when the dispatch call comes back, and the stop carries the
+// same id. The prompt's task id then reaches a hand-back that has no TASK line.
+export function dispatchByAgent(dispatches, agentId) {
+  if (!agentId) return null;
+  const hit = (Array.isArray(dispatches) ? dispatches : []).filter(d => d && d.agentId === String(agentId));
+  return hit[hit.length - 1] || null;
+}
+
+// The line that says a recorded status is not the helper's own word, with why.
+export function statusDiffNote(said, recorded, reasons) {
+  if (!said || !recorded || said === recorded) return null;
+  const why = (reasons || []).filter(Boolean).join('; ');
+  return `recorded ${recorded}, the helper's own OUTCOME word was ${said}${why ? `: ${why}` : ''}`;
+}
+
+export function offScriptNote(opening) {
+  return opening ? `its OUTCOME line opens with "${opening}", not DONE, PARTIAL, BLOCKED, PASS or FAIL, so no status was recorded` : null;
+}
+
+function dispatchFor(sessionId, task, agentId = null) {
   try {
     const state = loadSession(sessionId);
+    const own = dispatchByAgent(state && state.dispatches, agentId);
+    if (own) return own;
     const list = (state && Array.isArray(state.dispatches) ? state.dispatches : []).filter(d => !task || d.task === task);
     return list[list.length - 1] || null;
   } catch { return null; }
@@ -683,6 +709,7 @@ function main() {
   if (alreadyHandled(input, agent, text)) return;
 
   const r = parseReturn(text);
+  const said = r.status;
   // Only a reviewer's own return is a review. A builder whose hand-back opens
   // "OUTCOME: PASS (REVIEW OF: …)", pastes a review block, or ends on test
   // output starting "PASS" was filed as a look at that work, which let a
@@ -703,7 +730,8 @@ function main() {
   r.status = silent && !cap.capped ? 'PARTIAL' : cap.status;
   const noEvidence = evidenceDowngrade(r.status, text);
   r.status = noEvidence.status;
-  const dispatch = dispatchFor(input.session_id, r.task);
+  const dispatch = dispatchFor(input.session_id, r.task, input.agent_id);
+  if (!r.task && dispatch && dispatch.task) r.task = dispatch.task;
   const asked = dispatch && dispatch.model !== 'inherit' ? dispatch.model : '';
   const ranModel = usage.model || asked || 'inherit';
   const agentId = input.agent_id || input.tool_use_id || null;
@@ -728,6 +756,12 @@ function main() {
   const dirty = dirtyDowngrade(r.status, worktree ? dirtyPaths(worktree, dispatch && dispatch.progress) : []);
   r.status = dirty.status;
 
+  // One line when the recorded status is not the helper's own word, naming both
+  // and the reason; one line when its OUTCOME did not open with a status word.
+  const diff = statusDiffNote(said, r.status, [
+    cap.capped ? `it used all ${maxTurns} turns` : null, noEvidence.note, review.note, dirty.note]);
+  const offNote = offScriptNote(r.outcomeOpening);
+
   try {
     mkdirSync(dir, { recursive: true });
     const capNote = cap.capped ? ` · stopped at its ${maxTurns}-turn cap: PARTIAL${cap.claimed && cap.claimed !== 'PARTIAL' ? ` (it said ${cap.claimed})` : ''}` : '';
@@ -736,7 +770,9 @@ function main() {
     const dirtyNoteText = dirty.note ? ` · ${dirty.note}` : '';
     const compact = compactFact(dir, agentId);
     const compactNote = compact ? ` · ${compact}` : '';
-    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${dirtyNoteText}${compactNote} -->\n\n`;
+    const diffText = diff ? ` · ${diff}` : '';
+    const offText = offNote ? ` · ${offNote}` : '';
+    const header = `<!-- ${new Date().toISOString()} · ${agent} · ${describeDispatch(dispatch) || 'model unknown'} · ${formatUsage(usage)} · ${priced}${capNote}${evidenceNote}${reviewNote}${dirtyNoteText}${compactNote}${diffText}${offText} -->\n\n`;
     // A reviewer or advisor has no tool that writes files, so its hand-back is
     // the only copy of its findings: keep the whole of it beside the record.
     let body = shortened.body;
@@ -758,6 +794,8 @@ function main() {
     ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}),
     model: ranModel,
     status: r.status || null,
+    ...(diff ? { said, statusNote: diff } : {}),
+    ...(offNote ? { outcomeOpening: r.outcomeOpening } : {}),
     ...(cap.capped ? { capped: true, claimed: cap.claimed } : {}),
     ...(noEvidence.note ? { noEvidence: true } : {}),
     ...(review.note ? { reviewGated: true } : {}),
