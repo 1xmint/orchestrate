@@ -127,7 +127,11 @@ one more spelling left another open. Quotes are read where bash reads them: a
 line pipes it or starts a shell (`cat <<X | bash`, `bash <<X`); a `<<` inside
 `(( ))` is a shift, not a heredoc. A quote that is never closed, or one that
 PowerShell reads differently from bash (`\"` inside double quotes, `$'…'`, a
-backtick before a quote, a curly quote), refuses a removal line. A relative
+backtick before a quote, a curly quote), refuses a removal line. A PowerShell
+here-string (`@'` … `'@`) is read both as PowerShell reads it, as text, and
+as bash reads it, as quotes; either refusal holds, so an apostrophe in its
+body before a removal refuses the line, and the removal runs as its own
+command. A relative
 folder after a plain `cd <folder>`, or PowerShell's or bash's other ways to
 move (`pushd`, `Set-Location`, `sl`, `chdir`, `Push-Location`, any case), is
 checked from the starting folder and from where the move leads, because a

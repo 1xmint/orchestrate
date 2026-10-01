@@ -1623,6 +1623,33 @@ test('PowerShell and bash folder changes, a shift inside (( )) and quotes the tw
   assert.equal(decide(`cd ${clean.replace(/\\/g, '/')}; git worktree remove .claude/worktrees/agent-2`, { cwd: root, ...headless }).kind, 'pass');
 });
 
+test('a PowerShell here-string is read as PowerShell reads it too, so a removal after one is checked (review of bbc3fe4)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orch-wt-hs-'));
+  const helper = join(root, '.claude', 'worktrees', 'agent-1');
+  mkdirSync(helper, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: helper });
+  writeFileSync(join(helper, 'u.txt'), 'work');
+  const rm = 'git worktree remove --force .claude/worktrees/agent-1';
+  for (const c of [
+    // bash reads the removal as inside a quote that "Don't" opened.
+    `git commit -m @'\nDon't lose work\n'@\n${rm}  # helper's done`,
+    `git commit -m @"\nDon't lose work\n"@\n${rm}  # helper's done`,
+  ]) {
+    const d = decide(c, { cwd: root, ...headless });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /never saved to git/, c);
+  }
+  const clean = mkdtempSync(join(tmpdir(), 'orch-wt-hsc-'));
+  const ch = join(clean, '.claude', 'worktrees', 'agent-2');
+  mkdirSync(ch, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: ch });
+  const cleanRm = `git -C ${clean.replace(/\\/g, '/')} worktree remove .claude/worktrees/agent-2`;
+  assert.equal(decide(`git commit -m @'\nKeep the work\n'@\n${cleanRm}`, { cwd: root, ...headless }).kind, 'pass');
+  // To bash the apostrophe leaves a quote open, so even a clean removal there
+  // is refused as unreadable; run the removal as its own command.
+  assert.match(decide(`git commit -m @'\nDon't lose work\n'@\n${cleanRm}`, { cwd: root, ...headless }).reason, /never closed/);
+});
+
 test('a read of one pull request after one plain cd passes; other shapes with a cd still refuse', () => {
   const ctx = merging(prView()).ctx;
   for (const ok of [

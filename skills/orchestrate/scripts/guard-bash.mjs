@@ -320,6 +320,7 @@ function readWorktreeRemove(words) {
 // unescaped '), a backtick before a quote (PowerShell's escape) and curly
 // quotes (PowerShell's quotes, plain letters to bash).
 const MIXED_QUOTE_RE = /\$'|`["']|[‘-‟]/;
+const PS_HERE_STRING_RE = /@(["'])[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*\1@/g;
 // Every word bash or PowerShell uses to move the shell to another folder.
 const CD_WORD_RE = /^(?:cd|chdir|pushd|popd|sl|set-location|push-location|pop-location)$/i;
 // A cd is not followed to one place: a cd inside ( ), after ;, or into a
@@ -328,6 +329,14 @@ const CD_WORD_RE = /^(?:cd|chdir|pushd|popd|sl|set-location|push-location|pop-lo
 // have moved to: changes in any of them refuse, and a folder found in none
 // counts as not there.
 function worktreeRemoveRule(cmd, cwd) {
+  // PowerShell's here-string (@' or @" ending its line, up to a line starting
+  // '@ or "@) is text to PowerShell but quotes to bash, which can run past its
+  // end ("Don't" in the body). The line is read both ways; either refusal holds.
+  const asPowerShell = String(cmd).replace(PS_HERE_STRING_RE, "''");
+  if (asPowerShell !== String(cmd)) {
+    const ps = worktreeRemoveRule(asPowerShell, cwd);
+    if (ps) return ps;
+  }
   const text = String(cmd).replace(SAFE_REDIRECT_RE, '$1 ');
   const { parts, unclear } = lineParts(text);
   if ((unclear || MIXED_QUOTE_RE.test(text)) && /worktree\s+remove/i.test(text)) {
