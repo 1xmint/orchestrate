@@ -36,9 +36,10 @@ Always true:
   name, version) is either read from the source at build time or pinned by a
   test that fails when it drifts. One version string, in `plugin.json`; every
   other place reads it or a test checks it.
-- Every hook script is registered exactly once, in `hooks/hooks.json`. Nothing a
-  hook prints reaches a helper's context; a hook goes silent when the payload
-  says it is inside one.
+- Every hook script is registered exactly once, in `hooks/hooks.json`. The only
+  hook output that reaches a helper's context is a size fact (context-check.mjs,
+  once at its warn and once at its return size); every other hook goes silent
+  when the payload says it is inside a helper.
 - Where something must not happen (a destructive, public or paid action, a
   helper on the wrong model), a hook refuses it or the tool is taken away.
   Prose is for judgement.

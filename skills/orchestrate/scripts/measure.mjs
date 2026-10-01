@@ -38,8 +38,11 @@ export function measure(text) {
     input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
     dispatches: [], routerInjections: 0, routerBytes: 0, routerReread: 0,
     hookContext: 0, returns: [], started: null, ended: null, records: 0, skipped: 0,
-    stopBlocks: 0, advisor: [],
+    stopBlocks: 0, advisor: [], refused: 0,
   };
+  // A dispatch counts only if it ran. A PreToolUse hook that refuses an Agent
+  // call answers it with an error result, and no helper ever started.
+  const sent = new Map();
   const marks = [];
   // One API call is written as several records sharing `message.id`, each with
   // a copy of the usage. Count each call once, from its last record; counting
@@ -66,12 +69,14 @@ export function measure(text) {
       for (const b of Array.isArray(msg.content) ? msg.content : []) {
         if (b && b.type === 'tool_use' && (b.name === 'Agent' || b.name === 'Task')) {
           const i = b.input || {};
-          r.dispatches.push({
+          const d = {
             agent: String(i.subagent_type || 'claude'),
             model: String(i.model || 'inherit'),
             background: i.run_in_background !== false,
             packetLines: String(i.prompt || '').split('\n').length,
-          });
+          };
+          r.dispatches.push(d);
+          if (b.id) sent.set(b.id, d);
         }
       }
     }
@@ -82,6 +87,15 @@ export function measure(text) {
     // text. Reading only the second reported "0 router injections" on a
     // transcript that plainly held four. Tool results stay skipped: a session
     // that greps its own fixtures would otherwise count them as injections.
+    if (o.type === 'user') {
+      for (const b of Array.isArray(msg.content) ? msg.content : []) {
+        if (!b || b.type !== 'tool_result' || b.is_error !== true || !sent.has(b.tool_use_id)) continue;
+        const d = sent.get(b.tool_use_id);
+        sent.delete(b.tool_use_id);
+        r.dispatches.splice(r.dispatches.indexOf(d), 1);
+        r.refused++;
+      }
+    }
     if (o.type === 'user' || o.type === 'attachment') {
       // A background helper's return arrives as a queued task notification
       // whose text is in `prompt`, not `content`.
@@ -446,9 +460,9 @@ export function report(r) {
     const by = {};
     for (const d of r.dispatches) { const k = `${d.agent} on ${d.model}`; by[k] = (by[k] || 0) + 1; }
     const packets = r.dispatches.map(d => d.packetLines);
-    L.push(`dispatches: ${r.dispatches.length} — ${Object.entries(by).map(([k, n]) => `${k} ×${n}`).join(', ')}`);
+    L.push(`dispatches: ${r.dispatches.length} — ${Object.entries(by).map(([k, n]) => `${k} ×${n}`).join(', ')}${r.refused ? ` (${r.refused} more refused by a hook, not run)` : ''}`);
     L.push(`packets: ${Math.min(...packets)}–${Math.max(...packets)} lines, median ${median(packets)}`);
-  } else L.push('dispatches: none');
+  } else L.push(`dispatches: none${r.refused ? ` (${r.refused} refused by a hook, not run)` : ''}`);
   if (r.returns.length) {
     const lines = r.returns.map(x => x.lines);
     // Length, with no cap and no verdict attached to it. A long return is a
@@ -471,7 +485,24 @@ export function report(r) {
 // turns it into a share of a plan's week: that needs a weekly dollar figure
 // nobody has measured, and the one that used to be here rested on a single
 // observation.
-export function dollarReport(r, tier, profile) {
+// The whole session: the lead and every helper, each at its own model's rate,
+// from the agent tree. A part whose model nobody can price is left out and
+// counted.
+export function sessionDollars(tree) {
+  let total = 0, unpriced = 0;
+  const add = a => {
+    const adv = advisorDollars(a.advisor);
+    total += adv.dollars; unpriced += adv.unpriced;
+    const f = (a.models || []).map(family).find(Boolean);
+    const d = f ? dollars(a, f) : null;
+    if (d == null) { if (a.calls) unpriced++; } else total += d;
+  };
+  add(tree.lead);
+  for (const a of tree.agents) add(a);
+  return { dollars: total, unpriced, helpers: tree.agents.length };
+}
+
+export function dollarReport(r, tier, profile, tree = null) {
   const L = [];
   const fam = Object.keys(r.models).map(family);
   const named = fam.filter(Boolean);
@@ -485,7 +516,11 @@ export function dollarReport(r, tier, profile) {
   // A session whose transcript never names a model is not priced as the cheap
   // one. Unknown stays unknown until something resolves it.
   if (total == null) L.push('this session: not priced — the transcript names no model, and guessing one would invent the figure');
-  else L.push(`this session, at list price: $${total.toFixed(2)} on ${main}${advisorSuffix(adv)}`);
+  else L.push(`the lead (this transcript), at list price: $${total.toFixed(2)} on ${main}${advisorSuffix(adv)}`);
+  if (tree) {
+    const all = sessionDollars(tree);
+    L.push(`the whole session (the lead and ${all.helpers} helper${all.helpers === 1 ? '' : 's'} that ran), at list price: $${all.dollars.toFixed(2)}${all.unpriced ? `; ${all.unpriced} part(s) on a model nobody can price are left out` : ''}`);
+  }
   const av = advisorLine(r.advisor);
   if (av) L.push(av);
   if (r.dispatches.length) {
@@ -544,7 +579,7 @@ function main() {
   const r = measure(readFileSync(path, 'utf8'));
   if (args.includes('--json')) { console.log(JSON.stringify(r, null, 2)); return; }
   console.log(report(r));
-  if (args.includes('--dollars')) console.log(dollarReport(r, detectTier().tier, readJson(PROFILE_PATH)));
+  if (args.includes('--dollars')) console.log(dollarReport(r, detectTier().tier, readJson(PROFILE_PATH), measureTree(path)));
 }
 
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {

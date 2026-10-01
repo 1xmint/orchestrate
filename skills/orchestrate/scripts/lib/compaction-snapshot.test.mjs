@@ -276,3 +276,48 @@ test('system reminders stuck to real text are cut off it, and a real prompt afte
   assert.match(body, /Last message before compaction: now fix the gadget\n/);
   assert.doesNotMatch(body, /system-reminder/);
 });
+
+// A shell call with its own command, so the test line is told by the command.
+const shellRun = (command, text) => {
+  const id = `tu-${Math.random()}`;
+  return line({ type: 'assistant', message: { id: `a-${Math.random()}`, model: 'claude-sonnet-5', usage: { input_tokens: 100 }, content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } })
+    + line({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] } });
+};
+
+test('a table row that says Failed, printed by a command that is not a test run, gives no test line', () => {
+  const row = '| Steve DATA pack | the grading states Done / Built-unverified / Partial / Blocked / Failed |';
+  const none = snapshotOf([user('go'), shellRun('cat docs/research/notes.md', row)]);
+  assert.match(none, /Last test result: none seen/);
+  const ran = snapshotOf([user('go'), shellRun('cat notes.md', row), shellRun('node --test skills/x.test.mjs', '# tests 9\n# pass 9\n# fail 0')]);
+  assert.match(ran, /Last test result: # fail 0/);
+  // the document row printed after a real test run does not replace it
+  const after = snapshotOf([user('go'), shellRun('npm test', '# pass 4'), shellRun('cat notes.md', row)]);
+  assert.match(after, /Last test result: # pass 4/);
+});
+
+test('which commands count as a test run is read from the command, not from the output', async () => {
+  const { isTestCommand } = await import('./compaction-snapshot.mjs');
+  for (const c of ['node --test skills', 'npm test', 'npm run test -- -u', 'pytest -q', 'python -m pytest', 'cargo test', 'go test ./...', 'npx vitest run', 'cd x && jest', 'node --test $(find skills -name "*.test.mjs")']) assert.ok(isTestCommand(c), c);
+  for (const c of ['cat notes.md', 'grep -rn Failed docs', 'node scripts/package.mjs --both', 'git log']) assert.ok(!isTestCommand(c), c);
+});
+
+test('Files touched lists each file once and leaves out the plugin own checkpoint files', () => {
+  const home = makeHome();
+  const dir = join(home, 'store');
+  const rec = (cwd, o) => line({ cwd, ...o });
+  const editRel = path => rec('/repo', { type: 'assistant', message: { id: `a-${Math.random()}`, content: [{ type: 'tool_use', name: 'Edit', input: { file_path: path } }] } });
+  const text = [
+    rec('/repo', { type: 'user', message: { role: 'user', content: 'go' } }),
+    editRel('docs/notes.md'),
+    editRel('/repo/docs/notes.md'),
+    editRel('/home/u/.claude/orchestrate/context/sess/checkpoint-abc.md'),
+    editRel('/repo/.orchestrator/runs/r1/checkpoints/checkpoint-abc.md'),
+    editRel('/repo/src/a.mjs'),
+    boundary('b1'),
+  ].join('');
+  const transcriptPath = writeTranscript(home, text);
+  const reading = readContext(transcriptPath, { session: 's-files' });
+  const body = readFileSync(writeCompactionSnapshot({ session: 's-files', reading, transcriptPath, ctx: { dir } }), 'utf8');
+  const files = /Files touched: (.*)/.exec(body)[1].split(', ');
+  assert.deepEqual(files.sort(), ['/repo/docs/notes.md', '/repo/src/a.mjs']);
+});

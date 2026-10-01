@@ -26,8 +26,8 @@ import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail } from './lib/tier.mjs';
-import { reviewWordMatch } from './lib/review-words.mjs';
-import { fileChange, isProsePath } from './lib/file-change.mjs';
+import { fileChange } from './lib/file-change.mjs';
+import { projectPath } from './lib/project.mjs';
 
 export function pickupSection(runMdText) {
   const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
@@ -187,89 +187,6 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   return { block: false, task: null, blockedFor: [...already] };
 }
 
-// Work the lead built alone. The hold above only reads a helper's return, so a
-// lead that edits sign-in, money or stored personal data itself and finishes
-// never meets it. This reads the lead's own transcript (helpers keep theirs
-// apart): if the request or an edit it made touches one of the plugin's review
-// words (lib/review-words.mjs, the same list that flags a brief) and no
-// reviewer has returned since its last edit, it yields one plain fact. Nothing
-// is asked for: the host can hold a finish only by blocking it, so the fact is
-// the whole reason given, and the key makes it once per set of edits.
-const TOPIC_OF = w => (/^(payments?|billing|invoice|refund|checkout|stripe|pric(?:e|es|ing))$/.test(w) ? 'payments'
-  : /^(auth|authentication|authorization|login|password|credentials?|token|oauth|permission)$/.test(w) ? 'sign-in'
-  : /^(drop table|truncate|delete rows|delete records|purge|migration)$/.test(w) ? 'stored data'
-  : 'a shared contract');
-
-function editText(input) {
-  const i = input || {};
-  const parts = [i.file_path, i.notebook_path, i.new_string, i.content, i.new_source, i.command];
-  for (const e of Array.isArray(i.edits) ? i.edits : []) parts.push(e && e.new_string);
-  return parts.filter(x => typeof x === 'string').join('\n');
-}
-
-// The text of a change to look for review words in, or null when the change is
-// only to prose files (.md .mdx .txt .rst, by extension: a price table or a
-// design note is not the code that charges anyone). A shell command counts as
-// prose only when every path it writes is known and is a prose file.
-function riskText(input, fc) {
-  if (fc.exact && fc.paths.length && fc.paths.every(isProsePath)) return null;
-  // A shell line is searched only in the pieces that write: a grep pattern
-  // beside a `git pull` is not something that was changed.
-  const text = typeof fc.text === 'string' ? fc.text : editText(input);
-  return text;
-}
-
-export function unreviewedRiskFact({ transcriptTail, goal, returned, dispatches, now = Date.now() }) {
-  let edits = 0; let lastEditAt = 0; let word = null; let lastRiskAt = 0; let lastRiskId = null;
-  const lines = String(transcriptTail || '').split('\n');
-  lines.forEach((line, idx) => {
-    if (!line.includes('"tool_use"')) return;
-    let o; try { o = JSON.parse(line); } catch { return; }
-    const content = o && o.message && Array.isArray(o.message.content) ? o.message.content : [];
-    for (const c of content) {
-      if (!c || c.type !== 'tool_use') continue;
-      const fc = fileChange(c.name, c.input);
-      if (!fc.changes) continue;
-      edits++;
-      const at = Date.parse(o.timestamp) || 0;
-      if (at > lastEditAt) lastEditAt = at;
-      const text = riskText(c.input, fc);
-      const w = text == null ? null : reviewWordMatch(text);
-      if (w) { word = w; lastRiskId = c.id || o.uuid || `${o.timestamp}#${idx}`; if (at > lastRiskAt) lastRiskAt = at; }
-    }
-  });
-  if (!edits) return null;
-  const goalWord = reviewWordMatch(String(goal || ''));
-  if (!word && !goalWord) return null;
-  const since = word ? lastRiskAt : lastEditAt;
-  const reviews = (Array.isArray(returned) ? returned : []).filter(r => r && /reviewer/i.test(String(r.agent || '')));
-  if (reviews.some(r => (Date.parse(r.at) || 0) >= since)) return null;
-  // A reviewer sent after that change, within six hours and with no reply yet,
-  // is looking at it now. Only a reviewer by role counts: a builder whose brief
-  // carries a REVIEW OF id, or the advisor, is not a look at the change.
-  const rs = Array.isArray(returned) ? returned : [];
-  const looking = (Array.isArray(dispatches) ? dispatches : []).some(d => d && /reviewer/i.test(String(d.agent || ''))
-    && Date.parse(d.at) >= since && Date.parse(d.at) >= now - 6 * 3600 * 1000 && !rs.some(r => sameHelper(r, d)));
-  if (looking) return null;
-  const topic = TOPIC_OF(word || goalWord);
-  // The word itself is named, so a reader can see why: "token" in a comment
-  // and a token check read the same to this list. A review that came before
-  // the last change means the reviewed version was looked at; only what was
-  // changed since is not.
-  const said = word
-    ? `this change contains "${word}", a word on the review list for ${topic}`
-    : `the request mentions "${goalWord}", a word on the review list for ${topic}`;
-  const text = reviews.length
-    ? `${said}; the change made since the review has not been looked at.`
-    : `${said}; nobody independent has looked at ${word ? 'it' : 'the change'}.`;
-  // The key names the risky edit itself (its tool-call id), never its place in
-  // the transcript tail: the tail is the last 1 MB, so a line number or an edit
-  // count moves as the chat grows and the same edit would be raised again. With
-  // only the request to go on, it is raised once per review.
-  const lastReview = reviews.reduce((m, r) => Math.max(m, Date.parse(r.at) || 0), 0);
-  return { topic, key: word ? `${word}@${lastRiskId}` : `${goalWord}@review:${lastReview}`, text };
-}
-
 // Helper folders and branches left behind. A helper that works in its own
 // worktree leaves a folder `<cwd>/.claude/worktrees/agent-<id>` and a branch
 // `worktree-agent-<id>`. Both stay unless someone removes them, and the person
@@ -342,9 +259,86 @@ export function folderIsClean(dir) {
   try { return execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() === ''; } catch { return false; }
 }
 
+// The project page, kept honest. A turn that edited a tracked file in the repo
+// (not under .orchestrator/ or .claude/, not git-ignored) without editing
+// .orchestrator/PROJECT.md counts one; any PROJECT.md edit resets the count to
+// 0; on the third such turn the Stop says so once and the count restarts.
+// It is 3 and not every turn on purpose: a hold at every edit turn is the kind
+// of false alarm step 2 removed (live note Q), and a page that lags by two
+// turns is still a page worth reading. Never when stop_hook_active (main),
+// outside a git repo, or when the repo has no PROJECT.md (the first-helper
+// check in guard-agent.mjs is where a missing page is raised).
+export const PROJECT_TURNS = 3;
+
+// Case folds only where the file system does; git check-ignore gets this path.
+const norm = p => { const r = String(p || '').replace(/\\/g, '/').replace(/\/+$/, ''); return process.platform === 'win32' ? r.toLowerCase() : r; };
+
+// The edits since the last real user message in a transcript tail. A user line
+// whose content is only tool results is not a new turn.
+export function turnEdits(transcriptTail) {
+  let paths = [];
+  for (const line of String(transcriptTail || '').split('\n')) {
+    if (!line.includes('"type"')) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    const content = o && o.message && o.message.content;
+    if (o && o.type === 'user') {
+      const real = typeof content === 'string' ? content.trim() !== ''
+        : Array.isArray(content) && content.some(c => c && c.type === 'text');
+      if (real) paths = [];
+      continue;
+    }
+    if (!o || o.type !== 'assistant' || !Array.isArray(content)) continue;
+    for (const c of content) {
+      if (!c || c.type !== 'tool_use') continue;
+      const fc = fileChange(c.name, c.input);
+      if (fc.changes) paths.push(...fc.paths);
+    }
+  }
+  return { paths };
+}
+
+// Pure: what one Stop does to the count. `ignored(path)` says git-ignored.
+export function projectCount({ prev, paths, root, ignored = () => false }) {
+  const proj = norm(projectPath(root));
+  const r = norm(root);
+  const abs = p => (/^([a-z]:)?\//i.test(String(p).replace(/\\/g, '/')) ? norm(p) : norm(`${r}/${p}`));
+  const list = (paths || []).map(abs);
+  if (list.includes(proj)) return { count: 0, block: false };
+  const tracked = list.some(p => p.startsWith(`${r}/`) && !p.startsWith(`${r}/.orchestrator/`) && !p.startsWith(`${r}/.claude/`) && !ignored(p));
+  if (!tracked) return { count: Number(prev) || 0, block: false };
+  const count = (Number(prev) || 0) + 1;
+  return count >= PROJECT_TURNS ? { count: 0, block: true, turns: count } : { count, block: false };
+}
+
+function gitRoot(cwd) {
+  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; }
+}
+function gitIgnored(root, p) {
+  try { execFileSync('git', ['check-ignore', '-q', '--', p], { cwd: root, timeout: 5000, stdio: 'ignore' }); return true; } catch { return false; }
+}
+
+// Returns the reason to block with, or null. Updates the count either way. When
+// another pulse already spoke this Stop (`quiet`), the note waits one Stop.
+function checkProject(input, quiet) {
+  if (!input.cwd || !input.transcript_path) return null;
+  const root = gitRoot(input.cwd);
+  if (!root || !existsSync(projectPath(root))) return null;
+  const { paths } = turnEdits(readTail(input.transcript_path, 1048576));
+  const path = STORE();
+  const store = readJson(path) || {};
+  const key = sanitizeId(`${input.session_id || 'nosession'}-project`);
+  const d = projectCount({ prev: (store[key] || {}).count, paths, root, ignored: p => gitIgnored(root, p) });
+  const say = d.block && !quiet;
+  store[key] = { count: d.block && quiet ? PROJECT_TURNS - 1 : d.count };
+  try { writeJsonAtomic(path, store); } catch {}
+  return say ? `orchestrate: ${d.turns} turns changed project files and .orchestrator/PROJECT.md did not change; update Where it stands / Next if they moved.` : null;
+}
+
 const STORE = () => join(DIR, 'turn-checks.json');
 
+let emitted = false;
 function emitBlock(reason) {
+  emitted = true;
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason,
@@ -427,18 +421,6 @@ function checkHeartbeat(input) {
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
 
-  // Risky work the lead did itself and no reviewer has seen: one fact, once per
-  // set of edits. Quiet, and no file read beyond the transcript tail, otherwise.
-  if (input.transcript_path) {
-    const fact = unreviewedRiskFact({ transcriptTail: readTail(input.transcript_path, 1048576), goal: state.goal, returned: state.returned, dispatches: state.dispatches });
-    if (fact && rec.riskNotedFor !== fact.key) {
-      updated.riskNotedFor = fact.key;
-      store[key] = updated;
-      try { writeJsonAtomic(path, store); } catch {}
-      return emitBlock(`orchestrate: ${fact.text}`);
-    }
-  }
-
   // Helper folders and branches left behind are not raised here: the note goes
   // to the lead on its next tool call (context-check.mjs), so a closing message
   // is never followed by an error notice.
@@ -474,6 +456,8 @@ function main() {
   if (input.stop_hook_active === true) return;
 
   checkHeartbeat(input);
+  const note = checkProject(input, emitted);
+  if (note) emitBlock(note);
 }
 
 // Only when run as a hook, not when a test imports the pure functions above.

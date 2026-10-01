@@ -52,6 +52,27 @@ function sessionStartMs(sessionId) {
   return Number.isFinite(t) ? t : null;
 }
 
+// The host the Profile line names: --host, else the stored profile's host, else
+// what profile.mjs reads from the environment, else unknown. profile.mjs prints
+// "host claude-code" from the same variables, so the ledger no longer says
+// "unknown" next to it.
+function hostFor(opts, stored, env) {
+  if (opts && opts.host) return opts.host;
+  if (stored && typeof stored.host === 'string' && stored.host.trim()) return stored.host.trim();
+  const keys = Object.keys(env || {});
+  if (keys.some(k => /^CLAUDE(CODE|_CODE_|_SESSION|_PROJECT|_EFFORT)/.test(k))) return 'claude-code';
+  if (keys.some(k => /^CODEX_/.test(k))) return 'codex';
+  return 'unknown';
+}
+
+const USAGE = [
+  'usage: run-init.mjs <slug> [--repo <path>] [--goal "text"] [--tier t] [--host h] [--providers "p"] [--session-id id]',
+  '       run-init.mjs --bind <RUN.md> --session-id <id>',
+  '       run-init.mjs --close <run id> [--reason "why"] [--repo <path>]',
+  '       run-init.mjs --reopen <run id or RUN.md> [--repo <path>] [--session-id id]   (undoes --close, or wakes a run set aside as stale)',
+].join('\n');
+if (process.argv.slice(2).some(a => a === '--help' || a === '-h')) { console.log(USAGE); process.exit(0); }
+
 const CLOSED_LINE = /^Closed:.*(\r?\n){0,2}/m;
 const args = process.argv.slice(2);
 const positional = [];
@@ -108,7 +129,7 @@ if (opts.bind) {
 
 const slug = (positional[0] || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 if (!slug) {
-  console.error('usage: run-init.mjs <slug> [--goal "text"] [--tier t] [--host h] [--providers "p"] [--session-id id]\n       run-init.mjs --bind <RUN.md> --session-id <id>\n       run-init.mjs --close <run id> [--reason "why"]');
+  console.error(USAGE);
   process.exit(2);
 }
 
@@ -146,7 +167,7 @@ const body = template
   .replaceAll('{{DATE}}', localDate)
   .replaceAll('{{GOAL}}', opts.goal || '<goal in the user\'s words, then the objective in yours>')
   .replaceAll('{{TIER}}', opts.tier || 'unknown')
-  .replaceAll('{{HOST}}', opts.host || 'unknown')
+  .replaceAll('{{HOST}}', hostFor(opts, (() => { try { return JSON.parse(readFileSync(join(homedir(), '.claude', 'orchestrate', 'profile.json'), 'utf8')); } catch { return null; } })(), process.env))
   .replaceAll('{{PROVIDERS}}', opts.providers || 'unknown')
   .replaceAll('{{BUDGET}}', opts.budget ? `$${String(opts.budget).replace(/^\$/, '')} at list price` : 'none')
   .replaceAll('{{ID_PREFIX}}', idPrefix);

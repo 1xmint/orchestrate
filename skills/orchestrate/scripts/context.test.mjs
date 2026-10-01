@@ -231,7 +231,7 @@ test('incremental sampling reads only new bytes, resets advice on compaction, an
   const { p, store } = file([user('start', 0), assistant(cp - 20000, { min: 1 })]);
   const s1 = sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store });
   assert.equal(s1.reading.tokens, cp - 20000);
-  assert.match(s1.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp - 20000)} · newest checkpoint: none · 0 tool calls since your last edit$`), 'below the thresholds the lead still hears the measured size');
+  assert.match(s1.notice, new RegExp(`^\\[orchestrate · context\\] ${kk(cp - 20000)} · newest checkpoint: none$`), 'below the thresholds the lead still hears the measured size, and says nothing of edits when none has been made');
   assert.equal(sampleContext({ transcriptPath: p, session: 'sess-1', policy, now: NOW, dir: store, force: true }).notice, '', 'once per 25k step');
 
   appendFileSync(p, `${user('x'.repeat(5000), 2)}\n${assistant(cp + 5000, { min: 3 })}\n`);
@@ -598,4 +598,14 @@ test('nothing left, nothing said', () => {
   const sid = 'lo-ctx-2';
   writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, cwd: repo, dispatches: [], returned: [{ agentId: 'zz99', status: 'DONE' }] }));
   assert.doesNotMatch(runContextCheck({ session_id: sid, tool_name: 'Read', tool_input: { file_path: '/x' } }, home), /still here/);
+});
+
+test('the lead hears "calls since your last edit" only once something has been edited', () => {
+  const { checkpointAt: cp } = thresholds(null, policy);
+  const { p, store } = file([user('start', 0), assistant(cp - 20000, { min: 1, tools: ['Read', 'Grep'] })]);
+  const first = sampleContext({ transcriptPath: p, session: 'sess-e', policy, now: NOW, dir: store });
+  assert.doesNotMatch(first.notice, /since your last edit/, 'two reads and no edit yet');
+  appendFileSync(p, `${user('go', 2)}\n${assistant(cp + 5000, { min: 3, tools: ['Edit', 'Read', 'Read'] })}\n`);
+  const second = sampleContext({ transcriptPath: p, session: 'sess-e', policy, now: NOW, dir: store });
+  assert.match(second.notice, / 2 tool calls since your last edit/);
 });

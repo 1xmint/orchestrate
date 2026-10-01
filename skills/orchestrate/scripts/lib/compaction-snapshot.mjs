@@ -77,6 +77,33 @@ function toolResultText(content) {
   }).join('\n');
 }
 
+// A command that runs tests, matched on the command itself: a line in some
+// document that says "Failed" is not a test result unless a test command
+// printed it. Covers the common runners; `node --test`, `npm test`, `npm run
+// test`, `pnpm|yarn|bun test`, pytest, `python -m pytest|unittest`, cargo/go
+// test, jest, vitest, mocha, rspec, phpunit, dotnet test, mvn/gradle test, ctest.
+export const TEST_COMMAND = /(^|[\s;&|(])(node\s+(\S+\s+)*--test\b|(npm|pnpm|yarn|bun)\s+(run\s+)?test\b|npx\s+(jest|vitest|mocha)\b|pytest\b|py\.test\b|python3?\s+-m\s+(pytest|unittest)\b|cargo\s+(nextest\s+run|test)\b|go\s+test\b|jest\b|vitest\b|mocha\b|rspec\b|phpunit\b|dotnet\s+test\b|mvn\s+(\S+\s+)*test\b|(gradle|gradlew|\.\/gradlew)\s+(\S+\s+)*test\b|ctest\b|deno\s+test\b|Invoke-Pester\b)/i;
+export function isTestCommand(cmd) { return TEST_COMMAND.test(String(cmd || '')); }
+
+// One path once: relative paths resolve against the folder the session ran in,
+// and slashes and drive-letter case are made equal. The plugin's own
+// checkpoints (the store copy and the run folder's copy) are not work.
+export function tidyPaths(paths, cwd) {
+  const out = new Map();
+  for (const raw of paths) {
+    let q = String(raw || '').replace(/\\/g, '/');
+    if (!q) continue;
+    const abs = /^([A-Za-z]:)?\//.test(q);
+    if (!abs && cwd) q = String(cwd).replace(/\\/g, '/').replace(/\/+$/, '') + '/' + q.replace(/^\.\//, '');
+    q = q.replace(/\/\.\//g, '/');
+    if (/(^|\/)checkpoint-[^/]*\.md$/.test(q) && /\/(\.claude\/orchestrate\/context|checkpoints)\//.test(q)) continue;
+    const key = q.toLowerCase();
+    out.delete(key);
+    out.set(key, q);
+  }
+  return [...out.values()];
+}
+
 const TEST_LINE = /(\bTests?:\s*\d+|\bpassed?\b[:=]?\s*\d+|\bfailed?\b[:=]?\s*\d+|✔|✖|✓|✗|\bPASS\b|\bFAIL\b)/i;
 
 // One forward pass of the transcript: the newest boundary, a running count of
@@ -96,6 +123,7 @@ function scanTranscript(text) {
   // tool_use id -> tool name, so a result is read as a test result only when
   // a shell command produced it: a Read of source that says "pass" is not one.
   const toolNames = new Map();
+  const toolCommands = new Map();
   for (const line of String(text || '').split('\n')) {
     if (!line.trim()) continue;
     let rec;
@@ -122,7 +150,7 @@ function scanTranscript(text) {
         lastUserText = t;
       }
       for (const b of Array.isArray(rec.message.content) ? rec.message.content : []) {
-        if (!b || b.type !== 'tool_result' || !isShellTool(toolNames.get(b.tool_use_id))) continue;
+        if (!b || b.type !== 'tool_result' || !isShellTool(toolNames.get(b.tool_use_id)) || !isTestCommand(toolCommands.get(b.tool_use_id))) continue;
         const m = toolResultText([b]).split('\n').filter(l => TEST_LINE.test(l));
         if (m.length) testLine = m[m.length - 1].trim();
       }
@@ -133,7 +161,7 @@ function scanTranscript(text) {
       if (t.trim()) lastAssistantText = t;
       for (const b of Array.isArray(rec.message.content) ? rec.message.content : []) {
         if (!b || b.type !== 'tool_use') continue;
-        if (b.id) toolNames.set(b.id, b.name);
+        if (b.id) { toolNames.set(b.id, b.name); toolCommands.set(b.id, b.input && b.input.command); }
         // Edit tools, and shell commands that write (where the command names the file).
         for (const p of fileChange(b.name, b.input).paths) {
           const i = paths.indexOf(p);
@@ -217,7 +245,7 @@ export function writeCompactionSnapshot({ session, reading, transcriptPath, ctx 
       goal,
       lastUser: lastUser && lastUser === goal ? 'the same as the goal above' : lastUser,
       lastAssistant: clipTail(found.lastAssistantText, FIELD_CAP),
-      paths: found.paths,
+      paths: tidyPaths(found.paths, found.cwd),
       testLine: found.testLine ? clip(found.testLine, 200) : null,
       helpers: helpersInFlight(session),
     });

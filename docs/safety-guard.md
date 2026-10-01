@@ -36,7 +36,37 @@ those. Everything else, including loud everyday commands like `npm test` or
 - `vercel --prod`, `fly deploy`, `wrangler publish`/`deploy`,
   `netlify deploy --prod`
 - any `stripe` CLI command other than a read-only one (`login`, `logout`,
-  `config`, `version`, `help`, `listen`, `status`, `samples`, `open`)
+  `config`, `version`, `help`, `listen`, `status`, `samples`, `open`), run
+  directly or through `bash -c`, `$( )`, `env`, `sudo` or `npx`; a web call
+  (`curl`, `wget` and the like) to a payment service's API host; or code run
+  with `node -e`, `python -c` or a heredoc that loads a payment library. The
+  word alone is not a payment only on a line the reader can vouch for whole
+  (`plainLine` in `lib/shell-run.mjs`): every part a search or read (`grep`,
+  `rg`, `cat`, `ls`, `git log`/`show`/`diff`/`status`/`grep`…), text written
+  to a file, a read-only `stripe` command, or a `node -e` that only reads
+  local files and prints; and nothing it does not follow (`$( )`, backticks,
+  `<( )`, `<<<`, `( )`, `{ }`, `!`, loops, `>&`). Text written into git's or
+  rg's own settings is not inert, since a git read then runs it. Where the text
+  lands decides this, not what it says: a file inside a `.git` folder, a
+  `.git` gitdir file, `.gitattributes`, a gitconfig or `.ripgreprc`, whatever
+  command writes it (`>`, `1>>`, `&>`, `tee`). A `cd` into a `.git` folder also
+  makes the line not plain. A path can be spelled into `.git` in endless ways
+  (`"$D"it`, `$_`, `.gi?`, `.\.git`, `.git.`), so on a line that also has a git
+  read or `rg`, any write at all makes the line not plain, wherever it lands:
+  a redirect, a text writer, a heredoc to a file, `mkdir`, git's `--output`
+  (or a shortened `--ou…`), `node -e`, or the payment CLI, whose `config --set`
+  writes a file. Writing nowhere (`2>&1`, `/dev/null`, `nul`) does not count.
+  PowerShell's `2>$null` does count: in bash, `$null` is a variable the line
+  can set. Without a git read, `cd "$REPO" && grep …` stays plain. Any other line with the word `stripe` or a payment
+  API host in it asks: a host reached through a script file, `curl -K` or
+  `wsl` asks too. So `grep -n stripe README.md` passes and
+  `for c in …; do stripe refunds create …; done` asks. The price: a line that
+  only names a host but is not plain also asks, such as
+  `git commit -m "move to api.paypal.com"`, `grep -rn api.paypal.com src | sort`
+  or `nslookup api.paypal.com`, and so does an `rg` that writes its results to
+  a file, such as `rg -n stripe . > out.txt`; in a helper or a headless run,
+  that ask is a refusal. A PowerShell line that sends a git read's errors to
+  `$null` and also searches for merge wording is refused
 - dropping or truncating a database: `drop database`/`drop table`/`drop
   schema`/`truncate` on a `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo`, or
   `redis-cli` command line, including inside a `-c`/`-e`/`--eval` string;
@@ -107,6 +137,16 @@ Quoted text and comments count too. So a merge inside a chain, a pipe,
 `Invoke-RestMethod`, after a `cd`, or behind a comment or heredoc is refused
 rather than read.
 
+One exception, on a line the reader can vouch for whole (the same
+`plainLine` as the payment rule): text written to a file (`cat > notes.md
+<<'EOF'`, `echo … >> NOTES.md`) and the pattern of a search (`grep -rn "gh pr
+merge" docs/`) are left out before looking, because nothing on such a line
+runs them. Any other line is read whole, as before. A file written in one
+step and run in a later, separate step is not seen by this check, the same
+as a file written with the Write tool; on one line (`printf … > x.sh && bash
+x.sh`) the `bash` makes the line one the reader cannot vouch for, so it is
+read whole and refused.
+
 Two kinds of line are let off, each alone on its line with no word holding a
 quote, brace, `$` or separator:
 - a plain read of pull requests: `gh pr view`, `checks`, `list`, `status` or
@@ -155,7 +195,13 @@ or `"g$()h"`, cmd's `g^h`); a PowerShell splat (`@args`), which is a
 variable too; a merge run from a script file or `node -e`; a gh alias; a
 GraphQL query read from a file; and merging branches without a pull request
 at all — a push straight to the base branch (`git push origin HEAD:main`),
-the `mergeBranch` mutation or the REST route `…/merges`.
+the `mergeBranch` mutation or the REST route `…/merges`. Settings made before
+the line are not read either: a git config, `.gitattributes` or environment
+variable already in place can make a plain read run a program (an external
+diff, a textconv, `core.fsmonitor`, an editor for `git add -e`,
+`RIPGREP_CONFIG_PATH`, a `curl -K` file written earlier, or a link made
+earlier that points an ordinary-looking file at `.git/config`). The check
+reads only the line in front of it.
 
 ## What happens when one of these is about to run
 
@@ -239,6 +285,7 @@ is too broad is exactly as costly as a missing one, just quieter about it.
 ## The dispatch guard's own review gate
 
 A different guard, `guard-agent.mjs`, holds a task's DONE return back for
-independent review not only when its packet says `REVIEW: yes`, but also
-when the packet's own OBJECTIVE mentions money, auth, destructive data, or a
-shared contract — the word list lives in `REVIEW_WORDS` in that file.
+independent review when its packet says `REVIEW: yes`. Whether a review is
+owed is the lead's judgment, written into the packet; a word in the objective
+no longer decides it (live notes Q and V, 2026-09-30: a docs lookup about
+permission rules and two markdown files were flagged).

@@ -20,16 +20,16 @@
 
 import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve as resolvePath } from 'node:path';
+import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled, readTail } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, findRepoRoot, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { reviewOfIn } from './lib/review-of.mjs';
 import { roleModel, helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
 import { family, normalizeRole, costLabel, estimateDollars, SOLO_RATIO } from './lib/prices.mjs';
 import { readCosts } from './ledger.mjs';
+import { readProject, projectPath, nextSteps } from './lib/project.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
-import { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
 import { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, nestedReason, workflowDecision } from './lib/workflow.mjs';
 import { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision, effectiveModel } from './lib/spend-gate.mjs';
@@ -312,7 +312,6 @@ export const EVENTS_MAX = 400;
 // `recordSeen` (`lib/tier.mjs`) replace it with an append-only log: a
 // concurrent writer only ever adds its own line, so there is nothing to race.
 export { markSeen } from './lib/tier.mjs';
-export { REVIEW_WORDS, objectiveSection, reviewWordMatch, inferredReviewWord } from './lib/review-words.mjs';
 export { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, workflowDecision } from './lib/workflow.mjs';
 export { tagFor, runFor, resolveRunObj, overCeiling, budgetDecision } from './lib/spend-gate.mjs';
 
@@ -361,6 +360,31 @@ function packetPathFrom(prompt) {
   return m ? m[1] : null;
 }
 
+// Every brief file a prompt names: the path after "packet", and any path with
+// a folder in it ending .md or .txt (".../packets/9-30-0004.md", "brief file
+// x/y.md"). Live notes R and V, 2026-09-30: a short prompt naming its brief was
+// told it lacked three fields that were all in the file.
+const NAMED_FILE_RE = /(?:^|[\s"'`(<])((?:[A-Za-z]:)?[\w.~-]*[\\/][\w.~\\/-]*\.(?:md|txt))(?=[\s"'`),.;:>]|$)/g;
+export function namedFiles(prompt) {
+  const text = String(prompt || '');
+  const out = [];
+  const p = packetPathFrom(text);
+  if (p) out.push(p);
+  // A PROGRESS path is where the helper will write, not a brief to read.
+  for (const m of text.replace(/PROGRESS:\s*\S+/g, '').matchAll(NAMED_FILE_RE)) if (!out.includes(m[1])) out.push(m[1]);
+  return out.slice(0, 3);
+}
+// The prompt plus every named file that can be read. unread is true when the
+// prompt names a file and none of them could be read: then nothing is said
+// about what the brief lacks, since the guard cannot see the brief.
+export function briefText(prompt, readFile = readFileSync) {
+  const text = String(prompt || '');
+  const files = namedFiles(text);
+  const read = [];
+  for (const p of files) { try { read.push(String(readFile(p, 'utf8'))); } catch {} }
+  return { text: [text, ...read].join('\n'), unread: files.length > 0 && read.length === 0 };
+}
+
 // A fact, not a denial: Plan mode already forbids a PROGRESS line (its own
 // rule above), so this says nothing there. Elsewhere, an author-role packet
 // with no PROGRESS line is named as what it is before the dispatch happens,
@@ -378,12 +402,8 @@ export function progressFact(role, prompt, planMode, readFile = readFileSync) {
   // Inline anywhere in the prompt, not only at a line start: a one-paragraph
   // dispatch writes "... at the end). PROGRESS: <path> (...)" mid-line.
   if (/(^|\s)PROGRESS:\s*\S+/.test(text)) return '';
-  const packetPath = packetPathFrom(text);
-  if (packetPath) {
-    try {
-      if (/^\s*PROGRESS:\s*\S+/m.test(String(readFile(packetPath, 'utf8')))) return '';
-    } catch {}
-  }
+  const brief = briefText(text, readFile);
+  if (brief.unread || /(^|\s)PROGRESS:\s*\S+/.test(brief.text)) return '';
   return 'no PROGRESS line: a capped return will have nothing to resume from';
 }
 
@@ -394,14 +414,9 @@ export function progressFact(role, prompt, planMode, readFile = readFileSync) {
 export function missingFact(role, prompt, planMode, readFile = readFileSync) {
   if (planMode) return '';
   if (!RESUME_ROLES.has(normalizeRole(role))) return '';
-  const text = String(prompt || '');
-  let file = null;
-  const packetPath = packetPathFrom(text);
-  const has = re => {
-    if (re.test(text)) return true;
-    if (packetPath && file === null) { try { file = String(readFile(packetPath, 'utf8')); } catch { file = ''; } }
-    return Boolean(file) && re.test(file);
-  };
+  const brief = briefText(prompt, readFile);
+  if (brief.unread) return '';
+  const has = re => re.test(brief.text);
   const lacks = [];
   // The packet capitals anywhere, or the same label in any case at the start
   // of a line: a brief the lead wrote by hand says "For:" and "Done when:".
@@ -467,13 +482,7 @@ export function progressWorktreeNote(role, prompt, planMode, readFile = readFile
   if (planMode) return '';
   if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
   const text = String(prompt || '');
-  let has = /^\s*PROGRESS:\s*\S+/m.test(text);
-  if (!has) {
-    const packetPath = packetPathFrom(text);
-    if (packetPath) {
-      try { has = /^\s*PROGRESS:\s*\S+/m.test(String(readFile(packetPath, 'utf8'))); } catch {}
-    }
-  }
+  const has = /^\s*PROGRESS:\s*\S+/m.test(text) || /^\s*PROGRESS:\s*\S+/m.test(briefText(text, readFile).text);
   if (!has) return '';
   return 'if writing the progress file is refused, write the same relative path inside your own separate folder instead, and say so in your return';
 }
@@ -582,16 +591,14 @@ function main() {
     return;
   }
 
-  // The three plain lines, before the first helper starts: when the lead's last
-  // message to the user is readable and names no model, refuse every
-  // dispatch, up to three refusals a session, so helpers sent together are all
-  // held. The marks are the event ids of the refused calls, so a second
-  // registration of the same hook refuses the same call again without counting
-  // it; after the third, or once a message names a model, none is refused.
-  const fhr = firstHelperRefusal(input, id);
-  if (fhr) {
-    if (!repeat) recordDenial(input, ti, 'first helper: three plain lines owed');
-    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate guard: ${fhr}` } });
+  // Before the first writing helper: the project page exists and has a next
+  // step. A file check only; reading the lead's last message was a word check
+  // and is gone. Its prefix is not "orchestrate guard:" because the lead fixes
+  // this one itself in one step, so persist-check must not end auto-continue.
+  const fhg = firstHelperGate(input);
+  if (fhg) {
+    if (!repeat) recordDenial(input, ti, 'first helper');
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate project: ${fhg}` } });
     return;
   }
 
@@ -636,16 +643,7 @@ function main() {
   if (pw) tag = `${tag ? `${tag}; ` : ''}${pw}`;
   const cf = codexFact(ti.subagent_type);
   if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
-  if (priorDispatches.length === 0) {
-    const fh = firstHelperNote(input.transcript_path);
-    if (fh) tag = `${tag ? `${tag}; ` : ''}${fh}`;
-  }
   if (asksForPastedContents(ti.prompt)) tag = `${tag ? `${tag}; ` : ''}this brief asks for contents to be pasted back: the hand-back is five lines, so ask for a file path instead`;
-  const rw = /reviewer/i.test(String(ti.subagent_type || '')) ? null : inferredReviewWord(ti.prompt);
-  if (rw && !/^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || ''))) {
-    const task = taskIdIn(ti.prompt) || 'this task';
-    tag = `${tag ? `${tag}; ` : ''}this task will wait for an independent review because its objective mentions ${rw}; to send one, send a reviewer on opus with REVIEW OF: ${task}`;
-  }
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
 
@@ -659,86 +657,39 @@ function withSession(input, fn) {
   } catch {}
 }
 
-// First helper of a session: the person is owed three plain lines (what the job
-// needs, who does it on which model and why, how it is checked) before helpers
-// start. One fact, said once. Where the lead's latest message to the user can
-// be read from the transcript this turn, say what it lacks, and say nothing
-// when it has both a model and a check. Where it cannot be read, say the
-// unconditional version. The tail is scanned back to the last real user
-// prompt only, so an older turn's message is never mistaken for this one's.
-const FIRST_HELPER_PLAIN = 'first helper this session: the user is owed three plain lines first: what the job needs, who does it on what model and why, and how it is checked';
-export function leadTextThisTurn(transcriptPath) {
-  const lines = readTail(transcriptPath, 131072).split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i].trim();
-    if (!l || l[0] !== '{') continue;
-    let o; try { o = JSON.parse(l); } catch { continue; }
-    const m = o && o.message;
-    if (!m || (o.type !== 'assistant' && o.type !== 'user')) continue;
-    if (o.type === 'user') {
-      const c = m.content;
-      if (Array.isArray(c) && c.length && c.every(b => b && b.type === 'tool_result')) continue;
-      return null;
-    }
-    if (!Array.isArray(m.content)) continue;
-    const text = m.content.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n').trim();
-    if (text) return text;
-  }
-  return null;
-}
-// The hook can run before the lead's message reaches the disk: the newest entry
-// is then still the user's prompt. Look again a few times, well under a second
-// in all, before treating the message as unreadable.
-export function leadTextWithRetry(transcriptPath, { tries = 4, waitMs = 60, sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) } = {}) {
-  let text = leadTextThisTurn(transcriptPath);
-  for (let i = 1; text === null && i < tries; i++) {
-    try { sleep(waitMs); } catch {}
-    text = leadTextThisTurn(transcriptPath);
-  }
-  return text;
-}
 // A brief that asks for contents or output to come back in the hand-back.
 export function asksForPastedContents(prompt) {
   return /\b(exact contents|paste|full output|report back the file)\b/i.test(String(prompt || ''));
 }
-// A model is named by its name, or by the word with a describing word before
-// it ("a cheaper model"). The bare word is not enough: "update the data model".
-export const NAMES_MODEL_RE = /\b(haiku|sonnet|opus|fable)\b|\b(cheap\w*|small\w*|fast\w*|quick\w*|light\w*|strong\w*|larg\w*|bigg\w*|mid\w*|same|top|best|capable)\s+model\b/i;
-const FIRST_HELPER_REFUSAL ='the user is owed three short lines before the first helper starts: what the job needs, who does it on what model and why, and how it is checked; write them to the user, then send the helper again';
-export function firstHelperRefusal(input, id) {
+// The first writing helper of a session in a repo, with no run bound, waits for
+// .orchestrator/PROJECT.md to exist with a filled Next step, so the plan the
+// user sees is written before work starts. Returns a refusal reason or ''.
+// Read-only roles are never held (grounding comes before the plan), and one
+// sent first does not use the check up. A file check only: no transcript and
+// no message is read. Refusing a repeat is the caller's (recordDenial).
+const READ_ONLY_ROLES = new Set(['Explore', 'orch-researcher', 'orch-advisor', 'orch-planner', 'orch-reviewer', 'orch-browser', 'claude-code-guide', 'Plan']);
+const canWrite = role => !READ_ONLY_ROLES.has(normalizeRole(role));
+export function firstHelperGate(input) {
   try {
-    if (!input.session_id || !input.transcript_path) return '';
+    const ti = (input && input.tool_input) || {};
+    if (!canWrite(ti.subagent_type)) return '';
+    const root = findRepoRoot(input.cwd);
+    if (!root) return '';
     const state = loadSession(input.session_id) || {};
-    const asked = Array.isArray(state.firstHelperRefused) ? state.firstHelperRefused : [];
-    if (state.firstHelperDone) return '';
-    if (asked.includes(id)) return FIRST_HELPER_REFUSAL;
-    if (asked.length >= 3) return '';
-    if (Array.isArray(state.dispatches) && state.dispatches.length) return '';
-    const text = leadTextWithRetry(input.transcript_path);
-    if (text === null) return '';
-    if (NAMES_MODEL_RE.test(text)) {
-      withSession(input, s => { s.firstHelperDone = true; });
-      return '';
-    }
-    withSession(input, s => { s.firstHelperRefused = [...(Array.isArray(s.firstHelperRefused) ? s.firstHelperRefused : []), id]; });
-    return FIRST_HELPER_REFUSAL;
+    const prior = Array.isArray(state.dispatches) ? state.dispatches : [];
+    if (prior.some(d => d && canWrite(d.agent))) return '';
+    if (sessionRun(input.session_id)) return '';
+    const text = readProject(root);
+    if (text != null && nextSteps(text).length) return '';
+    const cmd = `node "${join(dirname(fileURLToPath(import.meta.url)), 'project.mjs')}" init "${root}"`;
+    return `no project page yet: ${projectPath(root)} ${text == null ? 'is missing' : 'has no filled step under Next'}, and the first helper that can write waits for it. Create it with ${cmd}, then fill Next with 3 to 7 steps, each ending "→ what the user will be able to see or run". This dispatch goes through once Next has a step.`;
   } catch { return ''; }
-}
-export function firstHelperNote(transcriptPath) {
-  const text = transcriptPath ? leadTextWithRetry(transcriptPath) : null;
-  if (text === null) return FIRST_HELPER_PLAIN;
-  const noModel = !NAMES_MODEL_RE.test(text);
-  const noCheck = !/\b(check|checked|checks|verif\w*|test|tests|tested|review\w*|prove\w*)\b/i.test(text);
-  if (!noModel && !noCheck) return '';
-  const lacks = noModel && noCheck ? 'names no model and no check' : noModel ? 'names no model' : 'names no check';
-  return `first helper this session: your last message to the user ${lacks}; they are owed three plain lines (what the job needs, who does it on what model and why, how it is checked)`;
 }
 
 // One line per dispatch in the session state, for the ledger. Never throws; a
 // missing session file just means no router ran here.
 function recordDispatch(input, ti) {
   const isReviewer = /reviewer/i.test(String(ti.subagent_type || ''));
-  const reviewWord = isReviewer ? null : inferredReviewWord(ti.prompt);
   withSession(input, state => {
     state.dispatches = Array.isArray(state.dispatches) ? state.dispatches : [];
     if (state.dispatches.length > 200) state.dispatches = state.dispatches.slice(-200);
@@ -764,12 +715,10 @@ function recordDispatch(input, ti) {
       run: runFor(input, ti),
       // Marks a task whose packet asked for independent review (money, auth,
       // destructive data, a contract others consume) so ledger.mjs can hold a
-      // DONE return back until a reviewer return for this task exists. The
-      // same gate is also reached without an explicit REVIEW: yes line, when
-      // the packet's own OBJECTIVE mentions one of REVIEW_WORDS (reviewWord
-      // below) — reviewInferred records which word tripped it.
+      // DONE return back until a reviewer return for this task exists. Only an
+      // explicit REVIEW: yes line sets it: a word in the objective is not a
+      // risk (live notes Q, V, 2026-09-30).
       ...(!isReviewer && /^\s*REVIEW:\s*yes\b/im.test(String(ti.prompt || '')) ? { review: true } : {}),
-      ...(reviewWord ? { review: true, reviewInferred: reviewWord } : {}),
       // A reviewer's own packet names the task it reviews under "REVIEW OF:"
       // (packet.md). Recorded on the reviewer's own dispatch row so
       // turn-check.mjs can tell a review was actually sent for a tagged task

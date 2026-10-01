@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.17.2"
+  version: "0.18.0"
 ---
 
 # Orchestrate
@@ -102,9 +102,11 @@ A status or side question mid-build does not replace the goal: answer and
 carry on. An explicit correction updates the goal, and
 invalidates only the tasks it touches.
 
-With no run ledger, write two lines to `.orchestrator/goal.md` on the first
-real request, in the user's words: what this is for, what done looks like.
-Rewrite them on a goal change; the plugin re-shows them.
+On the first real request in a repo, run `scripts/project.mjs init <repo>`,
+then fill What this is for, Where it stands and Next (each step ending with
+what the user will see) in `.orchestrator/PROJECT.md`, and keep it current. It
+is the plan the user sees; the plugin re-shows it. Decisions go under Decisions
+with the date, why and the cost if wrong.
 
 ## 2. Ground before deciding
 
@@ -153,11 +155,6 @@ wrote. Filter command output to what decides the next step. Move down to a
 simpler one the moment the reason for the heavier one is gone — a small
 high-risk change can get an independent review without becoming a project.
 
-Before the first helper of a job, write the user three plain lines: what the
-job needs (how hard, what could go wrong); who does it, on what model
-strength, and why; how it is checked. It is your judgment of this job;
-saying it lets them correct it before money is spent.
-
 Concurrent code writers each get a worktree; read-only work does not.
 **Two workers at once, across Claude and Codex**, browser work one at a time;
 a live coordinator holds a third slot.
@@ -192,7 +189,9 @@ but you. `references/ledger.md` has the ceiling option, context thresholds, chec
 
 ## 5. Dispatch: role agent plus packet
 
-A fix with no named cause is `orch-debugger`'s first; pilot one helper before many.
+Diagnose a bug yourself first: reproduce it, name its cause with evidence,
+fix that, show a test that failed before. After one honest miss, `orch-debugger`.
+Pilot one helper before many.
 `routing.md` has the model for each, by plan. Set `subagent_type` to the role,
 `model` from that table, and `isolation: "worktree"` for concurrent repo work;
 only `orch-coordinator` may dispatch a child, and only the bounded roles the

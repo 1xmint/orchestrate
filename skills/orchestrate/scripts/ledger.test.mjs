@@ -681,3 +681,51 @@ test('a reviewer that names no work is filed under its own dispatch\'s REVIEW OF
   const { row } = runHookWith([a, b], hookInput({ session_id: s, agent_type: 'orchestrate:orch-reviewer', agent_id: 'ag-ra', last_assistant_message: 'PASS\nlooks right\n' }));
   assert.equal(row.reviewOf, '9-1-0060');
 });
+
+// Three returns shaped like the live run's: none carries a TASK line; each is
+// joined to its own dispatch row by agent id.
+function fiveLine(outcome, proof) {
+  return `OUTCOME: ${outcome}\nPROOF: ${proof}\nNOT CHECKED: nothing.\nNEEDS A DECISION: nothing.\nFULL REPORT: docs/x.md\n`;
+}
+function runFor(agentId, agentType, report, taskDispatches) {
+  const input = hookInput({ agent_type: agentType, agent_id: agentId, last_assistant_message: report });
+  return runHookWith(taskDispatches.map(d => ({ at: new Date().toISOString(), model: 'sonnet', ...d })), input);
+}
+const LIVE_DISPATCHES = [
+  { agent: 'orchestrate:orch-researcher', task: '9-30-0001', agentId: 'agent-one' },
+  { agent: 'orchestrate:orch-researcher', task: '9-30-0002', agentId: 'agent-two' },
+  { agent: 'orchestrate:orch-planner', task: '9-30-0004', agentId: 'agent-four' },
+];
+
+test('a return with no TASK line takes its task from the dispatch row with the same agent id', () => {
+  const rep = fiveLine('DONE', '`node --test` 12/12 pass');
+  for (const [id, type, task] of [['agent-one', 'orchestrate:orch-researcher', '9-30-0001'], ['agent-two', 'orchestrate:orch-researcher', '9-30-0002'], ['agent-four', 'orchestrate:orch-planner', '9-30-0004']]) {
+    const { row, back } = runFor(id, type, rep, LIVE_DISPATCHES);
+    assert.equal(row.task, task);
+    assert.equal(row.status, 'DONE');
+    assert.equal(back.task, task);
+  }
+});
+
+test('an OUTCOME line that opens with a sentence is recorded as such and says so in the filed header', () => {
+  const rep = fiveLine('12-row rival table written, with the delta since the audit.', '`gh api repos/x` returned 11 repos');
+  const off = runHook(hookInput({ last_assistant_message: rep }));
+  assert.equal(off.row.status, null);
+  assert.equal(off.row.outcomeOpening, '12-row');
+  assert.ok(/opens with "12-row", not DONE, PARTIAL, BLOCKED, PASS or FAIL, so no status was recorded/.test(off.filed));
+  const ok = runHook(hookInput({ last_assistant_message: fiveLine('DONE', '12/12 pass') }));
+  assert.equal(ok.row.outcomeOpening, undefined);
+  assert.ok(!/opens with/.test(ok.filed));
+});
+
+test('a recorded status that differs from the helper own word is named with both and the reason', () => {
+  // The live case: DONE, but its PROOF line held no check.
+  const rep = fiveLine('DONE. A rebuild could do better.', 'The report has sections 1-6; grep finds every heading');
+  const { row, filed } = runHook(hookInput({ agent_type: 'orchestrate:orch-planner', last_assistant_message: rep }));
+  assert.equal(row.status, 'PARTIAL');
+  assert.equal(row.said, 'DONE');
+  assert.match(row.statusNote, /recorded PARTIAL, the helper's own OUTCOME word was DONE: .*no evidence line/);
+  assert.ok(filed.includes(row.statusNote));
+  const same = runHook(hookInput({ last_assistant_message: fiveLine('DONE', '12/12 pass') }));
+  assert.equal(same.row.statusNote, undefined);
+});

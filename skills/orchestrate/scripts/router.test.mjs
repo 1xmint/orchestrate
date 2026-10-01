@@ -916,6 +916,55 @@ test('with nothing to show, a resume prints no goal line', () => {
   assert.equal(goalOf(out), null);
 });
 
+// ---- the project page --------------------------------------------------------
+const PROJECT_FILLED = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'PROJECT.filled.md'), 'utf8');
+function writeProjectPage(repo) {
+  mkdirSync(join(repo, '.orchestrator'), { recursive: true });
+  writeFileSync(join(repo, '.orchestrator', 'PROJECT.md'), PROJECT_FILLED);
+}
+const PROJECT_LINE = /\[orchestrate · project\] \.orchestrator\/PROJECT\.md\nWhat this is for: A notes app for a small bakery/;
+
+test('the project page head shows on a session\'s first request, once, and the tenth-prompt goal line is not added', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  writeProjectPage(repo);
+  const sid = 's-proj1';
+  const outs = [];
+  for (let i = 1; i <= 12; i++) outs.push(prompt(home, repo, `substantive request number ${i} about the order list`, { session_id: sid }));
+  assert.match(outs[0], PROJECT_LINE);
+  assert.match(outs[0], /Next:\n1\. /);
+  assert.equal(outs.filter(o => /\[orchestrate · project\]/.test(o)).length, 1);
+  assert.equal(outs.filter(o => GOAL_LINE.test(o)).length, 0);
+});
+
+test('with no project page the first request shows no page line', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  assert.doesNotMatch(prompt(home, repo, 'add a --json flag to the status command and test it'), /\[orchestrate · project\]/);
+});
+
+test('after a compaction and on resume the project page head is shown, with or without a run', () => {
+  const home = makeHome(); const repo = makeRepo(false); const repoRun = makeRepo(true);
+  writeProjectPage(repo); writeProjectPage(repoRun);
+  for (const [source, r] of [['compact', repo], ['resume', repo], ['compact', repoRun]]) {
+    const out = run(home, { hook_event_name: 'SessionStart', source, session_id: `s-proj-${source}-${r === repo}`, cwd: r });
+    assert.match(out, PROJECT_LINE, source);
+    assert.equal(goalOf(out), null);
+  }
+});
+
+test('"continue" in a fresh session shows the project page when there is one, the earlier session otherwise', () => {
+  const home = makeHome(); const repo = makeRepo(false); const bare = makeRepo(false);
+  writeProjectPage(repo);
+  const lastSeen = new Date(Date.now() - 30 * 60000).toISOString();
+  seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
+  seedSession(home, 'sess-prev2', { cwd: bare, goal: 'add a --json flag to the status command', lastSeen });
+  const withPage = prompt(home, repo, 'continue', { session_id: 'sess-new1' });
+  assert.match(withPage, PROJECT_LINE);
+  assert.doesNotMatch(withPage, /Your last session in this folder/);
+  const without = prompt(home, bare, 'continue', { session_id: 'sess-new2' });
+  assert.match(without, /Your last session in this folder, 30 minutes ago/);
+  assert.doesNotMatch(without, /\[orchestrate · project\]/);
+});
+
 // One capacity for every card, and no reading from before the summary. The host
 // runs this hook before it writes the compaction record, so a reading with no
 // boundary in it is the pre-summary one.

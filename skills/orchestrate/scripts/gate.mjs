@@ -98,6 +98,34 @@ export function fromPyproject(text) {
 
 // What CI actually runs, as a tiebreak and as the honest answer to "what blocks
 // a merge". Lines are read as text: a workflow file is data, not instructions.
+// Only commands that build or check: a workflow's `run:` can be anything, and
+// a packet never suggests `curl ... | sh`. `node --test` and `node scripts/x`
+// are what a repo with no package manifest runs.
+const CI_COMMAND = /^(just|make|npm|pnpm|yarn|cargo|pytest|python -m pytest|ruff|mypy|go test|dotnet test|node\s+(--test\b|scripts\/\S+))/;
+
+// The commands of a workflow's `run:` steps: the one-line form, and each line
+// of a `run: |` block. A reasonable subset of YAML, read as text.
+export function runSteps(text) {
+  const out = [];
+  const lines = String(text || '').split(/\r?\n/);
+  const clean = c => c.trim().replace(/^["']|["']$/g, '').replace(/\s+#.*$/, '');
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\s*)(?:-\s*)?run:\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const rest = m[2].trim();
+    if (/^[|>][+-]?$/.test(rest)) {
+      const indent = m[1].length;
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() === '') continue;
+        if (lines[j].match(/^\s*/)[0].length <= indent) break;
+        out.push(clean(lines[j]));
+        i = j;
+      }
+    } else if (rest) out.push(clean(rest));
+  }
+  return out.filter(Boolean);
+}
+
 export function fromWorkflows(root) {
   const out = [];
   const dir = join(root, '.github', 'workflows');
@@ -106,9 +134,8 @@ export function fromWorkflows(root) {
   for (const f of files.slice(0, 10)) {
     const text = read(join(dir, f));
     if (!text) continue;
-    for (const m of text.matchAll(/^\s*(?:-\s*)?run:\s*(?:\|\s*)?(.+)$/gm)) {
-      const cmd = m[1].trim().replace(/^["']|["']$/g, '');
-      if (!/^(just|make|npm|pnpm|yarn|cargo|pytest|python -m pytest|ruff|mypy|go test|dotnet test)\b/.test(cmd)) continue;
+    for (const cmd of runSteps(text)) {
+      if (!CI_COMMAND.test(cmd)) continue;
       if (cmd.length > 120) continue;
       out.push({ cmd, kind: kindOf(cmd), source: `.github/workflows/${f}` });
     }

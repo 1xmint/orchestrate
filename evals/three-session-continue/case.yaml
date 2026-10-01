@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: three-session-continue
+context:
+  scaffold_script: fixture-seed.sh

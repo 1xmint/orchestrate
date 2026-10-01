@@ -362,7 +362,7 @@ Keys: `context.checkpointAt`, `context.compactAt`, `context.windowFraction`,
 `context.window`, `context.staleMs`, `context.freshAfterCompactions`, `context.tickEvery`, `context.autocompactDefault` (a positive token count or `off`), `workers.maxConcurrent`,
 `workers.browserConcurrent`, `workers.nested` (`coordinator`/`deny`/`allow`),
 `workers.generalPurpose` (`deny`/`allow`), `workers.staleMin`,
-`workers.size.<role>.warnAt` and `.returnAt` (a helper's size budget in tokens; `default` covers any role without its own), `codex.enabled`,
+`workers.size.<role>.warnAfter` and `.returnAfter` (a helper's size allowance in tokens above the size it started at; `default` covers any role without its own), `codex.enabled`,
 `codex.model`, `codex.effortImplement`, `codex.effortHard`, `codex.timeoutMin`.
 They are stored under `policy` in `~/.claude/orchestrate/profile.json`; an older
 version ignores that key. `profile.mjs --host` shows which Claude Code engine the
@@ -391,6 +391,18 @@ and again when you add one.
 Install from a terminal with `/plugin install <name>@claude-plugins-official`,
 or from the Claude app under Customize → Plugins → Discover.
 
+**Alongside orchestrate.** These do jobs orchestrate leaves out on purpose.
+Nothing here is installed for you. Links and licences checked 2026-09-30.
+
+| Tool | What it does for you | Licence | Cost |
+|---|---|---|---|
+| [ccusage](https://github.com/ccusage/ccusage) | Your usage by 5-hour block and by day, read from Claude's own logs on your disk. Orchestrate's `measure.mjs` covers one session, not the week | MIT | none; runs locally |
+| `receipts` (Anthropic catalog) | A plain report of what your Claude Code use actually produced, built from your own session files | Apache-2.0 | small: one session's reading |
+| [Playwright MCP](https://github.com/microsoft/playwright-mcp) | Proves a web change works in a real page: click, type, read what shows | Apache-2.0 | your usage, per page read; no key |
+| [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp) | Console errors, network and speed problems in a real Chrome | Apache-2.0 | your usage, per page read; no key |
+| `claude-md-management` (Anthropic catalog) | Checks and tidies CLAUDE.md so it stays true; a different job from orchestrate's project page | Apache-2.0 | small |
+| `security-guidance` (Anthropic catalog), reviews off | A free pattern check on every file Claude writes | Apache-2.0 | free with its reviews off; **billed to your key if `ANTHROPIC_API_KEY` is set** (see below) |
+
 **For web pages, use what is built in first.** A page fetch comes back already
 summarised, web search is included in your plan, and the browser handles pages
 that need JavaScript. Scraping plugins (Bright Data, Firecrawl, Tavily, Exa,
@@ -414,9 +426,14 @@ loop), and `code-simplifier` (Claude Code's built-in `/simplify` covers it).
 **`security-guidance`** is on by default in Claude Code. Its warnings while
 editing are free: pattern checks run on your machine. Its reviews at the end of
 each turn and on every commit and push call Opus whenever it finds credentials.
-On one machine every review was skipped for lack of credentials, so they
-cost nothing there. To make sure only the free warnings ever run, add this to
-`~/.claude/settings.json` under `"env"`: `"ENABLE_CODE_SECURITY_REVIEW": "0"`.
+**If `ANTHROPIC_API_KEY` is set, it uses that key, so those reviews are billed to
+that key, outside your subscription** (its `hooks/llm.py` uses your
+subscription's sign-in only when no key is set). On one machine every review
+was skipped for lack of credentials, so they cost nothing there. To make sure
+only the free warnings ever run, add both of these to `~/.claude/settings.json`
+under `"env"`: `"ENABLE_CODE_SECURITY_REVIEW": "0"` and
+`"ENABLE_COMMIT_REVIEW": "0"` (the second is the commit and push reviewer's own
+switch).
 
 Business plugins (sales, finance, legal, HR, marketing, bio research, ads,
 market data) are fine if that is your work. For a coding session they are pure
@@ -668,7 +685,9 @@ takes effect in a new session. To roll back:
 node scripts/install.mjs --project /path/to/repo --dry-run
 ```
 
-Four things, and it tells you about each: `.orchestrator/gate.json` with the
+Five things, and it tells you about each: `.orchestrator/PROJECT.md`, a short
+project page copied from a template when the repo has none (what it is for,
+where it stands, the next steps and what you will see from each); `.orchestrator/gate.json` with the
 build, test and lint commands it found; `.orchestrator/` added to
 `.git/info/exclude` so the ledger is never committed; a
 `.claude/rules/orchestrate.md` of twelve lines or fewer, which every session in

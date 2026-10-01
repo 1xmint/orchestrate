@@ -4,7 +4,7 @@
 //
 //   node install-project.mjs <repo> [--dry-run] [--force] [--with-claude-md]
 //
-// Four things, and nothing else:
+// Five things, and nothing else:
 //   1. .orchestrator/gate.json, the detected build/test/lint commands;
 //   2. .orchestrator/ in .git/info/exclude, so the ledger is never committed
 //      and no tracked .gitignore is touched;
@@ -13,7 +13,10 @@
 //      turn of every session in the repo;
 //   4. when AGENTS.md exists and CLAUDE.md does not, the one-line fix printed,
 //      and written only with --with-claude-md, because CLAUDE.md is a tracked
-//      file and adding one is the user's call.
+//      file and adding one is the user's call;
+//   5. .orchestrator/PROJECT.md, the project page, copied from the template
+//      when it is not there yet (lib/project.mjs ensureProject) and never
+//      overwritten; it sits under .orchestrator/, so it is not committed.
 //
 // The skill, the role agents and the global hooks stay at user level, so a
 // second machine needs `node scripts/install.mjs` once and nothing per repo.
@@ -23,6 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, block } from './gate.mjs';
+import { ensureProject } from './lib/project.mjs';
 
 export const RULES_REL = join('.claude', 'rules', 'orchestrate.md');
 const MAX_RULE_LINES = 12;
@@ -125,6 +129,11 @@ function main() {
     say(`rules -> ${p.rulesPath} (${p.rules.trimEnd().split('\n').length} lines; it is a tracked file, so commit or delete it)`);
   }
 
+  const pp = ensureProject(root, { dryRun: dry });
+  say(pp.action === 'exists' ? `project -> ${pp.path} already there; left alone`
+    : pp.action === 'failed' ? `project -> could not write ${pp.path}`
+    : `project -> ${pp.path} ${dry ? 'would be created' : 'created'} from the template; fill What this is for, Where it stands and Next`);
+
   if (p.needsClaudeMd) {
     const cmd = join(root, 'CLAUDE.md');
     console.log('');
@@ -138,7 +147,22 @@ function main() {
       console.log('  (not written: CLAUDE.md is tracked, so that is your call. --with-claude-md writes it.)');
     }
   }
+  console.log('');
+  console.log('Alongside orchestrate (nothing installed; see the README):');
+  for (const a of ALONGSIDE) console.log(a.startsWith(' ') ? a : `- ${a}`);
 }
+
+// Tools for jobs orchestrate leaves out on purpose; the same list as the
+// README's "Alongside orchestrate". Printed, never installed.
+export const ALONGSIDE = [
+  'ccusage (github.com/ccusage/ccusage, MIT): your usage by 5-hour block and by day',
+  'receipts (Anthropic catalog): what your Claude Code use actually produced',
+  'Playwright MCP (github.com/microsoft/playwright-mcp): proves a web change in a real page',
+  'Chrome DevTools MCP (github.com/ChromeDevTools/chrome-devtools-mcp): console, network, speed',
+  'claude-md-management (Anthropic catalog): keeps CLAUDE.md true',
+  'security-guidance (Anthropic catalog), reviews off: a free check on each file written;',
+  '  billed to your key if ANTHROPIC_API_KEY is set, so set ENABLE_CODE_SECURITY_REVIEW=0 and ENABLE_COMMIT_REVIEW=0',
+];
 
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { main(); } catch (e) { console.error(String(e && e.message)); process.exit(1); }

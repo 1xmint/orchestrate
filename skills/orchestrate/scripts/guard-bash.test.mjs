@@ -1240,7 +1240,7 @@ test('the head moving after the review, or a file list cut short, still needs th
 test('the hooks file, the reviewer\'s own instructions and the merge bar itself count as safety checks, and every listed path exists', async () => {
   const guard = await import('./guard-bash.mjs');
   const paths = guard.REVIEW_PATHS || [];
-  for (const p of ['hooks/hooks.json', 'skills/orchestrate/assets/agents/orch-reviewer.md', GUARD_FILE, 'skills/orchestrate/scripts/guard-agent.mjs', 'skills/orchestrate/scripts/ledger.mjs', 'skills/orchestrate/scripts/turn-check.mjs', 'skills/orchestrate/scripts/lib/review-of.mjs', 'skills/orchestrate/scripts/lib/review-words.mjs', 'skills/orchestrate/scripts/lib/merge-bar.mjs']) {
+  for (const p of ['hooks/hooks.json', 'skills/orchestrate/assets/agents/orch-reviewer.md', GUARD_FILE, 'skills/orchestrate/scripts/guard-agent.mjs', 'skills/orchestrate/scripts/ledger.mjs', 'skills/orchestrate/scripts/turn-check.mjs', 'skills/orchestrate/scripts/lib/review-of.mjs', 'skills/orchestrate/scripts/lib/shell-run.mjs', 'skills/orchestrate/scripts/lib/merge-bar.mjs']) {
     assert.ok(paths.includes(p), p);
     assert.equal(decide(M, merging(prView({ files: [p] })).ctx).kind, 'deny', p);
   }

@@ -50,6 +50,16 @@ test('with a note and no ledger the line is the note', () => {
   assert.equal(g.text, 'Ship the invoice export. Done looks like: Done: the accountant can open it.');
 });
 
+test('the project page\'s "What this is for" comes before an old goal.md; a blank page falls through', () => {
+  const d = project('Old note line.\nOld done.\n');
+  writeFileSync(join(d, '.orchestrator', 'PROJECT.md'), '## What this is for\n\nA notes app for a bakery.\n\n## Next\n');
+  const g = readGoal({ cwd: d, state: { prompts: 1 } });
+  assert.equal(g.source, 'project');
+  assert.equal(g.text, 'A notes app for a bakery.');
+  writeFileSync(join(d, '.orchestrator', 'PROJECT.md'), '## What this is for\n\n<one or two lines…>\n');
+  assert.equal(readGoal({ cwd: d, state: { prompts: 1 } }).source, 'note');
+});
+
 test('with neither, the first request is shown as not confirmed', () => {
   const d = project(null);
   const g = readGoal({ cwd: d, state: { prompts: 2, goal: 'add a json flag to the status command' } });

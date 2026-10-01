@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId, loadSession } from './lib/tier.mjs';
 import { mentionsMerge, mergeRefusal, ghView, REVIEW_PATHS } from './lib/merge-bar.mjs';
+import { paymentLine, withoutFileText } from './lib/shell-run.mjs';
 
 export { REVIEW_PATHS };
 
@@ -380,8 +381,12 @@ const RULES = [
     reason: `This would deploy this project to its live, public address. ${ASK_TAIL}`,
   },
   {
-    name: 'stripe',
-    test: cmd => /\bstripe\b/.test(cmd) && !/\bstripe\s+(login|logout|config|version|--version|-v|help|listen|status|samples|open)\b/.test(cmd),
+    // Only a line that RUNS a payment action: a payment CLI as a command word,
+    // a web call to a payment API host, or run code loading a payment SDK.
+    // The brand word in a grep pattern, a regex or file text is not one
+    // (lib/shell-run.mjs; live notes I and Q).
+    name: 'payment',
+    test: cmd => paymentLine(cmd),
     reason: `This would create or change something in a real payment account, which can charge or move money. ${ASK_TAIL}`,
   },
   {
@@ -475,7 +480,7 @@ function decideOne(command, ctx = {}) {
   // or checking the bar, refuses it. `ctx.mentionsMerge` is for tests.
   let merges;
   try {
-    merges = (ctx.mentionsMerge || mentionsMerge)(command);
+    merges = (ctx.mentionsMerge || mentionsMerge)(withoutFileText(String(command)));
   } catch (e) {
     return { kind: 'deny', reason: `Checking whether this line merges a pull request failed (${String((e && e.message) || e).slice(0, 120)}), so it is refused. Nothing was run.` };
   }
@@ -494,7 +499,7 @@ function decideOne(command, ctx = {}) {
   }
   const cmd = plainGit(asSent);
 
-  let hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.test(cmd)) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
+  let hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.name !== 'payment' && r.test(cmd)) || (paymentLine(String(command)) && RULES.find(r => r.name === 'payment')) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
 
   // Every branch delete in the line is the lowercase kind, so another part is
@@ -611,7 +616,7 @@ function main() {
   // counts as a merge, and decide() then refuses the line.
   if (isAllowed(command, input.cwd)) {
     let merges = true;
-    try { merges = mentionsMerge(command); } catch {}
+    try { merges = mentionsMerge(withoutFileText(command)); } catch {}
     if (!merges) return;
   }
 

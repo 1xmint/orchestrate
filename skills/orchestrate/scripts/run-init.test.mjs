@@ -199,3 +199,30 @@ test('--close names a run that does not exist and changes nothing', () => {
   assert.equal(r.status, 2);
   assert.match(r.stderr, /no RUN\.md/);
 });
+
+// The same run with its own HOME and a chosen environment: host variables the
+// developer's own session carries are dropped first.
+function runWith(cwd, env, storedProfile, ...args) {
+  const home = mkdtempSync(join(tmpdir(), 'orch-runinit-host-'));
+  if (storedProfile) {
+    mkdirSync(join(home, '.claude', 'orchestrate'), { recursive: true });
+    writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify(storedProfile));
+  }
+  const base = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^(CLAUDE|CODEX_)/.test(k)));
+  const r = spawnSync(process.execPath, [SCRIPT, ...args], { cwd, encoding: 'utf8', env: { ...base, ...env, HOME: home, USERPROFILE: home } });
+  return { r, md: r.status === 0 ? readFileSync(r.stdout.split('\n')[0].trim(), 'utf8') : '' };
+}
+
+test('the ledger Profile line takes its host from the stored profile, then the host environment, else says unknown', () => {
+  const dir = () => repo({ 'pyproject.toml': '[tool.pytest.ini_options]\n' });
+  assert.match(runWith(dir(), {}, { host: 'codex' }, 'h-stored').md, /host: codex/);
+  assert.match(runWith(dir(), { CLAUDECODE: '1' }, null, 'h-env').md, /host: claude-code/);
+  assert.match(runWith(dir(), { CLAUDECODE: '1' }, { host: 'codex' }, 'h-both', '--host', 'x-host').md, /host: x-host/);
+  assert.match(runWith(dir(), {}, null, 'h-none').md, /host: unknown/);
+});
+
+test('--help lists --repo, --close and --reopen and exits 0', () => {
+  const r = run(tmpdir(), '--help');
+  assert.equal(r.status, 0);
+  for (const f of ['--repo', '--close', '--reopen']) assert.ok(r.stdout.includes(f), f);
+});
