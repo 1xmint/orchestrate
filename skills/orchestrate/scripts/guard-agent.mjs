@@ -266,6 +266,11 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
         return g.bind ? { grantBind: g.bind, at: userModel.at, family: f } : null;
       }
       if (g && g.deny) return { prefix: 'model', reason: g.reason };
+      // The user named this model and only the id is missing: say that first,
+      // not "resend with sonnet", which would override the user's own words.
+      if (userModel && userModel.family === f && !userModel.taskId && !numericTaskId(prompt)) {
+        return { prefix: 'model', reason: `the user named ${f}; add a TASK: line with a number (e.g. TASK: 1-1-0001) to the packet and resend. The grant covers that one task id.` };
+      }
       return { prefix: 'model', reason: `${plainRole(role)} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id.` };
     }
   }
@@ -682,7 +687,7 @@ export function firstHelperGate(input) {
     const text = readProject(root);
     if (text != null && nextSteps(text).length) return '';
     const cmd = `node "${join(dirname(fileURLToPath(import.meta.url)), 'project.mjs')}" init "${root}"`;
-    return `no project page yet: ${projectPath(root)} ${text == null ? 'is missing' : 'has no filled step under Next'}, and the first helper that can write waits for it. Create it with ${cmd}, then fill Next with 3 to 7 steps, each ending "→ what the user will be able to see or run". This dispatch goes through once Next has a step.`;
+    return `no project page yet: ${projectPath(root)} ${text == null ? 'is missing' : 'has no filled step under Next'}, and the first helper that can write waits for it. Create it with ${cmd}, then fill Next with 3 to 7 steps, each ending "→ what the user will be able to see or run". This dispatch goes through once Next has a step. This is routine set-up, not news for the user: don't mention it.`;
   } catch { return ''; }
 }
 

@@ -5,11 +5,11 @@ Two different tools read this directory, for two different jobs:
 - **`evals.json`** is read by the `skill-creator` plugin's own eval runner.
   It is acceptance guidance for a human reading a transcript — nothing in
   it runs a model on its own. Keep using it for that.
-- **The nine case directories** (`delivery-contact-form/`,
+- **The ten case directories** (`delivery-contact-form/`,
   `recovery-mid-task-continue/`, `safety-branch-cleanup/`,
-  `triggering-substantive-request/`, and the five ability cases
+  `triggering-substantive-request/`, and the six ability cases
   `costly-fork/`, `misleading-bug/`, `wrong-goal/`,
-  `three-session-continue/`, `failed-check-report/`) are
+  `three-session-continue/`, `failed-check-report/`, `plan-request/`) are
   cases for `claude plugin eval`, the Claude Code CLI command (see
   `https://code.claude.com/docs/en/plugin-evals`). Each is a directory with
   a `prompt.md` (and, where the case needs a seeded workspace, a

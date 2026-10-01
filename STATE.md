@@ -2,6 +2,40 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.19.0 — plan 0006: a fair ruler, and who can see the data is the owner's call, 2026-10-01
+
+From the audit of the 0.18.0 release check (plan in the session notes,
+`docs/audits/2026-10-01-live-session-notes.md`). The measurement is in
+docs/research/0006-eval-0.19.0.md.
+
+- The leak check flags plugin words (worktree, packet, ledger, "helper
+  system", "until a plan existed") instead of any dollar sign; it had flagged a
+  plain monthly price and missed a real leak. A page on the home wifi now
+  counts as exposed in costly-fork. 0005-eval-0.18.0.md keeps its old text
+  with the correction.
+- Who can see or change the owner's data (a public page, or anyone on their
+  wifi) and anything they did not ask for are their call: card, SKILL §1 and
+  plain.md. The plan-page refusal says it is not news for the user.
+- A new case, `plan-request`, grades a plan on intent, plain questions,
+  grounding in the repo, visible steps and no extra scope.
+- AGENTS.md: work the user feels outranks upkeep; plans are a measured claim;
+  the guard catches what Claude would do by mistake, not commands built to slip
+  past it, and `docs/safety-guard.md` lists what it does not catch. The
+  open-ended bypass search owed since 0.18.0 is dropped under that rule.
+- In plan mode the context line names the plan file instead of ordering a
+  checkpoint that cannot be written; a model grant missing its TASK line says so
+  first. The card names the researcher's real model, with a test, and a
+  research packet can carry KILLS IT and SOURCE (from an outside review of how
+  the plugin researches).
+
+Measured (docs/research/0006-eval-0.19.0.md): the plan test's judge was reading the raw run
+record, not the plan; fixed, both versions rerun. With the plugin, plans asked the owner better
+questions (passed 3 of 6 against 0 of 6), and no costly-fork run built before asking. 0.19.0 and
+0.18.0 score the same; three runs cannot tell them apart.
+
+Not fixed: misleading-bug and failed-check-report still cannot run on Windows;
+"N tool calls since your last edit" counts shell commands as edits on purpose.
+
 ## v0.18.0 — plan 0005: checks that read what runs, and a project page, 2026-09-30
 
 Built from docs/research/0005-next-phase.md. What each step did, its evidence
@@ -29,47 +63,9 @@ docs/research/0005-baseline-0.17.2.md.
 - The README and the project installer list the tools to use alongside
   orchestrate (step 6).
 
-## v0.17.2 — a merge waits for its checks, 2026-09-30
-
-The second live session on the plugin's own repo (0.17.1; notes items Q–AL in
-`docs/audits/2026-09-29-live-session-notes.md`) found these, each fixed with a
-test that fails on the old code:
-
-- **A pull request merges only once it clears a bar**, in every mode: every
-  check on its newest commit has passed, and a change to the plugin's own
-  safety checks has a reviewer's PASS naming that same commit. The merge must
-  name the commit (`--match-head-commit`), so nothing can slip in between the
-  check and the merge. `--auto` and the raw API routes are refused, and checks
-  that cannot be read refuse rather than pass. (#36)
-- Which lines count as a merge is blunt on purpose: four review rounds each
-  found a new way to spell one, so the check now flattens the line to its
-  letters and refuses any that say merge next to gh or a GitHub address. The
-  price is a few harmless lines refused, listed in `docs/safety-guard.md`;
-  plain reads (`gh pr view`) and a plain `git merge` pass. (#36)
-- Only a reviewer's own hand-back counts as a review; a builder quoting
-  "PASS" no longer gets a verdict. (#36)
-- The dispatch gate no longer reads `git checkout` as payment work; a refusal
-  in auto mode no longer says "nobody is present"; three wrong or unneeded
-  hook lines are gone. (#36)
-- The checkpoint's goal, last message and test line are taken from what the
-  user typed and what the shell printed, not from host notices or file reads;
-  the compaction count comes from the transcript. (#35)
-- The audit prompts no longer claim a version, and a test keeps it so. (#37)
-- A helper's own compaction no longer prints the lead's card into the helper, or clears
-  the lead's working project. The host sends those
-  hooks with no helper id (anthropics/claude-code#91910), so the plugin looks
-  for a helper compaction in the last 10 s instead: on this machine's records it
-  caught 378 of 379 and misjudged none of 354 lead compactions. (#40)
-
-Seen and not fixed: a merge from a script, a variable, a gh alias or a command
-name built from pieces; `git push origin HEAD:main`, which skips pull requests;
-a project with no automatic checks never clears the bar, so its user merges by
-hand; the branch-delete rule still reads text headed into a file (notes AA,
-AJ). A helper whose transcript is written late still gets the card, as
-before (notes AO).
-
 ## Earlier releases
 
+- [v0.17.2 — a merge waits for its checks, 2026-09-30](docs/state/v0.17.2.md)
 - [v0.17.1 — fixes from the first live session on 0.17.0, 2026-09-29](docs/state/v0.17.1.md)
 - [v0.17.0 — the scoresheet audit, and rules that can be measured, 2026-09-29](docs/state/v0.17.0.md)
 - [v0.16.1 — a review that can stop the merge, 2026-09-21](docs/state/v0.16.1.md)

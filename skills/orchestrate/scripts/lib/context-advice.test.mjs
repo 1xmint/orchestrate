@@ -319,3 +319,24 @@ test('formatReading states the size, the state, and the recommendation', () => {
   assert.match(text, /^context: 42k of 200k \(21%\) — measured/);
   assert.match(text, /recommended: none/);
 });
+
+test('in plan mode the checkpoint notice gives no order the lead cannot follow', () => {
+  // A live lead in plan mode was told "write the checkpoint now ... to
+  // <context dir>", where plan mode lets it write only the plan file. Hooks
+  // state facts; this one now says which file counts.
+  const p = policy();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-adv-'));
+  const plansDir = mkdtempSync(join(tmpdir(), 'orch-plans-'));
+  const { checkpointAt } = thresholds(null, p);
+  const ctx = { policy: p, session: 's1', dir, plansDir, permissionMode: 'plan' };
+  const r = measured(checkpointAt);
+  const text = contextNotice(r, adviseContext(r, p), ctx);
+  assert.doesNotMatch(text, /write the checkpoint now/);
+  assert.match(text, / · in plan mode the plan file is the checkpoint$/);
+  const after = measured(1000, { compaction: { uuid: 'c9', at: new Date(Date.now() - 60000).toISOString() }, compactions: 1 });
+  const ask = contextNotice(after, adviseContext(after, p), ctx);
+  assert.doesNotMatch(ask, /write the checkpoint now/);
+  assert.match(ask, /in plan mode the plan file is the checkpoint/);
+  // Outside plan mode the order stands.
+  assert.match(contextNotice(r, adviseContext(r, p), { ...ctx, permissionMode: 'default' }), /write the checkpoint now/);
+});

@@ -271,8 +271,8 @@ export function postCompactionAskDue(reading, advice, ctx = {}) {
   // that counts as compaction 1, the same as the old behaviour it replaces.
   const compactions = Number.isFinite(reading.compactions) ? reading.compactions : 1;
   if (!(compactions > asked)) return false;
-  const { session = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null } = ctx;
-  return !newestCheckpoint(session, reading, { dir, runMd, permissionMode });
+  const { session = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null, plansDir } = ctx;
+  return !newestCheckpoint(session, reading, { dir, runMd, permissionMode, plansDir });
 }
 
 // The short notice for an advice change; empty when there is nothing to say.
@@ -280,6 +280,8 @@ export function postCompactionAskDue(reading, advice, ctx = {}) {
 // measured from the last response, says the conversation is full. `ctx` carries
 // what `factLine` needs (policy, session, editCounter, runMd, permissionMode);
 // see `sampleContext`.
+const PLAN_MODE_CHECKPOINT = 'in plan mode the plan file is the checkpoint';
+
 export function contextNotice(reading, advice, ctx = {}) {
   if (!reading || !advice) return '';
   const policy = ctx.policy || loadPolicy();
@@ -289,6 +291,7 @@ export function contextNotice(reading, advice, ctx = {}) {
   if (postCompactionAskDue(reading, advice, ctx)) {
     const { session = null, dir = CONTEXT_DIR } = ctx;
     const line = factLine(reading, policy, ctx, null);
+    if (ctx.permissionMode === 'plan') return `${line} · the conversation was just summarised; ${PLAN_MODE_CHECKPOINT}`;
     return `${line} · the conversation was just summarised; before anything else, write the checkpoint now (goal, decisions, files changed, verification, next action) to ${checkpointPath(session, reading, dir)}`;
   }
   switch (advice.action) {
@@ -296,11 +299,14 @@ export function contextNotice(reading, advice, ctx = {}) {
     case 'compact': {
       // With no checkpoint for this epoch, this is the one place the lead is
       // asked for one: a PreCompact block reaches nobody under autocompact.
-      const { session = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null } = ctx;
-      const cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode });
+      const { session = null, dir = CONTEXT_DIR, runMd = null, permissionMode = null, plansDir } = ctx;
+      const cp = newestCheckpoint(session, reading, { dir, runMd, permissionMode, plansDir });
       const line = factLine(reading, policy, ctx, cp);
       if (cp) return line;
       if (advice.action === 'compact') return `${line} · compaction will summarise without a checkpoint`;
+      // Plan mode lets the lead write only the plan file, so an order to write
+      // elsewhere cannot be followed; say which file counts instead.
+      if (permissionMode === 'plan') return `${line} · ${PLAN_MODE_CHECKPOINT}`;
       return `${line} · write the checkpoint now (goal, decisions, files changed, verification, next action) to ${checkpointPath(session, reading, dir)}`;
     }
     case 'investigate': {
