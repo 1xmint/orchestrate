@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.20.1"
+  version: "0.21.0"
 ---
 
 # Orchestrate
@@ -128,7 +128,9 @@ documentation, source, release note or issue that answers it, before building
 your own version of something established. One authoritative source can
 settle a question; several weak ones do not. Write what you learn into the
 run's Facts or Decisions, with its source. External research settles how
-something works; only running your change here shows it works here.
+something works; only running your change here shows it works here, so run that; before
+any other test or experiment, write what you expect and what it would
+change: if you can predict it, read it or look it up, don't run it.
 `evaluation.md`'s "Research results" has the grading.
 
 **The brief.** "What this is for" in the project's own instruction file — read
@@ -190,7 +192,8 @@ but you. `references/ledger.md` has the ceiling option, context thresholds, chec
 ## 5. Dispatch: role agent plus packet
 
 Diagnose a bug yourself first: reproduce it, name its cause with evidence,
-fix that, show a test that failed before. After one honest miss, `orch-debugger`.
+fix that, show a test that failed before, then look for that mistake
+elsewhere. After one honest miss, `orch-debugger`.
 Pilot one helper before many.
 `routing.md` has the model for each, by plan. Set `subagent_type` to the role,
 `model` from that table, and `isolation: "worktree"` for concurrent repo work;
@@ -209,11 +212,8 @@ one. It dispatches, grades, integrates in dependency order and gates once, then
 returns one summary.
 
 **Codex workers.** Codex for workers until it runs out; Claude for judgment,
-and for planner work, browser work, or anything needing this session's MCP
-tools or permissions. Write the packet under `<run dir>/packets/`, start
-`codex-worker.mjs` in the background naming model and effort, monitor it,
-then grade its report against `DONE WHEN`.
-`references/dispatch.md` has the exact command and the fallback rule.
+planning, browser work, or this session's MCP tools or permissions.
+`references/dispatch.md` has the command, grading and fallback.
 
 A background dispatch hands control straight back: **do not sit and wait on it
 while the plan has a task whose blockers have all landed** — start that task
@@ -258,10 +258,10 @@ with a named revert, even when the main change is good. You set the row in
 **Independent review** is for the cases where being wrong is expensive and hard
 to see: an authorisation or security boundary, money moving, a destructive or
 irreversible data change, a compatibility contract someone else consumes, or
-architectural uncertainty you could not resolve. A cosmetic change to a
-public page is not one. Decide a review is owed before design and write its
-questions then, so one list drives the design, the `DONE WHEN` and the
-reviewer's `ACCEPTANCE`. Never review your own edits; the built-in advisor
+architectural uncertainty you could not resolve. Decide a review is owed
+before design and write its questions then, so one list drives the design, the `DONE WHEN` and the
+reviewer's `ACCEPTANCE`, with what Decisions rule out: a finding there is
+noted, not a FAIL. Never review your own edits; the built-in advisor
 watched them made, so it is not independent. The reviewer runs on Opus or
 stronger and reviews only correctness against that list; the pull request stays
 a draft until the verdict is PASS, then `gh pr ready <n>` — a review that
@@ -276,8 +276,9 @@ to the user with a recommendation. `evaluation.md`'s table maps each class to
 its response. Another attempt needs a changed hypothesis,
 corrected context, or an actionable finding, never the same packet resent and
 never an escalation just because a reviewer disagreed. Three attempts per
-task, then stop with the evidence; no progress in three rounds, or the same
-error twice, ends the loop.
+task, then stop with the evidence; no progress in three rounds ends the loop.
+The same error or kind of finding twice: stop patching cases; name what they
+share, fix that kind once or rule it out with the owner.
 
 An escalation is a fresh dispatch on the next model up with a three-line note
 of what failed, never the failed agent's context carried forward. Recover from
@@ -295,9 +296,8 @@ Copy each number, and each claim that a check ran, from a proof line
 closing messages carried figures that did not exist.
 `evaluation.md`'s "Integrate" has the conflict rule.
 
-`measure.mjs <transcript> --tree` reports what a session actually consumed, in
-list-price dollars, never a percentage of a quota. `diagnose.mjs` snapshots
-versions, host, policy, hooks, context and Codex state for a problem report.
+`measure.mjs <transcript> --tree`: a session's cost in list-price dollars;
+`diagnose.mjs`: a problem report.
 
 **Local durability is not publication.** Commit and push a worker's branch so
 work survives; merging, releasing, tagging and deploying follow the user's

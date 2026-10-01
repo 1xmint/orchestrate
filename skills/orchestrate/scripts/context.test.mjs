@@ -18,7 +18,7 @@ import { adviseContext, contextNotice, thresholds, contextTick, formatReading, c
 import { sampleContext, storedContext, markAnnounced, agentTranscriptPath } from './lib/context-store.mjs';
 import { loadPolicy, setPolicyValue } from './lib/policy.mjs';
 import { persistDecision } from './persist-check.mjs';
-import { stepWorkCalls, workCallsFact } from './context-check.mjs';
+import { stepWorkCalls, workCallsFact, failStreak } from './context-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 import { buildReport } from './context.mjs';
@@ -570,6 +570,32 @@ test('the lead hears a long hand-back on its next tool call, once per helper', (
   const edit = { session_id: sid, tool_name: 'Read', tool_input: { file_path: '/x' } };
   assert.match(runContextCheck(edit, home), /the last hand-back was 2737 bytes against 600; in the next brief, ask for five lines and a file for the rest/);
   assert.doesNotMatch(runContextCheck(edit, home), /against 600/, 'once per helper');
+});
+
+test('failStreak counts failed reviews since the last PASS, skipping returns with no verdict', () => {
+  // The 0.20.1 release as recorded: two returns had no readable verdict.
+  const r = (verdict, reviewOf, agentId) => ({ agentId, ...(verdict ? { verdict, reviewOf } : {}) });
+  const run = [r('PASS', '1544036', 'a0'), r('FAIL', '24e65315', 'a1'), r('FAIL', '826d997f', 'a2'), r(null, null, 'a3'), r('FAIL', 'fa9d006c', 'a4')];
+  assert.deepEqual(failStreak(run.slice(0, 2)), { count: 1, of: ['24e65315'], key: 'a1' });
+  assert.deepEqual(failStreak(run), { count: 3, of: ['24e65315', '826d997f', 'fa9d006c'], key: 'a4' });
+  assert.equal(failStreak([...run, r('PASS', 'af1c1473', 'a5')]).count, 0);
+  assert.equal(failStreak(undefined).count, 0);
+});
+
+test('the lead hears two failed reviews in a row on its next tool call, once per new failure, as a fact', () => {
+  const home = ctxSandbox();
+  const sid = 'fs-1';
+  const read = { session_id: sid, tool_name: 'Read', tool_input: { file_path: '/x' } };
+  const one = { agentId: 'r1', verdict: 'FAIL', reviewOf: '24e65315aaaa' };
+  const two = { agentId: 'r2', verdict: 'FAIL', reviewOf: '826d997fbbbb' };
+  writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, returned: [one] }));
+  assert.doesNotMatch(runContextCheck(read, home), /in a row/, 'one failure: quiet');
+  const state = JSON.parse(readFileSync(wcSessionFile(home, sid), 'utf8'));
+  writeFileSync(wcSessionFile(home, sid), JSON.stringify({ ...state, returned: [one, two] }));
+  const said = runContextCheck(read, home);
+  assert.match(said, /2 reviews in a row returned FAIL \(of 24e65315, 826d997f\), none PASS since\.$/m);
+  assert.doesNotMatch(said, ORDERS, 'a fact, not an order');
+  assert.doesNotMatch(runContextCheck(read, home), /in a row/, 'once per new failure');
 });
 
 test('the lead hears what helper folders and branches are left on its next tool call, once, never while a helper works', () => {

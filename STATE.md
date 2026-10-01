@@ -2,6 +2,30 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.21.0 — judgment: no test that teaches nothing, no review loop, 2026-10-01
+
+From the owner's correction after 0.20.1: the session had spent $10 on a test
+whose result was predictable, and seven review rounds on cases of one kind its
+own decisions ruled out. Reasoned from that session's record; no eval run, by
+the owner's decision.
+
+- Two failed reviews in a row, with no PASS since, are stated once as a fact
+  on the lead's next tool call: how many, which commits, where the returns
+  are. A return with no readable verdict neither counts nor resets. On the
+  0.20.1 record it would have spoken after the second round.
+- SKILL §2: before a test or experiment beyond the gate, write the expected
+  result and what it would change; one that can be predicted, read or looked
+  up is not run. §5: after a bug fix, look for the same mistake elsewhere.
+  §6: the reviewer's questions carry what Decisions rule out, and a finding
+  there is noted, not a FAIL. §7: the same error or kind of finding twice
+  means naming what they share and fixing that kind once, or ruling it out
+  with the owner.
+- `evaluation.md` "Independent review": why a question that contradicts the
+  recorded threat model loops, and what to do after two failures.
+- The card carries the two habits and the look-elsewhere step; it dropped
+  lines SKILL already holds. 2,176 of 2,200 characters; SKILL 19,987 bytes.
+- Gate: 1263/1263 + 22/22.
+
 ## v0.20.1 — safer clean-up, a fairer ruler, 2026-10-01
 
 From the refusals and the eval ruler seen while releasing 0.20.0 (notes X and Y
@@ -54,47 +78,9 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
 Replayed against `decide()`, each refused line from this session now gives the
 intended answer. Gate: 1260/1260, 22/22.
 
-## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
-
-From the first live run of 0.19.0 (notes A-X in
-`docs/audits/2026-10-01-live-session-notes-0.19.0.md`; plan in
-docs/research/0007-next-phase.md).
-
-- Replies explain in flowing sentences and draw a real diagram when a picture
-  helps, instead of arrows in text (measured: docs/research/0007-eval-explain.md).
-- The run goal and the save point keep the owner's own words, so a resumed
-  session works toward what was asked, not a paraphrase of it.
-- A model the owner names for every helper ("use opus for all of them") covers
-  the whole run; a question, or a sentence that splits the work across models,
-  grants nothing.
-- The merge check reads words where bash splits them: brace groups bash leaves
-  alone stay text, quoted or escaped separators stay in their word, and a
-  heredoc body is read on its own, so writing a file of code is no longer
-  refused and a merge hidden in braces still is. Three independent reviews.
-- Hook lines: the dispatch line gives size and price, in plan mode only this
-  session's plan file counts as a checkpoint, and the run template is shorter.
-- A new case, `side-question-goal`: a side question mid-fix must not replace
-  the fix, and its answer must come from the repo.
-
-- A helper gets the lead's tools, no more: what the lead cannot run, it is not
-  sent to run (SKILL §6). With no shell, helper sends fell from 3/3 to 0/3 in
-  side-question-goal; three-session-continue shows no change (1/3 either way).
-- Grader fixes in side-question-goal: a regex on the file where an LLM judge
-  passed untouched code (note V); two rules read the last message, not the run
-  record. Six rules in other cases still read the record (note X).
-- Dropped to make room: SKILL's "Never `Write` a whole file you could `Edit`.
-  Never `Read` back a file you just wrote." The card carries it at session
-  start and after a summary; the build for other hosts has no card and loses
-  it (note W).
-
-Measured in docs/research/0007-eval-release.md ($10.03 of $15): on five cases
-against no plugin, every grader is level within one run of three; the plugin
-costs about a third more per run. Two earlier leads (drawing, plan questions)
-did not hold at three runs a side. Note X names judges that read a record with
-its middle cut out.
-
 ## Earlier releases
 
+- [v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01](docs/state/v0.20.0.md)
 - [v0.19.0 — plan 0006: a fair ruler, and who can see the data is the owner's call, 2026-10-01](docs/state/v0.19.0.md)
 - [v0.18.0 — plan 0005: checks that read what runs, and a project page, 2026-09-30](docs/state/v0.18.0.md)
 - [v0.17.2 — a merge waits for its checks, 2026-09-30](docs/state/v0.17.2.md)
