@@ -6,7 +6,7 @@
 // write anything, and it does not know about the per-session store; that is
 // lib/context-store.mjs, which imports from here.
 
-import { existsSync, readFileSync, statSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname, relative } from 'node:path';
 import { loadPolicy } from './policy.mjs';
@@ -101,9 +101,25 @@ export const PLANS_DIR = join(homedir(), '.claude', 'plans');
 //     a hook does mid-session), so a written-but-unchanged Pickup can still
 //     read as fresh in that one case. Accepted as the smallest honest check
 //     available without a second store recording Pickup's text across epochs.
-//   - in plan mode only, the newest `*.md` under `plansDir` (the host's own
-//     plan file), because the plan is the checkpoint while a plan is what the
-//     user asked for and helpers may be forbidden to write anything else.
+//   - in plan mode only, the plan file this session's transcript names (the
+//     host's own plan file), because the plan is the checkpoint while a plan is
+//     what the user asked for and helpers may be forbidden to write anything else.
+// The last `planFilePath` this session's transcript names, or null. Plan-mode
+// records carry it; only the tail is read, and it is found by pattern rather
+// than by parsing every line.
+const PLAN_TAIL = 1024 * 1024;
+function ownPlanFile(transcript) {
+  if (!transcript) return null;
+  try {
+    const size = statSync(transcript).size;
+    const text = readRange(transcript, Math.max(0, size - PLAN_TAIL), size);
+    const re = /"planFilePath"\s*:\s*("(?:[^"\\]|\\.)*")/g;
+    let last = null; let m;
+    while ((m = re.exec(text))) { try { last = JSON.parse(m[1]); } catch { /* cut off at the tail's start */ } }
+    return typeof last === 'string' && last.endsWith('.md') ? last : null;
+  } catch { return null; }
+}
+
 // The newest of the same candidates `hasCheckpoint` accepts, as a fact a
 // notice can print: `{ path, mtimeMs }`, or null when none qualifies. Does not
 // change what counts as a checkpoint — only reports which one is newest.
@@ -127,14 +143,16 @@ export function newestCheckpoint(session, reading, { dir = CONTEXT_DIR, runMd = 
     } catch { /* no RUN.md, or it moved: not a checkpoint */ }
   }
   if (permissionMode === 'plan') {
+    // Only the plan file this session's own transcript names: the plans folder
+    // is shared by every project on the machine, so its newest file may be
+    // another session's plan.
+    const fp = ownPlanFile(reading && reading.transcript);
     try {
-      for (const f of readdirSync(plansDir)) {
-        if (!f.endsWith('.md')) continue;
-        const fp = join(plansDir, f);
+      if (fp) {
         const st = statSync(fp);
         if (st.mtimeMs > epochStart) consider(fp, st.mtimeMs);
       }
-    } catch { /* no plans directory on this machine */ }
+    } catch { /* the named plan file is gone */ }
   }
   return best;
 }
