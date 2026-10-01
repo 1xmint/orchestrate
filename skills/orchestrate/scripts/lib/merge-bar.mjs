@@ -201,9 +201,19 @@ function braceItems(inner) {
 // separators). Such a line runs one gh read and nothing else, so
 // `gh pr view 36 --json mergeable` passes.
 const READS = new Set(['view', 'checks', 'list', 'status', 'diff']);
+// One leading `cd <plain path>` followed by ; or && is allowed before that
+// read: it only moves where gh runs. The path has none of $ ` ( ) { } | & ; < >
+// (a quoted one may hold spaces) and no second cd can follow.
+const CD_PREFIX_RE = /^cd\s+(?:"[^"$`(){}|&;<>\\]*"|'[^'$`(){}|&;<>\\]*'|[^\s"'$`(){}|&;<>\\-][^\s"'$`(){}|&;<>\\]*)\s*(?:;|&&)\s*(\S[\s\S]*)$/;
 function readsOnly(line) {
   const text = String(line || '').trim();
   if (!text || /[\r\n]/.test(text)) return false;
+  const cd = CD_PREFIX_RE.exec(text);
+  return readsOnlyGh(cd ? cd[1] : text);
+}
+function readsOnlyGh(line) {
+  const text = String(line || '').trim();
+  if (!text) return false;
   const words = text.split(/\s+/);
   if (!GH.test(words[0].toLowerCase()) || !words.every(w => /^[\w./:=,@#+-]+$/.test(w))) return false;
   let i = 1;

@@ -174,31 +174,51 @@ function gitFolders(seg) {
 const FORCE_FLAGS = new Set(['-f', '-ff', '--force']);
 const isHelperPath = p => !p.split('/').includes('..') && p.includes('.claude/worktrees/');
 
-// Whether the folder holds work git has not saved. A folder that is not there
-// counts as clean; one git cannot read counts as not clean.
-function worktreeIsDirty(folder) {
-  if (!existsSync(folder)) return false;
-  try {
-    const r = spawnSync('git', ['status', '--porcelain'], { cwd: folder, encoding: 'utf8', timeout: 15000 });
-    return r.status !== 0 || String(r.stdout || '').trim() !== '';
-  } catch { return true; }
+// Git Bash spells a drive as /c/rest; Node on Windows would read that as
+// C:\c\rest, a folder that is not there. Translate it to C:/rest on win32
+// only. Pure, so it can be tested with a platform argument.
+export function gitBashPath(p, platform = process.platform) {
+  const m = platform === 'win32' ? /^\/([a-zA-Z])(\/.*)?$/.exec(String(p)) : null;
+  return m ? `${m[1].toUpperCase()}:${m[2] || '/'}` : String(p);
 }
 
-// Removing a helper folder under .claude/worktrees/, forced or not, alone or in
-// a chain, passes only when the folder has no uncommitted changes.
+// Whether the folder holds work git has not saved: 'clean', 'dirty', or
+// 'unknown' (git could not read it). A folder that is not there is 'clean'
+// only when the caller says so (helper folders); otherwise it is 'unknown'.
+function worktreeState(folder, missingIsClean) {
+  if (!existsSync(folder)) return missingIsClean ? 'clean' : 'unknown';
+  try {
+    const r = spawnSync('git', ['status', '--porcelain'], { cwd: folder, encoding: 'utf8', timeout: 15000 });
+    if (r.status !== 0) return 'unknown';
+    return String(r.stdout || '').trim() !== '' ? 'dirty' : 'clean';
+  } catch { return 'unknown'; }
+}
+
+// Removing a helper folder under .claude/worktrees/ (forced or not), or any
+// other folder removed with force, alone or in a chain, passes only when the
+// folder has no uncommitted changes. A forced removal of a folder that is
+// missing or unreadable cannot be told apart from lost work, so it is refused.
 function worktreeRemoveRule(cmd, cwd) {
-  for (const seg of cmd.split(/&&|;/)) {
+  for (const part of cmd.split(/&&|;|\|\|/)) {
+    const seg = withoutStderrJoin(part).split(/[|<>]/)[0];
     const t = plainGit(seg).trim().split(/\s+/);
     if (t[0] !== 'git' || t[1] !== 'worktree' || t[2] !== 'remove') continue;
-    const base = resolvePath(cwd || process.cwd(), ...gitFolders(seg));
+    const forced = t.slice(3).some(a => FORCE_FLAGS.has(a));
+    const base = resolvePath(cwd || process.cwd(), ...gitFolders(seg).map(f => gitBashPath(f)));
     for (const raw of t.slice(3)) {
       if (raw.startsWith('-')) continue;
       const path = normSlashes(unquote(raw));
-      if (!isHelperPath(path.toLowerCase())) continue;
+      const helper = isHelperPath(path.toLowerCase());
+      if (!helper && !forced) continue;
       let folder;
-      try { folder = resolvePath(base, path); } catch { continue; }
-      if (worktreeIsDirty(folder)) {
-        return { name: 'worktree-remove-dirty', reason: `This would delete the helper folder ${path}, which still has changes that were never saved to git. ${ASK_TAIL}` };
+      try { folder = resolvePath(base, gitBashPath(path)); } catch { continue; }
+      const state = worktreeState(folder, helper);
+      const what = helper ? 'the helper folder' : 'the folder';
+      if (state === 'dirty') {
+        return { name: 'worktree-remove-dirty', reason: `This would delete ${what} ${path}, which still has changes that were never saved to git. ${ASK_TAIL}` };
+      }
+      if (state === 'unknown') {
+        return { name: 'worktree-remove-unknown', reason: `This would force-delete ${what} ${path}, and this check cannot tell whether it holds work that was never saved to git (the folder is not there under that name, or git could not read it). ${ASK_TAIL}` };
       }
     }
   }
@@ -242,8 +262,7 @@ function isSafeWorktreeCleanupChain(cmd) {
     if (t[1] === 'worktree' && t[2] === 'remove' && t.length > 3) {
       for (const raw of t.slice(3)) {
         if (FORCE_FLAGS.has(raw)) continue;
-        const path = normSlashes(unquote(raw)).toLowerCase();
-        if (path.startsWith('-') || !isHelperPath(path)) return false;
+        if (unquote(raw).startsWith('-')) return false;
       }
       continue;
     }
@@ -311,13 +330,13 @@ function chainRestIsSafe(raw, flags) {
       if (!isPlainBranchDelete(seg, flags)) return false;
       deletes++;
     } else if (/^git\s+worktree\s+remove\b/.test(seg)) {
-      // A folder removal is only part of the safe shape when every path is a helper folder.
+      // A plain folder removal of any path is part of the safe shape: the
+      // unsaved-work check (worktreeRemoveRule) runs before this one.
       const t = seg.split(/\s+/);
       if (t.length < 4 || CHAIN_META_RE.test(seg)) return false;
       for (const raw of t.slice(3)) {
         if (FORCE_FLAGS.has(raw)) continue;
-        const path = normSlashes(unquote(raw)).toLowerCase();
-        if (path.startsWith('-') || !isHelperPath(path)) return false;
+        if (unquote(raw).startsWith('-')) return false;
       }
     } else if (!segmentPasses(seg)) return false;
   }
@@ -529,6 +548,13 @@ function decideOne(command, ctx = {}) {
   // A branch delete that nobody can approve: say in plain words what is refused
   // and what works instead, with nothing about modes or files to repeat.
   if (hit.name === 'branch-delete-local' && (ctx.subagent || ctx.headless)) {
+    const allLower = segmentsOf(withoutStderrJoin(cmd)).filter(isBranchDeleteSeg).every(s => /\s(-d|--delete)(\s|$)/.test(s) && !/\s(-D|--force-delete)(\s|$)/.test(s) && !/\s-[a-zA-Z]*D[a-zA-Z]*(\s|$)/.test(s));
+    if (allLower) {
+      const parts = segmentsOf(withoutStderrJoin(cmd));
+      const part = parts.find(s => isBranchDeleteSeg(s) ? !isPlainBranchDelete(s, ['-d', '--delete']) : !segmentPasses(s)) || String(command).trim();
+      const shown = part.length > 60 ? `${part.slice(0, 60)}…` : part;
+      return { kind: 'deny', reason: `The branch delete already uses the lowercase flag, so that is not what is refused. What this check does not pass is: "${shown}". Run the rest on its own, or leave this part and tell the user. Nothing was run.` };
+    }
     const small = 'Deleting with the lowercase flag works for any branch that has been merged: git branch -d <name>. Git itself refuses it if the work was never merged.';
     return { kind: 'deny', reason: (isChainSafeExceptForcedDelete(cmd)
       ? `The helper folders can be removed, but the forced branch delete cannot. ${small}`
