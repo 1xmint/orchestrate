@@ -12,7 +12,7 @@ written then. They were copied here after approval.
 
 ## Start checks
 
-- The loaded plugin folder is `C:\Users\Josh\.claude\plugins\cache\orchestrate\orchestrate\0.18.0`.
+- The loaded plugin folder is `~/.claude/plugins/cache/orchestrate/orchestrate/0.18.0`.
   `installed_plugins.json` says version 0.18.0, commit `19d4cb1`.
 - context7 resolved "Claude Code" to `/websites/code_claude` and answered a docs lookup about the
   `UserPromptSubmit` hook's `additionalContext`.
@@ -37,11 +37,11 @@ last edit"* appeared when nothing had been edited this session. *Wrong.* 2026-09
 
 **E. An order in plan mode.** *"~109k · newest checkpoint: none · 5 tool calls since your last edit
 · write the checkpoint now (goal, decisions, files changed, verification, next action) to
-C:\Users\Josh\.claude\orchestrate\context\…\checkpoint-….md"* In plan mode only the plan file can be
+~/.claude/orchestrate/context/…/checkpoint-….md"* In plan mode only the plan file can be
 written, so this could not be followed. It also breaks AGENTS.md's "Hooks state facts the lead cannot
 see; they do not give orders." *Got in the way:* it was ignored, at a small cost in attention.
 After the plan file was written, the line named the plan file as the newest checkpoint: *"newest
-checkpoint: C:\Users\Josh\.claude\plans\note-from-josh-i-sorted-simon.md, just now"*. That was a
+checkpoint: ~/.claude/plans/<plan>.md, just now"*. That was a
 reasonable reading.
 
 **F. The hand-back size note.** *"the last hand-back was 8580 bytes against 600; in the next brief,

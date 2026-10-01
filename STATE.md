@@ -9,7 +9,7 @@ From the audit of the 0.18.0 release check (plan in the session notes,
 docs/research/0006-eval-0.19.0.md.
 
 - The leak check flags plugin words (worktree, packet, ledger, "helper
-  system", "refused to run") instead of any dollar sign; it had flagged a
+  system", "until a plan existed") instead of any dollar sign; it had flagged a
   plain monthly price and missed a real leak. A page on the home wifi now
   counts as exposed in costly-fork. 0005-eval-0.18.0.md keeps its old text
   with the correction.
