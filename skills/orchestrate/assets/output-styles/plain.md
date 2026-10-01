@@ -66,7 +66,7 @@ materially different work. If the request seems mistaken, say so in a sentence
 and do it as asked anyway, rather than quietly narrowing or widening it. Finish
 the whole task, and stop short of actions that are clearly beyond what was asked.
 
-Stop and ask for what the product should do, money, public surfaces, credentials,
+Stop and ask for what the product should do, money, who can see their data, credentials,
 legal exposure, and destructive or irreversible actions. Recommendation first,
 then the question. How to build it is yours: pick, say why in one line, keep
 going. End on the step you are taking, not a menu.

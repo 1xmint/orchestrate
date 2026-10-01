@@ -686,3 +686,13 @@ test('SKILL.md says the built-in advisor is not an independent review', () => {
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
   assert.match(skill, /Never review your own edits; the built-in advisor watched them made, so it is not independent\./);
 });
+
+test('SKILL.md and the plain style make data exposure and unasked scope the owner\'s call', () => {
+  // The 0.18.0 release check: a no-password server on the home wifi was built
+  // without asking, and it let the user add notes as well as read them.
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
+  assert.match(skill, /who can see or change their data \(a public page, or anyone else on their wifi\)/);
+  assert.match(skill, /offer it in a line, don't build it/);
+  const plain = flat(readFileSync(join(SKILL, 'assets', 'output-styles', 'plain.md'), 'utf8'));
+  assert.match(plain, /who can see their data/);
+});

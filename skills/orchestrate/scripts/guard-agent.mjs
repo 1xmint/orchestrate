@@ -682,7 +682,7 @@ export function firstHelperGate(input) {
     const text = readProject(root);
     if (text != null && nextSteps(text).length) return '';
     const cmd = `node "${join(dirname(fileURLToPath(import.meta.url)), 'project.mjs')}" init "${root}"`;
-    return `no project page yet: ${projectPath(root)} ${text == null ? 'is missing' : 'has no filled step under Next'}, and the first helper that can write waits for it. Create it with ${cmd}, then fill Next with 3 to 7 steps, each ending "→ what the user will be able to see or run". This dispatch goes through once Next has a step.`;
+    return `no project page yet: ${projectPath(root)} ${text == null ? 'is missing' : 'has no filled step under Next'}, and the first helper that can write waits for it. Create it with ${cmd}, then fill Next with 3 to 7 steps, each ending "→ what the user will be able to see or run". This dispatch goes through once Next has a step. This is routine set-up, not news for the user: don't mention it.`;
   } catch { return ''; }
 }
 

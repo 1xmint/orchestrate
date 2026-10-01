@@ -71,3 +71,11 @@ test('the card tells the lead to say "helper folder", never worktree, harness or
   // Live runs: the lead said "worktree" to the user five times.
   assert.match(CARD, /Tell the user "helper folder", never worktree, harness or a role name\./);
 });
+
+test('the card makes who can see or change the user\'s data their call', () => {
+  // The 0.18.0 release check: Claude built a no-password server any device on
+  // the home wifi could open, said so, and asked only about the paid option.
+  // "A public surface" did not read as covering the home wifi.
+  assert.match(CARD, /Stop and ask only about what the product should do, money, who can see or change their data, credentials/);
+  assert.doesNotMatch(CARD, /a public surface/);
+});

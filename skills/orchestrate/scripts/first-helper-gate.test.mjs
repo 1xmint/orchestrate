@@ -49,6 +49,9 @@ test('a first writing dispatch with no page is held, naming the file and the com
   assert.match(a.reason, /PROJECT\.md is missing/);
   assert.match(a.reason, /project\.mjs" init /);
   assert.match(a.reason, /fill Next/);
+  // A 0.18.0 release-check reply told the user "the helper system refused to
+  // run anything until a plan existed on file". Routine set-up is not news.
+  assert.match(a.reason, /routine set-up, not news for the user/);
 });
 
 test('a page whose Next is still blanks holds it too; a filled Next lets it through', () => {
