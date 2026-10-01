@@ -235,8 +235,8 @@ A return that used every turn is **partial** whatever it says; if what is
 left is small, SendMessage it while warm; otherwise a
 fresh, smaller packet from its PROGRESS file and branch.
 
-Every dispatch arrives with a price tag from the guard, in list-price dollars.
-Say it once, before the spend, when large enough to matter — never a running
+Every dispatch arrives with a size from the guard; in dollars on per-use
+billing or a ceiling. Say it once, before the spend, when large enough to matter — never a running
 total.
 
 ## 6. Prove it, proportionately

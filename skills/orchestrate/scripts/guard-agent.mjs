@@ -483,19 +483,6 @@ export function estimateWording(tag) {
   return t.replace(/^price tag: /, 'estimate before work, this helper: ').replace(', not subscription usage', '');
 }
 
-// The opposite fact from progressFact: a packet that does name a PROGRESS
-// path, for a helper that may be working in its own worktree and so cannot
-// write under the main checkout the path is written relative to. Said once,
-// plainly, so a refused write is not a dead end.
-export function progressWorktreeNote(role, prompt, planMode, readFile = readFileSync) {
-  if (planMode) return '';
-  if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
-  const text = String(prompt || '');
-  const has = /^\s*PROGRESS:\s*\S+/m.test(text) || /^\s*PROGRESS:\s*\S+/m.test(briefText(text, readFile).text);
-  if (!has) return '';
-  return 'if writing the progress file is refused, write the same relative path inside your own separate folder instead, and say so in your return';
-}
-
 // A fact, not an order, said only on an orch-implementer dispatch: Codex was
 // last probed inside CODEX_OK_FRESH_MS and answered signed in, and the account
 // is not sitting out a usage limit right now. The guard never starts Codex to
@@ -648,8 +635,6 @@ function main() {
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = missingFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
-  const pw = progressWorktreeNote(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
-  if (pw) tag = `${tag ? `${tag}; ` : ''}${pw}`;
   const cf = codexFact(ti.subagent_type);
   if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
   if (asksForPastedContents(ti.prompt)) tag = `${tag ? `${tag}; ` : ''}this brief asks for contents to be pasted back: the hand-back is five lines, so ask for a file path instead`;

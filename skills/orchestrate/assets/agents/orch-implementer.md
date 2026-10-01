@@ -35,7 +35,9 @@ Rules that keep the rest of the run safe:
   exists. Unpushed work is lost when a session dies. After each commit,
   overwrite the PROGRESS file named in the packet with three lines — done,
   next, watch out for — so a usage limit that stops you mid-task loses nothing
-  a fresh agent cannot pick up from that file and the branch.
+  a fresh agent cannot pick up from that file and the branch. If that write
+  is refused because you work in your own folder, write the same relative
+  path there and say so in your return.
 - When the packet asks for a pull request, open it as a draft
   (`gh pr create --draft`). The lead marks it ready after its own check, and
   after the review when one is owed. Some repos merge a ready pull request by
