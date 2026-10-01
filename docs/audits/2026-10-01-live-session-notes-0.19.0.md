@@ -144,3 +144,51 @@ refusal was a heredoc appending this note to a file: prose that says merge and g
 file-text filter does not strip because it is not a plain line. *Got in the way:* two wasted calls,
 and a lead told it was merging when it was not. A fix: look for gh inside one shell word, not across
 words; a guard change, so it goes to the same independent review as step 3.
+
+**T. Independent review caught what the tests did not, three rounds running.** Each round of the
+grant and merge-check change went to a fresh Opus reviewer before the pull request could leave
+draft. Round 1 failed the run grant: scope words anywhere within 80 characters made a grant for the
+whole run ("use opus for this one; all tasks after it on sonnet" did). Round 2 failed two points: a
+question ("should we use opus for every task?") or a split ("reviewers on opus, implementers on
+sonnet") still granted; and in the over-64-copies rule a quoted or escaped separator inside braces
+(`g{";",}h`) split one bash word in two, so a merge passed that 0.19.0 refused. Fixing round 1 had
+also opened three nested-brace bypasses (`g{h,{x}}`), found by probing before the review. *Served:*
+rigorous; the review gate is what held, not the author's own tests. *Held by:* each finding is now a
+test in `router.test.mjs` or `guard-bash.test.mjs`.
+
+**U. The root of note S was a heredoc, not the braces.** While fixing round 2, the installed 0.19.0
+check refused writing this release's own eval fixture with `cat > file <<'EOF'`. The cause was that
+the body of a heredoc (the file text between `<<'EOF'` and `EOF`) was read as command text. Bash
+never expands braces or reads quotes there, but the check did: JSON or JavaScript in it made more
+than 64 copies, and an apostrophe ("shop's") opened a quote that swallowed the rest. Each body is
+now read on its own, word by word, so a file of code passes and a body fed to `bash` is still
+caught. *Held by:* `guard-bash.test.mjs` "words split where bash splits them".
+
+**Smaller lines (plan step 4).** J: the dispatch line gives size and price; the helper's fallback
+sentence lives in its role file, not the lead's line. P: in plan mode only a plan file this
+session's transcript names counts as a checkpoint. I: the RUN.md template lost its Budget and Shape
+boilerplate. Left as they are, with the reason: D ("latest run" is the bound pointer on purpose, not
+the newest folder, so a resumed older run stays the one hooks write to) and E (the edit-count line
+already waits for a first edit; the one gap left, at the helper-size line, is pinned by a test).
+
+**V. A judge passed untouched code.** Starting the release eval, the new side-question case was
+refused before any turn ran (a shell grant this Windows machine cannot fence in). Its "fixed the
+total" grader still ran: an LLM judge read the untouched receipt code, `return sub - codes[code];`,
+was told in the rubric to trace 50 with SAVE10 by hand, and voted PASS in all six runs, both sides.
+*Got in the way:* a measurement that would have credited both sides with a fix nobody made. *Fix:*
+that grader is now a pattern on the file (a percent is taken: `/ 100` or `* 0.01`), checked against
+the wrong line and four right ones. Five older graders judge a file the same way
+(page-actually-works, prices-two-decimals, parser-keeps-last-row,
+resume-file-has-what-a-restart-needs, done-is-wired-up); none is shown wrong, but none was ever
+tried against the untouched file. *Held by:* the release write-up checks parser-keeps-last-row's
+passes against what each run changed.
+
+**W. A helper was sent to do what the lead could not.** In the release eval's pilot (no shell, as
+on this machine), the plugin side asked a helper to run `node --test` in 3 of 3 runs; each was
+refused, since a helper gets the same tools as the lead. It cost $0.30-0.49 and 67-122 seconds
+against $0.18 and 25 seconds without the plugin, for the same final answer. 0.19.0's
+three-session runs showed it once. *Cause:* SKILL §3 sends "a build or test suite" to a worker and
+never says a worker's tools are the lead's. *Fix:* one clause there: "A worker has your tools, no
+more: what you cannot run, it cannot." The room came from dropping the Write/Read sentence the card
+repeats every turn. *Held by:* side-question-goal's cost and turns, both sides, in the release
+eval.

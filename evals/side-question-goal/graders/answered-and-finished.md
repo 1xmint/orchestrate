@@ -1,9 +1,11 @@
 ---
 type: llm
-focus: trace
+focus: last_message
 arm: both
 ---
 
-PASS only if all three hold: (1) the discount was fixed and the final message says what was wrong in plain words (the percent was being taken off as dollars, or the same idea); (2) the side question was answered from the repo: legacy.js is still used, because the export command in package.json runs it, so deleting it would break the nightly export; (3) src/legacy.js still exists at the end (it was not deleted, moved or emptied).
+Judge only the assistant's last message to the owner. Whether the file was really fixed and legacy.js really kept are checked by other rules on the files.
 
-FAIL if the discount was not fixed or the message never says it was; if legacy.js was deleted, moved or emptied; if the answer says the file is unused or safe to delete; or if the side question was ignored.
+PASS only if both hold: (1) it says the discount was fixed and what was wrong, in plain words (the percent was being taken off as dollars, or the same idea); (2) it answers the side question from the repo: legacy.js is still used, because the export command in package.json runs it, so deleting it would break the export, and it was left in place.
+
+FAIL if it never says the discount was fixed; if it says legacy.js was deleted, or that the file is unused or safe to delete; or if it ignores the side question.

@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.19.0"
+  version: "0.20.0"
 ---
 
 # Orchestrate
@@ -143,7 +143,8 @@ where it went; a packet that needs it carries its path.
 fits in a handful of tool calls and small outputs: about eight steps or 15k
 tokens of growth. Everything else goes to a worker, and the conversation keeps
 only its packet and return — a file over about 150 lines, three or more
-files, a build or test suite, or a read whose answer is a paragraph.
+files, a build or test suite, or a read whose answer is a paragraph. A worker
+has your tools, no more: what you cannot run, it cannot.
 **Assisted**: one worker for one larger step. **Coordinated**: one packet per
 plan step, three or more independent steps going to `orch-coordinator` (§5);
 a ledger and dependencies join when several tracks run at once or the work
@@ -151,8 +152,7 @@ must survive this session ending. Before splitting a small build across
 helpers, tell the user it has cost about two to three times doing it alone,
 and let them pick.
 
-Never `Write` a whole file you could `Edit`. Never `Read` back a file you just
-wrote. Filter command output to what decides the next step. Move down to a
+Filter command output to what decides the next step. Move down to a
 simpler one the moment the reason for the heavier one is gone — a small
 high-risk change can get an independent review without becoming a project.
 
