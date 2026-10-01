@@ -46,6 +46,7 @@ import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR, limits
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
+import { projectNote } from './lib/project.mjs';
 import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
@@ -417,10 +418,23 @@ function handlePrompt(input) {
   // A brand-new session's first prompt naming no goal of its own — "continue"
   // is one word and never trips the substantive gate above, so this checks
   // for it on its own. Said once per session, whether or not the card fired.
+  // The project page answers "continue what?" when there is one; only without
+  // it does the previous session's own words stand in.
   if (freshSession && !state.handoffShown && continueIntent(trimmed)) {
-    const prev = findPreviousSession({ sessionsDir: SESSIONS_DIR, cwd: input.cwd, exceptId: input.session_id, now: Date.now() });
-    if (prev) out.push(handoffLine(prev, ctx));
+    const page = projectNote(ctx.repoRoot, input.cwd);
+    if (page) { out.push(page); state.projectShown = true; markShown(state, substantive ? 1 : 0); }
+    else {
+      const prev = findPreviousSession({ sessionsDir: SESSIONS_DIR, cwd: input.cwd, exceptId: input.session_id, now: Date.now() });
+      if (prev) out.push(handoffLine(prev, ctx));
+    }
     state.handoffShown = true;
+  }
+
+  // The project page, once per session at its first real request: it is the one
+  // place the plan and the purpose live, so it is in view from the start.
+  if (substantive && freshSession && !state.projectShown) {
+    const page = projectNote(ctx.repoRoot, input.cwd);
+    if (page) { out.push(page); state.projectShown = true; markShown(state, 1); }
   }
 
   // Said once, after the state line rather than before it: a question, not a
@@ -485,7 +499,9 @@ function handlePrompt(input) {
 
   // The goal, as one fact, on every tenth prompt since it was last shown; on the
   // others nothing is added. Compaction and resume show it in handleSessionStart.
-  if (substantive && goalDue(state)) {
+  // With a project page the goal line is not repeated: the page is re-shown at
+  // the moments that matter and keeps the purpose in view.
+  if (substantive && goalDue(state) && !projectNote(ctx.repoRoot, input.cwd)) {
     const g = readGoal({ cwd: input.cwd, root: ctx.repoRoot, session: input.session_id, runMd: ctx.run && ctx.run.runMd, state });
     if (g) { out.push(goalLine(g)); markShown(state, 1); }
   }
@@ -579,7 +595,11 @@ function handleSessionStart(input) {
   // The goal, once: an open run's excerpt above already printed its Goal and Done
   // when, so only without a run is it added here.
   if (!state.muted) {
-    if (ctx.run) markShown(state);
+    // The project page when there is one, with or without a run; else the old
+    // sources below.
+    const page = projectNote(ctx.repoRoot, input.cwd);
+    if (page) { out.push(page); state.projectShown = true; markShown(state); }
+    else if (ctx.run) markShown(state);
     else {
       const g = readGoal({ cwd: input.cwd, root: ctx.repoRoot, session: input.session_id, state });
       if (g) { out.push(goalLine(g)); markShown(state); }

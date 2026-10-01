@@ -78,6 +78,17 @@ export function projectHead(text, cap = HEAD_CAP) {
   return out;
 }
 
+// The shown form: the head of the first of `roots` that has a filled page, as
+// one labelled block; '' when there is none. The router prints this at a
+// session's first prompt, after a compaction, on resume and on "continue".
+export function projectNote(...roots) {
+  for (const r of roots) {
+    const head = projectHead(readProject(r));
+    if (head) return `[orchestrate · project] ${PROJECT_REL.replace(/\\/g, '/')}\n${head}`;
+  }
+  return '';
+}
+
 // Copies the template to <root>/.orchestrator/PROJECT.md when absent. Returns
 // { path, action: 'created' | 'exists' | 'would-create' | 'failed' }.
 export function ensureProject(root, { dryRun = false } = {}) {
