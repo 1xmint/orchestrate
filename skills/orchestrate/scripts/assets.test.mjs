@@ -266,7 +266,11 @@ test('assets/packet.md carries every field a dispatch needs', () => {
   assert.ok(packet.includes('ROLE: advisor'), 'the advisor packet is here too');
   // 7,000 until the commit-before-the-cap sentence (two lines) joined the intro.
   assert.ok(packet.includes('commit each piece'), 'helpers are told to commit before the cap');
-  assert.ok(packet.length < 7200, `packet.md is ${packet.length} bytes; it exists to be small`);
+  // 7,200 until the two research fields (two lines) joined it in 0.19.0:
+  // orch-researcher.md asks its packet for the counterexample and how far from
+  // a primary source an answer may sit, and the template offered neither.
+  assert.ok(packet.includes('KILLS IT:') && packet.includes('SOURCE:'), 'a research packet can carry what the researcher asks for');
+  assert.ok(packet.length < 7400, `packet.md is ${packet.length} bytes; it exists to be small`);
 });
 
 // The lead reads the top of a return first, so every role opens with the same
@@ -288,7 +292,7 @@ test('packet.md carries a FOR line and the five-line top, ahead of the parsed la
   assert.ok(inOrder(packet, [...TOP, 'TASK: <the id above', 'STATUS:', 'EVIDENCE:', 'NOT VERIFIED:']),
     'five labels, then the parsed ones, in order');
   for (const l of ['TASK:', 'STATUS:', 'EVIDENCE:', 'NOT VERIFIED:']) assert.ok(packet.includes(l), l);
-  assert.ok(packet.length < 7200, 'the packet cap still holds');
+  assert.ok(packet.length < 7400, 'the packet cap still holds');
 });
 
 test('every role file tells a helper to hand back the five lines only, and why', () => {

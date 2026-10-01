@@ -57,6 +57,8 @@ GATE: <commands from .orchestrator/gate.json, verbatim, with where each came
                                   agent cannot see (AGENTS.md is not loaded)
 VERIFY LIVE: <anything about an external service, CLI, library version or price
        the agent must confirm from a current source before relying on it>
+KILLS IT: <the finding that would overturn the answer>     research
+SOURCE: <primary only | vendor doc or changelog | an issue will do>  research
 PRIOR ATTEMPTS: <what was tried, the literal error, what not to repeat>
 MAP: <abs path to map.md> — read before searching; `map.mjs who-uses|deps
        <file>` for structure, LSP for exact references, grep for text

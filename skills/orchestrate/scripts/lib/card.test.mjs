@@ -47,7 +47,7 @@ test('the card names the helper kinds, and its builder advice clears the guard o
   // guard as "work in the shared checkout"); only the seventh call passed.
   const { workflowDecision } = await import('./workflow.mjs');
   const { loadPolicy } = await import('./policy.mjs');
-  assert.match(CARD, /Builders: orch-implementer on sonnet, own worktree \(worktree: yes\); finders: Explore or orch-researcher on haiku\./);
+  assert.match(CARD, /Builders: orch-implementer on sonnet, own worktree \(worktree: yes\); finders: Explore on haiku, orch-researcher on sonnet\./);
   const packet = 'Build lib/add.js; notes are kept in notes.json in the project root.';
   const ti = p => ({ subagent_type: 'orch-implementer', model: 'sonnet', prompt: p });
   const opts = { policy: loadPolicy(null), installed: 8, missing: [] };
@@ -78,4 +78,20 @@ test('the card makes who can see or change the user\'s data their call', () => {
   // "A public surface" did not read as covering the home wifi.
   assert.match(CARD, /Stop and ask only about what the product should do, money, who can see or change their data, credentials/);
   assert.doesNotMatch(CARD, /a public surface/);
+});
+
+test('the model the card names for each helper matches that helper\'s own definition', async () => {
+  // The card said "orch-researcher on haiku" while the agent file and the
+  // routing table said sonnet, and the guard holds a researcher at sonnet. A
+  // lead that took the card at its word was steered one way by the card and
+  // the other by the guard.
+  const { readFileSync } = await import('node:fs');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const agents = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'agents');
+  for (const m of CARD.matchAll(/(orch-[a-z]+) on (haiku|sonnet|opus|fable)/g)) {
+    const def = readFileSync(join(agents, `${m[1]}.md`), 'utf8');
+    const model = def.match(/^model:\s*(\S+)/m)?.[1];
+    assert.equal(model, m[2], `the card says ${m[1]} on ${m[2]}; its definition says ${model}`);
+  }
 });
