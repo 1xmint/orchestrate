@@ -95,6 +95,19 @@ the code rests on them, and each costs a fix round dearer than the review.
 When the design cannot answer one, have the reviewer read that part of the
 design before the build.
 
+Write each question inside what is already decided. If Decisions say a check
+catches accidents and not disguised input, "can a dangerous command pass
+anywhere?" contradicts them: every round finds one more disguise, each a real
+case, and the loop never ends. Ask "does the plain form the user actually types
+pass?" and give the reviewer the out-of-scope list from Decisions; a finding
+there is noted for the owner, not a FAIL. One release went seven rounds this
+way, each fixing a new case of a kind the decisions had already ruled out.
+
+Two failures in a row: before the next fix, name what their findings share. If
+it is one kind (another disguise, another place the same check is missing),
+fix the kind once, such as refusing what the check cannot read, or take it to
+the owner as a scope question. A third round on the same kind is the loop.
+
 The reviewer runs on Opus or stronger; the guard refuses less, because a PASS
 from the author's own model cannot be banked. Send it when the change is
 pushed, beside CI, not after CI. A review that cannot stop the merge is not a

@@ -150,6 +150,23 @@ export function workCallsFact(count, every) {
   return `${count} work calls since your last dispatch`;
 }
 
+// Failed reviews since the last PASS, newest last. A return with no readable
+// verdict neither counts nor breaks the run: a reply the parser missed is not
+// a pass.
+export function failStreak(returned) {
+  const of = [];
+  let key = null;
+  const list = Array.isArray(returned) ? returned : [];
+  for (let i = list.length - 1; i >= 0; i--) {
+    const v = list[i] && list[i].verdict;
+    if (v === 'PASS') break;
+    if (v !== 'FAIL') continue;
+    if (key == null) key = String(list[i].agentId || list[i].toolUseId || list[i].at || i);
+    of.unshift(String(list[i].reviewOf || '?').slice(0, 8));
+  }
+  return { count: of.length, of, key };
+}
+
 function progressFact(progress) {
   if (!progress || !progress.path) return 'progress file: none given';
   if (progress.minutesAgo == null) return `progress file: ${progress.path}, not written yet`;
@@ -295,6 +312,16 @@ export function check(input) {
       longTold = true;
       break;
     }
+    // Reviews that keep failing: said once per new failure from the second in a
+    // row, as a fact, while the next fix is still to be chosen. A run once went
+    // seven rounds, each a new case of the same kind the decisions ruled out.
+    const streak = failStreak(state.returned);
+    let streakTold = false;
+    if (streak.count >= 2 && state.failStreakTold !== streak.key) {
+      out.push(`[orchestrate · context] ${streak.count} reviews in a row returned FAIL (of ${streak.of.join(', ')}), none PASS since; each full return is in the run's returns/ folder.`);
+      state.failStreakTold = streak.key;
+      streakTold = true;
+    }
     if (workCallsChanged) state.workCalls = { count: workCalls };
     const workChanged = trackWork(state, input);
     const returnChanged = markDispatchReturn(state, input);
@@ -313,7 +340,7 @@ export function check(input) {
         state.leftoverTold = true;
       }
     }
-    if (leftoverTold ||(state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
+    if (leftoverTold || streakTold || (state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
   } else if (workCallsChanged) {
     try { saveSession({ v: 1, session_id: session, started: new Date().toISOString(), workCalls: { count: workCalls } }); } catch {}
   }
