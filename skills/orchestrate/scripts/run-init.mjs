@@ -24,6 +24,9 @@ import { fileURLToPath } from 'node:url';
 import { detect, block } from './gate.mjs';
 import { build as buildMap } from './map.mjs';
 import { rememberActiveRun, bindSessionRun, readRun, loadSession } from './lib/tier.mjs';
+import { findSessionTranscript } from './lib/context-store.mjs';
+import { ownerTextOf } from './lib/compaction-snapshot.mjs';
+import { clipWords } from './lib/goal.mjs';
 
 // The newest `~/.claude/plans/*.md` touched after `sinceMs`, or null. Without
 // a session-start time there is nothing to compare against, so this returns
@@ -40,6 +43,39 @@ function freshPlanFile(sinceMs) {
     }
     return best ? best.path : null;
   } catch { return null; }
+}
+
+// The owner's own words, from this session's transcript: the newest message
+// they typed and, when that is a short reply ("yes, go ahead"), the longest of
+// the few before it as well. A Goal written only in the lead's words drifts
+// from what was asked (live note Q). No transcript, no quote.
+const QUOTE_CAP = 1200;
+function ownerWords(sessionId) {
+  const p = findSessionTranscript(sessionId);
+  if (!p) return [];
+  let text;
+  try { text = readFileSync(p, 'utf8'); } catch { return []; }
+  const said = [];
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; }
+    const t = ownerTextOf(rec).replace(/\s+/g, ' ').trim();
+    if (t) said.push(t);
+  }
+  if (!said.length) return [];
+  const words = t => t.split(' ').length;
+  const newest = said[said.length - 1];
+  if (words(newest) >= 12) return [newest];
+  const earlier = said.slice(-5, -1).sort((a, b) => b.length - a.length)[0];
+  return earlier && words(earlier) > words(newest) ? [earlier, newest] : [newest];
+}
+
+function goalText(opts) {
+  const quoted = opts['session-id'] ? ownerWords(opts['session-id']) : [];
+  if (!quoted.length) return opts.goal || '<goal in the user\'s words, then the objective in yours>';
+  const q = quoted.map(t => `"${clipWords(t, QUOTE_CAP)}"`).join(' Then: ');
+  return `The owner's words, quoted from the session: ${q}\n\nThe lead's reading: ${opts.goal || '<the objective in yours>'}`;
 }
 
 // The session's own start time, when `--session-id` names one this process
@@ -165,7 +201,8 @@ const idPrefix = `${now.getMonth() + 1}-${now.getDate()}`;
 const body = template
   .replaceAll('{{RUN_ID}}', runId)
   .replaceAll('{{DATE}}', localDate)
-  .replaceAll('{{GOAL}}', opts.goal || '<goal in the user\'s words, then the objective in yours>')
+  // A function, so a "$&" in the owner's words is not read as a pattern.
+  .replaceAll('{{GOAL}}', () => goalText(opts))
   .replaceAll('{{TIER}}', opts.tier || 'unknown')
   .replaceAll('{{HOST}}', hostFor(opts, (() => { try { return JSON.parse(readFileSync(join(homedir(), '.claude', 'orchestrate', 'profile.json'), 'utf8')); } catch { return null; } })(), process.env))
   .replaceAll('{{PROVIDERS}}', opts.providers || 'unknown')

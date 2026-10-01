@@ -515,7 +515,16 @@ test('the Plain output style ships, is valid, and says the same thing as §9', (
   // three rules that were not here before: recommend and price the tradeoff,
   // say the assumption that mattered, and never show the machinery. Cutting
   // prose to defend a round number is how a file loses the rules that earn it.
-  assert.ok(Buffer.byteLength(style) <= 4700, `the style is ${Buffer.byteLength(style)} bytes, cap 4700`);
+  // 5,100 in 0.20.0: "one idea per sentence" read as clipped fragments, and
+  // nothing said to draw a flow or that Mermaid shows as text in the desktop
+  // app (live notes K and R, 2026-10-01).
+  assert.ok(Buffer.byteLength(style) <= 5100, `the style is ${Buffer.byteLength(style)} bytes, cap 5100`);
+
+  // A picture when the shape is the point, and never the one diagram format
+  // the desktop app shows as plain text.
+  assert.match(flat, /Draw it when the shape is the point/);
+  assert.match(flat, /Never Mermaid/);
+  assert.doesNotMatch(style, /One idea per sentence/);
 });
 
 test('the installer copies the output style but never selects it', () => {

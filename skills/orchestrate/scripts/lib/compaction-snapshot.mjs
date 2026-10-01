@@ -63,6 +63,23 @@ function userTextOf(content) {
     .join('\n');
 }
 
+// A message the owner typed while a turn was still running is stored as a
+// queued-command attachment, not a user record (live note N); it is the
+// owner's own words all the same.
+function isQueuedOwnerMessage(rec) {
+  return rec.type === 'attachment' && !!rec.attachment && rec.attachment.type === 'queued_command'
+    && !!rec.attachment.origin && rec.attachment.origin.kind === 'human';
+}
+
+// What the owner typed in one transcript record, or '' when the record is not
+// a message from them (a tool result, host wrapper text, a meta record).
+export function ownerTextOf(rec) {
+  if (!rec || typeof rec !== 'object') return '';
+  if (isQueuedOwnerMessage(rec)) return userTextOf(rec.attachment.prompt);
+  if (rec.type === 'user' && rec.message && rec.isMeta !== true) return userTextOf(rec.message.content);
+  return '';
+}
+
 function toolResultText(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -141,6 +158,14 @@ function scanTranscript(text) {
         lastUserText, lastAssistantText, testLine, paths: paths.slice(-8),
       };
       lastUserText = null; lastAssistantText = null; testLine = null; paths = [];
+      continue;
+    }
+    if (isQueuedOwnerMessage(rec)) {
+      const t = ownerTextOf(rec);
+      if (t.trim()) {
+        if (firstUserText == null) firstUserText = t;
+        lastUserText = t;
+      }
       continue;
     }
     if (rec.type === 'user' && rec.message) {
