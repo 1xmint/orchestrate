@@ -82,6 +82,38 @@ three reads of the guard code to see that the permission existed and needed only
 **N. The size note on dispatch.** *"helper size: a researcher on fable, about 14.6x the usual size for this
 kind of helper"*. A fact, and the right one to say before a costly helper starts. *Helped.*
 
+**O. The Fable review of problem solving.** The owner asked for a Fable helper to judge how well
+the plugin researches and solves problems. Its report was worth reading.
+- It found that the card told the lead to send the researcher on Haiku, while the researcher's own
+  file, the routing table and the guard all say Sonnet. That is fixed, and a test now ties the card to
+  each helper's file.
+- It found that a research brief had no place to say what finding would overturn the answer, or how
+  good a source must be. Two optional fields were added.
+- A third suggestion, a log of past research, was not taken. The brief's "verified facts", its
+  "builds on" field and the project page's earlier research already cover it, and the skill page had
+  no room.
+- A second round was not run. Every open question it raised was answered by reading the repo.
+- *Helped.*
+
+**P. The skill page's size cap.** SKILL.md has a byte cap held by a test. This session's wording took
+it to 39 bytes under. Any later addition needs an equal trim. *A fair limit, and it kept the wording short.*
+
+**Q. Note D's cause.** "2 tool calls since your last edit" with no edit came from a deliberate rule: a
+shell command that is not plainly read-only counts as an edit (`wsl.exe --status`,
+`claude plugin list`), so the review reminder is never skipped. It was left alone. *A known trade-off,
+not a bug.*
+
+**R. Note E fixed.** In plan mode the context line now says "in plan mode the plan file is the
+checkpoint" instead of ordering a write to a file plan mode forbids. Note M is fixed too: when the
+owner named the model and only the task line is missing, the refusal now says that first.
+
+**S. The new plan test's first run judged the judge.** The plan test failed all six runs on 0.18.0,
+with and without the plugin, on the same three rules. Read by hand, all six plans were sound. The
+Haiku judge was reading the owner's own commands as programming terms, and it wanted a recommendation
+on questions only the owner can answer. The rules were corrected and the reasons written down before
+any 0.19.0 run. *Cost $2.76 of plan usage. Without this, the before-and-after would have shown
+"no change" whatever was built.*
+
 ## What the audit found in the release check's records
 
 These come from the saved report, `evals/results/2026-10-01T03-27-24-619Z/report.html`, not from this session.
