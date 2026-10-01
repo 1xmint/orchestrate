@@ -262,20 +262,27 @@ export function plainLine(text) {
   if (unmodelled(line)) return false;
   if (bodies.some(b => !b.toFile || (b.expands && /\$\(|`/.test(b.text)))) return false;
   const segs = segments(line);
-  // With a git read or rg on the line, a cd path or write target that is not
-  // plain text could be expanded into `.git` (`"$D"it`, `$_`, `.gi?`, `.gi[t]`,
-  // `~`), so every one must be. Without one, `cd "$REPO"` stays plain.
+  // A git read or rg runs what its settings name, and a path can be spelled
+  // into `.git` endlessly (`"$D"it`, `$_`, `.gi?`, `.\.git`, `.git.`), so with
+  // one on the line, any write at all makes the line not plain, wherever it
+  // lands. Writing nowhere (`2>&1`, `/dev/null`, `$null`, `nul`) is not a write.
   const reads = segs.some(s => {
     const w = plainWords(s);
     const b = base(w[0] || '');
     return b === 'rg' || (b === 'git' && GIT_READ_RE.test(w[1] || ''));
   });
-  if (reads && segs.some(s => {
-    const w = plainWords(s);
-    const b = base(w[0] || '');
-    return [...textTargets(s, b), ...(b === 'cd' ? w.slice(1) : [])].some(t => !/^&\d?-?$/.test(t) && !/^[\w .\/\\:@+,=-]+$/.test(t));
-  })) return false;
+  if (reads && (bodies.some(b => b.toFile) || segs.some(writes))) return false;
   return segs.every(plainSegment);
+}
+
+// Does this segment write a file: a redirect or text writer's target, a
+// folder made, git's own `--output`, or inline node, which can reach fs?
+function writes(seg) {
+  const w = plainWords(seg);
+  const b = base(w[0] || '');
+  if (textTargets(seg, b).some(t => !/^(&\d?-?|\/dev\/null|\$null|nul)$/i.test(t))) return true;
+  if (b === 'mkdir' || b === 'node') return true;
+  return b === 'git' && w.some(x => /^--output/.test(x));
 }
 
 // Does this line act on a payment account? What it runs (runsPayment), or,

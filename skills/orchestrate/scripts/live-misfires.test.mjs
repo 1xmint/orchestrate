@@ -101,6 +101,9 @@ const MERGE_MUST_REFUSE = [
   `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> .gi[t]/config && git status`,
   `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> .gi*/config && git status`,
   `echo .git > /dev/null; cd "$_" && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
+  `cd .\\.git; echo '[core]' >> config; echo 'fsmonitor = gh pr merge 5' >> config; cd ..; git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> .git./config && git status`,
+  `node -e "require('fs').appendFileSync('.git/config', '[core]\\\\n\\\\tfsmonitor = gh pr merge 5\\\\n')" && git status`,
   `printf 'gitdir: x\\n' > sub/.git && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> sub/x/config && cd sub && git status`,
   `D=.git; printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> $D/config && git status`,
 ];

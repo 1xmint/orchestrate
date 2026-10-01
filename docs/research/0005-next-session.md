@@ -98,8 +98,10 @@ Full gate at the release: 1230 pass, 0 fail; `evals/no-machinery` 14/0.
   every redirect, whatever the command, and treated a variable in a `cd` path
   or a write target as unsafe only when the same line set one. Its review
   FAILED: a file-name pattern (`.gi?`, `.gi[t]`) or bash's `$_` still reached
-  `.git`. Fix 6 closes the class: on a line with a git read or `rg`, every `cd`
-  path and write target must be plain text. Each fix's
+  `.git`. Fix 6 required every `cd` path and write target on a git-read line
+  to be plain text. Its review FAILED on Windows spellings (`.\.git`,
+  `.git.`). Fix 7 stops reading paths: on a line with a git read or `rg`, any
+  write at all makes the line not plain. Each fix's
   new test lines were run against the reviewed code and the fixed code. The
   merge to main needed a reviewer's PASS naming its final commit. The rest (`git add -e`, textconv and
   external diff, `rg -z`, `RIPGREP_CONFIG_PATH`) act only through settings

@@ -50,17 +50,20 @@ those. Everything else, including loud everyday commands like `npm test` or
   lands decides this, not what it says: a file inside a `.git` folder, a
   `.git` gitdir file, `.gitattributes`, a gitconfig or `.ripgreprc`, whatever
   command writes it (`>`, `1>>`, `&>`, `tee`). A `cd` into a `.git` folder also
-  makes the line not plain. A path the shell rewrites can still land in `.git`
-  (`"$D"it`, `$_`, `.gi?`, `.gi[t]`, `~`), so on a line that also has a git
-  read or `rg`, every `cd` path and write target must be plain text, or the
-  line is not plain. Without one, `cd "$REPO" && grep …` stays plain. Any other line with the word `stripe` or a payment
+  makes the line not plain. A path can be spelled into `.git` in endless ways
+  (`"$D"it`, `$_`, `.gi?`, `.\.git`, `.git.`), so on a line that also has a git
+  read or `rg`, any write at all makes the line not plain, wherever it lands:
+  a redirect, a text writer, a heredoc to a file, `mkdir`, git's `--output`, or
+  `node -e`. Writing nowhere (`2>&1`, `/dev/null`, `$null`, `nul`) does not
+  count. Without a git read, `cd "$REPO" && grep …` stays plain. Any other line with the word `stripe` or a payment
   API host in it asks: a host reached through a script file, `curl -K` or
   `wsl` asks too. So `grep -n stripe README.md` passes and
   `for c in …; do stripe refunds create …; done` asks. The price: a line that
   only names a host but is not plain also asks, such as
   `git commit -m "move to api.paypal.com"`, `grep -rn api.paypal.com src | sort`
-  or `nslookup api.paypal.com`; in a helper or a headless run, that ask is a
-  refusal
+  or `nslookup api.paypal.com`, and so does an `rg` that writes its results to
+  a file, such as `rg -n stripe . > out.txt`; in a helper or a headless run,
+  that ask is a refusal
 - dropping or truncating a database: `drop database`/`drop table`/`drop
   schema`/`truncate` on a `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo`, or
   `redis-cli` command line, including inside a `-c`/`-e`/`--eval` string;
