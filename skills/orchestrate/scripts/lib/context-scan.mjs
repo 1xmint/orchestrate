@@ -202,6 +202,16 @@ export function stepEditCounter(count, toolUses) {
   return c;
 }
 
+// Whether any of these tool calls changed a file, by the same test the counter
+// resets on. Lets a count of "calls since your last edit" stay unsaid until
+// there has been an edit to count from.
+export function anyEdit(toolUses) {
+  return (toolUses || []).some(t => {
+    const u = typeof t === 'string' ? { name: t } : t || {};
+    return fileChange(u.name, u.input).changes;
+  });
+}
+
 // The window size the host reported for this session through the status line,
 // when that is installed and recent. Optional: nothing depends on it.
 export function statusCapacity(session, { dir = CONTEXT_DIR, now = Date.now(), staleMs } = {}) {

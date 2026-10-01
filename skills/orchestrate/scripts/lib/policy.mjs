@@ -16,6 +16,8 @@ import { join } from 'node:path';
 export const POLICY_V = 1;
 export const POLICY_PROFILE_PATH = join(homedir(), '.claude', 'orchestrate', 'profile.json');
 
+const READER_ALLOWANCE = Object.freeze({ warnAfter: 70000, returnAfter: 120000 });
+
 export const DEFAULT_POLICY = Object.freeze({
   v: POLICY_V,
   context: Object.freeze({
@@ -51,13 +53,23 @@ export const DEFAULT_POLICY = Object.freeze({
     // A dispatch with no transcript activity for this long no longer counts
     // as running, however long ago it was dispatched.
     staleMin: 10,
-    // Each helper's own size budget in tokens: at warnAt and again at returnAt
-    // the hook gives it one line of facts (size, turn, calls since its last
-    // edit, progress file). Keyed by normalized role name; "default" is the
-    // fallback for any role with no entry of its own.
+    // Each helper's own size budget: an allowance of tokens ABOVE the size it
+    // started at (its first sampled context: the role file, the packet and the
+    // host's own preamble, which differ by role and by repo). At warnAfter and
+    // again at returnAfter beyond that the hook gives it one line of facts
+    // (size, turn, calls since its last edit, progress file). A fixed ceiling
+    // charged the same to a helper that began at 25k and one that began at
+    // 60k. Keyed by normalized role name; "default" is the fallback for any
+    // role with no entry of its own (the builders: implementer, debugger,
+    // browser). The reader roles read widely before they write anything, so
+    // they get more; the coordinator keeps its larger room.
     size: Object.freeze({
-      default: Object.freeze({ warnAt: 80000, returnAt: 120000 }),
-      'orch-coordinator': Object.freeze({ warnAt: 150000, returnAt: 200000 }),
+      default: Object.freeze({ warnAfter: 40000, returnAfter: 80000 }),
+      'orch-researcher': READER_ALLOWANCE,
+      'orch-planner': READER_ALLOWANCE,
+      'orch-advisor': READER_ALLOWANCE,
+      'orch-reviewer': READER_ALLOWANCE,
+      'orch-coordinator': Object.freeze({ warnAfter: 120000, returnAfter: 170000 }),
     }),
   }),
   codex: Object.freeze({
@@ -86,13 +98,14 @@ function readProfile(path) {
 }
 
 const posNum = (v, d) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : d);
-// A {warnAt, returnAt} pair, valid only when warnAt < returnAt; an invalid or
-// missing pair falls back to that role's own defaults, not the generic one.
+// A {warnAfter, returnAfter} pair, valid only when warnAfter < returnAfter; an
+// invalid or missing pair falls back to that role's own defaults, not the
+// generic one.
 const sizePair = (entry, fallback) => {
   if (!entry || typeof entry !== 'object') return { ...fallback };
-  const warnAt = posNum(entry.warnAt, fallback.warnAt);
-  const returnAt = posNum(entry.returnAt, fallback.returnAt);
-  return warnAt < returnAt ? { warnAt, returnAt } : { ...fallback };
+  const warnAfter = posNum(entry.warnAfter, fallback.warnAfter);
+  const returnAfter = posNum(entry.returnAfter, fallback.returnAfter);
+  return warnAfter < returnAfter ? { warnAfter, returnAfter } : { ...fallback };
 };
 const autocompact = (v, d) => {
   if (v === 'off') return 'off';
@@ -148,23 +161,27 @@ export function loadPolicy(profile = readProfile(POLICY_PROFILE_PATH)) {
   };
 }
 
-// A role's token budget: warnAt to write progress and keep going, returnAt to
-// start no new work and return PARTIAL. Pure; a role with no entry of its own
-// gets "default". Strips a plugin prefix such as "orchestrate:" from the role name.
-export function sizeBudget(role, policy = loadPolicy()) {
+// A role's token budget as absolute sizes: the helper's baseline (its first
+// sampled context; 0 when not yet known) plus the role's allowance. warnAt is
+// where it is told to write progress and keep going, returnAt where it is told
+// it is past the budget. Pure; a role with no entry of its own gets "default".
+// Strips a plugin prefix such as "orchestrate:" from the role name.
+export function sizeBudget(role, policy = loadPolicy(), baseline = 0) {
   const key = String(role || '').replace(/^[\w-]+:/, '');
   const size = (policy && policy.workers && policy.workers.size) || DEFAULT_POLICY.workers.size;
-  return size[key] || size.default;
+  const a = size[key] || size.default;
+  const base = Number.isFinite(baseline) && baseline > 0 ? baseline : 0;
+  return { warnAt: base + a.warnAfter, returnAt: base + a.returnAfter };
 }
 
 // `context.compactAt=180000` style edits, validated against the defaults' keys.
 export function setPolicyValue(profile, dotted, raw) {
   const [section, key, ...rest] = String(dotted || '').split('.');
-  // A size budget is set per role and field: workers.size.<role>.warnAt|returnAt.
+  // A size budget is set per role and field: workers.size.<role>.warnAfter|returnAfter.
   if (section === 'workers' && key === 'size') {
     const [role, field] = rest;
-    if (rest.length !== 2 || !/^[\w-]+$/.test(role) || !['warnAt', 'returnAt'].includes(field) || !(Number(raw) > 0)) {
-      throw new Error(`policy key "${dotted}" takes the form workers.size.<role>.warnAt or .returnAt with a positive token count`);
+    if (rest.length !== 2 || !/^[\w-]+$/.test(role) || !['warnAfter', 'returnAfter'].includes(field) || !(Number(raw) > 0)) {
+      throw new Error(`policy key "${dotted}" takes the form workers.size.<role>.warnAfter or .returnAfter with a positive token count`);
     }
     const out = profile && typeof profile === 'object' ? profile : {};
     out.policy = out.policy && typeof out.policy === 'object' ? out.policy : {};

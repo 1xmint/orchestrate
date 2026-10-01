@@ -125,3 +125,20 @@ test('the CLI writes gate.json, --dry-run does not, and --print reads it back', 
   const missing = spawnSync(process.execPath, [script, tree({ 'a.txt': 'x' }), '--print'], { encoding: 'utf8' });
   assert.equal(missing.status, 1, 'a missing gate.json is an error the user can act on');
 });
+
+test('a repo with no manifest gets its gate from the CI workflow: node --test and node scripts/', () => {
+  const g = detect(tree({
+    '.github/workflows/ci.yml': "jobs:\n  t:\n    steps:\n      - name: Build\n        run: node scripts/package.mjs --both\n      - name: Test\n        run: node --test $(find skills -name '*.test.mjs')\n      - run: |\n          npm test\n          echo done\n",
+  }));
+  assert.equal(pick(g, 'test'), "node --test $(find skills -name '*.test.mjs')");
+  assert.equal(pick(g, 'build'), 'node scripts/package.mjs --both');
+  assert.ok(g.candidates.some(c => c.cmd === 'npm test'), 'a run: | block is read line by line');
+  assert.match(block(g), /node --test .*\.github\/workflows\/ci\.yml/);
+});
+
+test('this repo\'s own gate is found from its ci.yml', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+  const g = detect(root);
+  assert.equal(pick(g, 'test'), "node --test $(find skills -name '*.test.mjs')");
+  assert.equal(pick(g, 'build'), 'node scripts/package.mjs --both');
+});

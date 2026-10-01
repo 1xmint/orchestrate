@@ -16,7 +16,7 @@ import { loadPolicy } from './policy.mjs';
 import { writeCompactionSnapshot } from './compaction-snapshot.mjs';
 import {
   CONTEXT_V, CONTEXT_DIR, SCAN_MAX, idPart,
-  scanSlice, stepEditCounter, toReading, readContext, statusCapacity, readRange,
+  scanSlice, stepEditCounter, anyEdit, toReading, readContext, statusCapacity, readRange,
 } from './context-scan.mjs';
 import { contextEpoch, adviseContext, contextNotice, contextTick, postCompactionAskDue } from './context-advice.mjs';
 
@@ -71,6 +71,7 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
 
   let reading;
   let editCounter;
+  let sawEdit = false;
   const prevEditCounter = prev && Number.isFinite(prev.editCounter) ? prev.editCounter : 0;
   const sameFile = prev && prev.reading && prev.transcript === (transcriptPath || null);
   if (!force && sameFile && size === prev.size) {
@@ -87,13 +88,16 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
     // Incremental: only the new bytes' tool calls are added to the running
     // count, so a call already counted on an earlier read is never counted twice.
     editCounter = stepEditCounter(prevEditCounter, scan.toolUses);
+    sawEdit = anyEdit(scan.toolUses);
   } else {
     // First sample, a rewritten or truncated file, or a jump too large to read
     // incrementally: nothing earlier is known, so the count starts fresh from
     // whatever this wider read can see.
     reading = readContext(transcriptPath, { session, agent, capacity, now, policy });
     editCounter = stepEditCounter(0, reading.toolUses);
+    sawEdit = anyEdit(reading.toolUses);
   }
+  const edited = Boolean((prev && prev.edited) || sawEdit);
 
   // Count compactions this store has seen: a new epoch is one more. A first
   // read sees only the last boundary, so the count can start low, never high.
@@ -124,8 +128,16 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
     } catch { /* the notice below then says there is no checkpoint yet */ }
   }
 
+  // The size this transcript was first seen at, kept for good: a helper's size
+  // budget is an allowance above it (lib/policy.mjs sizeBudget).
+  const sized = reading.state === 'measured' || reading.state === 'provisional';
+  const baseline = prev && Number.isFinite(prev.baseline) ? prev.baseline
+    : (sized && Number.isFinite(reading.tokens) && reading.tokens > 0 ? reading.tokens : null);
+
   const prevAsked = prev && Number.isFinite(prev.askedAfterCompactions) ? prev.askedAfterCompactions : 0;
-  const noticeCtx = { policy, session, editCounter, dir, now, runMd, permissionMode, settingsPath, env, askedAfterCompactions: prevAsked };
+  // Nothing edited yet: there is no "last edit" to count calls from, so the
+  // fact is left out rather than read as 8 calls since an edit that never was.
+  const noticeCtx = { policy, session, editCounter: edited ? editCounter : null, dir, now, runMd, permissionMode, settingsPath, env, askedAfterCompactions: prevAsked };
   const advice = adviseContext(reading, policy, noticeCtx);
   const lastKey = prev ? prev.advisedKey || null : null;
   const changed = advice.key !== lastKey;
@@ -145,13 +157,13 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
   const { offset, size: sz, toolUses, ...clean } = reading;
   writeStore(p, {
     v: CONTEXT_V, session, agent, transcript: transcriptPath || null,
-    offset: offset || 0, size: sz || 0, reading: clean, editCounter,
+    offset: offset || 0, size: sz || 0, reading: clean, editCounter, edited, baseline,
     advisedKey: announce && changed ? advice.key : lastKey,
     tickKey: announce && ticked ? tick.key : lastTick,
     askedAfterCompactions: announce && askDue ? (Number(reading.compactions) || 0) : prevAsked,
     sampledAt: new Date(now).toISOString(),
   });
-  return { reading: clean, advice, changed, notice, tick: ticked ? tick.key : null, editCounter };
+  return { reading: clean, advice, changed, notice, tick: ticked ? tick.key : null, editCounter, edited, baseline };
 }
 
 // The stored reading, without sampling. For callers that must not read the

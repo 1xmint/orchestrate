@@ -367,8 +367,26 @@ function detectSkills(repoRoot) {
   try {
     const plugins = join(HOME, '.claude', 'plugins');
     for (const p of readdirSync(plugins)) {
-      if (p === 'marketplaces' || p.endsWith('.json')) continue;
+      if (p === 'marketplaces' || p === 'cache' || p.endsWith('.json')) continue;
       scan(join(plugins, p, 'skills'));
+    }
+  } catch {}
+  // The plugins the host installed: installed_plugins.json names each one's
+  // install path, and its skills/<name>/SKILL.md are what the session lists
+  // (as plugin:skill). A path that is gone on disk adds nothing.
+  try {
+    const rec = readJson(join(HOME, '.claude', 'plugins', 'installed_plugins.json'));
+    for (const [key, installs] of Object.entries((rec && rec.plugins) || {})) {
+      const plugin = String(key).split('@')[0];
+      for (const inst of Array.isArray(installs) ? installs : []) {
+        const root = inst && typeof inst.installPath === 'string' ? inst.installPath : null;
+        if (!root) continue;
+        try {
+          for (const n of readdirSync(join(root, 'skills'))) {
+            if (!n.startsWith('.') && existsSync(join(root, 'skills', n, 'SKILL.md'))) names.add(`${plugin}:${n}`);
+          }
+        } catch {}
+      }
     }
   } catch {}
   return [...names].sort();
@@ -481,7 +499,7 @@ if (brief) {
       }
     } catch {}
     console.log(`providers: ${prov}`);
-    console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none'}`);
+    console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none found on disk (this is not the session\'s own listing, which may hold more)'}`);
     console.log(pricesLine(tier.tier));
   } catch {}
   process.exit(0);
@@ -513,7 +531,7 @@ if (wantJson) {
   console.log(`agents: ${agents.installed}/${agents.expected} orch-* files in ${agents.dir}${agents.missing.length ? ' — missing: ' + agents.missing.join(', ') + (agents.source === 'plugin' ? ' (update the plugin)' : ' (run scripts/install-agents.mjs)') : ' (a running session lists newly installed ones after a short delay)'}`);
   console.log(`repo: ${repo || 'not in a git repo (worktree isolation unavailable)'}`);
   console.log(`runs: ${runs.count} under ${runs.dir}${runs.latest ? ' — latest: ' + runs.latest : ''}`);
-  console.log(`skills: ${skills.length ? skills.join(', ') : 'none installed'}`);
+  console.log(`skills: ${skills.length ? skills.join(', ') : 'none found on disk'}`);
   if (tier.tier === 'unknown') console.log('next: ask the user which plan (Pro $20 / Max 5x $100 / Max 20x $200 / API-Team-other), then: node scripts/profile.mjs --set tier=<pro|max5|max20|team|api>');
   if (tier.tier === 'pro' || tier.tier === 'team' || tier.tier === 'api') console.log(`note: on ${tier.tier}, Fable is not included and costs the user real money. Recommend it when a task warrants it, say what it would cost and what the alternatives are, and let the user choose.`);
 }

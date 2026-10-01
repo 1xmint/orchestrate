@@ -72,3 +72,27 @@ test('--brief prints the codex line in each shape from the cache', () => {
   assert.equal(profile(home, ['--set', 'codex.tier=plus']).status, 0);
   assert.equal(codexLine(home), 'codex: gpt-5.6-terra · plus · ok');
 });
+
+test('the skills line counts skills of installed plugins and the user\'s own, and never says "none" when none are found', () => {
+  const home = sandbox();
+  // none anywhere: says none were found on disk, without claiming the listing is empty
+  const empty = profile(home, ['--brief']);
+  assert.equal(empty.status, 0, empty.stderr);
+  const emptyLine = empty.stdout.split('\n').find(l => l.startsWith('skills on disk'));
+  assert.match(emptyLine, /none found on disk/);
+  assert.match(emptyLine, /not the session's own listing/);
+  // an installed plugin (named by installed_plugins.json, kept outside ~/.claude/plugins) and a user skill
+  const inst = join(home, 'elsewhere', 'docs-plugin');
+  mkdirSync(join(inst, 'skills', 'pdf'), { recursive: true });
+  writeFileSync(join(inst, 'skills', 'pdf', 'SKILL.md'), '---\nname: pdf\n---\n');
+  mkdirSync(join(inst, 'skills', 'not-a-skill'), { recursive: true });
+  mkdirSync(join(home, '.claude', 'plugins'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'docs-plugin@market': [{ scope: 'user', installPath: inst, version: '1' }] } }));
+  mkdirSync(join(home, '.claude', 'skills', 'mine'), { recursive: true });
+  writeFileSync(join(home, '.claude', 'skills', 'mine', 'SKILL.md'), '---\nname: mine\n---\n');
+  const r = profile(home, ['--brief']);
+  const line = r.stdout.split('\n').find(l => l.startsWith('skills on disk'));
+  assert.match(line, /docs-plugin:pdf/);
+  assert.match(line, /\bmine\b/);
+  assert.doesNotMatch(line, /not-a-skill|none/);
+});

@@ -18,7 +18,7 @@ import { modeTransition, modeNote, PLAN_NOTE, APPROVED_NOTE } from './lib/modes.
 import { cappedReturn, roleMaxTurns, sumUsage } from './ledger.mjs';
 import { loadPolicy, setPolicyValue, sizeBudget, DEFAULT_POLICY } from './lib/policy.mjs';
 import { measure, measureTree } from './measure.mjs';
-import { check as contextCheck, helperSizeNotice } from './context-check.mjs';
+import { check as contextCheck, helperSizeNotice, roleCanEdit } from './context-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const policy = loadPolicy({});
@@ -141,25 +141,27 @@ test('helperSizeNotice: one fact line, no orders, said once per threshold, retur
   assert.equal(helperSizeNotice({ role: 'orch-implementer', tokens: 130000, budget, announced: 'size-return' }), null, 'no warn after return');
 });
 
-test('the default size budgets are 80k/120k and coordinator 150k/200k, on purpose', () => {
-  assert.deepEqual(DEFAULT_POLICY.workers.size.default, { warnAt: 80000, returnAt: 120000 });
-  assert.deepEqual(DEFAULT_POLICY.workers.size['orch-coordinator'], { warnAt: 150000, returnAt: 200000 });
+test('the default size allowances above a helper\'s own start are builders 40k/80k, readers 70k/120k, coordinator 120k/170k, on purpose', () => {
+  assert.deepEqual(DEFAULT_POLICY.workers.size.default, { warnAfter: 40000, returnAfter: 80000 });
+  for (const r of ['orch-researcher', 'orch-planner', 'orch-advisor', 'orch-reviewer']) assert.deepEqual(DEFAULT_POLICY.workers.size[r], { warnAfter: 70000, returnAfter: 120000 }, r);
+  assert.deepEqual(DEFAULT_POLICY.workers.size['orch-coordinator'], { warnAfter: 120000, returnAfter: 170000 });
 });
 
 test('size budgets: defaults per role, a user override per field, a bad pair falls back', () => {
   const DEF = DEFAULT_POLICY.workers.size.default;
   const COORD = DEFAULT_POLICY.workers.size['orch-coordinator'];
-  assert.deepEqual(sizeBudget('orchestrate:orch-implementer', policy), DEF);
-  assert.deepEqual(sizeBudget('orchestrate:orch-coordinator', policy), COORD);
-  assert.deepEqual(sizeBudget(null, policy), DEF, 'an unresolved role uses default');
-  const custom = loadPolicy(setPolicyValue({}, 'workers.size.orch-debugger.returnAt', '160000'));
-  assert.deepEqual(sizeBudget('orch-debugger', custom), { warnAt: DEF.warnAt, returnAt: 160000 });
-  const coord = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAt: 170000 } } } } });
-  assert.deepEqual(sizeBudget('orch-coordinator', coord), { warnAt: 170000, returnAt: COORD.returnAt });
-  const bad = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAt: 250000 } } } } });
-  assert.deepEqual(sizeBudget('orch-coordinator', bad), COORD, 'warnAt >= returnAt keeps the role default');
-  assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.limit', '1'), /workers\.size\.<role>\.warnAt/);
-  assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.warnAt', '0'), /positive token count/);
+  const at = (a, base) => ({ warnAt: base + a.warnAfter, returnAt: base + a.returnAfter });
+  assert.deepEqual(sizeBudget('orchestrate:orch-implementer', policy, 20000), at(DEF, 20000));
+  assert.deepEqual(sizeBudget('orchestrate:orch-coordinator', policy, 20000), at(COORD, 20000));
+  assert.deepEqual(sizeBudget(null, policy, 20000), at(DEF, 20000), 'an unresolved role uses default');
+  const custom = loadPolicy(setPolicyValue({}, 'workers.size.orch-debugger.returnAfter', '160000'));
+  assert.deepEqual(sizeBudget('orch-debugger', custom, 20000), { warnAt: 20000 + DEF.warnAfter, returnAt: 180000 });
+  const coord = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAfter: 130000 } } } } });
+  assert.deepEqual(sizeBudget('orch-coordinator', coord, 20000), { warnAt: 150000, returnAt: 20000 + COORD.returnAfter });
+  const bad = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAfter: 250000 } } } } });
+  assert.deepEqual(sizeBudget('orch-coordinator', bad, 20000), at(COORD, 20000), 'warnAfter >= returnAfter keeps the role default');
+  assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.limit', '1'), /workers\.size\.<role>\.warnAfter/);
+  assert.throws(() => setPolicyValue({}, 'workers.size.orch-debugger.warnAfter', '0'), /positive token count/);
 });
 
 test('context-check gives a coordinator one fact line at warnAt and again at returnAt, with turn, calls-since-edit and progress facts', () => {
@@ -185,26 +187,31 @@ test('context-check gives a coordinator one fact line at warnAt and again at ret
     message: { id, model: 'claude-opus-5', usage: { input_tokens: tokens, output_tokens: 1 }, content: content || [{ type: 'text', text: 'x' }] },
   }) + '\n';
   const readTool = (id, name = 'Read') => ({ type: 'tool_use', id, name, input: {} });
-  writeFileSync(transcript, response('checkpoint', 150000, [readTool('t1')]));
+  // The budget is the helper's first sampled context (30k) plus the coordinator's
+  // allowance: warn at 150k, past the budget at 200k.
+  writeFileSync(transcript, response('start', 30000, [readTool('t0')]));
   const payload = { session_id: 'coord-context', agent_id: 'coord', transcript_path: lead, agent_transcript_path: transcript };
+  const quiet = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
+  assert.equal(quiet.stdout, '', 'at its starting size a helper hears nothing');
+  writeFileSync(transcript, response('start', 30000, [readTool('t0')]) + response('checkpoint', 150000, [readTool('t1')]));
   const first = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
   assert.equal(first.status, 0, first.stderr);
   const firstText = JSON.parse(first.stdout).hookSpecificOutput.additionalContext;
   // No orders, ever: this is a fact line, not "write PROGRESS" or "return PARTIAL".
   assert.doesNotMatch(firstText, /write|return PARTIAL|do not/i);
-  assert.match(firstText, /^\[orchestrate · size\] ~150k of ~200k budget · turn 1 of \d+ · 1 tool call since your last edit · /);
+  assert.match(firstText, /^\[orchestrate · size\] ~150k of ~200k budget · turn 2 of \d+ · 2 tool calls since your last edit · /);
   assert.match(firstText, new RegExp(`progress file: ${progressPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, not written yet$`));
 
   // The helper writes its progress file; the counter keeps counting reads and
   // resets on the edit tool call in the next response.
   writeFileSync(progressPath, 'still going');
-  writeFileSync(transcript, response('checkpoint', 150000, [readTool('t1')]) + response('edit', 205000, [readTool('t2'), { type: 'tool_use', id: 't3', name: 'Edit', input: {} }, readTool('t4')]));
+  writeFileSync(transcript, response('start', 30000, [readTool('t0')]) + response('checkpoint', 150000, [readTool('t1')]) + response('edit', 235000, [readTool('t2'), { type: 'tool_use', id: 't3', name: 'Edit', input: {} }, readTool('t4')]));
   const second = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
   assert.equal(second.status, 0, second.stderr);
   const secondText = JSON.parse(second.stdout).hookSpecificOutput.additionalContext;
   assert.doesNotMatch(secondText, /write|return PARTIAL|do not/i);
-  // ~205k has crossed both warnAt and returnAt; only the return key is said.
-  assert.match(secondText, /^\[orchestrate · size\] ~205k, past the ~200k budget · turn 2 of \d+ · 1 tool call since your last edit · /);
+  // ~235k has crossed both warnAt and returnAt; only the return key is said.
+  assert.match(secondText, /^\[orchestrate · size\] ~235k, past the ~200k budget · turn 3 of \d+ · 1 tool call since your last edit · /);
   assert.match(secondText, new RegExp(`progress file: ${progressPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}, written (just now|0 min ago)$`));
 
   // Said once: a third call with no growth repeats nothing.
@@ -564,4 +571,56 @@ test('freshCodexOk: a recorded ok is fresh until CODEX_OK_FRESH_MS passes, and a
   assert.equal(freshCodexOk(dir, t0 + CODEX_OK_FRESH_MS + 1), null, 'stale once the window passes');
   recordCodexOk(false, dir, t0);
   assert.equal(freshCodexOk(dir, t0 + 1000), null, 'a recorded sign-out is never reported as ok');
+});
+
+// "N tool calls since your last edit" is a fact only for a role that has an
+// edit tool: a reviewer was told of a gap it could not close.
+test('roleCanEdit reads the role file: reviewers, advisors and the browser cannot edit, builders can', () => {
+  for (const r of ['orch-reviewer', 'orch-advisor', 'orch-browser']) assert.equal(roleCanEdit(r), false, r);
+  for (const r of ['orch-implementer', 'orch-debugger', 'orch-researcher', 'orch-planner', 'orch-coordinator']) assert.equal(roleCanEdit(r), true, r);
+  assert.equal(roleCanEdit('orchestrate:orch-reviewer'), false, 'a plugin prefix is stripped');
+  assert.equal(roleCanEdit('some-role-with-no-file'), true, 'no file: the fact stays');
+  const dir = mkdtempSync(join(tmpdir(), 'orch-roles-'));
+  writeFileSync(join(dir, 'a.md'), '---\nname: a\ntools: Read, Grep, Bash(git diff:*), Bash(git log:*)\n---\n');
+  writeFileSync(join(dir, 'b.md'), '---\nname: b\ntools: Read, Bash\n---\n');
+  writeFileSync(join(dir, 'c.md'), '---\nname: c\ndisallowedTools: Edit, Write, NotebookEdit, Bash\n---\n');
+  assert.equal(roleCanEdit('a', dir), false, 'a shell narrowed to named read commands does not write');
+  assert.equal(roleCanEdit('b', dir), true, 'a bare shell can write');
+  assert.equal(roleCanEdit('c', dir), false);
+});
+
+test('a reviewer past its budget is not told "calls since your last edit"; an implementer is', () => {
+  const run = (agent, home) => {
+    const env = { ...process.env, HOME: home, USERPROFILE: home };
+    const sessions = join(home, '.claude', 'orchestrate', 'sessions');
+    mkdirSync(sessions, { recursive: true });
+    writeFileSync(join(sessions, 'edit-line.json'), JSON.stringify({ v: 1, session_id: 'edit-line', dispatches: [{ at: new Date().toISOString(), agent, toolUseId: 'toolu_e' }] }));
+    const lead = join(home, 'lead.jsonl');
+    writeFileSync(lead, '');
+    const sub = join(home, 'lead', 'subagents');
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, 'agent-h.meta.json'), JSON.stringify({ agentType: agent, toolUseId: 'toolu_e', spawnDepth: 1 }));
+    const response = (id, tokens) => JSON.stringify({ type: 'assistant', timestamp: new Date().toISOString(), message: { id, model: 'claude-opus-5', usage: { input_tokens: tokens, output_tokens: 1 }, content: [{ type: 'tool_use', id: 't' + id, name: 'Read', input: {} }] } }) + '\n';
+    const transcript = join(sub, 'agent-h.jsonl');
+    writeFileSync(transcript, response('a', 30000));
+    const payload = { session_id: 'edit-line', agent_id: 'h', transcript_path: lead, agent_transcript_path: transcript };
+    spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
+    writeFileSync(transcript, response('a', 30000) + response('b', 230000));
+    const out = spawnSync(process.execPath, [join(HERE, 'context-check.mjs')], { input: JSON.stringify(payload), encoding: 'utf8', env });
+    return JSON.parse(out.stdout).hookSpecificOutput.additionalContext;
+  };
+  const reviewer = run('orch-reviewer', mkdtempSync(join(tmpdir(), 'orch-edit-r-')));
+  assert.match(reviewer, /^\[orchestrate · size\] ~230k, past the ~150k budget/);
+  assert.doesNotMatch(reviewer, /since your last edit/);
+  const builder = run('orch-implementer', mkdtempSync(join(tmpdir(), 'orch-edit-i-')));
+  assert.match(builder, /^\[orchestrate · size\] ~230k, past the ~110k budget .*2 tool calls since your last edit/);
+});
+
+test('models.md states the size allowances the policy holds', () => {
+  const doc = readFileSync(join(HERE, '..', 'references', 'models.md'), 'utf8').replace(/\s+/g, ' ');
+  const k = n => `${n / 1000}k`;
+  const S = DEFAULT_POLICY.workers.size;
+  assert.ok(doc.includes(`A builder gets ${k(S.default.warnAfter)} and then ${k(S.default.returnAfter)} above`));
+  assert.ok(doc.includes(`a reader (researcher, planner, advisor, reviewer) ${k(S['orch-reviewer'].warnAfter)} and ${k(S['orch-reviewer'].returnAfter)}`));
+  assert.ok(doc.includes(`a coordinator ${k(S['orch-coordinator'].warnAfter)} and ${k(S['orch-coordinator'].returnAfter)}`));
 });

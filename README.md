@@ -362,7 +362,7 @@ Keys: `context.checkpointAt`, `context.compactAt`, `context.windowFraction`,
 `context.window`, `context.staleMs`, `context.freshAfterCompactions`, `context.tickEvery`, `context.autocompactDefault` (a positive token count or `off`), `workers.maxConcurrent`,
 `workers.browserConcurrent`, `workers.nested` (`coordinator`/`deny`/`allow`),
 `workers.generalPurpose` (`deny`/`allow`), `workers.staleMin`,
-`workers.size.<role>.warnAt` and `.returnAt` (a helper's size budget in tokens; `default` covers any role without its own), `codex.enabled`,
+`workers.size.<role>.warnAfter` and `.returnAfter` (a helper's size allowance in tokens above the size it started at; `default` covers any role without its own), `codex.enabled`,
 `codex.model`, `codex.effortImplement`, `codex.effortHard`, `codex.timeoutMin`.
 They are stored under `policy` in `~/.claude/orchestrate/profile.json`; an older
 version ignores that key. `profile.mjs --host` shows which Claude Code engine the
