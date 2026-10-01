@@ -21,7 +21,10 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   unreadable; a plain `cd <folder>` before it moves where folders are read.
   The third review found an escaped quote (`-m "Fix \"x\" bug"`) hid a forced
   removal after it, and a quoted Windows folder after `cd` was refused; quotes,
-  comments and heredoc bodies are now read where bash reads them.
+  comments and heredoc bodies are now read where bash reads them. The fourth
+  found a `<<EOF` inside quotes, a piped heredoc, a cd in `( )` and a `\"` read
+  by PowerShell; a relative folder is now checked from every place a cd could
+  leave the shell.
 - A clean-up line that removes a clean worktree and deletes branches with
   lowercase `-d` now passes. When a branch-delete line is refused although it
   already uses `-d`, the refusal names the part that was actually refused
@@ -45,7 +48,7 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   Not re-measured.
 
 Replayed against `decide()`, each refused line from this session now gives the
-intended answer. Gate: 1257/1257, 22/22.
+intended answer. Gate: 1258/1258, 22/22.
 
 ## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
 

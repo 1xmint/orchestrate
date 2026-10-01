@@ -1536,7 +1536,6 @@ test('quotes, comments and heredocs are read where bash reads them (review of 2d
   for (const c of [
     // A double-quoted folder keeps its backslashes as bash does (a Windows path here).
     `cd "${clean.base}" && git worktree remove --force clean`,
-    `git commit -m "Fix \\"x\\" bug" && git worktree remove --force ${cleanFwd}`,
     "git commit -F - <<'X'\nGuard: git worktree remove --force is checked\nX",
     '# git worktree remove --force anything\ngit worktree list',
   ]) assert.equal(decide(c, { cwd: clean.root, ...headless }).kind, 'pass', c);
@@ -1545,6 +1544,40 @@ test('quotes, comments and heredocs are read where bash reads them (review of 2d
   assert.equal(d.kind, 'deny');
   assert.match(d.reason, /cd/);
   assert.doesNotMatch(d.reason, /not there under that name/);
+});
+
+test('a heredoc is found only outside quotes and comments, and a cd is checked from every place it could leave the shell (review of fa9d006)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orch-wt-hd-'));
+  const helper = join(root, '.claude', 'worktrees', 'agent-1');
+  mkdirSync(helper, { recursive: true });
+  mkdirSync(join(root, 'sub'));
+  spawnSync('git', ['init', '-q'], { cwd: helper });
+  writeFileSync(join(helper, 'u.txt'), 'work');
+  const rm = 'git worktree remove --force .claude/worktrees/agent-1';
+  for (const c of [
+    `git commit -qm 'docs: explain cat <<EOF'\n${rm}\ncat > notes.md <<EOF\ndone\nEOF`,
+    `# see <<EOF\n${rm}\nEOF`,
+    `cat <<'X' |\n${rm}\nX\nbash`,
+    `cat <<'X' | bash\n${rm}\nX`,
+    // A cd in ( ), after ;, or into a folder that is not there leaves the shell where it was.
+    `(cd sub && ls); ${rm}`,
+    `cd subb; ${rm}`,
+    `cd sub; ${rm}`,
+    // PowerShell reads \\" as a backslash and the end of the quote.
+    `cd "${root}\\" ; ${rm}; cd "${root}\\"`,
+    `git commit -m "Fix \\"x\\" bug" && ${rm}`,
+  ]) {
+    const d = decide(c, { cwd: root, ...headless });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /never saved to git/, c);
+  }
+  // A clean helper reached through an absolute -C needs no cd.
+  const clean = mkdtempSync(join(tmpdir(), 'orch-wt-hdc-'));
+  const ch = join(clean, '.claude', 'worktrees', 'agent-2');
+  mkdirSync(ch, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: ch });
+  assert.equal(decide(`cd "$HOME" && git -C ${clean.replace(/\\/g, '/')} worktree remove .claude/worktrees/agent-2`, { cwd: root, ...headless }).kind, 'pass');
+  assert.equal(decide(`cat > notes.md <<'X'\ncat <<EOF and | pipes are text here\nX\ngit -C ${clean.replace(/\\/g, '/')} worktree remove .claude/worktrees/agent-2`, { cwd: root, ...headless }).kind, 'pass');
 });
 
 test('a read of one pull request after one plain cd passes; other shapes with a cd still refuse', () => {

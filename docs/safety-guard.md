@@ -121,10 +121,15 @@ alone or joined with `;`, `&&` or a plain `cd <folder>`. A brace, `$`, a
 backtick, a leading backslash, a redirect other than to `/dev/null` or `&1`, or
 anything in front of git (`if`, `!`, `env`, `sudo`, `eval`) is refused as
 unreadable, the same way the merge check works, because each attempt to follow
-one more spelling left another open. Quotes are read where bash reads them:
-an escaped `\"` does not end a message, a `#` starting a word is a comment to
-the end of its line, and a heredoc body is text unless a shell reads it (`bash
-<<X`). A quote that cannot be closed (`$'a\'b'`) is refused. A message that
+one more spelling left another open. Quotes are read where bash reads them: a
+`#` starting a word is a comment to the end of its line, and a heredoc
+(`<<X` outside quotes and comments) has its body skipped as text unless its
+line pipes it or starts a shell (`cat <<X | bash`, `bash <<X`). A quote that
+cannot be closed (`$'a\'b'`), or a `\"` inside double quotes, which PowerShell
+reads differently from bash, refuses a removal line. A relative folder after a
+plain `cd` is checked from the starting folder and from where the `cd` leads,
+because a `cd` in `( )`, or into a folder that is not there, leaves the shell
+where it was. A message that
 only quotes the words (`git commit -m "…worktree remove…"`, or a `-F -` heredoc)
 is not a removal and passes.
 
