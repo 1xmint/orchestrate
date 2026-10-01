@@ -83,6 +83,9 @@ const MERGE_MUST_REFUSE = [
   'echo "gh pr merge 5" | bash',
   'rg --hostname-bin=./x.sh --hyperlink-format=default "gh pr merge 5" .',
   'rg --hostname-bin ./x.sh --hyperlink-format default "gh pr merge 5" .',
+  // Text into git's settings, then a git read that runs it.
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> .git/config && git status`,
+  `printf '* diff=x\\n' > .gitattributes && printf '[diff "x"]\\n\\ttextconv = gh pr merge 5\\n' >> .git/config && git diff`,
 ];
 test('every merge line the review found is refused through decide', () => {
   for (const cmd of MERGE_MUST_REFUSE) {
@@ -129,6 +132,12 @@ const PAYMENT_MUST_ASK = [
   'rg --hostname-bin ./x.sh "stripe charges create"',
   'git grep -iO./x.sh "stripe charges create"',
   'git grep --open=./x.sh "stripe charges create"',
+  // Leads closed before release: a payment host reached indirectly, and text
+  // into git's settings run by a git read.
+  `printf 'url = "https://api.paypal.com/v2/payments/captures/1/refund"\\nrequest = POST\\n' > c.txt && curl -K c.txt`,
+  `printf 'curl -X POST https://api.paypal.com/v2/payments/captures/1/refund' > x.sh && bash x.sh`,
+  'wsl curl -X POST https://api.paypal.com/v2/payments/captures/1/refund',
+  `printf '[core]\\n\\tfsmonitor = "stripe charges create"\\n' >> .git/config && git status`,
 ];
 test('every payment line the review found asks, with the payment reason', () => {
   for (const cmd of PAYMENT_MUST_ASK) {
@@ -147,6 +156,8 @@ const MUST_PASS = [
   `echo "never run stripe refunds create from a helper" >> NOTES.md`,
   `node -p "require('./package.json').name"`,
   'stripe login',
+  'grep -rn "api.paypal.com" docs/',
+  'echo "dist/" >> .gitignore && git status',
 ];
 test('the read-only and file-text lines pass through decide', () => {
   for (const cmd of MUST_PASS) assert.equal(decide(cmd, noGh).kind, 'pass', cmd);

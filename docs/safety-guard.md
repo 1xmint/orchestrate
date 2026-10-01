@@ -45,8 +45,11 @@ those. Everything else, including loud everyday commands like `npm test` or
   `rg`, `cat`, `ls`, `git log`/`show`/`diff`/`status`/`grep`…), text written
   to a file, a read-only `stripe` command, or a `node -e` that only reads
   local files and prints; and nothing it does not follow (`$( )`, backticks,
-  `<( )`, `<<<`, `( )`, `{ }`, `!`, loops, `>&`). Any other line with the
-  word `stripe` in it asks, as before 0.18. So `grep -n stripe README.md`
+  `<( )`, `<<<`, `( )`, `{ }`, `!`, loops, `>&`). Text written into git's or
+  rg's own settings (`.git/`, `.gitattributes`, a gitconfig, `.ripgreprc`) is
+  not inert, since a git read then runs it. Any other line with the word
+  `stripe` or a payment API host in it asks: a host reached through a script
+  file, `curl -K` or `wsl` asks too. So `grep -n stripe README.md`
   passes and `for c in …; do stripe refunds create …; done` asks
 - dropping or truncating a database: `drop database`/`drop table`/`drop
   schema`/`truncate` on a `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo`, or
@@ -176,7 +179,12 @@ or `"g$()h"`, cmd's `g^h`); a PowerShell splat (`@args`), which is a
 variable too; a merge run from a script file or `node -e`; a gh alias; a
 GraphQL query read from a file; and merging branches without a pull request
 at all — a push straight to the base branch (`git push origin HEAD:main`),
-the `mergeBranch` mutation or the REST route `…/merges`.
+the `mergeBranch` mutation or the REST route `…/merges`. Settings made before
+the line are not read either: a git config, `.gitattributes` or environment
+variable already in place can make a plain read run a program (an external
+diff, a textconv, `core.fsmonitor`, an editor for `git add -e`,
+`RIPGREP_CONFIG_PATH`, a `curl -K` file written earlier). The check reads only
+the line in front of it.
 
 ## What happens when one of these is about to run
 

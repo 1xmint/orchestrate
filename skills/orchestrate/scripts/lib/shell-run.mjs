@@ -24,6 +24,7 @@ const WRAPPER_ARG_FLAGS = { nice: /^-n$/, sudo: /^-[ugCDhpRrT]$/, xargs: /^-[nIP
 // Not sed, awk, find or xargs: each has a way to run a command.
 const READERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls', 'findstr', 'cat', 'head', 'tail', 'wc', 'ls', 'pwd', 'cd', 'mkdir', 'echo', 'printf', 'type', 'get-content', 'write-output']);
 const GIT_READ_RE = /^(grep|log|show|diff|status|blame|add)$/;
+const RUN_CONFIG_RE = /\.git[\\/]|gitattributes|gitconfig|ripgreprc|\.config[\\/]git\b/i;
 const FETCHERS = new Set(['curl', 'wget', 'http', 'https', 'xh', 'invoke-webrequest', 'invoke-restmethod', 'iwr', 'irm']);
 
 // Payment services' API hosts: a web call to one of these is a payment action.
@@ -203,7 +204,9 @@ function plainSegment(seg) {
   if (!w.length) return true;
   if (w.length !== all.length) return false; // `PAGER=… git log` runs the assignment
   const b = base(w[0]);
-  if (TEXT_CMDS.has(b) && isTextToFile(seg)) return true;
+  // Text into git's or rg's own settings is not inert: a git read on the same
+  // line runs what it names (core.fsmonitor, a textconv, a filter).
+  if (TEXT_CMDS.has(b) && isTextToFile(seg)) return !RUN_CONFIG_RE.test(seg);
   // rg runs a program for --pre and --hostname-bin; git grep for -O, which
   // groups with other short flags (-iO) and takes any long prefix (--open).
   if (b === 'rg' && w.some(x => /^--(pre|hostname-bin|hyperlink)/.test(x))) return false;
@@ -237,11 +240,12 @@ export function plainLine(text) {
 }
 
 // Does this line act on a payment account? What it runs (runsPayment), or,
-// on any line that is not plain, the brand word anywhere, as before 0.18.
+// on any line that is not plain, the brand word or a payment API host anywhere
+// (a host reached through a script file, `curl -K`, or `wsl`/`ssh`).
 export function paymentLine(text) {
   const s = String(text || '');
   if (runsPayment(s)) return true;
-  return /\bstripe\b/i.test(s) && !plainLine(s);
+  return (/\bstripe\b/i.test(s) || PAYMENT_HOSTS_RE.test(s)) && !plainLine(s);
 }
 
 // Every piece of shell that would run, flattened: the top-level segments,
