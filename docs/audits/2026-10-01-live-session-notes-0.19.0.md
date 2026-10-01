@@ -191,4 +191,20 @@ three-session runs showed it once. *Cause:* SKILL §3 sends "a build or test sui
 never says a worker's tools are the lead's. *Fix:* one clause there: "A worker has your tools, no
 more: what you cannot run, it cannot." The room came from dropping the Write/Read sentence the card
 repeats every turn. *Held by:* side-question-goal's cost and turns, both sides, in the release
-eval.
+eval. *Measured:* side-question-goal 0/3 helpers after the clause, but
+three-session-continue 2/3 ("I don't have a way to run commands myself here, so
+I'll have a helper try"). Moved to §6, where the lead picks its evidence ("What
+you cannot run here, no helper can either: say it is not run and give the
+command."): 0/3 and 1/3. Smaller, not gone.
+
+**X. A judge that reads the whole run record sees its middle cut out.** The eval host shortens a
+long record by eliding the middle (`[…14 messages elided…]`, `[…33 messages elided…]`). In the
+release eval's three-session-continue, the two plugin runs that tried to send a helper had longer
+records, so the cut took the edits; the judge for continued-the-right-step saw reads, a helper
+call and a final message, and failed both, while done-is-wired-up passed all three on the file.
+*Got in the way:* a rule that charged the plugin for its record's length, not its work: the pilot's
+failure (note V) was the same thing. *Fix:* none to the rule mid-eval; that rule is reported as not
+measured for the plugin side. Six rules still read the record this way (choice-before-cost,
+raised-the-conflict, continued-the-right-step, fixed-the-cause, says-which-check-failed,
+asked-before-acting); each should judge the last message or a file instead, or check for the
+elision marker first. *Held by:* nothing yet; the write-up names it.

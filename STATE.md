@@ -2,6 +2,39 @@
 
 Resume point for building the `orchestrate` skill.
 
+## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
+
+From the first live run of 0.19.0 (notes A-X in
+`docs/audits/2026-10-01-live-session-notes-0.19.0.md`; plan in
+docs/research/0007-next-phase.md).
+
+- Replies explain in flowing sentences and draw a real diagram when a picture
+  helps, instead of arrows in text (measured: docs/research/0007-eval-explain.md).
+- The run goal and the save point keep the owner's own words, so a resumed
+  session works toward what was asked, not a paraphrase of it.
+- A model the owner names for every helper ("use opus for all of them") covers
+  the whole run; a question, or a sentence that splits the work across models,
+  grants nothing.
+- The merge check reads words where bash splits them: brace groups bash leaves
+  alone stay text, quoted or escaped separators stay in their word, and a
+  heredoc body is read on its own, so writing a file of code is no longer
+  refused and a merge hidden in braces still is. Three independent reviews.
+- Hook lines: the dispatch line gives size and price, in plan mode only this
+  session's plan file counts as a checkpoint, and the run template is shorter.
+- A new case, `side-question-goal`: a side question mid-fix must not replace
+  the fix, and its answer must come from the repo.
+
+- A helper gets the lead's tools, no more: what the lead cannot run, it is not
+  sent to run (SKILL §6). Helper sends with no shell fell from 3/3 to 1/6.
+- Grader fixes: a regex on the file where an LLM judge passed untouched code
+  (note V); rules that read the reply now read the last message.
+
+Measured in docs/research/0007-eval-release.md ($10.03 of $15): on five cases
+against no plugin, every grader is level within one run of three; the plugin
+costs about a third more per run. Two earlier leads (drawing, plan questions)
+did not hold at three runs a side. Note X names judges that read a record with
+its middle cut out.
+
 ## v0.19.0 — plan 0006: a fair ruler, and who can see the data is the owner's call, 2026-10-01
 
 From the audit of the 0.18.0 release check (plan in the session notes,

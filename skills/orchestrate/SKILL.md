@@ -143,8 +143,7 @@ where it went; a packet that needs it carries its path.
 fits in a handful of tool calls and small outputs: about eight steps or 15k
 tokens of growth. Everything else goes to a worker, and the conversation keeps
 only its packet and return — a file over about 150 lines, three or more
-files, a build or test suite, or a read whose answer is a paragraph. A worker
-has your tools, no more: what you cannot run, it cannot.
+files, a build or test suite, or a read whose answer is a paragraph.
 **Assisted**: one worker for one larger step. **Coordinated**: one packet per
 plan step, three or more independent steps going to `orch-coordinator` (§5);
 a ledger and dependencies join when several tracks run at once or the work
@@ -245,8 +244,9 @@ An agent's `DONE` is a claim. What settles it is evidence, and the cheapest
 sufficient evidence is the right one — reuse a check that already passed.
 Do not rerun it by ritual. Add a regression test only for a real behaviour
 nothing else covers, drive a user-facing flow by hand when reading the code
-cannot settle it, and run whatever the repo requires to merge. `evaluation.md`
-has the rule and the five grades (Done, Built-unverified, Partial,
+cannot settle it, and run whatever the repo requires to merge. What you cannot
+run here, no helper can either: say it is not run and give the command.
+`evaluation.md` has the rule and the five grades (Done, Built-unverified, Partial,
 Blocked, Failed).
 
 Check the return against its packet: `CHANGED` inside the scope it was given,
