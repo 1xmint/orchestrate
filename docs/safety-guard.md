@@ -46,11 +46,18 @@ those. Everything else, including loud everyday commands like `npm test` or
   to a file, a read-only `stripe` command, or a `node -e` that only reads
   local files and prints; and nothing it does not follow (`$( )`, backticks,
   `<( )`, `<<<`, `( )`, `{ }`, `!`, loops, `>&`). Text written into git's or
-  rg's own settings (`.git/`, `.gitattributes`, a gitconfig, `.ripgreprc`) is
-  not inert, since a git read then runs it. Any other line with the word
-  `stripe` or a payment API host in it asks: a host reached through a script
-  file, `curl -K` or `wsl` asks too. So `grep -n stripe README.md`
-  passes and `for c in …; do stripe refunds create …; done` asks
+  rg's own settings is not inert, since a git read then runs it. Where the text
+  lands decides this, not what it says: a file inside a `.git` folder, a
+  `.git` gitdir file, `.gitattributes`, a gitconfig or `.ripgreprc`, or a path
+  built from a variable. A `cd` into a `.git` folder or a variable path also
+  makes the line not plain. Any other line with the word `stripe` or a payment
+  API host in it asks: a host reached through a script file, `curl -K` or
+  `wsl` asks too. So `grep -n stripe README.md` passes and
+  `for c in …; do stripe refunds create …; done` asks. The price: a line that
+  only names a host but is not plain also asks, such as
+  `git commit -m "move to api.paypal.com"`, `grep -rn api.paypal.com src | sort`
+  or `nslookup api.paypal.com`; in a helper or a headless run, that ask is a
+  refusal
 - dropping or truncating a database: `drop database`/`drop table`/`drop
   schema`/`truncate` on a `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo`, or
   `redis-cli` command line, including inside a `-c`/`-e`/`--eval` string;
@@ -183,8 +190,9 @@ the `mergeBranch` mutation or the REST route `…/merges`. Settings made before
 the line are not read either: a git config, `.gitattributes` or environment
 variable already in place can make a plain read run a program (an external
 diff, a textconv, `core.fsmonitor`, an editor for `git add -e`,
-`RIPGREP_CONFIG_PATH`, a `curl -K` file written earlier). The check reads only
-the line in front of it.
+`RIPGREP_CONFIG_PATH`, a `curl -K` file written earlier, or a link made
+earlier that points an ordinary-looking file at `.git/config`). The check
+reads only the line in front of it.
 
 ## What happens when one of these is about to run
 

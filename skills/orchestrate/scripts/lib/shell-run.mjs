@@ -24,7 +24,9 @@ const WRAPPER_ARG_FLAGS = { nice: /^-n$/, sudo: /^-[ugCDhpRrT]$/, xargs: /^-[nIP
 // Not sed, awk, find or xargs: each has a way to run a command.
 const READERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls', 'findstr', 'cat', 'head', 'tail', 'wc', 'ls', 'pwd', 'cd', 'mkdir', 'echo', 'printf', 'type', 'get-content', 'write-output']);
 const GIT_READ_RE = /^(grep|log|show|diff|status|blame|add)$/;
-const RUN_CONFIG_RE = /\.git[\\/]|gitattributes|gitconfig|ripgreprc|\.config[\\/]git\b/i;
+// A file git or rg reads its settings from, a `.git` folder or gitdir file, or
+// a path built from a variable, which could be any of those.
+const RUN_CONFIG_RE = /(^|[\\/])\.git($|[\\/])|gitattributes|gitconfig|ripgreprc|(^|[\\/])\.config[\\/]git($|[\\/])|[$%]/i;
 const FETCHERS = new Set(['curl', 'wget', 'http', 'https', 'xh', 'invoke-webrequest', 'invoke-restmethod', 'iwr', 'irm']);
 
 // Payment services' API hosts: a web call to one of these is a payment action.
@@ -167,6 +169,25 @@ export function isTextToFile(seg) {
     && (b === 'tee' || /(^|[^>&0-9])>>?\s*[^\s&]/.test(seg) || /^(set-content|add-content|out-file)$/.test(b));
 }
 
+// The files a text command writes: what follows `>` or `>>`, tee's file
+// arguments, and every argument of the PowerShell writers.
+function textTargets(seg, b) {
+  const out = [];
+  let q = null;
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i];
+    if (q) { if (c === '\\' && q === '"') i++; else if (c === q) q = null; continue; }
+    if (c === '\\') { i++; continue; }
+    if (c === '"' || c === "'") { q = c; continue; }
+    if (c !== '>') continue;
+    while (seg[i + 1] === '>') i++;
+    const t = words(seg.slice(i + 1))[0];
+    if (t !== undefined) out.push(t);
+  }
+  if (b === 'tee' || /^(set-content|add-content|out-file)$/.test(b)) out.push(...words(seg).slice(1).filter(x => !/^-/.test(x)));
+  return out;
+}
+
 // Words with leading VAR=x assignments removed, wrappers kept.
 function plainWords(seg) {
   const w = words(seg);
@@ -205,8 +226,11 @@ function plainSegment(seg) {
   if (w.length !== all.length) return false; // `PAGER=… git log` runs the assignment
   const b = base(w[0]);
   // Text into git's or rg's own settings is not inert: a git read on the same
-  // line runs what it names (core.fsmonitor, a textconv, a filter).
-  if (TEXT_CMDS.has(b) && isTextToFile(seg)) return !RUN_CONFIG_RE.test(seg);
+  // line runs what it names (core.fsmonitor, a textconv, a filter). Only where
+  // it lands counts, so a note that mentions .git/hooks stays plain; a `cd`
+  // into a .git folder makes a bare `>> config` land there.
+  if (TEXT_CMDS.has(b) && isTextToFile(seg)) return !textTargets(seg, b).some(t => RUN_CONFIG_RE.test(t));
+  if (b === 'cd' && w.slice(1).some(t => RUN_CONFIG_RE.test(t))) return false;
   // rg runs a program for --pre and --hostname-bin; git grep for -O, which
   // groups with other short flags (-iO) and takes any long prefix (--open).
   if (b === 'rg' && w.some(x => /^--(pre|hostname-bin|hyperlink)/.test(x))) return false;

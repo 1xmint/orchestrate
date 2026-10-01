@@ -86,6 +86,12 @@ const MERGE_MUST_REFUSE = [
   // Text into git's settings, then a git read that runs it.
   `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> .git/config && git status`,
   `printf '* diff=x\\n' > .gitattributes && printf '[diff "x"]\\n\\ttextconv = gh pr merge 5\\n' >> .git/config && git diff`,
+  // Reached by a cd, a quoted or unspaced path, a gitdir file, or a variable.
+  `cd .git && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> config && cd .. && git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> ".git"/config && git status`,
+  `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n'>>.git/config && git status`,
+  `printf 'gitdir: x\\n' > sub/.git && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> sub/x/config && cd sub && git status`,
+  `D=.git; printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> $D/config && git status`,
 ];
 test('every merge line the review found is refused through decide', () => {
   for (const cmd of MERGE_MUST_REFUSE) {
@@ -158,6 +164,7 @@ const MUST_PASS = [
   'stripe login',
   'grep -rn "api.paypal.com" docs/',
   'echo "dist/" >> .gitignore && git status',
+  'echo "hooks live in .git/hooks; gh pr merge after review" >> NOTES.md',
 ];
 test('the read-only and file-text lines pass through decide', () => {
   for (const cmd of MUST_PASS) assert.equal(decide(cmd, noGh).kind, 'pass', cmd);
