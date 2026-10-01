@@ -1,7 +1,7 @@
 // state-archive.test.mjs — STATE.md holds only the newest release and the
 // one before it in full (AGENTS.md:49-51); older entries move to
 // docs/state/<version>.md so a fresh session can read where we are in one
-// page. Pins the shape, not the byte count: fails if a fourth version
+// page. Pins the shape, not the byte count: fails if a third version
 // section creeps back into STATE.md, or an "Earlier releases" link goes
 // stale or duplicates content that is also still inline.
 
@@ -18,13 +18,13 @@ const stateText = readFileSync(STATE_MD, 'utf8');
 
 const headings = [...stateText.matchAll(/^## (.+)$/gm)].map(m => m[1]);
 
-test('STATE.md has at most three version sections before "Earlier releases"', () => {
+test('STATE.md has at most two version sections before "Earlier releases"', () => {
   const earlierIdx = headings.indexOf('Earlier releases');
   assert.notEqual(earlierIdx, -1, 'STATE.md has an "## Earlier releases" heading');
   const before = headings.slice(0, earlierIdx);
   assert.ok(
-    before.length <= 3,
-    `expected at most 3 version sections before "Earlier releases", found ${before.length}: ${before.join(' | ')}`,
+    before.length <= 2,
+    `expected at most 2 version sections before "Earlier releases", found ${before.length}: ${before.join(' | ')}`,
   );
   // Nothing follows the index section.
   assert.equal(earlierIdx, headings.length - 1, '"Earlier releases" is the last heading in STATE.md');

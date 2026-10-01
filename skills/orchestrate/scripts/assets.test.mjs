@@ -403,6 +403,13 @@ test('the plan the user sees is the project page, and closing numbers come from 
   assert.match(routing, /often cheaper than the stronger model doing both/);
 });
 
+test('the RUN.md Budget section is the ceiling line and one note, not boilerplate', () => {
+  const run = readFileSync(join(SKILL, 'assets', 'RUN.md'), 'utf8');
+  const body = /^## Budget\n([\s\S]*?)(?=\n## )/m.exec(run)[1].split('\n').filter(l => l.trim());
+  assert.ok(body.length <= 3, `Budget section has ${body.length} lines, want at most 3`);
+  assert.match(body[0], /^Ceiling: \{\{BUDGET\}\}/);
+});
+
 test('the run ledger keeps the goal above the task table', () => {
   // What a resuming session has to recover. Task history is long, mostly
   // finished, and on disk; these four are the run itself.
@@ -515,7 +522,16 @@ test('the Plain output style ships, is valid, and says the same thing as §9', (
   // three rules that were not here before: recommend and price the tradeoff,
   // say the assumption that mattered, and never show the machinery. Cutting
   // prose to defend a round number is how a file loses the rules that earn it.
-  assert.ok(Buffer.byteLength(style) <= 4700, `the style is ${Buffer.byteLength(style)} bytes, cap 4700`);
+  // 5,100 in 0.20.0: "one idea per sentence" read as clipped fragments, and
+  // nothing said to draw a flow or that Mermaid shows as text in the desktop
+  // app (live notes K and R, 2026-10-01).
+  assert.ok(Buffer.byteLength(style) <= 5100, `the style is ${Buffer.byteLength(style)} bytes, cap 5100`);
+
+  // A picture when the shape is the point, and never the one diagram format
+  // the desktop app shows as plain text.
+  assert.match(flat, /Draw it when the shape is the point/);
+  assert.match(flat, /Never Mermaid/);
+  assert.doesNotMatch(style, /One idea per sentence/);
 });
 
 test('the installer copies the output style but never selects it', () => {

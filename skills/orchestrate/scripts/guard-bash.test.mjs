@@ -999,6 +999,72 @@ test('reviewer round 4: a line full of unclosed brace commas is read in well und
   assert.ok(took < 1000, `took ${took} ms`);
 });
 
+test('braces it cannot expand still hide no merge, but g and h in two different words are not gh (live note S)', () => {
+  const many = ','.repeat(70);
+  for (const cmd of [
+    `g{h${many}} pr merge 36`,
+    `gh pr me{r${many}}ge 36`,
+    'gh pr merge 36 {a..zz}',
+    '{g,x}{h,y}{a..z}{a..z} pr merge 36',
+    `gh api -X PUT repos/o/r/pul{l${many}}s/36/merge`,
+    `gh api graphql -f query=mutation{merge${many}PullRequest}`,
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of [
+    'node -e "const merged = {...base}; log(big hat)"',
+    'node -e "const o = {...opts, flag: true}; console.log(o.big, hat)"',
+    'echo {a..zz} && echo the merged log is big; hold on',
+  ]) assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  assert.equal(m.calls.length, 0);
+});
+
+test('a group bash leaves as written stays text, and the group around it still expands (g{h,{x}} is gh to bash)', () => {
+  // Bash: echo g{h,{x}} prints "gh g{x}". The inner group used to stop the
+  // outer one being read at all, so the gh never appeared.
+  for (const cmd of [
+    'g{h,{x}} pr merge 36',
+    'gh pr mer{g,{x}}e 36',
+    '{g,{x}}h pr merge 36',
+    'g{h,{a..b..c}} pr merge 36',
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+  // {...base} is not a range, so bash leaves it alone; reading it as one that
+  // could not be expanded sent the line to the looser rule. And a script with
+  // too many groups to list is held to words that spell merge and gh outright.
+  const objs = 'abcdefg'.split('').map((c, i) => `const ${c}={x:${i},y:${i}};`).join('');
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of [
+    'node -e "const o = {...base}; console.log(o.length, merged, high)"',
+    `node -e "${objs}import('./x.mjs').then(({modelDecision,grantCheck})=>console.log(modelDecision.length, 'merged', grantCheck.length))"`,
+  ]) assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  assert.equal(m.calls.length, 0);
+});
+
+test('words split where bash splits them: a quoted or escaped separator in a brace group stays in its word, and a heredoc body is not command text', () => {
+  // Over 64 copies, so the word-by-word rule decides. Bash keeps g{";",}h as
+  // one word, and its second copy is gh; splitting at the ; hid it.
+  const pad = ' {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}';
+  for (const cmd of [
+    `g{";",}h pr merge 36${pad}`,
+    `g{" ",}h pr merge 36${pad}`,
+    `g{';',}h pr merge 36${pad}`,
+    `g{\\;,}h pr merge 36${pad}`,
+    `g{\\ ,}h pr merge 36${pad}`,
+    // A body is read on its own and still counts, so one fed to bash is caught.
+    'bash <<X\ngh pr merge 36\nX',
+    `cat <<'X' | bash\ng{";",}h pr merge 36${pad}\nX`,
+    'echo "<<X"\ngh pr merge 1\nX',
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+  // Braces in a heredoc body or inside quotes are text to bash: a file of JSON
+  // or code written with cat <<EOF, an apostrophe in it, is not a merge.
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of [
+    `cat > a.json <<'E'\n{ "a": 1, "b": [1,2], "c": {"d": 2, "e": 3}, "f": {"g": 1, "h": 2}, "x": "merged" }\nE\ncat > b.js <<'E'\nconst o = { g: 1, h: 2 }; // the shop's merged list {x,y}{x,y}{x,y}{x,y}{x,y}{x,y}{x,y}\nE`,
+    'echo "a g" "h b" merged' + pad,
+    `node -e "const r={a:1,b:2};const s={c:3,d:4};const t={e:5,f:6};const u={g:7,h:8};const v={i:9,j:0};const w={k:1,l:2};const x={m:1,n:2}; console.log('merged')"`,
+  ]) assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  assert.equal(m.calls.length, 0);
+});
+
 test('reviewer round 4: a plain git merge alone on its line passes whatever the branch is called, and nothing rides along with it', () => {
   const m = merging(prView({ checks: [running()] }));
   for (const ok of ['git merge feature/graphql-schema', 'git merge origin/pulls-cleanup', 'git merge --no-ff feature/gh-merge-fix']) {

@@ -53,15 +53,95 @@ export const REVIEW_PATHS = [
 // out of time.
 export function mentionsMerge(line) {
   if (readsOnly(line) || plainGitMerge(line)) return false;
-  const text = String(line || '').replace(/\\\r?\n/g, '').replace(/["'`$]/g, '');
+  // A heredoc's body is not command text: bash expands no braces and reads no
+  // quotes in it, so a file written with cat <<EOF (JSON, code, "shop's") is
+  // read word by word on its own, below, and never expanded with the line.
+  // Read that way it still counts, so a body fed to bash is caught.
+  const { command, bodies } = splitHeredocs(String(line || '').replace(/\\\r?\n/g, ''));
+  const text = command.replace(/["'`$]/g, '');
   const expanded = expandBraces(text, { calls: 0 });
   const forms = (expanded || [text]).map(f => f.toLowerCase());
   const flat = forms.map(f => f.replace(/[^a-z0-9]/g, '')).join(' ');
-  // Braces this cannot expand hide both halves, so then the line counts as
-  // saying merge, and gh counts wherever its letters are.
-  if (!expanded) return flat.includes('gh') || flat.includes('pulls') || flat.includes('graphql');
-  const says = flat.includes('merge') || flat.includes('enqueuepullrequest');
-  return says && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql'));
+  const bodyWords = bodies.flatMap(b => shellWords(b.toLowerCase()));
+  // Braces this cannot expand can hide letters between the ones that stay, but
+  // not move a letter out of its shell word: the shell expands braces inside
+  // one word, and the first copy of a word is made of letters written in it.
+  // So then the line counts when one word holds m, e, r, g, e in order (or
+  // enqueuepullrequest) and one holds g then h (or pulls, or graphql), with
+  // anything between. A g ending one word beside an h starting the next is not
+  // gh, which is what refused ordinary scripts before. A word with no brace in
+  // it is not changed by expansion, so it must spell the word outright. Words
+  // split where bash splits them: g{";",}h and g{\ ,}h are one word, gh in one
+  // copy.
+  const words = expanded ? bodyWords : [...shellWords(command.toLowerCase()), ...bodyWords];
+  const holds = (w, n) => {
+    if (/[{}]/.test(w)) return inOrder(w, n);
+    return n === 'gh' ? namesGh(w) : w.replace(/[^a-z0-9]/g, '').includes(n);
+  };
+  const has = (...needles) => needles.some(n => words.some(w => holds(w, n)));
+  const says = has('merge', 'enqueuepullrequest') || (expanded && (flat.includes('merge') || flat.includes('enqueuepullrequest')));
+  const names = has('gh', 'pulls', 'graphql') || (expanded && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql')));
+  return Boolean(says && names);
+}
+
+// The line with each heredoc body taken out, and the bodies. A body runs from
+// the line after <<WORD (or <<-WORD, <<'WORD', <<"WORD"; not <<<) to a line
+// that is WORD alone. With no such line it is not a heredoc and stays command.
+function splitHeredocs(text) {
+  const lines = text.split('\n'), command = [], bodies = [];
+  for (let i = 0; i < lines.length; i++) {
+    command.push(lines[i]);
+    const marks = [...lines[i].matchAll(/<<(-?)\s*(["']?)([A-Za-z_][\w.-]*)\2/g)]
+      .filter(m => lines[i][m.index - 1] !== '<');
+    for (const m of marks) {
+      const end = lines.findIndex((l, j) => j > i && (m[1] ? l.replace(/^\t+/, '') : l).replace(/\r$/, '') === m[3]);
+      if (end < 0) break;
+      bodies.push(lines.slice(i + 1, end).join('\n'));
+      i = end;
+    }
+  }
+  return { command: command.join('\n'), bodies };
+}
+
+// The words as bash splits them: at a space or ; & | ( ) < > that is neither
+// quoted nor after a backslash. Quotes, backticks and $ are dropped; a
+// backslash stays, for a path such as C:\…\gh.exe. Braces and commas inside
+// quotes are text to bash, so they become \u0003, which joins nothing. An
+// unclosed quote runs to the end.
+function shellWords(text) {
+  const words = [];
+  let w = '', q = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === q) q = ''; else if (/[{},]/.test(c)) w += '\u0003'; else if (!/["'`$]/.test(c)) w += c; continue; }
+    if (c === '\\' && i + 1 < text.length) { w += c + text[++i]; continue; }
+    if (c === '"' || c === "'") { q = c; continue; }
+    if (/[\s;&|()<>]/.test(c)) { if (w) words.push(w); w = ''; continue; }
+    if (c !== '$' && c !== '`') w += c;
+  }
+  if (w) words.push(w);
+  return words;
+}
+
+// Whether some expansion of `word` could bring the letters of `needle`
+// together: they appear in order, and between two of them is only
+// punctuation, or a brace or comma, which a choice can cut through. A letter
+// or digit with no brace or comma beside it is written in the same choice as
+// its neighbours and is always there: grantCheck never becomes gh.
+function inOrder(word, needle) {
+  // At each needle position: 0 nothing but punctuation since the last letter
+  // matched, 1 a letter or digit and no brace yet, 2 a brace or comma seen.
+  let states = new Set(['0:2']);
+  for (const c of word) {
+    const next = new Set();
+    for (const st of states) {
+      const [i, s] = st.split(':').map(Number);
+      if (c === needle[i] && s !== 1) { if (i + 1 === needle.length) return true; next.add(`${i + 1}:0`); }
+      next.add(`${i}:${/[{},]/.test(c) ? 2 : /[a-z0-9]/.test(c) && s !== 2 ? 1 : s}`);
+    }
+    states = next;
+  }
+  return false;
 }
 
 // Any word that is gh once quotes, braces and backslashes are gone, or whose
@@ -78,15 +158,19 @@ function namesGh(text) {
 
 // The shell's brace expansion: each {a,b}, {x..y} or {x..y..step} group gives
 // one copy of the line per choice, innermost group first, done before letters
-// are lowercased so a range such as {Z..a} holds what bash's would. Null when
-// that makes more than 64 copies or a `..` group is not a range this reads.
+// are lowercased so a range such as {Z..a} holds what bash's would. A group
+// bash leaves as it is ({x}, {...base}, {a..b..c}) stays text, with its braces
+// masked so the group around it still expands: g{h,{x}} is gh and g{x} to
+// bash, and reading the outer group as text hid the gh. Null when that makes
+// more than 64 copies.
+const OPEN = '\u0001', CLOSE = '\u0002';
 function expandBraces(text, budget) {
   if (++budget.calls > 400) return null;
-  const groups = /\{([^{}]*)\}/g;
-  let m;
-  while ((m = groups.exec(text)) && !m[1].includes(',') && !m[1].includes('..'));
-  if (!m) return [text];
-  const items = braceItems(m[1]);
+  let m, items = 'text';
+  while ((m = /\{([^{}]*)\}/.exec(text)) && (items = braceItems(m[1])) === 'text') {
+    text = text.slice(0, m.index) + OPEN + m[1] + CLOSE + text.slice(m.index + m[0].length);
+  }
+  if (!m) return [text.replaceAll(OPEN, '{').replaceAll(CLOSE, '}')];
   if (!items) return null;
   const head = text.slice(0, m.index), tail = text.slice(m.index + m[0].length);
   const out = [];
@@ -96,11 +180,13 @@ function expandBraces(text, budget) {
   }
   return out;
 }
+// The choices in one group, 'text' when bash would leave it as written, or
+// null when it is a range too long to list.
 function braceItems(inner) {
   if (inner.includes(',')) return inner.split(',');
   const r = /^(-?\d+|[a-zA-Z])\.\.(-?\d+|[a-zA-Z])(?:\.\.(-?\d+))?$/.exec(inner);
   const num = r && /\d/.test(r[1]);
-  if (!r || num !== /\d/.test(r[2])) return null;
+  if (!r || num !== /\d/.test(r[2])) return 'text';
   const a = num ? Number(r[1]) : r[1].charCodeAt(0), b = num ? Number(r[2]) : r[2].charCodeAt(0);
   const step = Math.max(1, Math.abs(Number(r[3] || 1))), dir = a <= b ? 1 : -1;
   if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || Math.abs(b - a) / step > 64) return null;

@@ -79,6 +79,25 @@ test('writes the snapshot at checkpointPath, with the goal, last user line, edit
   assert.ok(Buffer.byteLength(body, 'utf8') < 1600, `body is ${Buffer.byteLength(body, 'utf8')} bytes`);
 });
 
+test('a message typed mid-turn (a queued command from a human) is the last message; one from elsewhere is not', () => {
+  const home = makeHome();
+  const dir = join(home, 'store');
+  const queued = (prompt, kind) => line({ type: 'attachment', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind }, humanTurn: kind === 'human' } });
+  const transcriptPath = writeTranscript(home, [
+    user('do the thing: fix the widget'),
+    assistantText('Working on the widget.'),
+    queued('also keep the old colours', 'human'),
+    queued('<task-notification>done</task-notification>', 'task'),
+    edit('/repo/src/widget.mjs'),
+    boundary('b1'),
+  ].join(''));
+  const reading = readContext(transcriptPath, { session: 'sq' });
+  const path = writeCompactionSnapshot({ session: 'sq', reading, transcriptPath, ctx: { dir } });
+  const body = readFileSync(path, 'utf8');
+  assert.match(body, /Last message before compaction: also keep the old colours/);
+  assert.doesNotMatch(body, /task-notification/);
+});
+
 test('a second call does not rewrite the file', () => {
   const home = makeHome();
   const dir = join(home, 'store');

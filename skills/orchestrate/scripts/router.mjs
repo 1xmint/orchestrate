@@ -210,6 +210,55 @@ function newState(input) {
 }
 
 // ---- hook handlers ----------------------------------------------------------
+// A family is every helper's model only when the scope words hold the name
+// itself: "however many opus agents", "opus for all the helpers", "every
+// helper on opus". Scope words elsewhere in the sentence are about something
+// else ("as many tests as you can, use opus for the parser fix"), and a
+// sentence that also says not, only, except or this one is not a blanket yes.
+// Wrong in the loose direction, every later helper runs on a model the user
+// pays more for; wrong in the tight one, the guard asks again.
+const HELPERS = '(?:agents?|helpers?|workers?|subagents?|tasks?)';
+const runScope = f => new RegExp(
+  `\\b(?:however|as) many (?:of (?:the |your )?)?${f}\\b` +
+  `|\\b${f}\\b(?:[^.;,!?\\n]|\\.(?=\\d)){0,30}?\\b(?:for|on|to) (?:all|every|each)\\b(?: of)?(?: the| your| my)? ${HELPERS}\\b` +
+  `|\\b(?:all|every|each)(?: of)?(?: the| your| my)? ${HELPERS} (?:on|use|uses|using|with|gets?|runs? on|should use) ${f}\\b`, 'i');
+const NOT_BLANKET = /\b(?:stop|quit|no more|not|don'?t|never|only|except|this one|that one)\b/i;
+// A sentence ends at ; or a line break, or . ! ? before a space: the dot in
+// "opus 5.5" is part of the name.
+const sentenceAt = (text, i) => {
+  const parts = text.split(/(?<=[.!?])(?=\s)|(?<=[;\n])/);
+  let at = 0;
+  for (const p of parts) { if (i < at + p.length) return p; at += p.length; }
+  return '';
+};
+export function runFamilyIn(text, families) {
+  let best = null;
+  for (const f of families) {
+    const m = runScope(f).exec(text);
+    const s = m && sentenceAt(text, m.index);
+    // A question asks, it does not grant; a sentence that names sonnet or
+    // haiku too splits the run between models. A missed grant costs one ask,
+    // a wrong one costs the user money.
+    if (!m || NOT_BLANKET.test(s) || /\?\s*$/.test(s) || /\b(?:sonnet|haiku)\b/i.test(s)) continue;
+    if (!best || m.index < best.at) best = { family: f, at: m.index, sentence: s };
+  }
+  return best;
+}
+// Withdrawn by name ("stop using opus", "no more opus"), or by putting the
+// helpers back on a cheaper model for the rest ("sonnet from now on").
+const withdrawsRun = (text, f) =>
+  new RegExp(`\\b(?:stop|quit|no more|don'?t|do not|never)\\b[^.;!?\\n]{0,20}\\b${f}\\b`, 'i').test(text)
+  || /\b(?:sonnet|haiku)\b[^.;!?\n]{0,40}\b(?:from now on|for the rest|for all|for every|throughout)\b|\b(?:back to|switch to|only use) (?:sonnet|haiku)\b/i.test(text);
+
+// The fact the lead needs when a grant covers the run, and the one part of
+// the request it cannot honour: the Agent tool takes a model, not an effort,
+// so "opus high" runs each helper at the host's default effort.
+function runGrantLine(f, near) {
+  const effort = /\b(?:effort|low|medium|high|xhigh|max)\b/i.test(near)
+    ? ' A helper\'s effort cannot be set: it runs at the host\'s default for that model, so say so once if the user named one.' : '';
+  return `[orchestrate · model] The user named ${f} for every helper this session; the guard allows it for any task without asking again.${effort}`;
+}
+
 function emit(event, text) {
   if (!text) return;
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }));
@@ -275,8 +324,23 @@ function handlePrompt(input) {
   // first. A prompt naming none of them leaves an existing grant alone: a
   // later message about Sonnet or Haiku must not overwrite a live grant.
   const grantFamilies = FAMILY_ORDER.filter(f => FAMILY_ORDER.indexOf(f) < FAMILY_ORDER.indexOf('sonnet'));
+  // A family named for every helper ("however many opus agents you need") is
+  // its own record, `runModel`, beside the one-task grant: seen live, the
+  // owner said that and each helper after the first was refused back to
+  // Sonnet. The one-task grant goes to the earliest other family named.
+  let runGrant = null;
+  if (state.runModel && withdrawsRun(trimmed, state.runModel.family)) {
+    runGrant = `[orchestrate · model] The user withdrew ${state.runModel.family} for every helper; helpers start on Sonnet again, and a model they name covers one task.`;
+    delete state.runModel;
+  }
+  const run = runFamilyIn(trimmed, grantFamilies);
+  if (run && !(state.runModel && state.runModel.family === run.family)) {
+    state.runModel = { family: run.family, at: new Date().toISOString() };
+    runGrant = runGrantLine(run.family, run.sentence);
+  }
   let namedFamily = null, namedAt = Infinity;
   for (const f of grantFamilies) {
+    if (run && f === run.family) continue;
     const m = new RegExp(`\\b${f}\\b`, 'i').exec(trimmed);
     if (m && m.index < namedAt) { namedAt = m.index; namedFamily = f; }
   }
@@ -489,6 +553,8 @@ function handlePrompt(input) {
       state.recoverShownFor = limitKey;
     }
   }
+
+  if (runGrant) out.push(runGrant);
 
   if (armedNow) {
     out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);

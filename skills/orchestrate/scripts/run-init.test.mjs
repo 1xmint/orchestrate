@@ -159,6 +159,32 @@ test('no session-id and no plan file both leave the Plan line off', () => {
   assert.doesNotMatch(md, /^Plan:/m);
 });
 
+// Live note Q: the Goal held only the lead's paraphrase. With a session id the
+// owner's own words are quoted from the transcript, a mid-turn message counts,
+// and a short reply brings the longer request before it along.
+test('the Goal quotes the owner from the transcript, then gives the lead\'s reading', () => {
+  const projects = join(FAKE_HOME, '.claude', 'projects', 'proj');
+  mkdirSync(projects, { recursive: true });
+  const L = o => JSON.stringify(o) + '\n';
+  const said = t => L({ type: 'user', message: { role: 'user', content: t } });
+  const queued = t => L({ type: 'attachment', attachment: { type: 'queued_command', prompt: t, origin: { kind: 'human' } } });
+  writeFileSync(join(projects, 'sess-words.jsonl'),
+    said('<command-name>/orchestrate</command-name>')
+    + said('make the members page load faster, it takes $& ten seconds on my phone and people complain')
+    + L({ type: 'assistant', message: { content: [{ type: 'text', text: 'Shall I start?' }] } })
+    + queued('yes go'));
+  const dir = repo({ 'package.json': '{}' });
+  const r = run(dir, 'w', '--session-id', 'sess-words', '--goal', 'cut members page load time');
+  assert.equal(r.status, 0, r.stderr);
+  const md = readFileSync(r.stdout.split('\n')[0].trim(), 'utf8');
+  assert.match(md, /The owner's words, quoted from the session: "make the members page load faster, it takes \$& ten seconds[^"]*" Then: "yes go"/);
+  assert.match(md, /The lead's reading: cut members page load time/);
+  assert.doesNotMatch(md, /command-name/);
+
+  const r2 = run(dir, 'w2', '--session-id', 'sess-none', '--goal', 'only mine');
+  assert.match(readFileSync(r2.stdout.split('\n')[0].trim(), 'utf8'), /## Goal\n\nonly mine\n/, 'no transcript: the --goal text alone, as before');
+});
+
 test('the new ledger reads back as an open run with an unwritten Pickup', () => {
   const dir = repo({ 'package.json': '{}' });
   run(dir, 'x', '--goal', 'do the thing');

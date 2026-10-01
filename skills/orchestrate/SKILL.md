@@ -17,7 +17,7 @@ license: MIT
 compatibility: Claude Code (desktop or CLI); loads in Codex as instructions. Scripts need Node 18+.
 metadata:
   author: Josh (1xmint)
-  version: "0.19.0"
+  version: "0.20.0"
 ---
 
 # Orchestrate
@@ -73,7 +73,8 @@ alternatives, and let them choose. Never downgrade or spend quietly to avoid
 asking. `routing.md`'s "Who chooses the model" has it.
 
 A model the user names in their own message is a grant for the task they
-named it for, not the run: any other id gets the plan's usual model.
+named it for, or every helper when they said so ("as many opus agents as
+you need").
 `APPROVED BY USER: <model>` in a packet is a separate thing — the billing
 check for a model outside the plan, not a grant.
 
@@ -150,8 +151,7 @@ must survive this session ending. Before splitting a small build across
 helpers, tell the user it has cost about two to three times doing it alone,
 and let them pick.
 
-Never `Write` a whole file you could `Edit`. Never `Read` back a file you just
-wrote. Filter command output to what decides the next step. Move down to a
+Filter command output to what decides the next step. Move down to a
 simpler one the moment the reason for the heavier one is gone — a small
 high-risk change can get an independent review without becoming a project.
 
@@ -234,8 +234,8 @@ A return that used every turn is **partial** whatever it says; if what is
 left is small, SendMessage it while warm; otherwise a
 fresh, smaller packet from its PROGRESS file and branch.
 
-Every dispatch arrives with a price tag from the guard, in list-price dollars.
-Say it once, before the spend, when large enough to matter — never a running
+Every dispatch arrives with a size from the guard; in dollars on per-use
+billing or a ceiling. Say it once, before the spend, when large enough to matter — never a running
 total.
 
 ## 6. Prove it, proportionately
@@ -244,8 +244,9 @@ An agent's `DONE` is a claim. What settles it is evidence, and the cheapest
 sufficient evidence is the right one — reuse a check that already passed.
 Do not rerun it by ritual. Add a regression test only for a real behaviour
 nothing else covers, drive a user-facing flow by hand when reading the code
-cannot settle it, and run whatever the repo requires to merge. `evaluation.md`
-has the rule and the five grades (Done, Built-unverified, Partial,
+cannot settle it, and run whatever the repo requires to merge. What you cannot
+run here, no helper can either: say it is not run and give the command.
+`evaluation.md` has the rule and the five grades (Done, Built-unverified, Partial,
 Blocked, Failed).
 
 Check the return against its packet: `CHANGED` inside the scope it was given,

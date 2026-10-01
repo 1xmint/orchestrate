@@ -142,6 +142,8 @@ const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
 //   null              no grant applies (no record, wrong family, no task id)
 //   { allow, bind }   allowed; `bind` is the id to claim when not bound yet
 //   { deny, reason }  a grant exists but is already spent on another task
+// A grant for the whole run is a separate record (`runModel`, below), so
+// naming another model for one task never spends or replaces it.
 export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!userModel || userModel.family !== f) return null;
   const id = numericTaskId(prompt);
@@ -220,7 +222,7 @@ export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
 //   { grantBind, at, family }   allowed, and the caller should claim the
 //                               grant for `grantBind` (via claimGrantId)
 //                               once every later gate (budget) also passes
-export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null, userModel = null } = {}) {
+export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null, userModel = null, runModel = null } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const model = String(ti.model || '');
   const f = family(model);
@@ -255,6 +257,9 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
     const key = taskKey(prompt);
     const tried = dispatches.some(d => d && normalizeRole(d.agent) === role && d.key === key && rank(d.model === 'inherit' ? 'sonnet' : d.model) >= rank('sonnet'));
     if (!tried) {
+      // The user named this family for every helper ("however many opus
+      // agents you need"): any task on it, with or without an id, binds nothing.
+      if (runModel && runModel.family === f) return null;
       const g = grantCheck(userModel, f, prompt, userModel && userModel.taskId);
       if (g && g.allow) {
         // The grant is the reason this is allowed. Only here does a bind
@@ -271,7 +276,7 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
       if (userModel && userModel.family === f && !userModel.taskId && !numericTaskId(prompt)) {
         return { prefix: 'model', reason: `the user named ${f}; add a TASK: line with a number (e.g. TASK: 1-1-0001) to the packet and resend. The grant covers that one task id.` };
       }
-      return { prefix: 'model', reason: `${plainRole(role)} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id.` };
+      return { prefix: 'model', reason: `${plainRole(role)} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id, or every helper when they said so ("however many opus agents you need").` };
     }
   }
   return null;
@@ -479,19 +484,6 @@ export function estimateWording(tag) {
   return t.replace(/^price tag: /, 'estimate before work, this helper: ').replace(', not subscription usage', '');
 }
 
-// The opposite fact from progressFact: a packet that does name a PROGRESS
-// path, for a helper that may be working in its own worktree and so cannot
-// write under the main checkout the path is written relative to. Said once,
-// plainly, so a refused write is not a dead end.
-export function progressWorktreeNote(role, prompt, planMode, readFile = readFileSync) {
-  if (planMode) return '';
-  if (!AUTHOR_ROLES.has(normalizeRole(role))) return '';
-  const text = String(prompt || '');
-  const has = /^\s*PROGRESS:\s*\S+/m.test(text) || /^\s*PROGRESS:\s*\S+/m.test(briefText(text, readFile).text);
-  if (!has) return '';
-  return 'if writing the progress file is refused, write the same relative path inside your own separate folder instead, and say so in your return';
-}
-
 // A fact, not an order, said only on an orch-implementer dispatch: Codex was
 // last probed inside CODEX_OK_FRESH_MS and answered signed in, and the account
 // is not sitting out a usage limit right now. The guard never starts Codex to
@@ -576,6 +568,7 @@ function main() {
       leadContext: normalizeRole(ti.subagent_type) === 'fork' ? lastContextTokens(input.transcript_path) : null,
       quota: readQuota(),
       userModel: userModel ? { ...userModel, taskId: boundId } : null,
+      runModel: state.runModel || null,
     });
     if (m && m.grantBind) { grantToClaim = m; m = null; }
   } catch { m = null; grantToClaim = null; }
@@ -644,8 +637,6 @@ function main() {
   if (size > PACKET_WARN_CHARS) tag = `${tag ? `${tag}; ` : ''}this packet is ${size} characters and is re-read on every step the agent takes; point at path:line ranges instead of pasting content`;
   const pf = missingFact(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
   if (pf) tag = `${tag ? `${tag}; ` : ''}${pf}`;
-  const pw = progressWorktreeNote(ti.subagent_type, ti.prompt, input.permission_mode === 'plan');
-  if (pw) tag = `${tag ? `${tag}; ` : ''}${pw}`;
   const cf = codexFact(ti.subagent_type);
   if (cf) tag = `${tag ? `${tag}; ` : ''}${cf}`;
   if (asksForPastedContents(ti.prompt)) tag = `${tag ? `${tag}; ` : ''}this brief asks for contents to be pasted back: the hand-back is five lines, so ask for a file path instead`;
