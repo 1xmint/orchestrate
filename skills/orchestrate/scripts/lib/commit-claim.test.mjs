@@ -5,6 +5,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { classifyClaim, lastAssistantText, contradicts, countedPaths, namesAllPaths } from './commit-claim.mjs';
 
+// Live note T: a sentence about what must happen BEFORE a commit is not a claim.
+test('negated, future and conditional sentences are not a committed claim', () => {
+  assert.equal(classifyClaim('Bring it back for approval before anything is committed.'), null);
+  for (const s of ['Nothing will be committed until you say so.', 'I will commit once the tests pass.', 'If you approve, it gets committed.']) assert.equal(classifyClaim(s), null, s);
+  assert.equal(classifyClaim('The work is committed on branch x.'), 'committed');
+});
+
 const line = rec => JSON.stringify(rec) + '\n';
 const assistantText = (...texts) => line({ type: 'assistant', message: { content: texts.map(t => ({ type: 'text', text: t })) } });
 

@@ -38,6 +38,11 @@ const notCommittedRe = new RegExp(
 const negatedUncommittedRe = /\b(?:no|nothing|none|zero|without)\s+(?:any\s+)?uncommitted\b/gi;
 
 const committedWordRe = /\bcommitted\b/i;
+// Words that make a sentence about "committed" something other than a report
+// that it happened: time and condition (before, until, once, if, unless, after,
+// when, whether), negation (not, no, nothing, never, n't), and what has not
+// happened yet (will, would, should, can, could, may, might, to be, going to).
+const NOT_A_CLAIM_RE = /\b(?:before|until|till|once|if|unless|after|when|whenever|whether|not|no|nothing|none|never|without|will|would|should|shall|can|could|may|might|must|need|needs|to\s+be|going\s+to|about\s+to|ready\s+to|want|wants|please)\b|n't\b/i;
 const commitsAreInRe = /\bcommits\s+are\s+in\b/i;
 
 // One sentence's claim: 'not' | 'committed' | 'mixed' | null. The negation
@@ -51,6 +56,11 @@ function classifySentence(raw) {
   const hasNot = !!matched;
   const stripped = hasNot ? sentence.replace(notCommittedRe, ' ') : sentence;
   const hasCommitted = committedWordRe.test(stripped) || commitsAreInRe.test(stripped);
+  // "bring it back for approval before anything is committed" says the opposite
+  // of a claim. Only a plain statement that the work IS committed counts; a
+  // negated, future, conditional or "before/until/once/if" sentence is not one,
+  // and when unsure nothing is said.
+  if (hasCommitted && !hasNot && NOT_A_CLAIM_RE.test(stripped)) return null;
   if (hasNot && hasCommitted) return 'mixed';
   if (hasNot) return 'not';
   if (hasCommitted) return 'committed';
