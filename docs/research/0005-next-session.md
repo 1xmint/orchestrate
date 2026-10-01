@@ -18,8 +18,8 @@ session.
 Then check that the session runs this build, before watching anything. The
 loaded copy's folder should end in `0.18.0`. The check: the loaded plugin's
 `skills/orchestrate/scripts/project.mjs` exists (0.17.2 has no such file), and
-`node <that scripts dir>/install-project.mjs --dry-run` prints "Alongside
-orchestrate". If either fails, stop: a watch of the old build measures nothing.
+`node <that scripts dir>/install-project.mjs <any repo folder> --dry-run`
+prints "Alongside orchestrate" (a dry run writes nothing). If either fails, stop: a watch of the old build measures nothing.
 
 ## 2. Watch it live
 
