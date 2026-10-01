@@ -147,7 +147,22 @@ function main() {
       console.log('  (not written: CLAUDE.md is tracked, so that is your call. --with-claude-md writes it.)');
     }
   }
+  console.log('');
+  console.log('Alongside orchestrate (nothing installed; see the README):');
+  for (const a of ALONGSIDE) console.log(a.startsWith(' ') ? a : `- ${a}`);
 }
+
+// Tools for jobs orchestrate leaves out on purpose; the same list as the
+// README's "Alongside orchestrate". Printed, never installed.
+export const ALONGSIDE = [
+  'ccusage (github.com/ccusage/ccusage, MIT): your usage by 5-hour block and by day',
+  'receipts (Anthropic catalog): what your Claude Code use actually produced',
+  'Playwright MCP (github.com/microsoft/playwright-mcp): proves a web change in a real page',
+  'Chrome DevTools MCP (github.com/ChromeDevTools/chrome-devtools-mcp): console, network, speed',
+  'claude-md-management (Anthropic catalog): keeps CLAUDE.md true',
+  'security-guidance (Anthropic catalog), reviews off: a free check on each file written;',
+  '  billed to your key if ANTHROPIC_API_KEY is set, so set ENABLE_CODE_SECURITY_REVIEW=0 and ENABLE_COMMIT_REVIEW=0',
+];
 
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { main(); } catch (e) { console.error(String(e && e.message)); process.exit(1); }

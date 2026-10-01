@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { plan, rulesFile, neverDoRules, RULES_REL } from './install-project.mjs';
+import { plan, rulesFile, neverDoRules, RULES_REL, ALONGSIDE } from './install-project.mjs';
 import { detect } from './gate.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -164,4 +164,17 @@ test('the twelve-line budget truncates and always terminates, even absurdly', ()
   const many = rulesFile({ ...g, gate: [{ kind: 'test', cmd: 'x' }] }, ['Never a.', 'Never b.', 'Never c.']);
   assert.ok(many.trimEnd().split('\n').length <= 12);
   assert.match(many, /`x`/, 'the gate survives truncation; the quoted rules are what gets cut');
+});
+
+test('the printed alongside list matches the README, and the run prints it', () => {
+  const readme = join(HERE, '..', '..', '..', 'README.md');
+  if (existsSync(readme)) {
+    const text = readFileSync(readme, 'utf8');
+    for (const a of ALONGSIDE.filter(a => !a.startsWith(' '))) assert.ok(text.includes(a.split(' ')[0]), a);
+  }
+  assert.ok(ALONGSIDE.some(a => /billed to your key if ANTHROPIC_API_KEY is set/.test(a)), 'the key warning is printed');
+  const dir = repo({ 'package.json': '{"scripts":{"test":"node --test"}}' });
+  const out = spawnSync(process.execPath, [SCRIPT, dir, '--dry-run'], { encoding: 'utf8' }).stdout;
+  assert.match(out, /Alongside orchestrate \(nothing installed/);
+  assert.match(out, /- ccusage /);
 });
