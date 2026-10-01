@@ -73,8 +73,6 @@ test('a lead\'s clean-up of several helper worktrees passes: quoted paths, a rea
 test('the wider clean-up still refuses anything that could lose work or reach elsewhere', () => {
   const tail = ' && git branch -d worktree-agent-abc123';
   for (const bad of [
-    'git worktree remove .claude/worktrees/../../src' + tail,
-    'git worktree remove .claude/worktrees/a elsewhere/b' + tail,
     'git worktree remove .claude/worktrees/a && git branch -D task/x',
     'git worktree remove .claude/worktrees/a && git branch -d task/x --force',
     'git worktree remove .claude/worktrees/a && git branch -d task/x && rm -rf src',
@@ -180,8 +178,10 @@ test('options placed before the git command word do not step round any check', (
     assert.equal(decide(c, { cwd: root, subagent: true }).kind, 'deny', c);
   }
   // -C moves where the path is read from
-  assert.equal(decide('git -C .claude worktree remove --force worktrees/agent-abc123', { cwd: root }).kind, 'pass', 'not a helper path as written');
-  assert.equal(decide('git -C sub worktree remove --force ../.claude/worktrees/agent-abc123', { cwd: root }).kind, 'pass', 'a path with .. is outside the rule, as before');
+  // A forced removal is checked whatever the path looks like, so these now ask
+  // (they used to pass because the path was not a helper path as written).
+  assert.equal(decide('git -C .claude worktree remove --force worktrees/agent-abc123', { cwd: root }).kind, 'ask', 'forced: checked wherever it resolves');
+  assert.equal(decide('git -C sub worktree remove --force ../.claude/worktrees/agent-abc123', { cwd: root }).kind, 'ask', 'forced, with ..: checked wherever it resolves');
   for (const c of ['git -C . push --force', 'git -C . branch -D feature/x', 'git --no-pager clean -fd', 'git -c a=b push origin --delete old']) {
     assert.equal(decide(c).kind, 'ask', c);
   }
@@ -224,10 +224,15 @@ test('a refused line of several parts says once that nothing ran', () => {
   assert.match(d.reason, /Nothing in this line ran\.$/);
 });
 
-test('a worktree cleanup chain with the path outside .claude/worktrees/ still asks or denies', () => {
-  const outside = 'git worktree remove ../elsewhere/worktree-agent-abc123 && git branch -d worktree-agent-abc123';
-  assert.equal(decide(outside).kind, 'ask');
-  assert.equal(decide(outside, { headless: true, mode: 'auto' }).kind, 'deny');
+test('a plain (unforced) worktree cleanup chain of a path outside .claude/worktrees/ passes: git itself refuses a dirty folder without force', () => {
+  for (const outside of [
+    'git worktree remove ../elsewhere/worktree-agent-abc123 && git branch -d worktree-agent-abc123',
+    'git worktree remove .claude/worktrees/../../src && git branch -d worktree-agent-abc123',
+    'git worktree remove .claude/worktrees/a elsewhere/b && git branch -d worktree-agent-abc123',
+  ]) {
+    assert.equal(decide(outside).kind, 'pass', outside);
+    assert.equal(decide(outside, { headless: true, mode: 'auto' }).kind, 'pass', outside);
+  }
 });
 
 test('a forced or remote branch delete is stopped, and the small -d passes for any name', () => {
@@ -1332,4 +1337,126 @@ test('the project\'s approved-commands list does not let a merge through', () =>
   assert.equal(out && out.hookSpecificOutput.permissionDecision, 'deny');
   // The list still works for what it is for.
   assert.equal(run(bash('git clean -fd', { cwd: dir })).stdout.trim(), '');
+});
+
+// ---- forced removal of a folder outside .claude/worktrees/, and the cd read ----
+import { gitBashPath } from './guard-bash.mjs';
+
+const toGitBash = p => p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => '/' + d.toLowerCase());
+const headless = { headless: true, mode: 'auto' };
+function tempWorktree(name = 'o190') {
+  const base = mkdtempSync(join(tmpdir(), 'orch-wt-out-'));
+  const root = join(base, 'repo');
+  const wt = join(base, name);
+  mkdirSync(root); mkdirSync(wt);
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  spawnSync('git', ['init', '-q'], { cwd: wt });
+  return { base, root, wt };
+}
+
+test('gitBashPath turns /x/rest into X:/rest on win32 only', () => {
+  assert.equal(gitBashPath('/c/Users/a/b', 'win32'), 'C:/Users/a/b');
+  assert.equal(gitBashPath('/d', 'win32'), 'D:/');
+  assert.equal(gitBashPath('/tmp/x', 'win32'), '/tmp/x', 'more than one letter is not a drive');
+  assert.equal(gitBashPath('C:/x', 'win32'), 'C:/x');
+  assert.equal(gitBashPath('rel/x', 'win32'), 'rel/x');
+  assert.equal(gitBashPath('/c/Users/a', 'linux'), '/c/Users/a');
+});
+
+test('the shape of a lead\'s clean-up line passes headless when the forced non-helper folder is clean (Git Bash /x/ form on Windows)', t => {
+  const { root, wt } = tempWorktree();
+  const helper = join(root, '.claude', 'worktrees', 'agent-ab14fb35c82fa5881');
+  mkdirSync(helper, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: helper });
+  const line = p => `git worktree remove ${p} --force 2>&1; git worktree remove .claude/worktrees/agent-ab14fb35c82fa5881 2>&1; git branch -d phase/0007-hook-lines worktree-agent-ab14fb35c82fa5881 phase/0007-flow-goal-grants 2>&1; git worktree list`;
+  assert.equal(decide(line(wt.replace(/\\/g, '/')), { cwd: root, ...headless }).kind, 'pass', 'native path form');
+  if (process.platform !== 'win32') return t.skip('the /x/ drive form is read only on win32');
+  assert.equal(decide(line(toGitBash(wt)), { cwd: root, ...headless }).kind, 'pass', '/x/ form');
+});
+
+test('a forced removal of a non-helper folder with unsaved changes is refused in every spelling', () => {
+  const { root, wt, base } = tempWorktree();
+  writeFileSync(join(wt, 'unsaved.txt'), 'work');
+  const fwd = wt.replace(/\\/g, '/');
+  const rel = '../o190';
+  const forms = [
+    `git worktree remove ${fwd} --force`,
+    `git worktree remove -f ${fwd}`,
+    `git worktree remove --force "${fwd}"`,
+    `git worktree remove --force '${fwd}'`,
+    `git worktree remove ${fwd} --force 2>&1; git worktree list`,
+    `git worktree remove ${fwd} --force && git branch -d worktree-agent-abc123`,
+    `git worktree remove ${fwd} -ff; git branch -d phase/x worktree-agent-abc123 2>&1; git worktree list`,
+    `git -C ${root.replace(/\\/g, '/')} worktree remove --force ${fwd}`,
+    `git -C . worktree remove --force ${rel}`,
+    `git worktree remove --force ${rel}`,
+  ];
+  for (const c of forms) {
+    assert.equal(decide(c, { cwd: root }).kind, 'ask', c);
+    const d = decide(c, { cwd: root, ...headless });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /never saved to git/, c);
+    assert.doesNotMatch(d.reason, /lowercase flag/, c);
+  }
+  if (process.platform === 'win32') {
+    const c = `git worktree remove ${toGitBash(wt)} --force`;
+    assert.equal(decide(c, { cwd: root, ...headless }).kind, 'deny', c);
+  }
+  // Not forced: git itself refuses a dirty folder, so it is left alone.
+  assert.equal(decide(`git worktree remove ${fwd}`, { cwd: root }).kind, 'pass');
+  void base;
+});
+
+test('a forced removal of a non-helper folder that is not there, or that git cannot read, is refused as "cannot tell"', () => {
+  const { root, base } = tempWorktree();
+  const gone = join(base, 'not-here').replace(/\\/g, '/');
+  const plain = join(base, 'plain-dir').replace(/\\/g, '/');
+  mkdirSync(plain);
+  for (const c of [`git worktree remove --force ${gone}`, `git worktree remove ${gone} -f && git worktree list`, `git worktree remove --force ${plain}`]) {
+    const d = decide(c, { cwd: root, ...headless });
+    assert.equal(d.kind, 'deny', c);
+    assert.match(d.reason, /cannot tell/, c);
+  }
+  // A missing helper folder is still clean, as before.
+  assert.equal(decide('git worktree remove --force .claude/worktrees/agent-gone', { cwd: root }).kind, 'pass');
+});
+
+test('a chain of -d deletes plus a dirty worktree removal names the worktree, not the branch delete', () => {
+  const { root, wt } = tempWorktree();
+  writeFileSync(join(wt, 'unsaved.txt'), 'work');
+  const c = `git worktree remove ${wt.replace(/\\/g, '/')} --force 2>&1; git branch -d phase/0007-hook-lines worktree-agent-ab14fb35c82fa5881 2>&1; git worktree list`;
+  const d = decide(c, { cwd: root, ...headless });
+  assert.equal(d.kind, 'deny');
+  assert.match(d.reason, /never saved to git/);
+  assert.doesNotMatch(d.reason, /lowercase flag|branch delete is refused/);
+});
+
+test('when every branch delete already uses -d, the refusal never advises the lowercase flag and names the part refused', () => {
+  const other = decide('git branch -d phase/x worktree-agent-abc123 && git worktree list && npm publish', headless);
+  assert.equal(other.kind, 'deny');
+  assert.doesNotMatch(other.reason, /lowercase flag/);
+  assert.match(other.reason, /publish/);
+});
+
+test('a read of one pull request after one plain cd passes; other shapes with a cd still refuse', () => {
+  const ctx = merging(prView()).ctx;
+  for (const ok of [
+    'cd /c/Users/someone/work/orchestrate; gh pr view 47 --json headRefOid,isDraft,mergeable,state',
+    'cd /tmp/some-repo && gh pr view 47 --json mergeable',
+    'cd "/tmp/with space/repo"; gh pr checks 47',
+    "cd '/tmp/repo'; gh pr list --json number,mergeable",
+  ]) assert.equal(decide(ok, ctx).kind, 'pass', ok);
+  for (const bad of [
+    'cd $(echo /tmp); gh pr view 1 --json mergeable',
+    'cd `pwd`; gh pr view 1 --json mergeable',
+    'cd a && gh pr merge 1 --merge',
+    'cd a; cd b; gh pr view 1 --json mergeable',
+    'cd a; gh pr view 1; gh pr merge 1',
+    'cd a; gh pr view 1 && gh pr merge 1',
+    'cd a|b; gh pr view 1 --json mergeable',
+    'cd "$HOME"; gh pr view 1 --json mergeable',
+    'cd a & gh pr view 1 --json mergeable',
+    'cd a\ngh pr view 1 --json mergeable',
+    'cd {a,b}; gh pr view 1 --json mergeable',
+  ]) assert.notEqual(decide(bad, ctx).kind, 'pass', bad);
 });
