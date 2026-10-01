@@ -209,6 +209,13 @@ test('a grant needs a numeric TASK id in the packet; no id, no unlock', () => {
   const d = modelDecision(ti, { ...pro, userModel: grant });
   assert.equal(d.prefix, 'model');
   assert.equal(grantCheck(grant, 'opus', ti.prompt, null), null);
+  // A live lead whose user had named the model got "resend with sonnet" first,
+  // which would have overridden the user's own words; the missing TASK line,
+  // the only thing wrong, was the last clause. The fix leads now.
+  assert.match(d.reason, /^the user named opus; add a TASK: line with a number/);
+  assert.doesNotMatch(d.reason, /resend with model: "sonnet"/);
+  // Without a grant the old advice stands.
+  assert.match(modelDecision(ti, pro).reason, /resend with model: "sonnet"/);
 });
 
 test('grantCheck: bind on first use, allow on the bound id, deny naming both ids', () => {
