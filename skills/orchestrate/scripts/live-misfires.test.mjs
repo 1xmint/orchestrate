@@ -62,13 +62,101 @@ test('note U: prose about merging, written to a file, is not a merge', () => {
 test('a heredoc fed to a shell is still read for merges, and real merges still stop', () => {
   assert.match(withoutFileText(`bash <<'EOF'\ngh pr merge 5 --squash\nEOF`), /gh pr merge 5/);
   assert.match(withoutFileText(`echo $(gh pr merge 5) > out.txt`), /gh pr merge 5/);
-  const refused = cmd => assert.equal(decide(cmd, { mentionsMerge: () => true, ghView: () => ({ ok: false }) }).kind, 'deny', cmd);
-  refused(`bash <<'EOF'\ngh pr merge 5\nEOF`);
-  refused('gh pr merge 5 --squash');
 });
 
-test('force-push to main still stops', () => {
-  stops('git push --force origin main');
+// Every line the independent review of step 2 showed slipping past the first
+// version of this change (progress/9-30-0004-review.txt), run through the real
+// decide() with the real merge reading; only the network look-up is stubbed.
+const noGh = { ghView: () => ({ ok: false }) };
+const MERGE_MUST_REFUSE = [
+  'gh pr merge 5 --squash',
+  `bash <<'EOF'\ngh pr merge 5\nEOF`,
+  `cat <<EOF | bash\ngh pr merge 5 --admin\nEOF`,
+  `echo 'gh pr merge 5' >&1 | sh`,
+  'Set-Content log.txt (gh pr merge 5)',
+  'tee >(bash) <<< "gh pr merge 5"',
+  'cat <(gh pr merge 5) > out',
+  'echo "$(gh pr merge "$(gh pr list -q .[0].number)")" > log',
+  `echo "<<EOF"\ngh pr merge 5\nEOF`,
+  `printf 'gh pr merge 5' > x.sh && bash x.sh`,
+  `tee x.sh <<'EOF'\ngh pr merge 5\nEOF\nbash x.sh`,
+  'echo "gh pr merge 5" | bash',
+];
+test('every merge line the review found is refused through decide', () => {
+  for (const cmd of MERGE_MUST_REFUSE) {
+    const d = decide(cmd, noGh);
+    assert.equal(d.kind, 'deny', cmd);
+    assert.match(d.reason, /merge|pull request/i, cmd);
+  }
+});
+
+const PAYMENT_MUST_ASK = [
+  'for c in ch_1 ch_2; do stripe refunds create --charge $c; done',
+  'if true; then stripe charges create --amount 5; fi',
+  '(stripe charges create --amount 5)',
+  '{ stripe charges create --amount 5; }',
+  'while read c; do curl -X POST https://api.stripe.com/v1/refunds -d charge=$c; done < ids',
+  'timeout 60 stripe charges create',
+  'eval "stripe charges create"',
+  'watch -n 5 stripe charges create',
+  'parallel stripe refunds create --charge ::: ch_1 ch_2',
+  'nice -n 10 stripe charges create',
+  'sudo -u u stripe charges create',
+  'xargs -n 1 stripe refunds create --charge < ids',
+  'env -u X stripe charges create',
+  'bash -ec "stripe charges create"',
+  'sh -xc "stripe charges create"',
+  'echo "stripe charges create" | bash',
+  'bash <<< "stripe charges create"',
+  'bash <(echo stripe charges create)',
+  `cat <<EOF | python3\nimport stripe\nstripe.Refund.create(charge='ch_1')\nEOF`,
+  `ruby -e "require 'stripe'; Stripe::Charge.create(amount: 5)"`,
+  'python3 -c "import os, stripe; stripe.Charge.create(amount=5)"',
+  'python3 -c "x=1; import stripe"',
+  `node -e "import('stripe').then(s => s.default(k).charges.create({}))"`,
+  `deno eval "import Stripe from 'npm:stripe'"`,
+  `$'stripe' charges create`,
+  'U=https://api.stripe.com/v1/charges; curl -X POST $U',
+  'curl https://connect.stripe.com/oauth/deauthorize',
+  `printf 'stripe charges create' > x.sh && bash x.sh`,
+  'stripe -v charges create',
+  `php -r "\\Stripe\\Refund::create(['charge' => 'ch_1']);"`,
+  'curl https://api.paypal.com/v2/payments/captures/1/refund -X POST',
+];
+test('every payment line the review found asks, with the payment reason', () => {
+  for (const cmd of PAYMENT_MUST_ASK) {
+    const d = decide(cmd, noGh);
+    assert.equal(d.kind, 'ask', cmd);
+    assert.match(d.reason, /real payment account/, cmd);
+  }
+});
+
+// The live false alarms, and lines like them, pass through the same decide().
+const MUST_PASS = [
+  `grep -rn "gh pr merge" docs/`,
+  `rg -n "stripe charges create|gh pr merge" skills/`,
+  `git log --oneline --grep=merge`,
+  `cat > docs/plan.md <<'EOF'\nReview before merge; then gh pr merge.\nEOF`,
+  `echo "never run stripe refunds create from a helper" >> NOTES.md`,
+  `node -p "require('./package.json').name"`,
+  'stripe login',
+];
+test('the read-only and file-text lines pass through decide', () => {
+  for (const cmd of MUST_PASS) assert.equal(decide(cmd, noGh).kind, 'pass', cmd);
+});
+
+test('lines the parser cannot vouch for fall back to reading every word', () => {
+  // A grep is plain; the same grep fed a command substitution is not.
+  pass(`grep -n stripe README.md`);
+  assert.equal(decide('grep -n stripe $(cat files.txt)', noGh).kind, 'ask');
+  // Inline node that can reach a process or the network is not pure.
+  assert.equal(decide(`node -e "require('child_process').execSync('stripe charges create')"`, noGh).kind, 'ask');
+  assert.equal(decide(`node -e "fetch('https://api.example.com/x?q=stripe')"`, noGh).kind, 'ask');
+});
+
+test('force-push to main still asks', () => {
+  assert.equal(decide('git push --force origin main').kind, 'ask');
+  stops('git push -f origin main');
 });
 
 test('runsPayment reads command words, not words', () => {
@@ -93,7 +181,18 @@ test('notes R and V: the brief file a prompt names is graded, and an unreadable 
 });
 
 test('note V: a lookup whose objective says "permission" is not held for review', async () => {
-  const src = (await import('node:fs')).readFileSync(new URL('./guard-agent.mjs', import.meta.url), 'utf8');
-  assert.doesNotMatch(src, /will wait for an independent review because/);
-  assert.doesNotMatch(src, /reviewInferred/);
+  const { spawnSync } = await import('node:child_process');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const home = mkdtempSync(join(tmpdir(), 'live-v-'));
+  const ti = { subagent_type: 'claude-code-guide', model: 'haiku', description: 'docs lookup', prompt: 'Find what the docs say about permission rules and the security boundary for plugin hooks. Read only.' };
+  const r = spawnSync(process.execPath, [new URL('./guard-agent.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: 'live-v', cwd: home, tool_use_id: 'u-live-v', tool_input: ti }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout, /"permissionDecision"\s*:\s*"deny"/);
+  assert.doesNotMatch(r.stdout, /independent review/i);
 });

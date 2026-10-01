@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId, loadSession } from './lib/tier.mjs';
 import { mentionsMerge, mergeRefusal, ghView, REVIEW_PATHS } from './lib/merge-bar.mjs';
-import { runsPayment, withoutFileText } from './lib/shell-run.mjs';
+import { paymentLine, withoutFileText } from './lib/shell-run.mjs';
 
 export { REVIEW_PATHS };
 
@@ -386,7 +386,7 @@ const RULES = [
     // The brand word in a grep pattern, a regex or file text is not one
     // (lib/shell-run.mjs; live notes I and Q).
     name: 'payment',
-    test: cmd => runsPayment(cmd),
+    test: cmd => paymentLine(cmd),
     reason: `This would create or change something in a real payment account, which can charge or move money. ${ASK_TAIL}`,
   },
   {
@@ -499,7 +499,7 @@ function decideOne(command, ctx = {}) {
   }
   const cmd = plainGit(asSent);
 
-  let hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.name !== 'payment' && r.test(cmd)) || (runsPayment(String(command)) && RULES.find(r => r.name === 'payment')) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
+  let hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.name !== 'payment' && r.test(cmd)) || (paymentLine(String(command)) && RULES.find(r => r.name === 'payment')) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
 
   // Every branch delete in the line is the lowercase kind, so another part is

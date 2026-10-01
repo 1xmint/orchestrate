@@ -10,6 +10,14 @@ test('negated, future and conditional sentences are not a committed claim', () =
   assert.equal(classifyClaim('Bring it back for approval before anything is committed.'), null);
   for (const s of ['Nothing will be committed until you say so.', 'I will commit once the tests pass.', 'If you approve, it gets committed.']) assert.equal(classifyClaim(s), null, s);
   assert.equal(classifyClaim('The work is committed on branch x.'), 'committed');
+  for (const s of ['After you approve, it gets committed.', 'When the review passes it will be committed.', 'It can be committed later.']) assert.equal(classifyClaim(s), null, s);
+});
+
+test('a claim with "after" or "can" later in it is still a claim, and a false one on a dirty tree is caught', () => {
+  for (const s of ['I committed the fix after the tests passed.', 'All changes are committed; you can review them.']) {
+    assert.equal(classifyClaim(s), 'committed', s);
+    assert.equal(contradicts(classifyClaim(s), 2, 1), true, s);
+  }
 });
 
 const line = rec => JSON.stringify(rec) + '\n';

@@ -8,10 +8,22 @@
 // when they are fed to an interpreter, and `bash -c "…"`, `env`, `sudo`, `npx`
 // unwrapped. They lean towards reading more as code, never less: `$(…)` and
 // backticks are read wherever they appear.
+//
+// The parser does not model every shell shape, so it only ever NARROWS a check
+// on a plain line (plainLine below): every segment a search, a read, or text
+// going into a file, and no construct it cannot follow. Any other line is read
+// word by word, as before (review 9-30-0004: `cat <<EOF | bash`, `for … do`,
+// `timeout`, `eval` all slipped past a parser that guessed).
 
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'pwsh', 'powershell', 'cmd']);
 const LANGS = new Set(['node', 'nodejs', 'python', 'python3', 'py', 'ruby', 'deno', 'bun', 'php', 'perl', 'tsx', 'ts-node']);
-const WRAPPERS = new Set(['env', 'sudo', 'npx', 'exec', 'command', 'time', 'nohup', 'nice', 'xargs', 'doas', 'bunx', 'pnpx']);
+const WRAPPERS = new Set(['env', 'sudo', 'npx', 'exec', 'command', 'time', 'nohup', 'nice', 'xargs', 'doas', 'bunx', 'pnpx', 'timeout', 'watch', 'parallel']);
+// Wrapper flags that take the next word as their value.
+const WRAPPER_ARG_FLAGS = { nice: /^-n$/, sudo: /^-[ugCDhpRrT]$/, xargs: /^-[nIPLEsd]$/, env: /^-[uC]$/, timeout: /^-[sk]$/, watch: /^-n$/, doas: /^-[uC]$/ };
+// Plain-line allowlist: commands that search or read and cannot run text.
+// Not sed, awk, find or xargs: each has a way to run a command.
+const READERS = new Set(['grep', 'egrep', 'fgrep', 'rg', 'select-string', 'sls', 'findstr', 'cat', 'head', 'tail', 'wc', 'ls', 'pwd', 'cd', 'mkdir', 'echo', 'printf', 'type', 'get-content', 'write-output']);
+const GIT_READ_RE = /^(grep|log|show|diff|status|blame|add)$/;
 const FETCHERS = new Set(['curl', 'wget', 'http', 'https', 'xh', 'invoke-webrequest', 'invoke-restmethod', 'iwr', 'irm']);
 
 // Payment services' API hosts: a web call to one of these is a payment action.
@@ -80,7 +92,10 @@ export function commandOf(seg) {
     const b = base(w[0]);
     if (WRAPPERS.has(b)) {
       w = w.slice(1);
-      while (w.length && (w[0].startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0]))) w = w.slice(1);
+      while (w.length && (w[0].startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[0]))) {
+        w = w.slice(WRAPPER_ARG_FLAGS[b] && WRAPPER_ARG_FLAGS[b].test(w[0]) ? 2 : 1);
+      }
+      if (b === 'timeout' && w.length && /^\d/.test(w[0])) w = w.slice(1); // the duration
       continue;
     }
     break;
@@ -91,15 +106,20 @@ export function commandOf(seg) {
 // Split a line into what runs and what is only data. Each heredoc body is
 // either attached to its command as code (when that command is a shell or an
 // interpreter reading stdin) or dropped (cat > f, tee, anything else).
-// Returns { line, code: [{ kind: 'shell'|'lang', text }] }.
+// Returns { line, code: [{ kind: 'shell'|'lang', text }], bodies: [{ text,
+// toFile }] }; toFile is true only when the body's reader writes it to a file
+// (`cat > f <<EOF`, `tee f <<EOF`), never when it is piped on.
 export function splitHeredocs(text) {
   const lines = String(text || '').split('\n');
   const kept = [];
   const code = [];
+  const bodies = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const m = /<<-?\s*(['"]?)([A-Za-z_][\w.-]*)\1/.exec(line);
+    const at = unquotedHeredoc(line);
     kept.push(line);
+    if (at < 0) continue;
+    const m = /^<<-?\s*(['"]?)([A-Za-z_][\w.-]*)\1/.exec(line.slice(at));
     if (!m) continue;
     const end = m[2];
     const body = [];
@@ -108,22 +128,118 @@ export function splitHeredocs(text) {
       if (lines[j].replace(/^\t+/, '').trim() === end) break;
       body.push(lines[j]);
     }
-    const head = segments(line.slice(0, m.index)).pop() || '';
+    const head = segments(line.slice(0, at)).pop() || '';
     const cmd = base(commandOf(head)[0]);
     if (SHELLS.has(cmd)) code.push({ kind: 'shell', text: body.join('\n') });
     else if (LANGS.has(cmd)) code.push({ kind: 'lang', text: body.join('\n') });
+    // The whole segment holding the marker, so `cat <<EOF > f` counts as a file.
+    const rest = line.slice(at + m[0].length);
+    const own = `${head} ${/^\s*[;&|]/.test(rest) ? '' : segments(rest)[0] || ''}`;
+    // An unquoted marker means the shell still expands $( ) and backticks in the body.
+    bodies.push({ text: body.join('\n'), toFile: isTextToFile(own) && TEXT_CMDS.has(base(plainWords(own)[0])), expands: !m[1] });
     i = j;
   }
-  return { line: kept.join('\n'), code };
+  return { line: kept.join('\n'), code, bodies };
+}
+
+// Index of the first `<<` outside quotes that is not `<<<`, or -1.
+function unquotedHeredoc(line) {
+  let q = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) { if (c === '\\' && q === '"') i++; else if (c === q) q = null; continue; }
+    if (c === '\\') { i++; continue; }
+    if (c === '"' || c === "'") { q = c; continue; }
+    if (c === '<' && line[i + 1] === '<' && line[i + 2] !== '<' && line[i - 1] !== '<') return i;
+  }
+  return -1;
 }
 
 // Text that only goes into a file: `echo …  > f`, `printf … >> f`. Returns the
 // segment unchanged when it is anything else.
+const TEXT_CMDS = new Set(['echo', 'printf', 'cat', 'tee', 'write-output', 'set-content', 'add-content', 'out-file']);
 export function isTextToFile(seg) {
   const w = commandOf(seg);
   const b = base(w[0]);
-  return (b === 'echo' || b === 'printf' || b === 'cat' || b === 'tee' || b === 'write-output' || b === 'set-content' || b === 'add-content' || b === 'out-file')
-    && (b === 'tee' || /(^|[^>&0-9])>>?\s*\S/.test(seg) || /^(set-content|add-content|out-file)$/.test(b));
+  // `>&1` sends to another stream, not a file.
+  return TEXT_CMDS.has(b)
+    && (b === 'tee' || /(^|[^>&0-9])>>?\s*[^\s&]/.test(seg) || /^(set-content|add-content|out-file)$/.test(b));
+}
+
+// Words with leading VAR=x assignments removed, wrappers kept.
+function plainWords(seg) {
+  const w = words(seg);
+  let k = 0;
+  while (k < w.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(w[k])) k++;
+  return w.slice(k);
+}
+
+// Text with quoted spans blanked, for constructs that only count unquoted.
+function unquotedText(s) {
+  let out = '', q = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) { if (c === '\\' && q === '"') { i++; out += '  '; continue; } if (c === q) q = null; out += ' '; continue; }
+    if (c === '\\') { i++; out += '  '; continue; }
+    if (c === '"' || c === "'") { q = c; out += ' '; continue; }
+    out += c;
+  }
+  return out;
+}
+
+// Shapes the parser does not follow. `$(…)` and backticks run even inside
+// double quotes, so those are looked for anywhere.
+function unmodelled(s) {
+  if (/\$\(|`|<\(|>\(|<<<|\$'/.test(s)) return true;
+  const u = unquotedText(s).replace(/\d?>&\d?-?(?=\s|$)/g, m => (m === '2>&1' ? '' : m));
+  return /[(){}!]|>&/.test(u);
+}
+
+// One segment of a plain line: a pure assignment, a search or read, text to
+// a file, a git read, or a stripe subcommand that never charges.
+function plainSegment(seg) {
+  const all = words(seg);
+  const w = plainWords(seg);
+  if (!w.length) return true;
+  if (w.length !== all.length) return false; // `PAGER=… git log` runs the assignment
+  const b = base(w[0]);
+  if (TEXT_CMDS.has(b) && isTextToFile(seg)) return true;
+  if (b === 'rg' && w.some(x => /^--pre(=|$)/.test(x))) return false;
+  if (READERS.has(b)) return true;
+  if (b === 'git') return GIT_READ_RE.test(w[1] || '') && !(w[1] === 'grep' && w.some(x => /^(-O|--open-files-in-pager)/.test(x)));
+  if (b === 'stripe') return STRIPE_SAFE_RE.test(w[1] || '') && (!/^-/.test(w[1]) || w.length === 2);
+  if (b === 'node') return w.length === 3 && /^(-e|-p|--eval|--print)$/.test(w[1]) && pureInline(w[2]);
+  return false;
+}
+
+// Inline node code that can only read local files and print (note I): its
+// only require is fs, path or a relative .json, and nothing that reaches a
+// process, the network or dynamic code.
+const INLINE_IO_RE = /child_process|\bexec|spawn|\bfork\b|fetch|https?\b|\bnet\b|\bdgram\b|\btls\b|request|axios|undici|import\s*\(|\bimport\b|\beval\b|Function|\bprocess\.(binding|dlopen|env)\b|worker_threads|\bvm\b|\bmodule\b|globalThis|\bglobal\b|\[\s*['"]/;
+function pureInline(code) {
+  const s = String(code || '');
+  if (INLINE_IO_RE.test(s)) return false;
+  for (const m of s.matchAll(/\brequire\b(\s*\(\s*(['"])([^'"]*)\2\s*\))?/g)) {
+    if (!m[1] || !/^((node:)?(fs|path)|\.{1,2}\/[\w./-]+\.json)$/.test(m[3])) return false;
+  }
+  return true;
+}
+
+// A line the parser can vouch for: nothing it cannot follow, every heredoc
+// written to a file, every segment on the allowlist.
+export function plainLine(text) {
+  const { line, bodies } = splitHeredocs(String(text || ''));
+  if (unmodelled(line)) return false;
+  if (bodies.some(b => !b.toFile || (b.expands && /\$\(|`/.test(b.text)))) return false;
+  return segments(line).every(plainSegment);
+}
+
+// Does this line act on a payment account? What it runs (runsPayment), or,
+// on any line that is not plain, the brand word anywhere, as before 0.18.
+export function paymentLine(text) {
+  const s = String(text || '');
+  if (runsPayment(s)) return true;
+  return /\bstripe\b/i.test(s) && !plainLine(s);
 }
 
 // Every piece of shell that would run, flattened: the top-level segments,
@@ -142,7 +258,7 @@ export function runnable(text, depth = 0) {
     const w = commandOf(seg);
     const b = base(w[0]);
     if (SHELLS.has(b)) {
-      const k = w.findIndex(x => /^(-c|-lc|-ic|-command|\/c)$/i.test(x));
+      const k = w.findIndex(x => /^(-[a-z]*c|-command|\/c)$/i.test(x));
       if (k >= 0 && w[k + 1] != null) merge(out, runnable(w.slice(k + 1).join(' '), depth + 1));
     }
     if (LANGS.has(b)) {
@@ -172,12 +288,14 @@ export function runsPayment(text) {
   return lang.some(code => PAYMENT_SDK_RE.test(code) || PAYMENT_HOSTS_RE.test(code));
 }
 
-// The line with text bound for files removed: heredoc bodies not fed to an
-// interpreter, and echo/printf/tee segments that write to a file. Used by the
-// merge bar so prose that mentions merging is not read as a merge (note U).
+// The line with text bound for files removed, on a plain line only: heredoc
+// bodies written to a file and echo/printf/tee segments that write to one.
+// Any other line comes back whole. Used by the merge bar so prose that
+// mentions merging is not read as a merge (note U).
 export function withoutFileText(text) {
-  const { line, code } = splitHeredocs(text);
-  const kept = segments(line).filter(seg => !isTextToFile(seg));
-  const subs = [...line.matchAll(/\$\(([^()]*)\)|`([^`]*)`/g)].map(m => m[1] ?? m[2]);
-  return [...kept, ...code.map(c => c.text), ...subs].join('\n');
+  const s = String(text || '');
+  if (!plainLine(s)) return s;
+  const { line } = splitHeredocs(s);
+  // A search or read on a plain line runs nothing, so its pattern is text too.
+  return segments(line).filter(seg => !isTextToFile(seg) && !READERS.has(base(plainWords(seg)[0]))).join('\n');
 }

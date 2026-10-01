@@ -39,10 +39,12 @@ const negatedUncommittedRe = /\b(?:no|nothing|none|zero|without)\s+(?:any\s+)?un
 
 const committedWordRe = /\bcommitted\b/i;
 // Words that make a sentence about "committed" something other than a report
-// that it happened: time and condition (before, until, once, if, unless, after,
-// when, whether), negation (not, no, nothing, never, n't), and what has not
-// happened yet (will, would, should, can, could, may, might, to be, going to).
-const NOT_A_CLAIM_RE = /\b(?:before|until|till|once|if|unless|after|when|whenever|whether|not|no|nothing|none|never|without|will|would|should|shall|can|could|may|might|must|need|needs|to\s+be|going\s+to|about\s+to|ready\s+to|want|wants|please)\b|n't\b/i;
+// that it happened: condition (before, until, once, if, unless, whether, and
+// after/when only as the sentence's opening word), negation (not, no, nothing,
+// never, n't), and what has not happened yet (will, would, should, can be,
+// could, may, might, to be, going to). "I committed it after the tests passed"
+// and "it is committed; you can review it" are claims.
+const NOT_A_CLAIM_RE = /^\W*(?:after|when|whenever)\b|\b(?:before|until|till|once|if|unless|whether|not|no|nothing|none|never|without|will|would|should|shall|can\s+be|could|may|might|must|to\s+be|going\s+to|about\s+to|ready\s+to)\b|n't\b/i;
 const commitsAreInRe = /\bcommits\s+are\s+in\b/i;
 
 // One sentence's claim: 'not' | 'committed' | 'mixed' | null. The negation

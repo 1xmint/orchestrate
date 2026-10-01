@@ -40,8 +40,14 @@ those. Everything else, including loud everyday commands like `npm test` or
   directly or through `bash -c`, `$( )`, `env`, `sudo` or `npx`; a web call
   (`curl`, `wget` and the like) to a payment service's API host; or code run
   with `node -e`, `python -c` or a heredoc that loads a payment library. The
-  word alone, in a search pattern or text written to a file, is not a payment
-  (`lib/shell-run.mjs`)
+  word alone is not a payment only on a line the reader can vouch for whole
+  (`plainLine` in `lib/shell-run.mjs`): every part a search or read (`grep`,
+  `rg`, `cat`, `ls`, `git log`/`show`/`diff`/`status`/`grep`…), text written
+  to a file, a read-only `stripe` command, or a `node -e` that only reads
+  local files and prints; and nothing it does not follow (`$( )`, backticks,
+  `<( )`, `<<<`, `( )`, `{ }`, `!`, loops, `>&`). Any other line with the
+  word `stripe` in it asks, as before 0.18. So `grep -n stripe README.md`
+  passes and `for c in …; do stripe refunds create …; done` asks
 - dropping or truncating a database: `drop database`/`drop table`/`drop
   schema`/`truncate` on a `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo`, or
   `redis-cli` command line, including inside a `-c`/`-e`/`--eval` string;
@@ -111,6 +117,16 @@ Quoted text and comments count too. So a merge inside a chain, a pipe,
 `bash -c`, a wrapper such as `timeout`, `env` or `xargs`, `curl` or
 `Invoke-RestMethod`, after a `cd`, or behind a comment or heredoc is refused
 rather than read.
+
+One exception, on a line the reader can vouch for whole (the same
+`plainLine` as the payment rule): text written to a file (`cat > notes.md
+<<'EOF'`, `echo … >> NOTES.md`) and the pattern of a search (`grep -rn "gh pr
+merge" docs/`) are left out before looking, because nothing on such a line
+runs them. Any other line is read whole, as before. A file written in one
+step and run in a later, separate step is not seen by this check, the same
+as a file written with the Write tool; on one line (`printf … > x.sh && bash
+x.sh`) the `bash` makes the line one the reader cannot vouch for, so it is
+read whole and refused.
 
 Two kinds of line are let off, each alone on its line with no word holding a
 quote, brace, `$` or separator:
