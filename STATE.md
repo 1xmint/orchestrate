@@ -29,47 +29,9 @@ docs/research/0005-baseline-0.17.2.md.
 - The README and the project installer list the tools to use alongside
   orchestrate (step 6).
 
-## v0.17.2 — a merge waits for its checks, 2026-09-30
-
-The second live session on the plugin's own repo (0.17.1; notes items Q–AL in
-`docs/audits/2026-09-29-live-session-notes.md`) found these, each fixed with a
-test that fails on the old code:
-
-- **A pull request merges only once it clears a bar**, in every mode: every
-  check on its newest commit has passed, and a change to the plugin's own
-  safety checks has a reviewer's PASS naming that same commit. The merge must
-  name the commit (`--match-head-commit`), so nothing can slip in between the
-  check and the merge. `--auto` and the raw API routes are refused, and checks
-  that cannot be read refuse rather than pass. (#36)
-- Which lines count as a merge is blunt on purpose: four review rounds each
-  found a new way to spell one, so the check now flattens the line to its
-  letters and refuses any that say merge next to gh or a GitHub address. The
-  price is a few harmless lines refused, listed in `docs/safety-guard.md`;
-  plain reads (`gh pr view`) and a plain `git merge` pass. (#36)
-- Only a reviewer's own hand-back counts as a review; a builder quoting
-  "PASS" no longer gets a verdict. (#36)
-- The dispatch gate no longer reads `git checkout` as payment work; a refusal
-  in auto mode no longer says "nobody is present"; three wrong or unneeded
-  hook lines are gone. (#36)
-- The checkpoint's goal, last message and test line are taken from what the
-  user typed and what the shell printed, not from host notices or file reads;
-  the compaction count comes from the transcript. (#35)
-- The audit prompts no longer claim a version, and a test keeps it so. (#37)
-- A helper's own compaction no longer prints the lead's card into the helper, or clears
-  the lead's working project. The host sends those
-  hooks with no helper id (anthropics/claude-code#91910), so the plugin looks
-  for a helper compaction in the last 10 s instead: on this machine's records it
-  caught 378 of 379 and misjudged none of 354 lead compactions. (#40)
-
-Seen and not fixed: a merge from a script, a variable, a gh alias or a command
-name built from pieces; `git push origin HEAD:main`, which skips pull requests;
-a project with no automatic checks never clears the bar, so its user merges by
-hand; the branch-delete rule still reads text headed into a file (notes AA,
-AJ). A helper whose transcript is written late still gets the card, as
-before (notes AO).
-
 ## Earlier releases
 
+- [v0.17.2 — a merge waits for its checks, 2026-09-30](docs/state/v0.17.2.md)
 - [v0.17.1 — fixes from the first live session on 0.17.0, 2026-09-29](docs/state/v0.17.1.md)
 - [v0.17.0 — the scoresheet audit, and rules that can be measured, 2026-09-29](docs/state/v0.17.0.md)
 - [v0.16.1 — a review that can stop the merge, 2026-09-21](docs/state/v0.16.1.md)
