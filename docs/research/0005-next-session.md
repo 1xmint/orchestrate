@@ -81,8 +81,8 @@ Full gate at the release: 1230 pass, 0 fail; `evals/no-machinery` 14/0.
 - **Step 1, ability tests**: done. Five cases in `evals/`; the baseline is in
   docs/research/0005-baseline-0.17.2.md. Two cases were not run (no shell
   sandbox on Windows).
-- **Step 2, checks read what runs**: on the branch, but its review did not
-  pass cleanly. 0ed8ca8 was committed before its first review, and that review
+- **Step 2, checks read what runs**: merged to main as 19d4cb1 after a
+  review PASS naming its final commit, 5da9b2d. Getting there took eight fixes. 0ed8ca8 was committed before its first review, and that review
   FAILED. Fix 19f1112 was reviewed twice. The first re-review was cut off by a
   safety classifier. The narrower re-review the owner chose then FAILED on two
   options that run a program (`rg --hostname-bin`, `git grep -O` grouped or
@@ -104,12 +104,12 @@ Full gate at the release: 1230 pass, 0 fail; `evals/no-machinery` 14/0.
   `.git`. Fix 6 required every `cd` path and write target on a git-read line
   to be plain text. Its review FAILED on Windows spellings (`.\.git`,
   `.git.`). Fix 7 stops reading paths: on a line with a git read or `rg`, any
-  write at all makes the line not plain. Its review FAILED on two writes the
+  write at all makes the line not plain. Its first review was cut off by a
+  safety classifier before it found anything; the narrower re-review FAILED on two writes the
   rule did not count: bash's `$null`, which the line itself can set, and the
   payment CLI's `config --set`. Fix 8 counts both, and git's shortened
-  `--ou…` for `--output`. Each fix's
-  new test lines were run against the reviewed code and the fixed code. The
-  merge to main needed a reviewer's PASS naming its final commit. The rest (`git add -e`, textconv and
+  `--ou…` for `--output`. Its review PASSED. Each fix's new test lines were
+  run against the reviewed code and the fixed code. The rest (`git add -e`, textconv and
   external diff, `rg -z`, `RIPGREP_CONFIG_PATH`) act only through settings
   made before the line. They are listed as not caught in `docs/safety-guard.md`.
   The open-ended hunt for new ways past the guard was started twice. A safety
