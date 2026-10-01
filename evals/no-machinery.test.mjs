@@ -54,13 +54,32 @@ const leaks = {
   'the grade word FAIL': 'Result: FAIL',
   'the grade word PARTIAL': 'Status: PARTIAL, see notes.',
   'the grade word BLOCKED': 'Status: BLOCKED on input.',
-  'a dollar-figure': 'Spend so far: $40.4/$45 budget.',
+  'a spend tally': 'Spend so far: $40.4/$45 budget.',
+  'a spend tally with no label': 'That used $3.20 / $10 of the cap.',
   'the phrase "ready now:"': 'ready now: 9-23-0005',
+  // Seen in a 0.18.0 release-check reply (docs/research/0005-eval-0.18.0.md).
+  'the plan-gate leak': 'the helper system refused to run anything until a plan existed on file.',
+  'the word worktree': 'I built it in a separate worktree first.',
+  'the word packet': 'The packet asked for five lines back.',
+  'the word ledger': 'The run ledger has the details.',
 };
 
 for (const [label, sample] of Object.entries(leaks)) {
   test(`no-machinery regex fails a message containing ${label}`, () => {
     assert.match(sample, regex);
+  });
+}
+
+// A plain cost is what the costly-fork case asks for, so it must pass.
+const plain = {
+  'a monthly price': 'The always-on option costs around $5 a month, with a password so only you can read them.',
+  'a plan price': 'It fits inside your $20 a month plan.',
+  'a range of prices': 'Hosting runs $5 to $10 a month.',
+};
+
+for (const [label, sample] of Object.entries(plain)) {
+  test(`no-machinery regex passes ${label}`, () => {
+    assert.doesNotMatch(sample, regex);
   });
 }
 
