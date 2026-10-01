@@ -39,14 +39,14 @@ test('loadPolicy parses autocompactDefault as a bare number, a "k" suffix, or "o
 });
 
 test('loadPolicy merges a per-role size budget on top of the defaults, keeping the untouched roles', () => {
-  const p = loadPolicy({ policy: { workers: { size: { 'orch-researcher': { warnAt: 1000, returnAt: 2000 } } } } });
-  assert.deepEqual(p.workers.size['orch-researcher'], { warnAt: 1000, returnAt: 2000 });
+  const p = loadPolicy({ policy: { workers: { size: { 'orch-implementer': { warnAfter: 1000, returnAfter: 2000 } } } } });
+  assert.deepEqual(p.workers.size['orch-implementer'], { warnAfter: 1000, returnAfter: 2000 });
   assert.deepEqual(p.workers.size['orch-coordinator'], DEFAULT_POLICY.workers.size['orch-coordinator']);
   assert.deepEqual(p.workers.size.default, DEFAULT_POLICY.workers.size.default);
 });
 
 test('loadPolicy rejects a size pair where warnAt is not below returnAt, falling back to that role\'s own default', () => {
-  const p = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAt: 300000, returnAt: 100000 } } } } });
+  const p = loadPolicy({ policy: { workers: { size: { 'orch-coordinator': { warnAfter: 300000, returnAfter: 100000 } } } } });
   assert.deepEqual(p.workers.size['orch-coordinator'], DEFAULT_POLICY.workers.size['orch-coordinator']);
 });
 
@@ -54,8 +54,27 @@ test('loadPolicy rejects a size pair where warnAt is not below returnAt, falling
 
 test('sizeBudget strips a plugin prefix and falls back to "default" for an unknown role', () => {
   const policy = loadPolicy(null);
-  assert.deepEqual(sizeBudget('orchestrate:orch-coordinator', policy), policy.workers.size['orch-coordinator']);
-  assert.deepEqual(sizeBudget('some-unlisted-role', policy), policy.workers.size.default);
+  assert.deepEqual(sizeBudget('orchestrate:orch-coordinator', policy), { warnAt: 120000, returnAt: 170000 });
+  assert.deepEqual(sizeBudget('some-unlisted-role', policy), { warnAt: 40000, returnAt: 80000 });
+});
+
+// The size budget is the helper's first sampled context plus a per-role
+// allowance, so a helper that starts large is not over budget at its first
+// call and one that starts small is not given room it did not ask for.
+test('sizeBudget adds the role allowance to the helper\'s own baseline; readers get more room than builders', () => {
+  const policy = loadPolicy(null);
+  assert.deepEqual(sizeBudget('orch-implementer', policy, 30000), { warnAt: 70000, returnAt: 110000 });
+  assert.deepEqual(sizeBudget('orch-implementer', policy, 60000), { warnAt: 100000, returnAt: 140000 });
+  for (const reader of ['orch-researcher', 'orch-planner', 'orch-advisor', 'orch-reviewer']) {
+    assert.deepEqual(sizeBudget(reader, policy, 30000), { warnAt: 100000, returnAt: 150000 }, reader);
+  }
+  for (const builder of ['orch-implementer', 'orch-debugger', 'orch-browser']) {
+    assert.deepEqual(sizeBudget(builder, policy, 30000), { warnAt: 70000, returnAt: 110000 }, builder);
+  }
+  assert.deepEqual(sizeBudget('orch-coordinator', policy, 30000), { warnAt: 150000, returnAt: 200000 }, 'the coordinator keeps its 150k / 200k at a 30k start');
+  assert.deepEqual(sizeBudget('orch-implementer', policy), { warnAt: 40000, returnAt: 80000 }, 'no baseline yet: the allowance alone');
+  const r = DEFAULT_POLICY.workers.size['orch-reviewer'], b = DEFAULT_POLICY.workers.size.default;
+  assert.ok(r.warnAfter > b.warnAfter && r.returnAfter > b.returnAfter);
 });
 
 // ---- setPolicyValue -----------------------------------------------------------
@@ -72,7 +91,7 @@ test('setPolicyValue rejects an unknown dotted key', () => {
 });
 
 test('setPolicyValue takes the workers.size.<role>.<field> form and rejects a non-positive value', () => {
-  const out = setPolicyValue({}, 'workers.size.orch-implementer.warnAt', '90000');
-  assert.equal(out.policy.workers.size['orch-implementer'].warnAt, 90000);
-  assert.throws(() => setPolicyValue({}, 'workers.size.orch-implementer.warnAt', '-5'), /workers\.size/);
+  const out = setPolicyValue({}, 'workers.size.orch-implementer.warnAfter', '90000');
+  assert.equal(out.policy.workers.size['orch-implementer'].warnAfter, 90000);
+  assert.throws(() => setPolicyValue({}, 'workers.size.orch-implementer.warnAfter', '-5'), /workers\.size/);
 });

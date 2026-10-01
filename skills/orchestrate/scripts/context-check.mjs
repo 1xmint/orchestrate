@@ -30,6 +30,34 @@ import { loadSession, saveSession, routerSettings, findRepoRoot } from './lib/ti
 import { loadPolicy, sizeBudget } from './lib/policy.mjs';
 import { leftoverNote, anyHelperRunning } from './turn-check.mjs';
 
+// ---- which roles can edit ---------------------------------------------------
+// "N tool calls since your last edit" is a fact only for a role that has an
+// edit tool. A reviewer or advisor cannot edit, so the line told it of a gap
+// it could not close. Read from the role's own agent file (assets/agents), the
+// same home as its turn cap: a `tools:` list names what it has, a
+// `disallowedTools:` list what it lacks from everything else. A shell that is
+// not narrowed to named commands counts as able to write; Bash(git diff:*)
+// does not. A role with no file is taken to be able to (the fact stays).
+const AGENTS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'agents');
+const EDIT_NAMES = ['Edit', 'Write', 'NotebookEdit'];
+export function roleCanEdit(role, dir = AGENTS_DIR) {
+  let fm;
+  try {
+    const name = String(role || '').replace(/^[\w-]+:(?=orch-)/, '');
+    fm = /^---\n([\s\S]*?)\n---/.exec(readFileSync(join(dir, `${name}.md`), 'utf8').replace(/\r\n/g, '\n'));
+  } catch { return true; }
+  if (!fm) return true;
+  const list = key => {
+    const m = new RegExp(`^${key}:\\s*(.*)$`, 'm').exec(fm[1]);
+    // split on commas outside parentheses: Bash(git:*) stays one entry
+    return m ? m[1].split(/,(?![^(]*\))/).map(x => x.trim()).filter(Boolean) : null;
+  };
+  const tools = list('tools');
+  const denied = new Set(list('disallowedTools') || []);
+  const has = n => (tools ? tools.includes(n) : true) && !denied.has(n);
+  return EDIT_NAMES.some(has) || (has('Bash') && (!tools || tools.includes('Bash')));
+}
+
 // ---- the working project ----------------------------------------------------
 // Which repo and folder this session is actually touching, learned from the
 // only signal a hook that runs after every tool call has cheaply: the path a
@@ -215,7 +243,7 @@ export function check(input) {
       const role = owner ? owner.role : 'default';
       const reading = sample.reading;
       const tokens = reading && (reading.state === 'measured' || reading.state === 'provisional') ? reading.tokens : null;
-      const budget = sizeBudget(role, loadPolicy());
+      const budget = sizeBudget(role, loadPolicy(), sample.baseline);
       const announced = storedAdvisedKey(session, agent);
       // The turn count reads the whole transcript, so it is paid only on the
       // call that is past warnAt, not on every tool call a helper makes.
@@ -228,7 +256,7 @@ export function check(input) {
         progress = { path: progressPath, minutesAgo: null };
         try { progress.minutesAgo = (Date.now() - statSync(progressPath).mtimeMs) / 60000; } catch {}
       }
-      const notice = helperSizeNotice({ role, tokens, budget, announced, turn, maxTurns, callsSinceEdit: sample.editCounter, progress });
+      const notice = helperSizeNotice({ role, tokens, budget, announced, turn, maxTurns, callsSinceEdit: roleCanEdit(owner ? owner.dispatch.agent : role) ? sample.editCounter : null, progress });
       if (notice) markAnnounced(session, agent, notice.key);
       return notice ? notice.text : '';
     }
