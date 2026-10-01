@@ -18,16 +18,20 @@ Deciding documents (these win when the code and the intent disagree):
 - `CARD` in `skills/orchestrate/scripts/lib/card.mjs` — the card, the guidance a
   session is sure to see; it carries behaviour rules only, never state
 - `docs/scoresheet-audit-prompt.md` and the newest report under `docs/audits/`
-  — how the plugin is scored for its audience; an area under 10 there is open
-  work, and a change that lowers an area needs a decision here saying why
+  — how the plugin is scored for its audience. Areas the user feels (what they
+  meant was understood, the wrong thing was not built, questions they can
+  answer, cost, reports they can trust, picking up again, nothing broken behind
+  their back) come first: one under 10 is open work. An upkeep area under 10 is
+  open work only when it causes something the user feels. A change that lowers
+  an area needs a decision here saying why
 
 Always true:
 - Hooks state facts the lead cannot see; they do not give orders.
 - Every always-on line names the failure it prevents and what it costs per turn.
 - Quota first: the cheapest model that can do a step does it.
 - Tests need no network and no quota, run in CI, and pin behaviour, not numbers.
-- Claims the user feels (the thing got built, what it cost, it picks up again,
-  it stopped before deleting) are measured, not argued: `claude plugin eval`
+- Claims the user feels (the plan matched what they meant, the thing got built,
+  what it cost, it picks up again, it stopped before deleting) are measured, not argued: `claude plugin eval`
   with the no-plugin baseline, and the audit prompt's live scenarios, before a
   release and after any change to the skill body, the card or a hook. Each
   measured run has a spend cap written down first; day-to-day changes are still
@@ -42,7 +46,10 @@ Always true:
   when the payload says it is inside a helper.
 - Where something must not happen (a destructive, public or paid action, a
   helper on the wrong model), a hook refuses it or the tool is taken away.
-  Prose is for judgement.
+  Prose is for judgement. The guard catches what Claude would do by mistake,
+  not a command built to slip past it; Claude does not disguise commands. A
+  guard change gets one independent review, and what the guard does not catch
+  is listed in `docs/safety-guard.md` rather than chased.
 - Install and uninstall leave the machine as they found it apart from the
   files the user asked for, and a test proves it. No person's name, machine
   path or account detail in code, docs or tests.

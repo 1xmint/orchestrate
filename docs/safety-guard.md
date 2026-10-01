@@ -10,6 +10,19 @@ of files, a published package, a live deployment, or real money — and stops
 those. Everything else, including loud everyday commands like `npm test` or
 `rm -rf node_modules`, passes through with no output at all.
 
+## What it is for, and what it does not catch
+
+The guard catches what Claude would run by mistake. It is not built to stop a
+command written to slip past it: Claude does not disguise commands, and chasing
+every spelling of one cost eight review rounds in 0.18.0 for no change a user
+could feel. A guard change gets one independent review. What it does not catch
+is written here, not chased:
+
+- git or rg settings made by an earlier command, before the line it reads;
+- a destructive or paying command spelled in a way none of the shapes below
+  name;
+- anything a program does after it starts, beyond the words on the line.
+
 ## What it stops
 
 - `git push --force` / `git push -f` (rewrites a shared branch's history)
