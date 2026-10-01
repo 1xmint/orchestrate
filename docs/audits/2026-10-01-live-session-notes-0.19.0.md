@@ -195,7 +195,8 @@ eval. *Measured:* side-question-goal 0/3 helpers after the clause, but
 three-session-continue 2/3 ("I don't have a way to run commands myself here, so
 I'll have a helper try"). Moved to §6, where the lead picks its evidence ("What
 you cannot run here, no helper can either: say it is not run and give the
-command."): 0/3 and 1/3. Smaller, not gone.
+command."): 0/3 and 1/3. Per case: fixed in side-question-goal (3/3, 0/3,
+0/3); in three-session-continue no change shown (1/3 on 0.19.0, 2/3, 1/3).
 
 **X. A judge that reads the whole run record sees its middle cut out.** The eval host shortens a
 long record by eliding the middle (`[…14 messages elided…]`, `[…33 messages elided…]`). In the

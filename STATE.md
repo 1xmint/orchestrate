@@ -25,9 +25,11 @@ docs/research/0007-next-phase.md).
   the fix, and its answer must come from the repo.
 
 - A helper gets the lead's tools, no more: what the lead cannot run, it is not
-  sent to run (SKILL §6). Helper sends with no shell fell from 3/3 to 1/6.
-- Grader fixes: a regex on the file where an LLM judge passed untouched code
-  (note V); rules that read the reply now read the last message.
+  sent to run (SKILL §6). With no shell, helper sends fell from 3/3 to 0/3 in
+  side-question-goal; three-session-continue shows no change (1/3 either way).
+- Grader fixes in side-question-goal: a regex on the file where an LLM judge
+  passed untouched code (note V); two rules read the last message, not the run
+  record. Six rules in other cases still read the record (note X).
 
 Measured in docs/research/0007-eval-release.md ($10.03 of $15): on five cases
 against no plugin, every grader is level within one run of three; the plugin

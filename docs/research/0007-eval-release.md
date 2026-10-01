@@ -61,8 +61,12 @@ Cost and time per run (list price, judge excluded):
 | side-question-goal | $0.11, 22-23 s | $0.14-0.16, 27-32 s |
 
 Helpers sent to run what nobody in the session could, plugin side:
-side-question-goal pilot (before the §3 sentence) 3/3; after it,
-side-question-goal 0/3 and three-session-continue 2/3.
+side-question-goal 3/3 in the pilot (before the §3 sentence), 0/3 after it;
+three-session-continue 1/3 on 0.19.0 (0006), 2/3 after it.
+
+Which wording each run had: explain-flow started two minutes before the §3
+sentence; the other four ran with it. The shipped §6 wording (below) was
+measured on two cases, plugin side only.
 
 ### Second placement
 
@@ -80,9 +84,10 @@ give the command." Plugin side only, three runs each (`eval/rel2-<case>.json`):
 side question from `package.json`, but never says in words that a percent was
 taken off as dollars.
 
-Helper sends to do what nobody in the session could: 3/3 before any sentence,
-2/6 with it in §3, 1/6 in §6. The §6 placement ships; the flaw is smaller, not
-gone.
+Helper sends, per case: side-question-goal 3/3, then 0/3 (§3), then 0/3 (§6):
+a real effect. three-session-continue 1/3 (0.19.0), then 2/3, then 1/3: no
+effect shown. The §6 placement ships on the strength of the first case; in the
+second the flaw is unchanged.
 
 ## What it shows
 
@@ -90,14 +95,15 @@ gone.
   Every grader is level within one run of three.
 - **Two earlier leads did not hold.** The explain eval earlier today had no
   plugin drawing 0/3; today it drew 3/3, so the drawing rule's gain is no
-  longer shown. The plugin's 3/6 against 0/6 on plan questions (0006) is 1/3
+  longer shown. On plan questions, 0.19.0's 2/3 against 0/6 (0006) is 1/3
   against 1/3 here. Three runs a side cannot tell a real lead from luck.
 - **The plugin costs more:** about a third more per run on the cases where
   both sides do the same work ($0.15 against $0.11), from reading its own
   instructions. Where it sent a helper it could not use, up to three times the
   cost and four times the time.
-- **The helper flaw was real and is mostly fixed.** The lead said it plainly:
-  "I don't have a way to run commands myself here, so I'll have a helper try."
+- **The helper flaw is real, and fixed in one case of two.** The lead said it
+  plainly: "I don't have a way to run commands myself here, so I'll have a
+  helper try." In the side question it stopped; in the to-do case it did not.
 - **Two measuring faults, both biased against the plugin:** an LLM judge that
   passed untouched code (note V), and judges that read a run record with its
   middle cut out (note X). The first is fixed; the second is named, with six
