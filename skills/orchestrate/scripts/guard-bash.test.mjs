@@ -999,6 +999,25 @@ test('reviewer round 4: a line full of unclosed brace commas is read in well und
   assert.ok(took < 1000, `took ${took} ms`);
 });
 
+test('braces it cannot expand still hide no merge, but g and h in two different words are not gh (live note S)', () => {
+  const many = ','.repeat(70);
+  for (const cmd of [
+    `g{h${many}} pr merge 36`,
+    `gh pr me{r${many}}ge 36`,
+    'gh pr merge 36 {a..zz}',
+    '{g,x}{h,y}{a..z}{a..z} pr merge 36',
+    `gh api -X PUT repos/o/r/pul{l${many}}s/36/merge`,
+    `gh api graphql -f query=mutation{merge${many}PullRequest}`,
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of [
+    'node -e "const merged = {...base}; log(big hat)"',
+    'node -e "const o = {...opts, flag: true}; console.log(o.big, hat)"',
+    'echo {a..zz} && echo the merged log is big; hold on',
+  ]) assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  assert.equal(m.calls.length, 0);
+});
+
 test('reviewer round 4: a plain git merge alone on its line passes whatever the branch is called, and nothing rides along with it', () => {
   const m = merging(prView({ checks: [running()] }));
   for (const ok of ['git merge feature/graphql-schema', 'git merge origin/pulls-cleanup', 'git merge --no-ff feature/gh-merge-fix']) {

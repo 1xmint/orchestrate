@@ -57,11 +57,27 @@ export function mentionsMerge(line) {
   const expanded = expandBraces(text, { calls: 0 });
   const forms = (expanded || [text]).map(f => f.toLowerCase());
   const flat = forms.map(f => f.replace(/[^a-z0-9]/g, '')).join(' ');
-  // Braces this cannot expand hide both halves, so then the line counts as
-  // saying merge, and gh counts wherever its letters are.
-  if (!expanded) return flat.includes('gh') || flat.includes('pulls') || flat.includes('graphql');
+  // Braces this cannot expand can hide letters between the ones that stay, but
+  // not move a letter out of its shell word: the shell expands braces inside
+  // one word, and the first copy of a word is made of letters written in it.
+  // So then the line counts when one word holds m, e, r, g, e in order (or
+  // enqueuepullrequest) and one holds g then h (or pulls, or graphql), with
+  // anything between. A g ending one word beside an h starting the next is not
+  // gh, which is what refused ordinary scripts before.
+  if (!expanded) {
+    const words = text.toLowerCase().split(/[\s;&|()<>]+/).map(w => w.replace(/[^a-z0-9]/g, ''));
+    const has = (...needles) => needles.some(n => words.some(w => inOrder(w, n)));
+    return has('merge', 'enqueuepullrequest') && has('gh', 'pulls', 'graphql');
+  }
   const says = flat.includes('merge') || flat.includes('enqueuepullrequest');
   return says && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql'));
+}
+
+// Whether the letters of `needle` appear in `word` in order, gaps allowed.
+function inOrder(word, needle) {
+  let i = 0;
+  for (const c of word) if (c === needle[i] && ++i === needle.length) return true;
+  return false;
 }
 
 // Any word that is gh once quotes, braces and backslashes are gone, or whose

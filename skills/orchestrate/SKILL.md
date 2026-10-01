@@ -73,7 +73,8 @@ alternatives, and let them choose. Never downgrade or spend quietly to avoid
 asking. `routing.md`'s "Who chooses the model" has it.
 
 A model the user names in their own message is a grant for the task they
-named it for, not the run: any other id gets the plan's usual model.
+named it for, or every helper when they said so ("as many opus agents as
+you need").
 `APPROVED BY USER: <model>` in a packet is a separate thing — the billing
 check for a model outside the plan, not a grant.
 

@@ -144,7 +144,11 @@ Before looking, a backslash at a line end is joined up, quotes, backticks and
 `$` are taken out, and brace lists and ranges are expanded the way bash does
 (`{merge,}`, `{pr,merge}`, `{m..m}erge`, `{e..e..1}`). When the braces would
 make more than 64 copies, or hold a `..` group that is not a range, the line
-counts whenever its letters contain `gh`, `pulls` or `graphql` anywhere.
+counts when one shell word holds the letters of `merge` (or
+`enqueuepullrequest`) in order and one holds `g` then `h` (or `pulls`, or
+`graphql`), other letters allowed between: the shell expands braces inside a
+word, so they can pad a word but not join two. A `g` ending one word beside
+an `h` starting the next does not count.
 Quoted text and comments count too. So a merge inside a chain, a pipe,
 `bash -c`, a wrapper such as `timeout`, `env` or `xargs`, `curl` or
 `Invoke-RestMethod`, after a `cd`, or behind a comment or heredoc is refused

@@ -210,6 +210,17 @@ function newState(input) {
 }
 
 // ---- hook handlers ----------------------------------------------------------
+const RUN_SCOPE = /\b(?:however many|as many|all (?:the |of the |your |my )?(?:agents|helpers|workers|subagents|tasks)|every (?:agent|helper|worker|subagent|task)|for (?:this|the whole|the rest of the) (?:run|session|project)|from now on|throughout)\b/i;
+
+// The fact the lead needs when a grant covers the run, and the one part of
+// the request it cannot honour: the Agent tool takes a model, not an effort,
+// so "opus high" runs each helper at the host's default effort.
+function runGrantLine(f, near) {
+  const effort = /\b(?:effort|low|medium|high|xhigh|max)\b/i.test(near)
+    ? ' A helper\'s effort cannot be set: it runs at the host\'s default for that model, so say so once if the user named one.' : '';
+  return `[orchestrate · model] The user named ${f} for every helper this session; the guard allows it for any task without asking again.${effort}`;
+}
+
 function emit(event, text) {
   if (!text) return;
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }));
@@ -280,7 +291,17 @@ function handlePrompt(input) {
     const m = new RegExp(`\\b${f}\\b`, 'i').exec(trimmed);
     if (m && m.index < namedAt) { namedAt = m.index; namedFamily = f; }
   }
-  if (namedFamily) state.userModel = { family: namedFamily, at: new Date().toISOString() };
+  // Words near the name that make it every helper's model, not one task's:
+  // "however many opus agents you need", "use opus for all the helpers". Seen
+  // live: the owner said the first, and each helper after the first was
+  // refused back to Sonnet.
+  let runGrant = null;
+  if (namedFamily) {
+    const near = trimmed.slice(Math.max(0, namedAt - 80), namedAt + 80);
+    const scope = RUN_SCOPE.test(near);
+    state.userModel = { family: namedFamily, at: new Date().toISOString(), ...(scope ? { scope: 'run' } : {}) };
+    if (scope) runGrant = runGrantLine(namedFamily, near);
+  }
 
   if (/^router (off|on)$/i.test(trimmed)) { state.muted = /off$/i.test(trimmed); saveSession(state); return; }
   // The full state line, on demand: not a substantive prompt, so it sends no
@@ -489,6 +510,8 @@ function handlePrompt(input) {
       state.recoverShownFor = limitKey;
     }
   }
+
+  if (runGrant) out.push(runGrant);
 
   if (armedNow) {
     out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);

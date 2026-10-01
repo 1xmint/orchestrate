@@ -631,6 +631,26 @@ test('a prompt naming a model family records userModel for guard-agent to read; 
   assert.equal(s2.userModel, undefined, 'no family named, nothing recorded');
 });
 
+test('naming a family for every helper records a grant for the run and says so once, with the effort it cannot set', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = prompt(home, repo, 'improve the plugin. Use however many opus 5.5 high agents you need', { session_id: 's-run' });
+  const s = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-run.json'), 'utf8'));
+  assert.equal(s.userModel.family, 'opus');
+  assert.equal(s.userModel.scope, 'run');
+  assert.match(out, /named opus for every helper this session/);
+  assert.match(out, /effort cannot be set/);
+
+  prompt(home, repo, 'use opus for all the helpers on this', { session_id: 's-run2' });
+  const s2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-run2.json'), 'utf8'));
+  assert.equal(s2.userModel.scope, 'run');
+
+  // One task's grant stays one task's, and says nothing.
+  const one = prompt(home, repo, 'use opus for this one, it is worth it', { session_id: 's-one' });
+  const s3 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-one.json'), 'utf8'));
+  assert.equal(s3.userModel.scope, undefined);
+  assert.doesNotMatch(one, /every helper/);
+});
+
 test('naming a family records the earliest one in the prompt, not the ladder\'s own order; a later prompt naming only Sonnet leaves it alone', () => {
   const home = makeHome(); const repo = makeRepo(false);
   // FAMILY_ORDER is ['fable', 'opus', 'sonnet', 'haiku'], so .find used to

@@ -142,8 +142,12 @@ const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
 //   null              no grant applies (no record, wrong family, no task id)
 //   { allow, bind }   allowed; `bind` is the id to claim when not bound yet
 //   { deny, reason }  a grant exists but is already spent on another task
+// A grant the router marked `scope: 'run'` (the user named the family for
+// every helper: "however many opus agents you need") allows any dispatch on
+// that family, with or without an id, and binds nothing.
 export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!userModel || userModel.family !== f) return null;
+  if (userModel.scope === 'run') return { allow: true, bind: null };
   const id = numericTaskId(prompt);
   if (!id) return null;
   if (!boundId) return { allow: true, bind: id };
@@ -271,7 +275,7 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
       if (userModel && userModel.family === f && !userModel.taskId && !numericTaskId(prompt)) {
         return { prefix: 'model', reason: `the user named ${f}; add a TASK: line with a number (e.g. TASK: 1-1-0001) to the packet and resend. The grant covers that one task id.` };
       }
-      return { prefix: 'model', reason: `${plainRole(role)} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id.` };
+      return { prefix: 'model', reason: `${plainRole(role)} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id, or every helper when they said so ("however many opus agents you need").` };
     }
   }
   return null;
