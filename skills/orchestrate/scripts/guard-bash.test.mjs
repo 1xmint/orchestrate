@@ -1390,6 +1390,21 @@ test('a forced removal of a non-helper folder with unsaved changes is refused in
     `git -C ${root.replace(/\\/g, '/')} worktree remove --force ${fwd}`,
     `git -C . worktree remove --force ${rel}`,
     `git worktree remove --force ${rel}`,
+    // A redirect before the flag or the path does not hide them (review of 24e6531).
+    `git worktree remove 2>/dev/null --force ${fwd}`,
+    `git worktree remove >/dev/null -f ${fwd}`,
+    `git worktree remove ${rel} 2>/dev/null --force`,
+    `git worktree remove 2> /dev/null ${fwd} --force`,
+    // Git takes --fo for --force.
+    `git worktree remove --fo ${fwd}`,
+    `git worktree remove --forc ${fwd}`,
+    // Other ways one line runs it.
+    `git status\ngit worktree remove --force ${fwd}`,
+    `true & git worktree remove --force ${fwd}`,
+    `(git worktree remove --force ${fwd})`,
+    `GIT_TRACE=0 git worktree remove --force ${fwd}`,
+    `command git worktree remove --force ${fwd}`,
+    `git worktree list | git worktree remove --force ${fwd}`,
   ];
   for (const c of forms) {
     assert.equal(decide(c, { cwd: root }).kind, 'ask', c);
@@ -1436,6 +1451,23 @@ test('when every branch delete already uses -d, the refusal never advises the lo
   assert.equal(other.kind, 'deny');
   assert.doesNotMatch(other.reason, /lowercase flag/);
   assert.match(other.reason, /publish/);
+  // -d with --force deletes unmerged work like -D, so it is not "the lowercase flag".
+  for (const c of ['git branch -d task/x --force && git worktree list', 'git branch -df task/x && git worktree list']) {
+    const d = decide(c, headless);
+    assert.equal(d.kind, 'deny', c);
+    assert.doesNotMatch(d.reason, /already uses the lowercase flag/, c);
+  }
+});
+
+test('a redirect before the force flag on a dirty helper folder is still refused (review of 24e6531)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'orch-wt-redir-'));
+  const helper = join(root, '.claude', 'worktrees', 'agent-abc');
+  mkdirSync(helper, { recursive: true });
+  spawnSync('git', ['init', '-q'], { cwd: helper });
+  writeFileSync(join(helper, 'u.txt'), 'work');
+  for (const c of ['git worktree remove 2>/dev/null --force .claude/worktrees/agent-abc', 'git worktree remove >/dev/null -f .claude/worktrees/agent-abc']) {
+    assert.equal(decide(c, { cwd: root, headless: true, mode: 'auto' }).kind, 'deny', c);
+  }
 });
 
 test('a read of one pull request after one plain cd passes; other shapes with a cd still refuse', () => {
@@ -1458,5 +1490,15 @@ test('a read of one pull request after one plain cd passes; other shapes with a 
     'cd a & gh pr view 1 --json mergeable',
     'cd a\ngh pr view 1 --json mergeable',
     'cd {a,b}; gh pr view 1 --json mergeable',
+    'cd a*; gh pr view 1 --json mergeable',
+    'cd a?; gh pr view 1 --json mergeable',
+    'cd [ab]; gh pr view 1 --json mergeable',
+    'cd ~; gh pr view 1 --json mergeable',
+    'cd a#b; gh pr view 1 --json mergeable',
+    'cd !a; gh pr view 1 --json mergeable',
+    'cd %a; gh pr view 1 --json mergeable',
+    'cd -; gh pr view 1 --json mergeable',
+    'cd "-"; gh pr view 1 --json mergeable',
+    'cd "a*"; gh pr view 1 --json mergeable',
   ]) assert.notEqual(decide(bad, ctx).kind, 'pass', bad);
 });

@@ -172,6 +172,8 @@ function gitFolders(seg) {
 }
 
 const FORCE_FLAGS = new Set(['-f', '-ff', '--force']);
+// Git takes a long option by any unambiguous start: --fo is --force.
+const isForce = a => FORCE_FLAGS.has(a) || /^--f(o(r(c(e)?)?)?)?$/.test(a);
 const isHelperPath = p => !p.split('/').includes('..') && p.includes('.claude/worktrees/');
 
 // Git Bash spells a drive as /c/rest; Node on Windows would read that as
@@ -198,12 +200,18 @@ function worktreeState(folder, missingIsClean) {
 // other folder removed with force, alone or in a chain, passes only when the
 // folder has no uncommitted changes. A forced removal of a folder that is
 // missing or unreadable cannot be told apart from lost work, so it is refused.
+// Read from the line as sent: a redirect is dropped as a word, not as the rest
+// of the part (`remove 2>/dev/null --force <p>` is still forced), and every
+// separator, a newline, a lone `&`, a pipe or brackets, starts a new part.
+const REDIRECT_RE = /(^|\s)\d+(?=[<>])|&?(?:<|>{1,2})&?\s*[^\s;&|()]+/g;
+const LEAD_RE = /^(?:(?:\w+=\S*|command|env|exec|time|nohup|sudo)\s+)+/;
 function worktreeRemoveRule(cmd, cwd) {
-  for (const part of cmd.split(/&&|;|\|\|/)) {
-    const seg = withoutStderrJoin(part).split(/[|<>]/)[0];
+  const text = withoutStderrJoin(String(cmd)).replace(REDIRECT_RE, '$1 ');
+  for (const part of text.split(/&&|\|\||[;\n&|(){}]/)) {
+    const seg = part.trim().replace(LEAD_RE, '');
     const t = plainGit(seg).trim().split(/\s+/);
     if (t[0] !== 'git' || t[1] !== 'worktree' || t[2] !== 'remove') continue;
-    const forced = t.slice(3).some(a => FORCE_FLAGS.has(a));
+    const forced = t.slice(3).some(isForce);
     const base = resolvePath(cwd || process.cwd(), ...gitFolders(seg).map(f => gitBashPath(f)));
     for (const raw of t.slice(3)) {
       if (raw.startsWith('-')) continue;
@@ -218,7 +226,7 @@ function worktreeRemoveRule(cmd, cwd) {
         return { name: 'worktree-remove-dirty', reason: `This would delete ${what} ${path}, which still has changes that were never saved to git. ${ASK_TAIL}` };
       }
       if (state === 'unknown') {
-        return { name: 'worktree-remove-unknown', reason: `This would force-delete ${what} ${path}, and this check cannot tell whether it holds work that was never saved to git (the folder is not there under that name, or git could not read it). ${ASK_TAIL}` };
+        return { name: 'worktree-remove-unknown', reason: `This would ${forced ? 'force-delete' : 'delete'} ${what} ${path}, and this check cannot tell whether it holds work that was never saved to git (the folder is not there under that name, or git could not read it). ${ASK_TAIL}` };
       }
     }
   }
@@ -261,7 +269,7 @@ function isSafeWorktreeCleanupChain(cmd) {
     if (t[1] === 'worktree' && t[2] === 'list' && t.length === 3) continue;
     if (t[1] === 'worktree' && t[2] === 'remove' && t.length > 3) {
       for (const raw of t.slice(3)) {
-        if (FORCE_FLAGS.has(raw)) continue;
+        if (isForce(raw)) continue;
         if (unquote(raw).startsWith('-')) return false;
       }
       continue;
@@ -335,7 +343,7 @@ function chainRestIsSafe(raw, flags) {
       const t = seg.split(/\s+/);
       if (t.length < 4 || CHAIN_META_RE.test(seg)) return false;
       for (const raw of t.slice(3)) {
-        if (FORCE_FLAGS.has(raw)) continue;
+        if (isForce(raw)) continue;
         if (unquote(raw).startsWith('-')) return false;
       }
     } else if (!segmentPasses(seg)) return false;
@@ -518,7 +526,7 @@ function decideOne(command, ctx = {}) {
   }
   const cmd = plainGit(asSent);
 
-  let hit = worktreeRemoveRule(asSent, ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.name !== 'payment' && r.test(cmd)) || (paymentLine(String(command)) && RULES.find(r => r.name === 'payment')) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
+  let hit = worktreeRemoveRule(String(command), ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.name !== 'payment' && r.test(cmd)) || (paymentLine(String(command)) && RULES.find(r => r.name === 'payment')) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
   if (!hit) return { kind: 'pass' };
 
   // Every branch delete in the line is the lowercase kind, so another part is
@@ -548,7 +556,7 @@ function decideOne(command, ctx = {}) {
   // A branch delete that nobody can approve: say in plain words what is refused
   // and what works instead, with nothing about modes or files to repeat.
   if (hit.name === 'branch-delete-local' && (ctx.subagent || ctx.headless)) {
-    const allLower = segmentsOf(withoutStderrJoin(cmd)).filter(isBranchDeleteSeg).every(s => /\s(-d|--delete)(\s|$)/.test(s) && !/\s(-D|--force-delete)(\s|$)/.test(s) && !/\s-[a-zA-Z]*D[a-zA-Z]*(\s|$)/.test(s));
+    const allLower = segmentsOf(withoutStderrJoin(cmd)).filter(isBranchDeleteSeg).every(s => /\s(-d|--delete)(\s|$)/.test(s) && !/\s(-D|--force-delete)(\s|$)/.test(s) && !/\s-[a-zA-Z]*D[a-zA-Z]*(\s|$)/.test(s) && !/\s(--force|-[a-zA-Z]*f[a-zA-Z]*)(\s|$)/.test(s));
     if (allLower) {
       const parts = segmentsOf(withoutStderrJoin(cmd));
       const part = parts.find(s => isBranchDeleteSeg(s) ? !isPlainBranchDelete(s, ['-d', '--delete']) : !segmentPasses(s)) || String(command).trim();

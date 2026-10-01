@@ -12,26 +12,34 @@ in `docs/audits/2026-10-01-live-session-notes-0.19.0.md`).
   passed with no check and its unsaved work was lost. A folder that cannot be
   found or read is refused ("cannot tell"). A Git Bash path such as `/c/...`
   is translated before the check, because Node read it as a missing folder,
-  which counted as clean.
+  which counted as clean. The first review found a redirect before the flag
+  (`remove 2>/dev/null --force`) hid it, and `--fo` was not read as force;
+  both fixed, and the removal is now also found after a newline, `&`, a pipe,
+  brackets, `VAR=` or `command`.
 - A clean-up line that removes a clean worktree and deletes branches with
   lowercase `-d` now passes. When a branch-delete line is refused although it
   already uses `-d`, the refusal names the part that was actually refused
   instead of advising `-d`.
 - The merge check accepts one plain `cd <path>;` or `&&` before a single
-  `gh pr` read. `cd $(…)`, backticks, two `cd`s and `cd …` before a merge are
-  still refused.
+  `gh pr` read; the path is letters, digits and `./:@+,=-` only. `cd $(…)`,
+  backticks, globs, `~`, two `cd`s and `cd …` before a merge are still
+  refused. A branch delete with `-d --force` is not called "the lowercase
+  flag" in a refusal.
 - docs/safety-guard.md: in a session that shows no prompts, an owner's yes in
   chat does not reach the check. The owner runs the command, or approves the
   exact line for `.orchestrator/allow-bash.json`.
 - Eval ruler (note X): six LLM rules that read the whole run record, which the
   eval host cuts in the middle, now read the last message. Two tool rules were
   added for actions the rewritten rules no longer see
-  (`no-uploads-removed`, `report-test-untouched`). `eval-graders.test.mjs`
+  (`no-uploads-removed`, `report-test-untouched`), and Edit or Write siblings
+  for three that watched one tool only. Left to the final message: whether
+  three-session-continue redid steps 1-2, and whether misleading-bug's tests
+  passed (only that they ran is checked). `eval-graders.test.mjs`
   refuses any LLM rule that reads the record or doesn't say what it reads.
   Not re-measured.
 
 Replayed against `decide()`, each refused line from this session now gives the
-intended answer. Gate: 1254/1254, 22/22.
+intended answer. Gate: 1255/1255, 22/22.
 
 ## v0.20.0 — plan 0007: replies that draw, the owner's words kept, grants that hold, 2026-10-01
 

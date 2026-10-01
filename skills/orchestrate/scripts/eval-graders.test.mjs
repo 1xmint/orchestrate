@@ -34,7 +34,7 @@ test('evals/ has graders to check', () => {
 test('no llm grader judges the whole run record', () => {
   const bad = graderFiles().filter(f => {
     const fm = frontMatter(readFileSync(f, 'utf8'));
-    return /^type:\s*llm\s*$/m.test(fm) && /^focus:\s*trace\s*$/m.test(fm);
+    return /^type:\s*llm\s*$/m.test(fm) && /^focus:\s*["']?trace["']?\s*$/m.test(fm);
   }).map(f => relative(ROOT, f));
   assert.deepEqual(bad, [], 'use focus: last_message or a file; hold actions with tool_used graders');
 });

@@ -204,7 +204,7 @@ const READS = new Set(['view', 'checks', 'list', 'status', 'diff']);
 // One leading `cd <plain path>` followed by ; or && is allowed before that
 // read: it only moves where gh runs. The path has none of $ ` ( ) { } | & ; < >
 // (a quoted one may hold spaces) and no second cd can follow.
-const CD_PREFIX_RE = /^cd\s+(?:"[^"$`(){}|&;<>\\]*"|'[^'$`(){}|&;<>\\]*'|[^\s"'$`(){}|&;<>\\-][^\s"'$`(){}|&;<>\\]*)\s*(?:;|&&)\s*(\S[\s\S]*)$/;
+const CD_PREFIX_RE = /^cd\s+(?:"[\w./:@+,= ][\w./:@+,= -]*"|'[\w./:@+,= ][\w./:@+,= -]*'|[\w./:@+,=][\w./:@+,=-]*)\s*(?:;|&&)\s*(\S[\s\S]*)$/;
 function readsOnly(line) {
   const text = String(line || '').trim();
   if (!text || /[\r\n]/.test(text)) return false;
