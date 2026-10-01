@@ -20,6 +20,15 @@ test('the template and the realistic filled example are within the 60-line limit
   assert.ok(lines(FILLED) <= MAX_LINES);
 });
 
+test('always-on budget: the example page plus the growth of SKILL.md and the card stays under 900 tokens (chars/4)', () => {
+  // Before step 4: SKILL.md 19996 bytes, card.mjs 6538 bytes.
+  const here = dirname(fileURLToPath(import.meta.url));
+  const skill = readFileSync(join(here, '..', '..', 'SKILL.md')).length;
+  const card = readFileSync(join(here, 'card.mjs')).length;
+  const total = (Buffer.byteLength(FILLED) + (skill - 19996) + (card - 6538)) / 4;
+  assert.ok(total <= 900, `${total} tokens`);
+});
+
 test('the template has the six sections in order, and every blank is recognisable', () => {
   const t = readFileSync(TEMPLATE_PATH, 'utf8');
   assert.deepEqual(Object.keys(sections(t)), ['What this is for', 'Where it stands', 'Next', 'Decisions', 'Open questions for the owner', 'Earlier research']);

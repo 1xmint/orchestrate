@@ -386,10 +386,11 @@ test('no shipped file turns a price into a share of a subscription week', () => 
   assert.match(routing, /Never a running total/);
 });
 
-test('the lead thinks in the open before the first helper, and closing numbers come from proof', () => {
+test('the plan the user sees is the project page, and closing numbers come from proof', () => {
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
-  assert.match(skill, /Before the first helper of a job, write the user three plain lines: what the job needs/);
-  assert.match(skill, /saying it lets them correct it before money is spent/);
+  assert.match(skill, /run `scripts\/project\.mjs init <repo>`, then fill What this is for, Where it stands and Next \(each step ending with what the user will see\)/);
+  assert.match(skill, /Decisions go under Decisions with the date, why and the cost if wrong/);
+  assert.doesNotMatch(skill, /three plain lines|goal\.md/, 'the retired rules are gone');
   assert.match(skill, /Copy each number, and each claim that a check ran, from a proof line/);
   assert.match(skill, /say what was not run as not run/);
   assert.match(skill, /Two closing messages carried figures that did not exist/);

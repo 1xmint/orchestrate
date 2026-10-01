@@ -35,10 +35,10 @@ test('the card has the user pick before a small build is split across helpers', 
   assert.match(CARD, /Before splitting a small build across helpers, tell the user it has cost about two to three times doing it alone, and let them pick\./);
 });
 
-test('the card asks for the three plain lines before the first helper, with the reason', () => {
-  // A live lead that never opened the skill said one sentence and dispatched;
-  // the card is the text every lead does see.
-  assert.match(CARD, /Before the first helper, tell the user in three plain lines what the job needs, who does it on what model and why, and how it is checked, so they can correct it first\./);
+test('the card points at the project page\'s Next as the plan, and no longer asks for three plain lines', () => {
+  // The card is re-shown, so it must not contradict SKILL.md.
+  assert.match(CARD, /The plan the user sees is Next in \.orchestrator\/PROJECT\.md; keep it current\./);
+  assert.doesNotMatch(CARD, /three plain lines/);
 });
 
 test('the card names the helper kinds, and its builder advice clears the guard on the first try', async () => {
