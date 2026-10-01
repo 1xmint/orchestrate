@@ -71,35 +71,9 @@ questions (passed 3 of 6 against 0 of 6), and no costly-fork run built before as
 Not fixed: misleading-bug and failed-check-report still cannot run on Windows;
 "N tool calls since your last edit" counts shell commands as edits on purpose.
 
-## v0.18.0 — plan 0005: checks that read what runs, and a project page, 2026-09-30
-
-Built from docs/research/0005-next-phase.md. What each step did, its evidence
-and what is left is in docs/research/0005-next-session.md ("What is built"),
-which is also the brief for the next session: a live watch of this build, a
-fresh gap audit, and a rerun of the ability tests. The release measurement is
-in docs/research/0005-eval-0.18.0.md, against
-docs/research/0005-baseline-0.17.2.md.
-
-- The guard reads what runs instead of guessing from words (step 2). Its first
-  commit went in before its review, and that review failed. Fixes
-  followed, each reviewed independently; each failed review was answered by
-  the next fix, and the merge needed a PASS naming the last. The later fixes
-  address two leads the reviews named: text written into git's or rg's own settings on the same line
-  as a git read, and a payment host reached through a script file, `curl -K`
-  or `wsl`. Settings made before the line are still not read; that is written
-  down in `docs/safety-guard.md`. An open-ended search for other ways past the
-  guard was started twice and stopped both times by a safety classifier before
-  it ran a test; it is still owed, by the owner.
-- A project page, `.orchestrator/PROJECT.md`, keeps purpose, standing and next
-  steps in view. The first writing helper waits for its Next (step 4). Off
-  Windows, the "page unchanged" note now passes git the path as written, so
-  edits only to git-ignored files never draw it.
-- A bug fix starts from a reproduced, named cause (step 5).
-- The README and the project installer list the tools to use alongside
-  orchestrate (step 6).
-
 ## Earlier releases
 
+- [v0.18.0 — plan 0005: checks that read what runs, and a project page, 2026-09-30](docs/state/v0.18.0.md)
 - [v0.17.2 — a merge waits for its checks, 2026-09-30](docs/state/v0.17.2.md)
 - [v0.17.1 — fixes from the first live session on 0.17.0, 2026-09-29](docs/state/v0.17.1.md)
 - [v0.17.0 — the scoresheet audit, and rules that can be measured, 2026-09-29](docs/state/v0.17.0.md)

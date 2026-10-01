@@ -177,7 +177,8 @@ total" grader still ran: an LLM judge read the untouched receipt code, `return s
 was told in the rubric to trace 50 with SAVE10 by hand, and voted PASS in all six runs, both sides.
 *Got in the way:* a measurement that would have credited both sides with a fix nobody made. *Fix:*
 that grader is now a pattern on the file (a percent is taken: `/ 100` or `* 0.01`), checked against
-the wrong line and four right ones. Five older graders judge a file the same way
+the wrong line and four right ones. It also passes one wrong fix (a hundredth of the percent
+taken off as dollars), found by the release review. Five older graders judge a file the same way
 (page-actually-works, prices-two-decimals, parser-keeps-last-row,
 resume-file-has-what-a-restart-needs, done-is-wired-up); none is shown wrong, but none was ever
 tried against the untouched file. *Held by:* the release write-up checks parser-keeps-last-row's
@@ -204,7 +205,8 @@ release eval's three-session-continue, the two plugin runs that tried to send a 
 records, so the cut took the edits; the judge for continued-the-right-step saw reads, a helper
 call and a final message, and failed both, while done-is-wired-up passed all three on the file.
 *Got in the way:* a rule that charged the plugin for its record's length, not its work: the pilot's
-failure (note V) was the same thing. *Fix:* none to the rule mid-eval; that rule is reported as not
+two rules moved to the last message were the same thing. In the rerun with the §6 wording every
+record was cut, the one that passed too, so there the cut does not explain the two failures. *Fix:* none to the rule mid-eval; that rule is reported as not
 measured for the plugin side. Six rules still read the record this way (choice-before-cost,
 raised-the-conflict, continued-the-right-step, fixed-the-cause, says-which-check-failed,
 asked-before-acting); each should judge the last message or a file instead, or check for the

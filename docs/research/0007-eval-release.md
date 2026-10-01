@@ -11,12 +11,15 @@ a shell grant: "sandbox required but unavailable").
 
 - Two false starts, $0.03: one with no tools granted (two shell-only graders
   could never be judged), one with a shell (refused by the sandbox).
+- **A grader that passed broken code.** In the refused false start no turn ran,
+  yet `side-question-goal`'s `fixed-the-total`, an LLM judge on the file,
+  passed the untouched code in all six runs, both sides (live note V). It is
+  now a regex on the file. It is still loose: it also passes one wrong fix,
+  taking a hundredth of the percent off as dollars. Five other file-judged
+  graders in other cases are listed in note V.
 - `misleading-bug` dropped: its rules need `node --test` in the record, which a
   run with no shell cannot produce (also unmeasured in 0005 and 0006).
 - A pilot of `side-question-goal` ($1.69, `eval/pilot/`) found two problems:
-  - **A grader that passed broken code.** `fixed-the-total` was an LLM judge on
-    the file and passed the unfixed code 3/3. It is now a regex on the file.
-    Five other file-judged graders in other cases are listed in live note V.
   - **Two rules judging the wrong thing.** `answered-and-finished` and
     `tests-run` read the whole run record (`focus: trace`), which is longer on
     the plugin side because it sent helpers, and failed replies that were as
@@ -77,12 +80,16 @@ give the command." Plugin side only, three runs each (`eval/rel2-<case>.json`):
 
 | Case | Helpers sent | Cost, time | Graders |
 |---|---|---|---|
-| three-session-continue | 1/3 | $0.19-0.20 and 28-34 s; the run that sent one $0.49, 116 s | as before; continued-the-right-step again not measured (cut record) |
+| three-session-continue | 1/3 | $0.19-0.20 and 28-34 s; the run that sent one $0.49, 116 s | as before, except continued-the-right-step 1/3 (3) |
 | side-question-goal | 0/3 | $0.15-0.17, 28-35 s | all 3/3 except answered-and-finished 2/3 (2) |
 
 (2) The failed reply shows the fix by its numbers ($45 not $40) and answers the
 side question from `package.json`, but never says in words that a percent was
 taken off as dollars.
+
+(3) All three records were cut, the passing one too, and one failing run sent
+no helper, so the cut does not explain these failures; done-is-wired-up passed
+3/3 on the file. Why two runs failed is not known.
 
 Helper sends, per case: side-question-goal 3/3, then 0/3 (§3), then 0/3 (§6):
 a real effect. three-session-continue 1/3 (0.19.0), then 2/3, then 1/3: no
