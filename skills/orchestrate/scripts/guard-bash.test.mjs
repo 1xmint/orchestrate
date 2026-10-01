@@ -1018,6 +1018,27 @@ test('braces it cannot expand still hide no merge, but g and h in two different 
   assert.equal(m.calls.length, 0);
 });
 
+test('a group bash leaves as written stays text, and the group around it still expands (g{h,{x}} is gh to bash)', () => {
+  // Bash: echo g{h,{x}} prints "gh g{x}". The inner group used to stop the
+  // outer one being read at all, so the gh never appeared.
+  for (const cmd of [
+    'g{h,{x}} pr merge 36',
+    'gh pr mer{g,{x}}e 36',
+    '{g,{x}}h pr merge 36',
+    'g{h,{a..b..c}} pr merge 36',
+  ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
+  // {...base} is not a range, so bash leaves it alone; reading it as one that
+  // could not be expanded sent the line to the looser rule. And a script with
+  // too many groups to list is held to words that spell merge and gh outright.
+  const objs = 'abcdefg'.split('').map((c, i) => `const ${c}={x:${i},y:${i}};`).join('');
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of [
+    'node -e "const o = {...base}; console.log(o.length, merged, high)"',
+    `node -e "${objs}import('./x.mjs').then(({modelDecision,grantCheck})=>console.log(modelDecision.length, 'merged', grantCheck.length))"`,
+  ]) assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  assert.equal(m.calls.length, 0);
+});
+
 test('reviewer round 4: a plain git merge alone on its line passes whatever the branch is called, and nothing rides along with it', () => {
   const m = merging(prView({ checks: [running()] }));
   for (const ok of ['git merge feature/graphql-schema', 'git merge origin/pulls-cleanup', 'git merge --no-ff feature/gh-merge-fix']) {

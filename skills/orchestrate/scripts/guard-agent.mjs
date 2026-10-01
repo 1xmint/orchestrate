@@ -142,12 +142,10 @@ const rank = m => FAMILY_ORDER.indexOf(family(m) || '');
 //   null              no grant applies (no record, wrong family, no task id)
 //   { allow, bind }   allowed; `bind` is the id to claim when not bound yet
 //   { deny, reason }  a grant exists but is already spent on another task
-// A grant the router marked `scope: 'run'` (the user named the family for
-// every helper: "however many opus agents you need") allows any dispatch on
-// that family, with or without an id, and binds nothing.
+// A grant for the whole run is a separate record (`runModel`, below), so
+// naming another model for one task never spends or replaces it.
 export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!userModel || userModel.family !== f) return null;
-  if (userModel.scope === 'run') return { allow: true, bind: null };
   const id = numericTaskId(prompt);
   if (!id) return null;
   if (!boundId) return { allow: true, bind: id };
@@ -224,7 +222,7 @@ export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
 //   { grantBind, at, family }   allowed, and the caller should claim the
 //                               grant for `grantBind` (via claimGrantId)
 //                               once every later gate (budget) also passes
-export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null, userModel = null } = {}) {
+export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadContext = null, quota = null, userModel = null, runModel = null } = {}) {
   const role = normalizeRole(ti.subagent_type || 'general-purpose');
   const model = String(ti.model || '');
   const f = family(model);
@@ -259,6 +257,9 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
     const key = taskKey(prompt);
     const tried = dispatches.some(d => d && normalizeRole(d.agent) === role && d.key === key && rank(d.model === 'inherit' ? 'sonnet' : d.model) >= rank('sonnet'));
     if (!tried) {
+      // The user named this family for every helper ("however many opus
+      // agents you need"): any task on it, with or without an id, binds nothing.
+      if (runModel && runModel.family === f) return null;
       const g = grantCheck(userModel, f, prompt, userModel && userModel.taskId);
       if (g && g.allow) {
         // The grant is the reason this is allowed. Only here does a bind
@@ -567,6 +568,7 @@ function main() {
       leadContext: normalizeRole(ti.subagent_type) === 'fork' ? lastContextTokens(input.transcript_path) : null,
       quota: readQuota(),
       userModel: userModel ? { ...userModel, taskId: boundId } : null,
+      runModel: state.runModel || null,
     });
     if (m && m.grantBind) { grantToClaim = m; m = null; }
   } catch { m = null; grantToClaim = null; }

@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, unlink
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cardBody, syntheticPrompt, sectionExcerpt, RESUME_CAP, actionableLine, BRIEF_CAP } from './router.mjs';
+import { cardBody, syntheticPrompt, sectionExcerpt, RESUME_CAP, actionableLine, BRIEF_CAP, runFamilyIn } from './router.mjs';
 import { AGENT_NAMES } from './lib/tier.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -634,21 +634,54 @@ test('a prompt naming a model family records userModel for guard-agent to read; 
 test('naming a family for every helper records a grant for the run and says so once, with the effort it cannot set', () => {
   const home = makeHome(); const repo = makeRepo(false);
   const out = prompt(home, repo, 'improve the plugin. Use however many opus 5.5 high agents you need', { session_id: 's-run' });
-  const s = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-run.json'), 'utf8'));
-  assert.equal(s.userModel.family, 'opus');
-  assert.equal(s.userModel.scope, 'run');
+  const read = id => JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${id}.json`), 'utf8'));
+  assert.equal(read('s-run').runModel.family, 'opus');
   assert.match(out, /named opus for every helper this session/);
   assert.match(out, /effort cannot be set/);
+  // Said once: the same words again add nothing.
+  assert.doesNotMatch(prompt(home, repo, 'again: however many opus agents you need', { session_id: 's-run' }), /every helper/);
 
   prompt(home, repo, 'use opus for all the helpers on this', { session_id: 's-run2' });
-  const s2 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-run2.json'), 'utf8'));
-  assert.equal(s2.userModel.scope, 'run');
+  assert.equal(read('s-run2').runModel.family, 'opus');
 
   // One task's grant stays one task's, and says nothing.
   const one = prompt(home, repo, 'use opus for this one, it is worth it', { session_id: 's-one' });
-  const s3 = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', 's-one.json'), 'utf8'));
-  assert.equal(s3.userModel.scope, undefined);
+  assert.equal(read('s-one').runModel, undefined);
+  assert.equal(read('s-one').userModel.family, 'opus');
   assert.doesNotMatch(one, /every helper/);
+
+  // The run grant goes to the family the scope words hold, and the other
+  // family named keeps its one-task grant beside it.
+  prompt(home, repo, 'use fable for the hard one, and however many opus agents you need', { session_id: 's-two' });
+  assert.equal(read('s-two').runModel.family, 'opus');
+  assert.equal(read('s-two').userModel.family, 'fable');
+
+  // Withdrawn by name, or by the helpers going back to a cheaper model.
+  const off = prompt(home, repo, 'stop using opus, it is too dear', { session_id: 's-run' });
+  assert.equal(read('s-run').runModel, undefined);
+  assert.match(off, /withdrew opus for every helper/);
+  prompt(home, repo, 'sonnet from now on please', { session_id: 's-run2' });
+  assert.equal(read('s-run2').runModel, undefined);
+});
+
+test('scope words elsewhere in the sentence, or a not or an only beside them, are no grant for the run (review of the first cut)', () => {
+  const fams = ['fable', 'opus'];
+  for (const t of [
+    'use opus for this one; all tasks after it on sonnet',
+    'do not use opus for all the helpers, only for the hard one',
+    'opus for task 3, sonnet from now on',
+    'as many tests as you can, use opus for the parser fix',
+    'every task gets a review; put opus on the migration only',
+    'fix the opus bug in the router throughout the file',
+    'stop using opus for all the helpers',
+  ]) assert.equal(runFamilyIn(t, fams), null, t);
+  for (const [t, f] of [
+    ['Use however many opus 5.5 high agents you need', 'opus'],
+    ['use as many opus agents as you need', 'opus'],
+    ['put every helper on fable', 'fable'],
+    ['opus 5.5 for all of the agents please', 'opus'],
+    ['use fable for the hard one, and however many opus agents you need', 'opus'],
+  ]) assert.equal(runFamilyIn(t, fams)?.family, f, t);
 });
 
 test('naming a family records the earliest one in the prompt, not the ladder\'s own order; a later prompt naming only Sonnet leaves it alone', () => {

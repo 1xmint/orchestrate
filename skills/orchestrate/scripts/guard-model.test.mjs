@@ -215,16 +215,18 @@ test('a grant needs a numeric TASK id in the packet; no id, no unlock', () => {
   assert.match(modelDecision(ti, pro).reason, /resend with model: "sonnet"/);
 });
 
-test('a grant for the whole run allows every task on that family, with or without an id, and binds nothing', () => {
-  const run = { family: 'opus', at: '2026-10-01T00:00:00Z', scope: 'run' };
+test('a grant for the whole run allows every task on that family, with or without an id, and leaves a one-task grant for another family alone', () => {
+  const runModel = { family: 'opus', at: '2026-10-01T00:00:00Z' };
   for (const prompt of ['TASK: 10-1-0001\nfix it', 'TASK: 10-1-0002\nfix another', 'fix it, no id here']) {
-    assert.equal(modelDecision({ subagent_type: 'orch-implementer', model: 'opus', prompt }, { ...pro, userModel: run }), null, prompt);
-    assert.deepEqual(grantCheck(run, 'opus', prompt, null), { allow: true, bind: null });
+    assert.equal(modelDecision({ subagent_type: 'orch-implementer', model: 'opus', prompt }, { ...pro, runModel }), null, prompt);
   }
+  // A one-task grant for fable sits beside it and is spent the usual way.
+  const userModel = { family: 'fable', at: '2026-10-01T00:00:01Z' };
+  const f = modelDecision({ subagent_type: 'orch-implementer', model: 'fable', prompt: 'TASK: 10-1-0003\nx\nAPPROVED BY USER: fable' }, { ...pro, runModel, userModel });
+  assert.deepEqual(f && f.grantBind, '10-1-0003', 'the fable grant binds its own task');
+  assert.equal(modelDecision({ subagent_type: 'orch-implementer', model: 'opus', prompt: 'TASK: 10-1-0004\nx' }, { ...pro, runModel, userModel }), null, 'opus still runs for every task');
   // The run grant is for the family named, and does not lift the billing check.
-  assert.equal(grantCheck(run, 'fable', 'TASK: 10-1-0001\nx', null), null, 'another family is not granted');
-  const fable = { ...run, family: 'fable' };
-  const d = modelDecision({ subagent_type: 'orch-implementer', model: 'fable', prompt: 'TASK: 10-1-0001\nx' }, { ...pro, userModel: fable });
+  const d = modelDecision({ subagent_type: 'orch-implementer', model: 'fable', prompt: 'TASK: 10-1-0001\nx' }, { ...pro, runModel: { ...runModel, family: 'fable' } });
   assert.match(d.reason, /APPROVED BY USER: fable/, 'a model outside the plan still needs the billing line');
 });
 

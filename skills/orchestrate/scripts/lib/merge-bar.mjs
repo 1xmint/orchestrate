@@ -63,20 +63,39 @@ export function mentionsMerge(line) {
   // So then the line counts when one word holds m, e, r, g, e in order (or
   // enqueuepullrequest) and one holds g then h (or pulls, or graphql), with
   // anything between. A g ending one word beside an h starting the next is not
-  // gh, which is what refused ordinary scripts before.
+  // gh, which is what refused ordinary scripts before. A word with no brace in
+  // it is not changed by expansion, so it must spell the word outright.
   if (!expanded) {
-    const words = text.toLowerCase().split(/[\s;&|()<>]+/).map(w => w.replace(/[^a-z0-9]/g, ''));
-    const has = (...needles) => needles.some(n => words.some(w => inOrder(w, n)));
+    const words = text.toLowerCase().split(/[\s;&|()<>]+/);
+    const holds = (w, n) => {
+      if (/[{}]/.test(w)) return inOrder(w, n);
+      return n === 'gh' ? namesGh(w) : w.replace(/[^a-z0-9]/g, '').includes(n);
+    };
+    const has = (...needles) => needles.some(n => words.some(w => holds(w, n)));
     return has('merge', 'enqueuepullrequest') && has('gh', 'pulls', 'graphql');
   }
   const says = flat.includes('merge') || flat.includes('enqueuepullrequest');
   return says && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql'));
 }
 
-// Whether the letters of `needle` appear in `word` in order, gaps allowed.
+// Whether some expansion of `word` could bring the letters of `needle`
+// together: they appear in order, and between two of them is only
+// punctuation, or a brace or comma, which a choice can cut through. A letter
+// or digit with no brace or comma beside it is written in the same choice as
+// its neighbours and is always there: grantCheck never becomes gh.
 function inOrder(word, needle) {
-  let i = 0;
-  for (const c of word) if (c === needle[i] && ++i === needle.length) return true;
+  // At each needle position: 0 nothing but punctuation since the last letter
+  // matched, 1 a letter or digit and no brace yet, 2 a brace or comma seen.
+  let states = new Set(['0:2']);
+  for (const c of word) {
+    const next = new Set();
+    for (const st of states) {
+      const [i, s] = st.split(':').map(Number);
+      if (c === needle[i] && s !== 1) { if (i + 1 === needle.length) return true; next.add(`${i + 1}:0`); }
+      next.add(`${i}:${/[{},]/.test(c) ? 2 : /[a-z0-9]/.test(c) && s !== 2 ? 1 : s}`);
+    }
+    states = next;
+  }
   return false;
 }
 
@@ -94,15 +113,19 @@ function namesGh(text) {
 
 // The shell's brace expansion: each {a,b}, {x..y} or {x..y..step} group gives
 // one copy of the line per choice, innermost group first, done before letters
-// are lowercased so a range such as {Z..a} holds what bash's would. Null when
-// that makes more than 64 copies or a `..` group is not a range this reads.
+// are lowercased so a range such as {Z..a} holds what bash's would. A group
+// bash leaves as it is ({x}, {...base}, {a..b..c}) stays text, with its braces
+// masked so the group around it still expands: g{h,{x}} is gh and g{x} to
+// bash, and reading the outer group as text hid the gh. Null when that makes
+// more than 64 copies.
+const OPEN = '\u0001', CLOSE = '\u0002';
 function expandBraces(text, budget) {
   if (++budget.calls > 400) return null;
-  const groups = /\{([^{}]*)\}/g;
-  let m;
-  while ((m = groups.exec(text)) && !m[1].includes(',') && !m[1].includes('..'));
-  if (!m) return [text];
-  const items = braceItems(m[1]);
+  let m, items = 'text';
+  while ((m = /\{([^{}]*)\}/.exec(text)) && (items = braceItems(m[1])) === 'text') {
+    text = text.slice(0, m.index) + OPEN + m[1] + CLOSE + text.slice(m.index + m[0].length);
+  }
+  if (!m) return [text.replaceAll(OPEN, '{').replaceAll(CLOSE, '}')];
   if (!items) return null;
   const head = text.slice(0, m.index), tail = text.slice(m.index + m[0].length);
   const out = [];
@@ -112,11 +135,13 @@ function expandBraces(text, budget) {
   }
   return out;
 }
+// The choices in one group, 'text' when bash would leave it as written, or
+// null when it is a range too long to list.
 function braceItems(inner) {
   if (inner.includes(',')) return inner.split(',');
   const r = /^(-?\d+|[a-zA-Z])\.\.(-?\d+|[a-zA-Z])(?:\.\.(-?\d+))?$/.exec(inner);
   const num = r && /\d/.test(r[1]);
-  if (!r || num !== /\d/.test(r[2])) return null;
+  if (!r || num !== /\d/.test(r[2])) return 'text';
   const a = num ? Number(r[1]) : r[1].charCodeAt(0), b = num ? Number(r[2]) : r[2].charCodeAt(0);
   const step = Math.max(1, Math.abs(Number(r[3] || 1))), dir = a <= b ? 1 : -1;
   if (!Number.isSafeInteger(a) || !Number.isSafeInteger(b) || Math.abs(b - a) / step > 64) return null;
