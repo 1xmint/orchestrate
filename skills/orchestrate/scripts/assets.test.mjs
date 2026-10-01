@@ -403,6 +403,13 @@ test('the plan the user sees is the project page, and closing numbers come from 
   assert.match(routing, /often cheaper than the stronger model doing both/);
 });
 
+test('the RUN.md Budget section is the ceiling line and one note, not boilerplate', () => {
+  const run = readFileSync(join(SKILL, 'assets', 'RUN.md'), 'utf8');
+  const body = /^## Budget\n([\s\S]*?)(?=\n## )/m.exec(run)[1].split('\n').filter(l => l.trim());
+  assert.ok(body.length <= 3, `Budget section has ${body.length} lines, want at most 3`);
+  assert.match(body[0], /^Ceiling: \{\{BUDGET\}\}/);
+});
+
 test('the run ledger keeps the goal above the task table', () => {
   // What a resuming session has to recover. Task history is long, mostly
   // finished, and on disk; these four are the run itself.
