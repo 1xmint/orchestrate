@@ -5,8 +5,11 @@ Two different tools read this directory, for two different jobs:
 - **`evals.json`** is read by the `skill-creator` plugin's own eval runner.
   It is acceptance guidance for a human reading a transcript — nothing in
   it runs a model on its own. Keep using it for that.
-- **`delivery-contact-form/`, `recovery-mid-task-continue/`,
-  `safety-branch-cleanup/`, and `triggering-substantive-request/`** are
+- **The nine case directories** (`delivery-contact-form/`,
+  `recovery-mid-task-continue/`, `safety-branch-cleanup/`,
+  `triggering-substantive-request/`, and the five ability cases
+  `costly-fork/`, `misleading-bug/`, `wrong-goal/`,
+  `three-session-continue/`, `failed-check-report/`) are
   cases for `claude plugin eval`, the Claude Code CLI command (see
   `https://code.claude.com/docs/en/plugin-evals`). Each is a directory with
   a `prompt.md` (and, where the case needs a seeded workspace, a
@@ -24,10 +27,9 @@ Two different tools read this directory, for two different jobs:
   (`node --test evals/no-machinery.test.mjs`, no quota spent).
 
 Running these costs real model calls against your account and is not part
-of `node --test`. Two of the three (`recovery-mid-task-continue` and
-`safety-branch-cleanup`) seed a throwaway git repository via a
+of `node --test`. Every case with a `case.yaml` seeds a throwaway git repository via a
 `scaffold_script`, which only runs when the eval command is passed
-`--scaffold`, and all three need tools beyond the read-only default —
+`--scaffold`, and they need tools beyond the read-only default —
 run them with something like:
 
 ```
