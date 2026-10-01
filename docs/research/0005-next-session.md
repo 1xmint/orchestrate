@@ -55,8 +55,11 @@ the plugin.
 ## 4. Rerun the comparison
 
 Rerun the five cases from step 1 on the new build and compare against
-docs/research/0005-baseline-0.17.2.md (raw numbers in evals/results/, kept out
-of git). Same command per case:
+docs/research/0005-baseline-0.17.2.md and the release check
+docs/research/0005-eval-0.18.0.md (raw numbers in evals/results/, kept out
+of git). The release check found two gaps for the audit in step 3: on
+costly-fork the plugin still wrote a server file in two of three runs before
+the cost was chosen, and one reply leaked plugin wording. Same command per case:
 
     claude plugin eval evals --case <name> --trust-plugin --no-publish \
       --allow-tools Write Edit --scaffold
@@ -101,7 +104,10 @@ Full gate at the release: 1230 pass, 0 fail; `evals/no-machinery` 14/0.
   `.git`. Fix 6 required every `cd` path and write target on a git-read line
   to be plain text. Its review FAILED on Windows spellings (`.\.git`,
   `.git.`). Fix 7 stops reading paths: on a line with a git read or `rg`, any
-  write at all makes the line not plain. Each fix's
+  write at all makes the line not plain. Its review FAILED on two writes the
+  rule did not count: bash's `$null`, which the line itself can set, and the
+  payment CLI's `config --set`. Fix 8 counts both, and git's shortened
+  `--ou…` for `--output`. Each fix's
   new test lines were run against the reviewed code and the fixed code. The
   merge to main needed a reviewer's PASS naming its final commit. The rest (`git add -e`, textconv and
   external diff, `rg -z`, `RIPGREP_CONFIG_PATH`) act only through settings

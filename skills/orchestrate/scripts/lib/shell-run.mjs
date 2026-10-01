@@ -265,7 +265,8 @@ export function plainLine(text) {
   // A git read or rg runs what its settings name, and a path can be spelled
   // into `.git` endlessly (`"$D"it`, `$_`, `.gi?`, `.\.git`, `.git.`), so with
   // one on the line, any write at all makes the line not plain, wherever it
-  // lands. Writing nowhere (`2>&1`, `/dev/null`, `$null`, `nul`) is not a write.
+  // lands. Writing nowhere (`2>&1`, `/dev/null`, `nul`) is not a write; `$null`
+  // is, since in bash it is a variable the line itself can set.
   const reads = segs.some(s => {
     const w = plainWords(s);
     const b = base(w[0] || '');
@@ -276,13 +277,14 @@ export function plainLine(text) {
 }
 
 // Does this segment write a file: a redirect or text writer's target, a
-// folder made, git's own `--output`, or inline node, which can reach fs?
+// folder made, git's own `--output` (git takes `--ou` for it), inline node,
+// which can reach fs, or the payment CLI, whose `config --set` writes a file?
 function writes(seg) {
   const w = plainWords(seg);
   const b = base(w[0] || '');
-  if (textTargets(seg, b).some(t => !/^(&\d?-?|\/dev\/null|\$null|nul)$/i.test(t))) return true;
-  if (b === 'mkdir' || b === 'node') return true;
-  return b === 'git' && w.some(x => /^--output/.test(x));
+  if (textTargets(seg, b).some(t => !/^(&\d?-?|\/dev\/null|nul)$/i.test(t))) return true;
+  if (b === 'mkdir' || b === 'node' || b === 'stripe') return true;
+  return b === 'git' && w.some(x => /^--ou/.test(x));
 }
 
 // Does this line act on a payment account? What it runs (runsPayment), or,

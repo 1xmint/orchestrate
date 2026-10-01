@@ -104,6 +104,8 @@ const MERGE_MUST_REFUSE = [
   `cd .\\.git; echo '[core]' >> config; echo 'fsmonitor = gh pr merge 5' >> config; cd ..; git status`,
   `printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> .git./config && git status`,
   `node -e "require('fs').appendFileSync('.git/config', '[core]\\\\n\\\\tfsmonitor = gh pr merge 5\\\\n')" && git status`,
+  `null=.git/config; printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> $null && git status`,
+  `git log -1 --format=%B --outp=.git/config && grep -rn "gh pr merge" docs/`,
   `printf 'gitdir: x\\n' > sub/.git && printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> sub/x/config && cd sub && git status`,
   `D=.git; printf '[core]\\n\\tfsmonitor = "gh pr merge 5"\\n' >> $D/config && git status`,
 ];
@@ -122,6 +124,7 @@ const PAYMENT_MUST_ASK = [
   '{ stripe charges create --amount 5; }',
   'while read c; do curl -X POST https://api.stripe.com/v1/refunds -d charge=$c; done < ids',
   'timeout 60 stripe charges create',
+  'stripe config --set a b && git status',
   'eval "stripe charges create"',
   'watch -n 5 stripe charges create',
   'parallel stripe refunds create --charge ::: ch_1 ch_2',
