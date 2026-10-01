@@ -190,8 +190,10 @@ refused, since a helper gets the same tools as the lead. It cost $0.30-0.49 and 
 against $0.18 and 25 seconds without the plugin, for the same final answer. 0.19.0's
 three-session runs showed it once. *Cause:* SKILL §3 sends "a build or test suite" to a worker and
 never says a worker's tools are the lead's. *Fix:* one clause there: "A worker has your tools, no
-more: what you cannot run, it cannot." The room came from dropping the Write/Read sentence the card
-repeats every turn. *Held by:* side-question-goal's cost and turns, both sides, in the release
+more: what you cannot run, it cannot." The room came from dropping the Write/Read sentence. The card
+carries it ("Edit, don't rewrite; trust a write that didn't error") only at session start and after
+a summary, and the build for other hosts has no card, so there the rule is gone (found by the
+release review). *Held by:* side-question-goal's cost and turns, both sides, in the release
 eval. *Measured:* side-question-goal 0/3 helpers after the clause, but
 three-session-continue 2/3 ("I don't have a way to run commands myself here, so
 I'll have a helper try"). Moved to §6, where the lead picks its evidence ("What

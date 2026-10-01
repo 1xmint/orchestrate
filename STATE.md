@@ -30,6 +30,10 @@ docs/research/0007-next-phase.md).
 - Grader fixes in side-question-goal: a regex on the file where an LLM judge
   passed untouched code (note V); two rules read the last message, not the run
   record. Six rules in other cases still read the record (note X).
+- Dropped to make room: SKILL's "Never `Write` a whole file you could `Edit`.
+  Never `Read` back a file you just wrote." The card carries it at session
+  start and after a summary; the build for other hosts has no card and loses
+  it (note W).
 
 Measured in docs/research/0007-eval-release.md ($10.03 of $15): on five cases
 against no plugin, every grader is level within one run of three; the plugin
