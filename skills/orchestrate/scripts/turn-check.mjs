@@ -25,7 +25,9 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession } from './lib/tier.mjs';
+import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail } from './lib/tier.mjs';
+import { fileChange } from './lib/file-change.mjs';
+import { projectPath } from './lib/project.mjs';
 
 export function pickupSection(runMdText) {
   const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
@@ -257,9 +259,85 @@ export function folderIsClean(dir) {
   try { return execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() === ''; } catch { return false; }
 }
 
+// The project page, kept honest. A turn that edited a tracked file in the repo
+// (not under .orchestrator/ or .claude/, not git-ignored) without editing
+// .orchestrator/PROJECT.md counts one; any PROJECT.md edit resets the count to
+// 0; on the third such turn the Stop says so once and the count restarts.
+// It is 3 and not every turn on purpose: a hold at every edit turn is the kind
+// of false alarm step 2 removed (live note Q), and a page that lags by two
+// turns is still a page worth reading. Never when stop_hook_active (main),
+// outside a git repo, or when the repo has no PROJECT.md (the first-helper
+// check in guard-agent.mjs is where a missing page is raised).
+export const PROJECT_TURNS = 3;
+
+const norm = p => String(p || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+
+// The edits since the last real user message in a transcript tail. A user line
+// whose content is only tool results is not a new turn.
+export function turnEdits(transcriptTail) {
+  let paths = [];
+  for (const line of String(transcriptTail || '').split('\n')) {
+    if (!line.includes('"type"')) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    const content = o && o.message && o.message.content;
+    if (o && o.type === 'user') {
+      const real = typeof content === 'string' ? content.trim() !== ''
+        : Array.isArray(content) && content.some(c => c && c.type === 'text');
+      if (real) paths = [];
+      continue;
+    }
+    if (!o || o.type !== 'assistant' || !Array.isArray(content)) continue;
+    for (const c of content) {
+      if (!c || c.type !== 'tool_use') continue;
+      const fc = fileChange(c.name, c.input);
+      if (fc.changes) paths.push(...fc.paths);
+    }
+  }
+  return { paths };
+}
+
+// Pure: what one Stop does to the count. `ignored(path)` says git-ignored.
+export function projectCount({ prev, paths, root, ignored = () => false }) {
+  const proj = norm(projectPath(root));
+  const r = norm(root);
+  const abs = p => (/^([a-z]:)?\//i.test(String(p).replace(/\\/g, '/')) ? norm(p) : norm(`${r}/${p}`));
+  const list = (paths || []).map(abs);
+  if (list.includes(proj)) return { count: 0, block: false };
+  const tracked = list.some(p => p.startsWith(`${r}/`) && !p.startsWith(`${r}/.orchestrator/`) && !p.startsWith(`${r}/.claude/`) && !ignored(p));
+  if (!tracked) return { count: Number(prev) || 0, block: false };
+  const count = (Number(prev) || 0) + 1;
+  return count >= PROJECT_TURNS ? { count: 0, block: true, turns: count } : { count, block: false };
+}
+
+function gitRoot(cwd) {
+  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; }
+}
+function gitIgnored(root, p) {
+  try { execFileSync('git', ['check-ignore', '-q', '--', p], { cwd: root, timeout: 5000, stdio: 'ignore' }); return true; } catch { return false; }
+}
+
+// Returns the reason to block with, or null. Updates the count either way. When
+// another pulse already spoke this Stop (`quiet`), the note waits one Stop.
+function checkProject(input, quiet) {
+  if (!input.cwd || !input.transcript_path) return null;
+  const root = gitRoot(input.cwd);
+  if (!root || !existsSync(projectPath(root))) return null;
+  const { paths } = turnEdits(readTail(input.transcript_path, 1048576));
+  const path = STORE();
+  const store = readJson(path) || {};
+  const key = sanitizeId(`${input.session_id || 'nosession'}-project`);
+  const d = projectCount({ prev: (store[key] || {}).count, paths, root, ignored: p => gitIgnored(root, p) });
+  const say = d.block && !quiet;
+  store[key] = { count: d.block && quiet ? PROJECT_TURNS - 1 : d.count };
+  try { writeJsonAtomic(path, store); } catch {}
+  return say ? `orchestrate: ${d.turns} turns changed project files and .orchestrator/PROJECT.md did not change; update Where it stands / Next if they moved.` : null;
+}
+
 const STORE = () => join(DIR, 'turn-checks.json');
 
+let emitted = false;
 function emitBlock(reason) {
+  emitted = true;
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason,
@@ -377,6 +455,8 @@ function main() {
   if (input.stop_hook_active === true) return;
 
   checkHeartbeat(input);
+  const note = checkProject(input, emitted);
+  if (note) emitBlock(note);
 }
 
 // Only when run as a hook, not when a test imports the pure functions above.

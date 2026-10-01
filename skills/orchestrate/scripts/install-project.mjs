@@ -4,7 +4,7 @@
 //
 //   node install-project.mjs <repo> [--dry-run] [--force] [--with-claude-md]
 //
-// Four things, and nothing else:
+// Five things, and nothing else:
 //   1. .orchestrator/gate.json, the detected build/test/lint commands;
 //   2. .orchestrator/ in .git/info/exclude, so the ledger is never committed
 //      and no tracked .gitignore is touched;
@@ -13,7 +13,10 @@
 //      turn of every session in the repo;
 //   4. when AGENTS.md exists and CLAUDE.md does not, the one-line fix printed,
 //      and written only with --with-claude-md, because CLAUDE.md is a tracked
-//      file and adding one is the user's call.
+//      file and adding one is the user's call;
+//   5. .orchestrator/PROJECT.md, the project page, copied from the template
+//      when it is not there yet (lib/project.mjs ensureProject) and never
+//      overwritten; it sits under .orchestrator/, so it is not committed.
 //
 // The skill, the role agents and the global hooks stay at user level, so a
 // second machine needs `node scripts/install.mjs` once and nothing per repo.
@@ -23,6 +26,7 @@ import { spawnSync } from 'node:child_process';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, block } from './gate.mjs';
+import { ensureProject } from './lib/project.mjs';
 
 export const RULES_REL = join('.claude', 'rules', 'orchestrate.md');
 const MAX_RULE_LINES = 12;
@@ -124,6 +128,11 @@ function main() {
     if (!dry) { mkdirSync(dirname(p.rulesPath), { recursive: true }); writeFileSync(p.rulesPath, p.rules); }
     say(`rules -> ${p.rulesPath} (${p.rules.trimEnd().split('\n').length} lines; it is a tracked file, so commit or delete it)`);
   }
+
+  const pp = ensureProject(root, { dryRun: dry });
+  say(pp.action === 'exists' ? `project -> ${pp.path} already there; left alone`
+    : pp.action === 'failed' ? `project -> could not write ${pp.path}`
+    : `project -> ${pp.path} ${dry ? 'would be created' : 'created'} from the template; fill What this is for, Where it stands and Next`);
 
   if (p.needsClaudeMd) {
     const cmd = join(root, 'CLAUDE.md');

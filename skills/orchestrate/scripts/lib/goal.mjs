@@ -1,19 +1,23 @@
 // lib/goal.mjs — what this work is for, in the user's words, kept in view.
 //
-// The lead writes a two-line note (`<project>/.orchestrator/goal.md`: what it is
-// for; what done looks like) on the first real request and rewrites it when the
-// user changes the goal. This file only reads it, and never guesses one. The
-// plugin shows it back as one fact after a compaction, on resume, and on every
-// tenth prompt since it was last shown; on any other prompt it adds nothing.
+// The lead keeps the project page (`<project>/.orchestrator/PROJECT.md`, its
+// "What this is for") and rewrites it when the user changes the goal. This file
+// only reads it, and never guesses one. A repo that still has the older two-line
+// `.orchestrator/goal.md` is read as a fallback; nothing asks for one to be
+// written any more. The plugin shows the goal back as one fact after a
+// compaction and on resume (the router shows the page's head instead when a
+// page exists, and the every-tenth-prompt line is then not shown).
 //
-// Sources, best first: the open run's Goal and Done when ('ledger'), the note
-// ('note'), the session's pinned first request ('first-request', labelled as
-// not confirmed). Nothing at all is null. Nothing here throws.
+// Sources, best first: the open run's Goal and Done when ('ledger'), the project
+// page ('project'), an old note ('note'), the session's pinned first request
+// ('first-request', labelled as not confirmed). Nothing at all is null.
+// Nothing here throws.
 
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { sectionExcerpt } from './resume.mjs';
 import { loadSession } from './tier.mjs';
+import { purpose, readProject, projectPath } from './project.mjs';
 
 export const NOTE_CAP = 300;   // bytes, both lines together
 export const SHOWN_CAP = 350;  // bytes, the whole shown line
@@ -96,6 +100,12 @@ export function readGoal({ cwd, root, session, runMd, state } = {}) {
     if (src) {
       const one = clipWords(src.one, 180), two = src.two ? clipWords(src.two, 80) : '';
       return { text: two ? `${one}${DONE}${two}` : one, source: 'ledger', age: ageOf(st, `l:${src.mtime}`, src.mtime) };
+    }
+    // The project page's "What this is for" comes before an old goal.md.
+    for (const d of [cwd, root]) {
+      if (!d) continue;
+      const why = purpose(readProject(d));
+      if (why) { const mt = mtimeOf(projectPath(d)); return { text: why, source: 'project', age: ageOf(st, `p:${mt}`, mt) }; }
     }
     const note = readNote([cwd, root]);
     if (note) {

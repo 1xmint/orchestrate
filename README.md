@@ -685,7 +685,9 @@ takes effect in a new session. To roll back:
 node scripts/install.mjs --project /path/to/repo --dry-run
 ```
 
-Four things, and it tells you about each: `.orchestrator/gate.json` with the
+Five things, and it tells you about each: `.orchestrator/PROJECT.md`, a short
+project page copied from a template when the repo has none (what it is for,
+where it stands, the next steps and what you will see from each); `.orchestrator/gate.json` with the
 build, test and lint commands it found; `.orchestrator/` added to
 `.git/info/exclude` so the ledger is never committed; a
 `.claude/rules/orchestrate.md` of twelve lines or fewer, which every session in

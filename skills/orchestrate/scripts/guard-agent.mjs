@@ -20,14 +20,15 @@
 
 import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { join, resolve as resolvePath } from 'node:path';
+import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, findRepoRoot, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { reviewOfIn } from './lib/review-of.mjs';
 import { roleModel, helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
 import { family, normalizeRole, costLabel, estimateDollars, SOLO_RATIO } from './lib/prices.mjs';
 import { readCosts } from './ledger.mjs';
+import { readProject, projectPath, nextSteps } from './lib/project.mjs';
 import { readQuota, resetClock, HELPER_STOP_FIVE_HOUR, HELPER_STOP_WEEK } from './lib/quota.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
 import { PLAN_READ_ROLES, UNCAPPED, COORDINATOR_CHILD_ROLES, WORKTREE_ISOLATED_ROLES, nestedReason, workflowDecision } from './lib/workflow.mjs';
@@ -590,13 +591,14 @@ function main() {
     return;
   }
 
-  // Before the first helper: step 4 of plan 0005 puts a file check here (the
-  // project page exists). Reading the lead's last message for a model name was
-  // a word check and is gone.
+  // Before the first writing helper: the project page exists and has a next
+  // step. A file check only; reading the lead's last message was a word check
+  // and is gone. Its prefix is not "orchestrate guard:" because the lead fixes
+  // this one itself in one step, so persist-check must not end auto-continue.
   const fhg = firstHelperGate(input);
   if (fhg) {
     if (!repeat) recordDenial(input, ti, 'first helper');
-    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate guard: ${fhg}` } });
+    emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: `orchestrate project: ${fhg}` } });
     return;
   }
 
@@ -659,8 +661,30 @@ function withSession(input, fn) {
 export function asksForPastedContents(prompt) {
   return /\b(exact contents|paste|full output|report back the file)\b/i.test(String(prompt || ''));
 }
-// The first-helper seam: returns a refusal reason or ''. Empty until step 4.
-export function firstHelperGate(_input) { return ''; }
+// The first writing helper of a session in a repo, with no run bound, waits for
+// .orchestrator/PROJECT.md to exist with a filled Next step, so the plan the
+// user sees is written before work starts. Returns a refusal reason or ''.
+// Read-only roles are never held (grounding comes before the plan), and one
+// sent first does not use the check up. A file check only: no transcript and
+// no message is read. Refusing a repeat is the caller's (recordDenial).
+const READ_ONLY_ROLES = new Set(['Explore', 'orch-researcher', 'orch-advisor', 'orch-planner', 'orch-reviewer', 'orch-browser', 'claude-code-guide', 'Plan']);
+const canWrite = role => !READ_ONLY_ROLES.has(normalizeRole(role));
+export function firstHelperGate(input) {
+  try {
+    const ti = (input && input.tool_input) || {};
+    if (!canWrite(ti.subagent_type)) return '';
+    const root = findRepoRoot(input.cwd);
+    if (!root) return '';
+    const state = loadSession(input.session_id) || {};
+    const prior = Array.isArray(state.dispatches) ? state.dispatches : [];
+    if (prior.some(d => d && canWrite(d.agent))) return '';
+    if (sessionRun(input.session_id)) return '';
+    const text = readProject(root);
+    if (text != null && nextSteps(text).length) return '';
+    const cmd = `node "${join(dirname(fileURLToPath(import.meta.url)), 'project.mjs')}" init "${root}"`;
+    return `no project page yet: ${projectPath(root)} ${text == null ? 'is missing' : 'has no filled step under Next'}, and the first helper that can write waits for it. Create it with ${cmd}, then fill Next with 3 to 7 steps, each ending "→ what the user will be able to see or run". This dispatch goes through once Next has a step.`;
+  } catch { return ''; }
+}
 
 // One line per dispatch in the session state, for the ledger. Never throws; a
 // missing session file just means no router ran here.
