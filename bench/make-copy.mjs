@@ -68,7 +68,7 @@ export function makeCopy({ arm, out, repo }) {
     if (a.status !== 0) throw new Error(`git archive ${arm} failed: ${(a.stderr || '').trim()}`);
     const src = join(tmp, 'src');
     mkdirSync(src);
-    const x = spawnSync('tar', ['-xf', tarFile, '-C', src], { encoding: 'utf8' });
+    const x = spawnSync('tar', ['-xf', 'src.tar', '-C', 'src'], { cwd: tmp, encoding: 'utf8' });
     if (x.status !== 0) throw new Error(`tar failed: ${(x.stderr || '').trim()}`);
     const files = selectFiles(walk(src), benchPaths);
     // Plugin files from the tag, bench folders from the current tree.
