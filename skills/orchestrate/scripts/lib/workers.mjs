@@ -310,7 +310,7 @@ export function concurrencyDecision(role, { native = [], external = [], policy =
   const list = xs => xs.map(w => `${w.provider === 'claude' ? w.role : `${w.provider} ${w.role || 'worker'}`}${w.task ? ` ${w.task}` : ''}`).join(', ');
   if (r === 'orch-browser') {
     const b = all.filter(w => roleOf(w.role) === 'orch-browser');
-    if (b.length >= policy.workers.browserConcurrent) return `browser work is serial and ${list(b)} is still using the browser; this one passes once it returns.`;
+    if (b.length >= policy.workers.browserConcurrent) return `browser work is serial and ${list(b)} is still using the browser; this one passes once it returns, or once it has been silent for ${policy.workers.staleMin} minutes.`;
   }
 
   // This candidate is itself a live coordinator's child: it draws only on

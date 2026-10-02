@@ -329,6 +329,17 @@ test('Fable needs the plan or the user\'s yes', () => {
   assert.equal(modelDecision({ ...ti, prompt: 'TASK: 1-1-0001\nAPPROVED BY USER: fable' }, pro), null);
 });
 
+test('the Fable refusal names what a builder or a finder on Fable still needs after the yes', () => {
+  // The approval line clears only the plan check, so the refusal must not
+  // promise a builder or a finder that it alone gets through.
+  const build = { subagent_type: 'orch-implementer', model: 'fable', prompt: 'TASK: 1-1-0001\nx' };
+  assert.match(modelDecision(build, pro).reason, /also needs a grant .* or an earlier Sonnet attempt/);
+  assert.equal(modelDecision({ ...build, prompt: `${build.prompt}\nAPPROVED BY USER: fable` }, pro).prefix, 'model', 'the line alone does not pass a builder');
+  const find = { subagent_type: 'Explore', model: 'fable', prompt: 'x' };
+  assert.match(modelDecision(find, pro).reason, /model: "sonnet" or "haiku" passes/);
+  assert.doesNotMatch(modelDecision({ subagent_type: 'orch-reviewer', model: 'fable', prompt: 'x' }, pro).reason, /also needs|sweep/);
+});
+
 test('near the plan limit no helper starts, whatever its model', () => {
   const q = snapshotFrom({ rate_limits: { five_hour: { used_percentage: 83, resets_at: 1790000000 }, seven_day: { used_percentage: 10 } } });
   const d = modelDecision({ subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'x' }, { ...pro, quota: q });

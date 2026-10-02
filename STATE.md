@@ -29,11 +29,16 @@ Resume point for building the `orchestrate` skill.
   `bench/RULE.md` keeps a removed capability when a result is inconclusive.
   Removing it would need its own comparison (current against current without
   the refusal) and an AGENTS.md change in the same pull request.
-- Hook notes now state facts (Stage 0). Two refusals still end in an order:
-  the worker-limit one in `lib/workers.mjs` and the Sonnet-first one in
-  `guard-agent.mjs`. They are reworded together, keeping what was blocked and
-  the way through, with one independent review, because a refusal's wording
-  is a guard change.
+- Hook notes now state facts (Stage 0), and so do the refusals in
+  `guard-agent.mjs` and `lib/workers.mjs`: each keeps what was blocked and the
+  way through that passes the code. One independent review (Opus) found the
+  Fable text promised the approval line alone passes, while a builder on Fable
+  still meets the Sonnet-first rule and a finder is refused as a sweep; the
+  text now names both and a test pins it. The old text had the same gap.
+  Three `guard-bash.mjs` texts still give an order (the ask tail, the
+  worktree-remove and branch-delete refusals); they are safety stops and are
+  left until a guard change has its own reason. Wording checked against
+  Anthropic's prompting best practices page (Claude Opus 5), 2026-10-01.
 
 ## v0.21.0 — judgment: no test that teaches nothing, no review loop, 2026-10-01
 

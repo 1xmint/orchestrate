@@ -150,7 +150,7 @@ export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!id) return null;
   if (!boundId) return { allow: true, bind: id };
   if (boundId === id) return { allow: true, bind: null };
-  return { deny: true, reason: `the user named ${f} for task ${boundId}, and this is task ${id}, which that grant does not cover. A dispatch with model: "sonnet" passes, and so does ${f} once the user names it for this task.` };
+  return { deny: true, reason: `the user named ${f} for task ${boundId}, and this is task ${id}, which that grant does not cover. A dispatch with model: "sonnet" passes; so does ${f} after a Sonnet attempt at this task, or once the user names it for this task or for every helper.` };
 }
 
 // Where a grant's claim lives: one file per session+moment-the-user-named-it,
@@ -210,7 +210,7 @@ export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
   const won = claim(session, grantToClaim.at, grantToClaim.grantBind);
   if (won === grantToClaim.grantBind) return null;
   if (won && won !== GRANT_PENDING) {
-    return { prefix: 'model', reason: `the user named ${grantToClaim.family} for task ${won}, and this is task ${grantToClaim.grantBind}, which that grant does not cover. A dispatch with model: "sonnet" passes, and so does ${grantToClaim.family} once the user names it for this task.` };
+    return { prefix: 'model', reason: `the user named ${grantToClaim.family} for task ${won}, and this is task ${grantToClaim.grantBind}, which that grant does not cover. A dispatch with model: "sonnet" passes; so does ${grantToClaim.family} after a Sonnet attempt at this task, or once the user names it for this task or for every helper.` };
   }
   return { prefix: 'model', reason: `the ${grantToClaim.family} grant could not be claimed, so which task holds it is unknown. A dispatch with model: "sonnet" passes.` };
 }
@@ -235,12 +235,16 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
   }
 
   if (role === 'fork') {
-    if (leadContext != null && leadContext > FORK_MAX_CONTEXT) return { prefix: 'model', reason: `a fork copies this whole conversation (~${Math.round(leadContext / 1000)}k tokens) into every step it takes. A named role agent with a short packet passes.` };
+    if (leadContext != null && leadContext > FORK_MAX_CONTEXT) return { prefix: 'model', reason: `a fork copies this whole conversation (~${Math.round(leadContext / 1000)}k tokens) into every step it takes. A named role agent with a short packet passes this check.` };
     return null;
   }
 
   if (f === 'fable' && !['max5', 'max20', 'team'].includes(tier) && !/^\s*APPROVED BY USER:\s*fable/mi.test(prompt)) {
-    return { prefix: 'model', reason: `Fable is not included in this plan (${tier}) and spends the user's credits, so it needs the user's yes. Once they give it, a packet with the line "APPROVED BY USER: fable" passes.` };
+    // The line clears only this check: an executor then meets the Sonnet-first
+    // rule below, and a sweeper never runs above Sonnet.
+    const next = EXECUTORS.has(role) ? ` On Fable, ${plainRole(role)} also needs a grant (the user names Fable in their own message, for this task with a numeric TASK: line or for every helper) or an earlier Sonnet attempt at this task.`
+      : SWEEPERS.has(role) ? ` On Fable, ${plainRole(role)} is a sweep on a judgment model; a dispatch with model: "sonnet" or "haiku" passes.` : '';
+    return { prefix: 'model', reason: `Fable is not included in this plan (${tier}) and spends the user's credits, so it needs the user's yes. Once they give it, a packet with the line "APPROVED BY USER: fable" passes this check.${next}` };
   }
 
   if (JUDGES.has(role) && f && rank(model) > rank('opus')) {
@@ -276,7 +280,7 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
       if (userModel && userModel.family === f && !userModel.taskId && !numericTaskId(prompt)) {
         return { prefix: 'model', reason: `the user named ${f}, and the packet has no TASK: line with a number (e.g. TASK: 1-1-0001), which the grant needs: it covers one numeric task id.` };
       }
-      return { prefix: 'model', reason: `${plainRole(role)} on ${f} has no grant and no earlier Sonnet attempt at this task. A dispatch with model: "sonnet" passes. ${f} passes for this task after a Sonnet attempt at it fails its check, in a fresh dispatch with a short note of what failed; a task too big for Sonnet can be split instead. A grant also passes: the user names the model in their own message to the lead, not in a packet, and it covers one numeric TASK id, or every helper when they said so ("however many opus agents you need").` };
+      return { prefix: 'model', reason: `${plainRole(role)} on ${f} has no grant and no earlier Sonnet attempt at this task. A dispatch with model: "sonnet" passes. ${f} passes after a Sonnet attempt at this task fails its check, in a fresh dispatch with the same TASK: line (or, without one, the same first line) and a short note of what failed; a task too big for Sonnet can be split instead. A grant also passes: the user names the model in their own message to the lead, not in a packet, and it covers one numeric TASK id, or every helper when they said so ("however many opus agents you need").` };
     }
   }
   return null;
