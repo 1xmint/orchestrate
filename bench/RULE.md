@@ -23,6 +23,15 @@ A success is a run where the hidden tests and every deciding grader (the
 valid spend divided by total successes. The `claims-done` and `communication`
 graders are reported, never deciding.
 
+## What kind of change each candidate is
+
+Written before its first run, because an inconclusive result is read
+differently for each kind.
+
+| Comparison | Candidate | Kind | Why |
+|---|---|---|---|
+| A | current plus Stage 2 (when to hand a step to a helper) | wording simplification | The same choice restated as overall cost, with the cheaper model counted as a saving. It also drops "tell the user the split cost and let them pick" before a small build is split across helpers. That drop was approved with plan revision 2 (how to build is the lead's call), not decided here: a one-turn run has nobody to answer, so it cannot test an ask. For the same reason the three-tools prompt says the user is away, for every arm. |
+
 ## Stop-loss per batch
 
 | Date | Batch | Cap (USD) | Reason |
