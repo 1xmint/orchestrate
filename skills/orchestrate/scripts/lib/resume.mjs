@@ -80,7 +80,7 @@ const STATUS_QUESTION = /^(where are we|where('?s| is) (this|it|that)|what'?s (l
 // A build verb followed by another word means the prompt names a new goal,
 // even when it opens with a continue-word ("continue and add a login page").
 // This is the one signal that overrides an otherwise-matching lead phrase.
-const NEW_GOAL_VERB = /\b(build|add|make|fix|create|write|implement|change|remove|update|refactor)\b\s+\S/i;
+export const NEW_GOAL_VERB = /\b(build|add|make|fix|create|write|implement|change|remove|update|refactor)\b\s+\S/i;
 
 // True for a prompt that means "tell me what I was doing / keep doing it",
 // false the moment it also names a new goal. CONTINUE_WORD is the strict

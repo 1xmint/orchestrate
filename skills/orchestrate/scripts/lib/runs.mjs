@@ -6,6 +6,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
+import { nextSteps } from './project.mjs';
 import { readJson, writeJsonAtomic, isWritten, isUnderRoot, findRepoRoot, loadSession, saveSession } from './tier.mjs';
 
 export const OPEN_GLYPHS = /📋|🔨|🔍|◐|⛔/;
@@ -343,4 +344,87 @@ export function resolveRun(sessionId, cwd, { forWrite = false } = {}) {
     if (p && isUnderRoot(cwd, p.root)) return { run: null, candidates: [p], how: 'no repo above the working directory; this is the last run opened on this machine, and it is not bound to this session' };
   }
   return { run: null, candidates: [], how: 'no repo above the working directory' };
+}
+
+// ---- what is open in a run --------------------------------------------------
+// One read of a RUN.md's task rows and Done when, for the two callers that need
+// to know whether keep-going has anything real to keep going toward.
+const filledLine = l => l.trim() && !/^<.*>$/.test(l.trim());
+const sectionBody = (text, name) => {
+  const m = new RegExp(`## ${name}\\s*\\n([\\s\\S]*?)(?:\\n## |\\s*$)`).exec(String(text || ''));
+  return m ? m[1].split('\n').filter(filledLine).join('\n').trim() : '';
+};
+
+// Rows split by state. Done is the done glyph only; blocked is the blocked
+// glyph; any other phase is still open. A template placeholder row (task text
+// in angle brackets) is not a task.
+export function runTasks(runText) {
+  const lines = String(runText || '').split('\n');
+  const header = lines.find(l => /^\|\s*id\s*\|/i.test(l)) || '';
+  const cols = header.split('|').map(s => s.trim().toLowerCase());
+  const at = n => cols.indexOf(n);
+  const tasks = [];
+  for (const r of lines) {
+    if (!/^\|\s*\d+-\d+-\d{4}\s*\|/.test(r)) continue;
+    const text = (at('task') >= 0 ? cellAt(r, at('task')) : '').replace(/\s+/g, ' ');
+    if (/^<.*>$/.test(text)) continue;
+    const phase = cellAt(r, 2);
+    tasks.push({
+      id: cellAt(r, 1),
+      state: /✅/.test(phase) ? 'done' : /⛔/.test(phase) ? 'blocked' : 'open',
+      text,
+      blockedOn: at('blocks on') >= 0 ? cellAt(r, at('blocks on')) : '',
+      result: at('result') >= 0 ? cellAt(r, at('result')) : '',
+      row: r,
+    });
+  }
+  const done = tasks.filter(t => t.state === 'done').length;
+  return { tasks, done, notDone: tasks.length - done };
+}
+
+// What a Resume prompt needs from a run: a written Done when and a task that is
+// not done. The goal source is checked by the caller (readGoal's 'ledger').
+export function runOpenWork(runText) {
+  const t = runTasks(runText);
+  return { doneWhen: sectionBody(runText, 'Done when'), notDone: t.notDone, total: t.tasks.length };
+}
+
+export const ALL_DONE_TEXT = 'all tasks done; the done-when has not been checked';
+const ISO_AT = /\b(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?)/g;
+const latestStamp = text => {
+  let best = null;
+  for (const m of String(text || '').matchAll(ISO_AT)) {
+    const t = Date.parse(m[1].replace(' ', 'T'));
+    if (Number.isFinite(t) && (best == null || t > best)) best = t;
+  }
+  return best;
+};
+const clip120 = s => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > 120 ? `${t.slice(0, 117)}...` : t; };
+
+// The next open item, from three sources in this order: the first task that is
+// not done (a blocked one reads "blocked on ..."), the run's Pickup when it is
+// newer than the last task change, then the first item of PROJECT.md's Next.
+// (Pickup is checked before the first task, but only when it is provably newer.)
+// Pickup and task changes are compared by the ISO dates written in them; a run
+// with no dates to compare ignores Pickup and uses the first open task. Every
+// task done is its own state, not a reason to name filler. Pure.
+//   { state: 'open' | 'all-done' | 'none', source, text }
+export function nextOpen(runText, projectText) {
+  const { tasks, notDone } = runTasks(runText);
+  const pickupBody = sectionBody(runText, 'Pickup');
+  const pm = /Pickup prompt:\s*(.*)/.exec(pickupBody);
+  const pickupPrompt = pm && pm[1].trim() && !/^<.*>$/.test(pm[1].trim()) ? pm[1].trim() : '';
+  const pickupAt = latestStamp(pickupBody);
+  const taskAt = latestStamp(tasks.map(t => t.row).join('\n'));
+  if (notDone && pickupPrompt && pickupAt != null && taskAt != null && pickupAt > taskAt) return { state: 'open', source: 'pickup', text: clip120(pickupPrompt) };
+  const first = tasks.find(t => t.state !== 'done');
+  if (first) {
+    const dash = /^[—-]?$/;
+    const why = !dash.test(first.blockedOn) ? first.blockedOn : !dash.test(first.result) ? first.result : 'something not recorded';
+    return { state: 'open', source: 'task', text: clip120(first.state === 'blocked' ? `${first.id} ${first.text} (blocked on ${why})` : `${first.id} ${first.text}`) };
+  }
+  if (tasks.length) return { state: 'all-done', source: 'task', text: ALL_DONE_TEXT };
+  const next = projectText ? nextSteps(projectText)[0] : '';
+  if (next) return { state: 'open', source: 'project', text: clip120(next.replace(/^\d+[.)]\s+/, '')) };
+  return { state: 'none', source: null, text: '' };
 }

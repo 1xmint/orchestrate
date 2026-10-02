@@ -30,7 +30,9 @@ import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
 import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
-import { checkpointPath, contextEpoch, hasCheckpoint, thresholds, switchAdvice } from './lib/context-advice.mjs';
+import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
+import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
+import { readProject } from './lib/project.mjs';
 import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
 import { classifyClaim, lastAssistantText, contradicts, countedPaths, namesAllPaths } from './lib/commit-claim.mjs';
@@ -116,7 +118,7 @@ export function scanTurn(tail) {
 // next record rather than writing it. `goal` is already-resolved text (the
 // bound run's Goal line, or '' when there is none) — this function does not
 // read files.
-export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', quota = null, workCalls = null }) {
+export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', quota = null, workCalls = null, next = null }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -125,26 +127,43 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   const stop = why => ({ rec: out, kind: 'stop', why });
 
   if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate')) {
-    const path = checkpointPath(contextReading && contextReading.session, contextReading);
-    const n = contextReading && contextReading.tokens != null ? `~${Math.round(contextReading.tokens / 1000)}k` : 'high';
-    return stop(`the conversation is getting long (${n} tokens tracked): save a checkpoint first, then ${switchAdvice(contextReading, contextAdvice)} Save the checkpoint to ${path}.`);
+    return stop(checkpointFact(contextReading));
   }
   if (quota && quota.fiveHour && quota.fiveHour.pct >= PERSIST_STOP_FIVE_HOUR) return stop(`the 5-hour usage window is at ${Math.round(quota.fiveHour.pct)}% (resets ${resetClock(quota.fiveHour.resetsAt)})`);
   if (scan.denied) return stop('a dispatch was denied (budget, credential or usage limit)');
   if (repeat) return stop(`the same error came back twice: ${repeat}`);
   if (scan.asked) return stop('the last message asks the user something');
   if (scan.goalMet) return stop('the last message says the goal is met');
+  if (next && next.state === 'all-done') return stop(ALL_DONE_TEXT);
   if (steps > PERSIST_STEP_CAP) return stop(`reached the limit of ${PERSIST_STEP_CAP} auto-continued steps in a row`);
   if (!scan.progressed) return stop('the last step did no visible work (no edit, command or dispatch)');
 
   const parts = [];
   if (g) parts.push(`"${g}"`);
-  parts.push(`step ${steps} of ${PERSIST_STEP_CAP}`);
+  // The next open item replaces the bare step count: a count alone produced
+  // filler steps. Without a run or a project page there is nothing to name,
+  // so the count stays as the only fact.
+  if (next && next.state === 'open' && next.text) parts.push(`next open item: ${next.text.length > 120 ? `${next.text.slice(0, 117)}...` : next.text}`);
+  else parts.push(`step ${steps} of ${PERSIST_STEP_CAP}`);
   if (Number.isFinite(workCalls) && workCalls >= 100) parts.push(`${workCalls} work calls since your last dispatch`);
   if (scan.lastChange) parts.push(`last edited ${scan.lastChange}`);
   let why = `orchestrate: ${parts.join(' · ')}`;
   if (contextNotice) why += ` ${contextNotice}`;
   return { rec: out, kind: 'continue', why };
+}
+
+// "No checkpoint since <time>; context N of M." The size and the epoch start
+// are facts the lead cannot see from inside the conversation.
+export function checkpointFact(reading, now = Date.now()) {
+  const t = contextEpochStart(reading);
+  const since = t != null ? new Date(t).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : 'this conversation began';
+  const k = n => `~${Math.round(n / 1000)}k`;
+  const used = reading && reading.tokens != null ? k(reading.tokens) : 'an unknown size';
+  const at = reading && reading.tokens != null ? thresholds(reading).compactAt : null;
+  const path = checkpointPath(reading && reading.session, reading);
+  const n = Number(reading && reading.compactions) || 0;
+  const compacted = n ? ` Compacted ${n} time${n === 1 ? "" : "s"} already; each summary drops detail.` : "";
+  return `No checkpoint since ${since}; context ${used}${at ? ` of ${k(at)}` : ''}. Checkpoints for this conversation are saved at ${path}.${compacted}`;
 }
 
 const STORE = () => join(DIR, 'persist-checks.json');
@@ -179,15 +198,15 @@ function commitsSince(cwd, startHead) {
 // already said, but a headless caller's `result` is whatever the lead sends
 // next, so a one-line reply to this block silently becomes the report the
 // user gets (round-9 audit finding 2, live run 1). Under 60 B added.
-const RESEND_NOTE = ' Resend the whole report; it becomes what the user sees.';
+const RESEND_NOTE = ' A reply to this block becomes the report the user sees.';
 
 function commitClaimReason(claim, git, commitsSinceStart) {
   if (claim === 'not-committed') {
     const commitNote = commitsSinceStart ? ` and ${commitsSinceStart} commit${commitsSinceStart === 1 ? '' : 's'} since this session started` : '';
-    return `Before you finish: your last message says nothing is committed, but git status shows a clean tree${commitNote}. Tell the user exactly what is committed and what is not, from git status, then finish.${RESEND_NOTE}`;
+    return `Your last message says nothing is committed; git status shows a clean tree${commitNote}.${RESEND_NOTE}`;
   }
-  const names = git.files.length ? ` (${git.files.join(', ')})` : '';
-  return `Before you finish: your last message says the work is committed, but git status shows ${git.count} file${git.count === 1 ? '' : 's'} not committed${names}. Say which files are not committed, then finish.${RESEND_NOTE}`;
+  const names = git.files.length ? `${git.files.join(', ')}${git.count > git.files.length ? ` and ${git.count - git.files.length} more` : ''}` : `${git.count} file${git.count === 1 ? '' : 's'}`;
+  return `Your last message says the work is committed. Uncommitted: ${names}.${RESEND_NOTE}`;
 }
 
 // Checks the closing message's claim about `git commit` against what the
@@ -234,6 +253,28 @@ function emitSystemMessage(message) {
   process.stdout.write(JSON.stringify({ systemMessage: message }));
 }
 
+// The goal shown in a block. Where the router took it from is stored beside it
+// (goalSource), so the two never show different goals: one that came from the
+// user's own words stays theirs, and only a ledger goal is re-read from the run.
+export function persistGoal(p, bound) {
+  const own = p && p.goal ? p.goal : '';
+  if (p && (p.goalSource === 'prompt' || p.goalSource === 'none')) return own;
+  return runGoalLine(bound) || own;
+}
+
+// What is open next, from the bound run and the project page; null when
+// neither can be read.
+function nextFor(state, input) {
+  try {
+    const run = state && state.run;
+    let runText = '';
+    if (run && run.runMd) { try { runText = readFileSync(run.runMd, 'utf8'); } catch {} }
+    const root = (run && run.root) || input.cwd || null;
+    const n = nextOpen(runText, root ? readProject(root) : null);
+    return n.state === 'none' ? null : n;
+  } catch { return null; }
+}
+
 export function check(input) {
   // A subagent's own Stop is not the lead's auto-continue loop — `agent_id`
   // on the payload (hooks doc, "common input fields") marks a call that fires
@@ -265,7 +306,7 @@ export function check(input) {
     if (ctx.reading.tokens >= at && !checkpoint && rec.contextBlockedFor !== epoch) {
       store[key] = { ...rec, contextBlockedFor: epoch, checkedAt: new Date().toISOString() };
       try { writeJsonAtomic(path, store); } catch {}
-      return { rec: store[key], kind: 'continue', why: `orchestrate: context is ~${Math.round(ctx.reading.tokens / 1000)}k: write a checkpoint first, then ${switchAdvice(ctx.reading, ctx.advice)} Save the checkpoint to ${checkpointPath(input.session_id || null, ctx.reading)}.` };
+      return { rec: store[key], kind: 'continue', why: `orchestrate: ${checkpointFact({ ...ctx.reading, session: ctx.reading.session || input.session_id || null })} This Stop is refused once for it.` };
     }
     return null;
   }
@@ -283,7 +324,7 @@ export function check(input) {
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
   const workCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : null;
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: runGoalLine(bound) || p.goal || '', quota: readQuota(), workCalls });
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), quota: readQuota(), workCalls, next: nextFor(state, input) });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };

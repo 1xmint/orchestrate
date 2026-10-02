@@ -4,6 +4,8 @@
 // while auto-continue is armed. Split out because it is a self-contained
 // concern with its own regexes, not because it shares code with the rest.
 
+import { NEW_GOAL_VERB } from './resume.mjs';
+
 // ---- persistence intent -----------------------------------------------------
 // Kept deliberately narrow: an explicit ask to keep going toward a goal,
 // never the shape of the work. A false arm is cheap, because persist-check.mjs
@@ -31,6 +33,41 @@ export function persistIntent(text) {
   const t = String(text || '').trim();
   if (!t || /\?\s*$/.test(t)) return false;
   return PERSIST_INTENT.test(t);
+}
+
+// ---- resume, retry and status prompts ---------------------------------------
+// Three short intents that are not an "until done" ask. The owner restarted
+// work by hand about twelve times with "continue", "resume" or "try again" and
+// none of those armed keep-going.
+//   status  whats left, where are we, status: never arms, "?" or not.
+//   resume  continue, resume, carry on, pick up, go on, keep going: arms only
+//           when the router's gate finds an open run (see router.mjs).
+//   retry   try again: restores keep-going only if it was on before the stop.
+// A resume or retry is 12 words or fewer, names no new goal, and has no word
+// that says to hold back.
+const STATUS_WORDS = /^(what'?s left|whats left|where are we|status)$/i;
+const RESUME_WORDS = /\b(continue|resume|carry on|pick up|go on|keep going)\b/i;
+const RETRY_WORDS = /\btry again\b/i;
+const HOLD_BACK = /\b(don'?t|do not|stop|wait|hold|pause|no)\b/i;
+const RESUME_MAX_WORDS = 12;
+
+export function promptIntent(text) {
+  const t = String(text || '').trim().replace(/[.!?\s]+$/, '').trim();
+  if (!t) return null;
+  if (STATUS_WORDS.test(t)) return 'status';
+  if (t.split(/\s+/).length > RESUME_MAX_WORDS || HOLD_BACK.test(t) || NEW_GOAL_VERB.test(t)) return null;
+  if (RETRY_WORDS.test(t)) return 'retry';
+  if (RESUME_WORDS.test(t)) return 'resume';
+  return null;
+}
+
+// True when the prompt is only the ask to keep going ("continue until
+// complete"), which names no goal of its own, so it must not be saved as one.
+export function barePersistPhrase(text) {
+  const rest = String(text || '').replace(PERSIST_INTENT, ' ')
+    .replace(/\b(continue|keep going|go on|carry on|resume|please|ok|okay|yes|and|just|now|work|working|the|it|its|it's|until|is|are|done|complete|finished)\b/gi, ' ')
+    .replace(/[^\w]+/g, '');
+  return rest === '';
 }
 
 export const GOAL_CAP = 600;
