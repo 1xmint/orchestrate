@@ -44,7 +44,7 @@ test('the armed line carries the goal verbatim and the ways out', () => {
   const line = persistLine({ armed: true, goal: 'keep coding until the website is done' });
   assert.match(line, /"keep coding until the website is done"/);
   assert.match(line, /persist off/);
-  assert.match(line, /Monitor/);
+  assert.doesNotMatch(line, /Monitor/, "a fact line, not an instruction");
   assert.equal(persistLine({ armed: false, goal: 'x' }), '');
 });
 

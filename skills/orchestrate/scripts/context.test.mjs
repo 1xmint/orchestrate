@@ -568,7 +568,7 @@ test('the lead hears a long hand-back on its next tool call, once per helper', (
   const sid = 'lb-1';
   writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, returned: [{ agentId: 'ag-1', longBytes: 2737 }] }));
   const edit = { session_id: sid, tool_name: 'Read', tool_input: { file_path: '/x' } };
-  assert.match(runContextCheck(edit, home), /the last hand-back was 2737 bytes against 600; in the next brief, ask for five lines and a file for the rest/);
+  assert.match(runContextCheck(edit, home), /last hand-back 2737 bytes against 600; it is re-read every later turn/);
   assert.doesNotMatch(runContextCheck(edit, home), /against 600/, 'once per helper');
 });
 
@@ -613,7 +613,7 @@ test('the lead hears what helper folders and branches are left on its next tool 
   writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, cwd: repo, dispatches, returned: [one] }));
   assert.doesNotMatch(runContextCheck(read, home), /still here/, 'a helper is still working: quiet');
   writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, cwd: repo, dispatches, returned: [one, two] }));
-  assert.match(runContextCheck(read, home), /1 helper folder and 1 branch are still here; remove them or tell the user they are there before you finish/);
+  assert.match(runContextCheck(read, home), /1 helper folder and 1 branch are still here; nothing has removed them/);
   assert.doesNotMatch(runContextCheck(read, home), /still here/, 'once per session');
 });
 
