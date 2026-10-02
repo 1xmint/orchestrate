@@ -18,7 +18,8 @@
 //
 //   stop when: a dispatch was denied · the same error came back twice · the last
 //   message asks the user something · the last message says the goal is met ·
-//   the step cap · a step that did no work.
+//   the same open item named three continues in a row · the step cap · a step
+//   that did no work.
 //
 // Never blocks twice in one Stop, never exits non-zero, never fails the Stop on
 // its own errors.
@@ -45,6 +46,12 @@ import { classifyClaim, lastAssistantText, contradicts, countedPaths, namesAllPa
 // already been compacted. The shared reader (lib/context-advice.mjs) decides, and its
 // notice rides along only when its advice changes.
 export const PERSIST_STEP_CAP = 25;
+// Continues that may name the same open item before the loop stops. A turn
+// that ends three times with the same item still open is stuck, and a stuck
+// run nudged up to the step cap is the costliest way this loop fails. Anthropic's
+// guidance for unattended runs ("Prompting Claude Opus 5.5", checked 2026-10-01)
+// says to stop after two or three automatic continuations on the same task.
+export const PERSIST_SAME_ITEM_CAP = 3;
 export const PERSIST_SCAN_CAP = 262144;
 
 const WORK_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash', 'PowerShell', 'Agent', 'Task']);
@@ -122,7 +129,9 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
-  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20) };
+  const item = next && next.state === 'open' && next.text ? next.text : null;
+  const sameItem = item && rec.lastItem === item ? (Number(rec.sameItem) || 0) + 1 : (item ? 1 : 0);
+  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem };
   const g = shortGoal(goal);
   const stop = why => ({ rec: out, kind: 'stop', why });
 
@@ -135,6 +144,7 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   if (scan.asked) return stop('the last message asks the user something');
   if (scan.goalMet) return stop('the last message says the goal is met');
   if (next && next.state === 'all-done') return stop(ALL_DONE_TEXT);
+  if (sameItem > PERSIST_SAME_ITEM_CAP) return stop(`${PERSIST_SAME_ITEM_CAP} continues in a row named the same open item, and it is still open: ${item.length > 120 ? `${item.slice(0, 117)}...` : item}`);
   if (steps > PERSIST_STEP_CAP) return stop(`reached the limit of ${PERSIST_STEP_CAP} auto-continued steps in a row`);
   if (!scan.progressed) return stop('the last step did no visible work (no edit, command or dispatch)');
 

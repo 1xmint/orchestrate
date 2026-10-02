@@ -128,3 +128,21 @@ test('the Stop decision names the next open item, and stops when every task is d
   assert.equal(done.kind, 'stop');
   assert.match(done.why, /all tasks done; the done-when has not been checked/);
 });
+
+test('the Stop loop stops after three continues name the same open item, and a new item starts the count again', async () => {
+  const { persistDecision } = await import('./persist-check.mjs');
+  const scan = { progressed: true, denied: false, errors: [], asked: false, goalMet: false };
+  const stuck = { state: 'open', source: 'task', text: '9-8-0002 do 9-8-0002' };
+  let rec = {};
+  for (let i = 1; i <= 3; i++) {
+    const d = persistDecision({ rec, scan, goal: 'g', next: stuck });
+    assert.equal(d.kind, 'continue', `continue ${i} on the same item`);
+    rec = d.rec;
+  }
+  const fourth = persistDecision({ rec, scan, goal: 'g', next: stuck });
+  assert.equal(fourth.kind, 'stop');
+  assert.match(fourth.why, /3 continues in a row named the same open item, and it is still open: 9-8-0002/);
+  const moved = persistDecision({ rec, scan, goal: 'g', next: { ...stuck, text: '9-8-0003 next' } });
+  assert.equal(moved.kind, 'continue', 'the item changed, so the run is not stuck');
+  assert.equal(moved.rec.sameItem, 1);
+});
