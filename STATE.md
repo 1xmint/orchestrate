@@ -37,8 +37,12 @@ Resume point for building the `orchestrate` skill.
   text now names both and a test pins it. The old text had the same gap.
   Three `guard-bash.mjs` texts still give an order (the ask tail, the
   worktree-remove and branch-delete refusals); they are safety stops and are
-  left until a guard change has its own reason. Wording checked against
-  Anthropic's prompting best practices page (Claude Opus 5), 2026-10-01.
+  left until a guard change has its own reason. The review also found the
+  Sonnet-first check does not read whether the earlier attempt failed; that
+  is written in `docs/safety-guard.md`. Refusal wording checked 2026-10-01
+  against Anthropic's prompting best practices page (give the reason, say what
+  to do rather than only what not to, no forceful words) and the Prompting
+  Claude Opus 5.5 page, which adds nothing on hook or refusal text.
 - Stage 2 (branch `phase/0009-stage2`): the card, SKILL §3 and
   `references/models.md` give one rule for handing a step to a helper. Do it
   yourself within about eight tool calls; past that, hand it over when that
