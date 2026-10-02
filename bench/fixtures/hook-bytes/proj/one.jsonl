@@ -1,0 +1,8 @@
+{"type":"attachment","uuid":"a1","sessionId":"s1","attachment":{"type":"hook_additional_context","hookEvent":"PostToolUse","content":["[orchestrate · size] SECRETWORD aaaa"]}}
+{"type":"attachment","uuid":"a2","sessionId":"s1","attachment":{"type":"hook_additional_context","hookEvent":"PostToolUse","content":["[orchestrate · size] bb"]}}
+{"type":"attachment","uuid":"a3","attachment":{"type":"hook_success","hookEvent":"PostToolUse","stdout":"[orchestrate · size] SECRETWORD aaaa","content":"[orchestrate · size] SECRETWORD aaaa"}}
+{"type":"attachment","uuid":"a4","sessionId":"s1","attachment":{"type":"hook_additional_context","hookEvent":"PostToolUse","content":["[orchestrate] untagged text"]}}
+{"type":"user","uuid":"a5","message":{"content":"orchestrate: Stop hold SECRETWORD"}}
+{"type":"system","subtype":"stop_hook_summary","uuid":"a6","hasOutput":true,"preventedContinuation":false}
+{"type":"assistant","uuid":"a7","message":{"content":"ordinary orchestrate chat SECRETWORD"}}
+not json orchestrate
