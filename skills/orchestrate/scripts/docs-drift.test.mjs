@@ -62,6 +62,21 @@ test('README\'s hook count matches hooks.json, if it names one', () => {
     `README says "${m[0]}" but hooks/hooks.json registers ${countHooks(HOOKS)}`);
 });
 
+test('the keep-going limits README, lanes.md and the arming line state match persist-check.mjs', async () => {
+  const { PERSIST_STEP_CAP, PERSIST_SAME_ITEM_CAP } = await import('./persist-check.mjs');
+  const word = { 2: 'two', 3: 'three', 4: 'four', 5: 'five' }[PERSIST_SAME_ITEM_CAP] ?? String(PERSIST_SAME_ITEM_CAP);
+  const docs = {
+    'README.md': README,
+    'references/lanes.md': readFileSync(join(SKILL, 'references', 'lanes.md'), 'utf8'),
+    'scripts/lib/persist-words.mjs': readFileSync(join(SKILL, 'scripts', 'lib', 'persist-words.mjs'), 'utf8'),
+  };
+  for (const [name, text] of Object.entries(docs)) {
+    const flat = text.replace(/\s+/g, ' ');
+    assert.match(flat, new RegExp(`\\b${PERSIST_STEP_CAP} steps\\b`), `${name} does not state the ${PERSIST_STEP_CAP}-step limit`);
+    assert.match(flat, new RegExp(`\\b${word} continues on the same open item\\b`), `${name} does not state the stop after ${word} continues on the same open item`);
+  }
+});
+
 test('agent counts in README, hosts.md, claude-code.md and models.md match plugin.json', () => {
   const n = agentCount();
   const words = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };

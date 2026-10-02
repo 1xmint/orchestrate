@@ -42,7 +42,15 @@ Resume point for building the `orchestrate` skill.
   is written in `docs/safety-guard.md`. Refusal wording checked 2026-10-01
   against Anthropic's prompting best practices page (give the reason, say what
   to do rather than only what not to, no forceful words) and the Prompting
-  Claude Opus 5.5 page, which adds nothing on hook or refusal text.
+  Claude Opus 5.5 page, which adds nothing on refusal text.
+- The keep-going loop stops when three continues in a row have named the same
+  open item and it is still open. Before, a stuck run was nudged up to the
+  25-step cap, the costliest way the loop fails. "Prompting Claude Opus 5.5",
+  Unattended agentic runs (checked 2026-10-01), says to stop after two or
+  three automatic continuations on the same task. A new arming (the user's
+  "continue" or "try again") starts the count again. README, `lanes.md` and the
+  line printed on arming state both limits; `docs-drift.test.mjs` pins them to
+  the code, which it did not do for the 25-step limit before.
 - Stage 2 (branch `phase/0009-stage2`): the card, SKILL §3 and
   `references/models.md` give one rule for handing a step to a helper. Do it
   yourself within about eight tool calls; past that, hand it over when that

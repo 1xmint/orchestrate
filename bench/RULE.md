@@ -36,4 +36,6 @@ differently for each kind.
 
 | Date | Batch | Cap (USD) | Reason |
 |---|---|---|---|
-|  |  |  |  |
+| 2026-10-01 | Pilot, part 1: `bench-pilot` suite (env-names), arm `branch`, 1 run | 2 | Checks the runner, the sandbox and what the shell sees; not a comparison. The three pilot parts sum to the plan's $10 pilot stop-loss |
+| 2026-10-01 | Pilot, part 2: `bench` suite, case `continue`, arm `branch`, 1 run | 4 | Kept workspace and trace paths, `history_file` seeding, Stage 0 arming on "continue", `measureTree` against the eval's cost |
+| 2026-10-01 | Pilot, part 3: `scenario` suite, arm `branch`, 1 run | 4 | The scenario script completes one run, and whether a summary can be forced headless |
