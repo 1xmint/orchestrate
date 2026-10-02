@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 
 // Text checks on the bench workflow: it is public, runs on a subscription
 // sign-in, and must never put the token in an upload. No yaml dependency.
-const yml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.github', 'workflows', 'bench.yml'), 'utf8');
+const yml = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.github', 'workflows', 'bench.yml'), 'utf8').replace(/\r\n/g, '\n');
 const lines = yml.split('\n');
 const code = lines.filter(l => !l.trim().startsWith('#')).join('\n');
 
