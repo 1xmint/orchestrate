@@ -1,0 +1,182 @@
+name: Bench
+
+# Runs the bench on GitHub's machines with the owner's subscription sign-in.
+# The job is public, so the token must never reach an upload: the only secret is
+# CLAUDE_CODE_OAUTH_TOKEN, set as env on the "Run bench" step alone, and that
+# step scans exactly the files it staged for upload before it finishes.
+#
+# Failing cases are expected (the eval exits 1 or 2), so the exit code is
+# recorded and the grading and upload steps still run.
+#
+# No-plugin leg: `claude plugin eval` has no flag that runs only the no-plugin
+# arm (its --ablation takes `none` or `with-without`), so that leg uses
+# `--ablation with-without` and keeps only the "without" rows for grading.
+# Plugin legs use `--ablation none`.
+#
+# `cap` is the cost ceiling per leg, not for the whole run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      arms:
+        description: 'Comma list of "branch" (this checkout) or git refs (tags, branches), e.g. branch,v0.21.0'
+        required: true
+        default: branch
+      baseline:
+        description: Also run plain Claude with no plugin
+        type: boolean
+        default: false
+      suite:
+        description: Which suite to run
+        type: choice
+        options: [bench, bench-final, bench-pilot, scenario]
+        default: bench
+      runs:
+        description: Runs per case per arm
+        default: '3'
+      cap:
+        description: Cost ceiling in USD for each leg
+        required: true
+      cases:
+        description: Optional case-name glob filter (eval suites only)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - name: Turn the arms into a matrix
+        id: m
+        env:
+          ARMS: ${{ inputs.arms }}
+          BASELINE: ${{ inputs.baseline }}
+        run: |
+          node -e '
+            const arms = process.env.ARMS.split(",").map(s => s.trim()).filter(Boolean);
+            const include = arms.map(a => ({ arm: a, label: a.replace(/[^A-Za-z0-9._-]/g, "_"), ablation: "none" }));
+            if (process.env.BASELINE === "true") include.push({ arm: "none", label: "none", ablation: "with-without" });
+            if (!include.length) { console.error("no arms"); process.exit(1); }
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "matrix=" + JSON.stringify({ include }) + "\n");
+          '
+
+  bench:
+    needs: setup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the CLI and the sandbox tools
+        # No run line starts with npm: orchestrate 0.21.0 reads such a line in
+        # any workflow as this repo's build check, and a session would then
+        # reinstall this pinned CLI on the owner's machine. gate.mjs on this
+        # branch skips hand-started workflows; this holds until it ships.
+        run: |
+          cd "$RUNNER_TEMP" && npm i -g @anthropic-ai/claude-code@2.1.286
+          sudo apt-get install -y bubblewrap socat
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - name: Run bench
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ARM: ${{ matrix.arm }}
+          LABEL: ${{ matrix.label }}
+          ABLATION: ${{ matrix.ablation }}
+          SUITE: ${{ inputs.suite }}
+          RUNS: ${{ inputs.runs }}
+          CAP: ${{ inputs.cap }}
+          CASES: ${{ inputs.cases }}
+        run: |
+          set -u
+          REPO="$PWD"
+          OUT="$RUNNER_TEMP/out"
+          STAGE="$RUNNER_TEMP/upload"
+          COPY="$RUNNER_TEMP/copy"
+          HIDDEN="$RUNNER_TEMP/bench-hidden"
+          mkdir -p "$OUT" "$STAGE"
+
+          # The hidden tests stay out of the checkout while the agent runs. The
+          # folder keeps its name so grade-kept voids a run whose tools open it.
+          [ -d bench-hidden ] && mv bench-hidden "$HIDDEN"
+
+          # The no-plugin leg runs the working tree under --ablation with-without
+          # and keeps only the "without" rows.
+          MAKE_ARM="$ARM"; [ "$ARM" = none ] && MAKE_ARM=branch
+          node bench/make-copy.mjs --arm "$MAKE_ARM" --out "$COPY"
+
+          set +e
+          if [ "$SUITE" = scenario ]; then
+            if [ "$ARM" = none ]; then PLUG=(--no-plugin); else PLUG=(--plugin-dir "$COPY"); fi
+            node bench/scenarios/resume.mjs "${PLUG[@]}" --label "$LABEL" --runs "$RUNS" --cap "$CAP" --out "$OUT/scenario" --model claude-opus-5-5
+            RC=$?
+          else
+            CASE_ARGS=(); [ -n "$CASES" ] && CASE_ARGS=(--case "$CASES")
+            claude plugin eval "$COPY" --eval-dir "$SUITE" --trust-plugin --no-publish --scaffold --keep-temp --allow-tools Bash Write Edit --model claude-opus-5-5 --judge-model claude-sonnet-5-5 -j 2 --runs "$RUNS" --ablation "$ABLATION" --max-cost-usd "$CAP" --output-dir "$OUT" "${CASE_ARGS[@]}" --json > "$RUNNER_TEMP/eval-stdout.json"
+            RC=$?
+          fi
+          set -e
+          # 1 (cases failed) and 2 (cost ceiling) are expected; later steps still run.
+          echo "eval exit code: $RC"
+
+          [ -d "$HIDDEN" ] && mv "$HIDDEN" bench-hidden
+
+          if [ "$SUITE" = scenario ]; then
+            cp "$OUT/scenario/runs.jsonl" "$OUT/scenario/summary.md" "$STAGE"/ 2>/dev/null || true
+          else
+            AGG="$OUT/aggregate-result.json"
+            if [ -f "$AGG" ]; then
+              GRADE_AGG="$AGG"
+              if [ "$ARM" = none ]; then
+                GRADE_AGG="$RUNNER_TEMP/aggregate-without.json"
+                node -e '
+                  const fs = require("fs");
+                  const a = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+                  for (const c of a.cases || []) if (c.arms) delete c.arms.with;
+                  fs.writeFileSync(process.argv[2], JSON.stringify(a));
+                ' "$AGG" "$GRADE_AGG"
+              fi
+              HIDDEN_ARG=(); [ -d bench-hidden ] && HIDDEN_ARG=(--hidden bench-hidden)
+              node evals/grade-kept.mjs --aggregate "$GRADE_AGG" "${HIDDEN_ARG[@]}" --arm "$LABEL" --out "$OUT/graded" || echo "grade-kept failed"
+              cp "$OUT/aggregate-result.json" "$STAGE"/
+              cp "$OUT"/*.html "$STAGE"/ 2>/dev/null || true
+              cp "$OUT/graded/rows.json" "$OUT/graded/table.md" "$STAGE"/ 2>/dev/null || true
+              [ -d "$OUT/graded/traces" ] && cp -r "$OUT/graded/traces" "$STAGE"/traces
+            fi
+          fi
+
+          # Summary for the run page.
+          for f in "$STAGE/table.md" "$STAGE/summary.md"; do
+            [ -f "$f" ] && { echo "### $LABEL"; cat "$f"; } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          # Leak scan over exactly what will be uploaded. Never print the file or the match.
+          LEAK=0
+          if [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] && grep -rlF -e "$CLAUDE_CODE_OAUTH_TOKEN" "$STAGE" > /dev/null 2>&1; then LEAK=1; fi
+          if grep -rlF -e 'sk-ant-' "$STAGE" > /dev/null 2>&1; then LEAK=1; fi
+          if [ "$LEAK" = 1 ]; then
+            rm -rf "$STAGE"
+            echo "::error::A credential pattern matched in the files staged for upload. Upload withheld."
+            exit 1
+          fi
+          echo "$RC" > "$RUNNER_TEMP/rc"
+      - name: Upload results
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.label }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/upload
+          retention-days: 7
+          if-no-files-found: warn
