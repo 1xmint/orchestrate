@@ -51,6 +51,14 @@ function copyAll(srcRoot, files, out) {
   }
 }
 
+// On the bench runner only the checked-out branch is local; every other branch
+// is origin/<name>, which a bare name does not reach. A name that resolves
+// neither way stays as given, so git archive reports it.
+export function resolveArm(repo, arm) {
+  const ok = r => spawnSync('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', `${r}^{tree}`], { encoding: 'utf8' }).status === 0;
+  return ok(arm) || !ok(`origin/${arm}`) ? arm : `origin/${arm}`;
+}
+
 export function makeCopy({ arm, out, repo }) {
   if (!existsSync(out)) mkdirSync(out, { recursive: true });
   else if (readdirSync(out).length) throw new Error(`out folder is not empty: ${out}`);
@@ -64,7 +72,7 @@ export function makeCopy({ arm, out, repo }) {
   const tmp = mkdtempSync(join(tmpdir(), 'bench-arm-'));
   try {
     const tarFile = join(tmp, 'src.tar');
-    const a = spawnSync('git', ['-C', repo, 'archive', '--format=tar', '-o', tarFile, arm], { encoding: 'utf8' });
+    const a = spawnSync('git', ['-C', repo, 'archive', '--format=tar', '-o', tarFile, resolveArm(repo, arm)], { encoding: 'utf8' });
     if (a.status !== 0) throw new Error(`git archive ${arm} failed: ${(a.stderr || '').trim()}`);
     const src = join(tmp, 'src');
     mkdirSync(src);

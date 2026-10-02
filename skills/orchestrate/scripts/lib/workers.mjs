@@ -310,7 +310,7 @@ export function concurrencyDecision(role, { native = [], external = [], policy =
   const list = xs => xs.map(w => `${w.provider === 'claude' ? w.role : `${w.provider} ${w.role || 'worker'}`}${w.task ? ` ${w.task}` : ''}`).join(', ');
   if (r === 'orch-browser') {
     const b = all.filter(w => roleOf(w.role) === 'orch-browser');
-    if (b.length >= policy.workers.browserConcurrent) return `browser work is serial and ${list(b)} is still using the browser. Wait for it to return, then send this one.`;
+    if (b.length >= policy.workers.browserConcurrent) return `browser work is serial and ${list(b)} is still using the browser; this one passes once it returns, or once it has been silent for ${policy.workers.staleMin} minutes.`;
   }
 
   // This candidate is itself a live coordinator's child: it draws only on
@@ -318,7 +318,7 @@ export function concurrencyDecision(role, { native = [], external = [], policy =
   if (coordinatorParentId) {
     const ownChildren = native.filter(w => w && w.parent === coordinatorParentId);
     if (ownChildren.length >= 2) {
-      return `this coordinator already has ${ownChildren.length} of its own children running (${list(ownChildren)}), and each coordinator holds exactly two child slots. Wait for one to return before sending another.`;
+      return `this coordinator already has ${ownChildren.length} of its own children running (${list(ownChildren)}), and each coordinator holds exactly two child slots; another passes once one returns.`;
     }
     return null;
   }
@@ -331,7 +331,7 @@ export function concurrencyDecision(role, { native = [], external = [], policy =
   const directPool = all.filter(w => !(w && w.parent && liveCoordinatorIds.has(w.parent)));
   const maxConcurrent = policy.workers.maxConcurrent;
   if (directPool.length >= maxConcurrent) {
-    return `${directPool.length} worker${directPool.length === 1 ? ' is' : 's are'} already running (${list(directPool)}), and the limit is ${maxConcurrent} across Claude and Codex. Do this step yourself if it is small, or wait for a return (watch it with Monitor and do independent work meanwhile). A worker silent for ${policy.workers.staleMin} minutes stops counting.`;
+    return `${directPool.length} worker${directPool.length === 1 ? ' is' : 's are'} already running (${list(directPool)}), and the limit is ${maxConcurrent} across Claude and Codex. A slot frees when one returns, or when a worker has been silent for ${policy.workers.staleMin} minutes; a small step needs no worker.`;
   }
   return null;
 }
