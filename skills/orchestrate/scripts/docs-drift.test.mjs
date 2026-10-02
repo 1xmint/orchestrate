@@ -213,6 +213,31 @@ test('SKILL.md names every hook script hooks.json registers', () => {
   }
 });
 
+test('SKILL.md\'s "<Number> hooks run around you" is the count of distinct scripts hooks.json registers', () => {
+  const SKILL_MD = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  const m = /^(\w+) hooks run around you/m.exec(SKILL_MD);
+  assert.ok(m, 'SKILL.md no longer says "<Number> hooks run around you"; update this test with it');
+  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen'];
+  const n = WORDS.indexOf(m[1].toLowerCase());
+  assert.ok(n >= 0, `"${m[1]}" is not a number word this test knows`);
+  assert.equal(n, scriptsFromHooksJson(HOOKS).length,
+    `SKILL.md says "${m[1]} hooks" but hooks/hooks.json registers ${scriptsFromHooksJson(HOOKS).length} distinct scripts`);
+});
+
+test('scripts/test.mjs collects the eval and bench tests, never bench-hidden or a case fixture', async () => {
+  const { collectTestFiles } = await import(new URL('../../../scripts/test.mjs', import.meta.url).href);
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const root = mkdtempSync(join(tmpdir(), 'orch-collect-'));
+  for (const f of ['skills/a/a.test.mjs', 'evals/e.test.mjs', 'evals/no-machinery.test.mjs', 'bench/b.test.mjs', 'bench/scenarios/s.test.mjs',
+    'bench-hidden/h.test.mjs', 'bench/bench-hidden/h.test.mjs', 'bench/scenarios/resume/fixture/f.test.mjs', 'evals/case/fixture/f.test.mjs', 'bench/one/x.test.mjs']) {
+    mkdirSync(join(root, f, '..'), { recursive: true });
+    writeFileSync(join(root, f), '');
+  }
+  const got = collectTestFiles(root).map(p => p.slice(root.length + 1).replace(/\\/g, '/')).sort();
+  assert.deepEqual(got, ['bench/b.test.mjs', 'bench/scenarios/s.test.mjs', 'evals/e.test.mjs', 'evals/no-machinery.test.mjs', 'skills/a/a.test.mjs']);
+});
+
 test('README\'s "Test it" command runs without a shell substitution and actually works', () => {
   const m = /## Test it\n\n```(?:bash|sh)?\n([^\n]+)\n```/.exec(README);
   assert.ok(m, 'README has no "## Test it" fenced command to check');
