@@ -1,0 +1,5 @@
+{
+  "hidden": ["add-list.test.mjs", "checkout-return.test.mjs", "due-overdue.test.mjs", "fee.test.mjs", "stats.test.mjs"],
+  "graders": [],
+  "timeoutSeconds": 120
+}
