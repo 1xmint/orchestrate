@@ -463,7 +463,7 @@ test('Stop: a task tagged for review that returned done with no reviewer blocks 
   const decision = JSON.parse(first.stdout);
   assert.equal(decision.decision, 'block');
   assert.match(decision.reason, /9-9-0001/);
-  assert.match(decision.reason, /REVIEW OF: 9-9-0001/);
+  assert.match(decision.reason, /task 9-9-0001 was tagged for independent review; it returned done with none sent/);
   assert.ok(decision.reason.length < 200, `reason is ${decision.reason.length} bytes`);
 
   const second = run({ hook_event_name: 'Stop', session_id: 'review-hold-1', last_assistant_message: 'Shipped it.' }, home);

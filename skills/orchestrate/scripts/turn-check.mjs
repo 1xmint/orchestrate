@@ -331,7 +331,7 @@ function checkProject(input, quiet) {
   const say = d.block && !quiet;
   store[key] = { count: d.block && quiet ? PROJECT_TURNS - 1 : d.count };
   try { writeJsonAtomic(path, store); } catch {}
-  return say ? `orchestrate: ${d.turns} turns changed project files and .orchestrator/PROJECT.md did not change; update Where it stands / Next if they moved.` : null;
+  return say ? `orchestrate: ${d.turns} turns changed project files and .orchestrator/PROJECT.md did not change; Where it stands / Next may be stale.` : null;
 }
 
 const STORE = () => join(DIR, 'turn-checks.json');
@@ -366,7 +366,7 @@ export function heartbeatDecision({ run, rec }) {
   if (ready.length >= IDLE_READY_MIN && prev.readyBlockedFor !== readyKey) {
     out.readyBlockedFor = readyKey;
     const shown = ready.slice(0, 4).join(', ') + (ready.length > 4 ? ` +${ready.length - 4} more` : '');
-    return { rec: out, kind: 'idle', why: `${ready.length} tasks are unblocked (${shown}) and nothing new has been dispatched this turn. A background dispatch hands control straight back, so start the ones that can run at once — or say plainly why you are waiting.` };
+    return { rec: out, kind: 'idle', why: `${ready.length} tasks are unblocked (${shown}) and nothing new has been dispatched this turn. A background dispatch hands control straight back.` };
   }
 
   return { rec: out, kind: null };
@@ -414,10 +414,10 @@ function checkHeartbeat(input) {
     updated.reviewBlockedFor = rh.blockedFor;
     store[key] = updated;
     try { writeJsonAtomic(path, store); } catch {}
-    if (rh.noVerdict) return emitBlock('orchestrate: the independent look came back with no verdict; send it again.');
-    if (rh.failed) return emitBlock('orchestrate: the independent look found a problem; fix it and have it looked at again.');
-    if (rh.freeForm) return emitBlock(`orchestrate: a brief flagged for independent review returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
-    return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent. Dispatch orch-reviewer with REVIEW OF: ${rh.task}, or tell the user it was skipped and why.`);
+    if (rh.noVerdict) return emitBlock('orchestrate: the independent look came back with no verdict.');
+    if (rh.failed) return emitBlock('orchestrate: the independent look found a problem.');
+    if (rh.freeForm) return emitBlock(`orchestrate: a brief flagged for independent review returned done with none sent (REVIEW OF: ${rh.task}).`);
+    return emitBlock(`orchestrate: task ${rh.task} was tagged for independent review; it returned done with none sent.`);
   }
   if (rh.blockedFor.length) updated.reviewBlockedFor = rh.blockedFor;
 
@@ -444,7 +444,7 @@ function checkHeartbeat(input) {
   store[key] = updated;
   try { writeJsonAtomic(path, store); } catch {}
 
-  emitBlock(`orchestrate: ${d.why}. Before this turn ends, update the Pickup section of ${run.runMd}: one sentence that continues from here, its confidence, and the resume risk. Also set the phase glyph on any row you graded. That section is the only thing the next session reads first.`);
+  emitBlock(`orchestrate: ${d.why}. The Pickup section of ${run.runMd} is the only thing the next session reads first.`);
 }
 
 function main() {

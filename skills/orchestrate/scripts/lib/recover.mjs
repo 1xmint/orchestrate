@@ -67,7 +67,7 @@ export function unreturnedNote(state, { native = [], max = 3 } = {}) {
     const notes = u.progress ? `its notes are at ${u.progress}` : 'no notes file was named';
     return `A helper working on ${what} has not reported back; ${notes}.`;
   });
-  return `[orchestrate · recover] ${sentences.join(' ')} The still-running check only narrows this list, not clears it — one of these may yet be working, not stopped; check before treating any as dead. If one was stopped by a limit or the session ending, continue it with a fresh dispatch from its notes and its branch; resuming the stopped agent re-reads its whole context at full price.`;
+  return `[orchestrate · recover] ${sentences.join(' ')} The still-running check only narrows this list, so one of these may yet be working. A helper stopped by a limit or the session ending leaves its notes and branch; resuming the stopped agent re-reads its whole context at full price.`;
 }
 
 // Helpers that stopped at their turn cap (lib/workers.mjs), said once each.

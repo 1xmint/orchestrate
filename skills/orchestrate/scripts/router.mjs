@@ -108,7 +108,7 @@ export function leadNote(self, tier, now = Date.now(), path = LEAD_NOTE_PATH) {
   const seen = readJson(path) || {};
   if (seen[key] && now - Number(seen[key]) < 7 * 86400000) return '';
   try { writeJsonAtomic(path, { ...seen, [key]: now }); } catch {}
-  return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. For quota-first work, high or medium is the better default. Mention it to the user once: it takes effect in a new session, because switching mid-session re-reads everything uncached.`;
+  return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. A change takes effect in a new session; switching mid-session re-reads everything uncached.`;
 }
 
 // The id of the newest compaction boundary this hook can see in the transcript.
@@ -556,8 +556,8 @@ function handlePrompt(input) {
   if (band !== (state.quotaBand || 'none') && (band === 'caution' || band === 'stop')) {
     const h = ctx.quota.fiveHour;
     out.push(band === 'stop'
-      ? `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}% (resets ${resetClock(h.resetsAt)}). No new helpers will start. Finish what is in flight here, keep steps few, and tell the user where things stand if the work will not fit.`
-      : `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}%. Work serially, on the cheapest model that can do each step, and do small things yourself rather than starting helpers.`);
+      ? `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}% (resets ${resetClock(h.resetsAt)}). No new helpers will start.`
+      : `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}%.`);
   }
   state.quotaBand = band;
 

@@ -155,5 +155,5 @@ test('handoffLine names a written Pickup section over plain git status', () => {
 
 test('handoffLine falls back to git status when there is no run or checkpoint', () => {
   const line = handoffLine({ goal: 'ship the login page', session_id: 'no-such-session', lastSeen: new Date(Date.now() - 60000).toISOString() }, { run: null });
-  assert.match(line, /run `git status`/);
+  assert.match(line, /`git status` lists them/);
 });
