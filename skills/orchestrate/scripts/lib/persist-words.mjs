@@ -75,5 +75,6 @@ export const GOAL_CAP = 600;
 export function persistLine(persist) {
   if (!persist || !persist.armed) return '';
   const g = String(persist.goal || '').replace(/\s+/g, ' ').trim();
-  return `auto-continue is on toward: "${g.length > GOAL_CAP ? `${g.slice(0, GOAL_CAP - 3)}...` : g}". A Stop is refused while each step does real work; it ends when you say the goal is met, ask the user something, a dispatch is denied, the same error repeats, a step does nothing, or after 25 steps. Waiting on CI or an agent: Monitor it and keep doing independent work. "persist off" turns it off.`;
+  const lead = g ? `auto-continue is on toward: "${g.length > GOAL_CAP ? `${g.slice(0, GOAL_CAP - 3)}...` : g}"` : 'auto-continue is on, but no goal is recorded (the prompt named none and no open run has one): work toward what the user last asked for, or ask';
+  return `${lead}. A Stop is refused while each step does real work; it ends when you say the goal is met, ask the user something, a dispatch is denied, the same error repeats, a step does nothing, or after 25 steps. Waiting on CI or an agent: Monitor it and keep doing independent work. "persist off" turns it off.`;
 }

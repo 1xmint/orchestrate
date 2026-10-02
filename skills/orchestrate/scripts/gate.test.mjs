@@ -148,6 +148,6 @@ test('a workflow started only by hand is not read as the merge gate', () => {
 test('this repo\'s own gate is found from its ci.yml', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
   const g = detect(root);
-  assert.equal(pick(g, 'test'), "node --test $(find skills -name '*.test.mjs')");
+  assert.equal(pick(g, 'test'), 'node scripts/test.mjs');
   assert.equal(pick(g, 'build'), 'node scripts/package.mjs --both');
 });
