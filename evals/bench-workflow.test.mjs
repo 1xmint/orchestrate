@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { runSteps } from '../skills/orchestrate/scripts/gate.mjs';
 
 // Text checks on the bench workflow: it is public, runs on a subscription
 // sign-in, and must never put the token in an upload. No yaml dependency.
@@ -61,6 +62,14 @@ test('the upload takes only the staged files, never the temp home, config or aut
   const staged = [...runStep.matchAll(/cp (?:-r )?([^\n]*?) "\$STAGE"/g)].map(m => m[1]).join(' ');
   for (const f of ['aggregate-result.json', 'rows.json', 'table.md', 'traces', 'runs.jsonl', 'summary.md', '*.html']) assert.ok(staged.includes(f), f);
   assert.doesNotMatch(staged, /home|config|\.claude|auth/i);
+});
+
+test('no run line is one the shipped gate reader would take as a check', () => {
+  // orchestrate 0.21.0 lists these lines from every workflow as the repo's
+  // checks and pastes them into helper briefs; this pattern is its CI_COMMAND.
+  const shipped = /^(just|make|npm|pnpm|yarn|cargo|pytest|python -m pytest|ruff|mypy|go test|dotnet test|node\s+(--test\b|scripts\/\S+))/;
+  const taken = runSteps(yml).filter(c => shipped.test(c));
+  assert.deepEqual(taken, []);
 });
 
 test('the token appears only as env on the run step', () => {

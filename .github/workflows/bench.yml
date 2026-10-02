@@ -81,8 +81,12 @@ jobs:
         with:
           node-version: 22
       - name: Install the CLI and the sandbox tools
+        # No run line starts with npm: orchestrate 0.21.0 reads such a line in
+        # any workflow as this repo's build check, and a session would then
+        # reinstall this pinned CLI on the owner's machine. gate.mjs on this
+        # branch skips hand-started workflows; this holds until it ships.
         run: |
-          npm i -g @anthropic-ai/claude-code@2.1.286
+          cd "$RUNNER_TEMP" && npm i -g @anthropic-ai/claude-code@2.1.286
           sudo apt-get install -y bubblewrap socat
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Run bench
