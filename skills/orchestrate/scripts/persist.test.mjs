@@ -206,6 +206,32 @@ test('replay: the stall — no ledger, a step with work, then a step that only t
   assert.equal(run('persist-check.mjs', stop, home).stdout.trim(), '', 'disarmed stays quiet');
 });
 
+test('replay: stuck on one open item, the loop stops; "try again" starts the count again', () => {
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
+  mkdirSync(join(dir, '.orchestrator'));
+  writeFileSync(join(dir, '.orchestrator', 'PROJECT.md'), '# Project\n\n## Next\n\n1. Fix the date parser\n');
+  const transcript = join(dir, 't.jsonl');
+  const prompt = 'keep coding until the website is done';
+  writeFileSync(transcript, tail(userSays(prompt)));
+  run('router.mjs', { hook_event_name: 'UserPromptSubmit', session_id: 'p2', cwd: dir, transcript_path: transcript, prompt }, home);
+  const stop = { hook_event_name: 'Stop', session_id: 'p2', cwd: dir, transcript_path: transcript, stop_hook_active: true };
+  const step = () => { appendFileSync(transcript, tail(used('Edit'), result('ok'), said('Tried another fix.'))); return run('persist-check.mjs', stop, home).json; };
+
+  for (let i = 1; i <= 3; i++) assert.equal(step().decision, 'block', `continue ${i}: each step did work`);
+  const ended = step();
+  assert.equal(ended.decision, undefined);
+  assert.match(ended.systemMessage, /3 continues in a row named the same open item, and it is still open: Fix the date parser/);
+  assert.equal(session(home, 'p2').persist.armed, false);
+
+  appendFileSync(transcript, tail(userSays('try again')));
+  run('router.mjs', { hook_event_name: 'UserPromptSubmit', session_id: 'p2', cwd: dir, transcript_path: transcript, prompt: 'try again' }, home);
+  assert.equal(session(home, 'p2').persist.armed, true);
+  const again = step();
+  assert.equal(again.decision, 'block', 'the first Stop after "try again" continues');
+  assert.match(again.reason, /next open item: Fix the date parser/);
+});
+
 test('router: "persist off" disarms and keeps it off; a question never arms', () => {
   const home = sandbox();
   const dir = mkdtempSync(join(tmpdir(), 'orch-cwd-'));
