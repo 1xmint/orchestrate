@@ -150,7 +150,7 @@ export function grantCheck(userModel, f, prompt, boundId = null) {
   if (!id) return null;
   if (!boundId) return { allow: true, bind: id };
   if (boundId === id) return { allow: true, bind: null };
-  return { deny: true, reason: `the user named ${f} for task ${boundId}; this is task ${id} — ask them or start on Sonnet.` };
+  return { deny: true, reason: `the user named ${f} for task ${boundId}, and this is task ${id}, which that grant does not cover. A dispatch with model: "sonnet" passes, and so does ${f} once the user names it for this task.` };
 }
 
 // Where a grant's claim lives: one file per session+moment-the-user-named-it,
@@ -210,9 +210,9 @@ export function claimOrDeny(session, grantToClaim, claim = claimGrantId) {
   const won = claim(session, grantToClaim.at, grantToClaim.grantBind);
   if (won === grantToClaim.grantBind) return null;
   if (won && won !== GRANT_PENDING) {
-    return { prefix: 'model', reason: `the user named ${grantToClaim.family} for task ${won}; this is task ${grantToClaim.grantBind} — ask them or start on Sonnet.` };
+    return { prefix: 'model', reason: `the user named ${grantToClaim.family} for task ${won}, and this is task ${grantToClaim.grantBind}, which that grant does not cover. A dispatch with model: "sonnet" passes, and so does ${grantToClaim.family} once the user names it for this task.` };
   }
-  return { prefix: 'model', reason: `the ${grantToClaim.family} grant could not be claimed; resend with model: "sonnet".` };
+  return { prefix: 'model', reason: `the ${grantToClaim.family} grant could not be claimed, so which task holds it is unknown. A dispatch with model: "sonnet" passes.` };
 }
 
 // Three shapes come back, and a caller that treats any non-null result as a
@@ -230,26 +230,26 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
 
   if (quota) {
     const h = quota.fiveHour, w = quota.week;
-    if (h && h.pct >= HELPER_STOP_FIVE_HOUR) return { prefix: 'quota', reason: `the 5-hour usage window is at ${Math.round(h.pct)}%, so a new helper would likely be cut off mid-task. Finish what is in flight in this conversation, or stop and tell the user it resets at ${resetClock(h.resetsAt)}; Claude Code resumes on its own after the reset.` };
-    if (w && w.pct >= HELPER_STOP_WEEK) return { prefix: 'quota', reason: `the weekly limit is at ${Math.round(w.pct)}%. Do not start helpers; finish in this conversation and tell the user where things stand.` };
+    if (h && h.pct >= HELPER_STOP_FIVE_HOUR) return { prefix: 'quota', reason: `the 5-hour usage window is at ${Math.round(h.pct)}%, so a new helper would likely be cut off mid-task. It resets at ${resetClock(h.resetsAt)}, and Claude Code resumes on its own after that; work in this conversation still runs.` };
+    if (w && w.pct >= HELPER_STOP_WEEK) return { prefix: 'quota', reason: `the weekly limit is at ${Math.round(w.pct)}%, so no new helper starts; work in this conversation still runs.` };
   }
 
   if (role === 'fork') {
-    if (leadContext != null && leadContext > FORK_MAX_CONTEXT) return { prefix: 'model', reason: `a fork copies this whole conversation (~${Math.round(leadContext / 1000)}k tokens) into every step it takes. Dispatch a named role agent with a short packet instead.` };
+    if (leadContext != null && leadContext > FORK_MAX_CONTEXT) return { prefix: 'model', reason: `a fork copies this whole conversation (~${Math.round(leadContext / 1000)}k tokens) into every step it takes. A named role agent with a short packet passes.` };
     return null;
   }
 
   if (f === 'fable' && !['max5', 'max20', 'team'].includes(tier) && !/^\s*APPROVED BY USER:\s*fable/mi.test(prompt)) {
-    return { prefix: 'model', reason: `Fable is not included in this plan (${tier}) and spends the user's credits. Ask the user first; if they say yes, add the line "APPROVED BY USER: fable" to the packet.` };
+    return { prefix: 'model', reason: `Fable is not included in this plan (${tier}) and spends the user's credits, so it needs the user's yes. Once they give it, a packet with the line "APPROVED BY USER: fable" passes.` };
   }
 
   if (JUDGES.has(role) && f && rank(model) > rank('opus')) {
-    return { prefix: 'model', reason: `${plainRole(role)} on ${f} gives a verdict nobody can rely on: it exists to catch what the author's model missed. Resend with model: "opus". If Opus is out for now, hold the merge and tell the user; a weaker review is not a pass.` };
+    return { prefix: 'model', reason: `${plainRole(role)} on ${f} gives a verdict nobody can rely on: it exists to catch what the author's model missed. A dispatch with model: "opus" passes. If Opus is out for now, a weaker review is not a pass, so the merge waits for one.` };
   }
 
   if (SWEEPERS.has(role)) {
-    if (!f) return { prefix: 'model', reason: `${plainRole(role)} runs on this conversation's own model unless one is named. Resend with model: "haiku" for a read-only sweep, or "sonnet" if it must reason — or do a small search yourself with Grep and Glob.` };
-    if (rank(model) < rank('sonnet')) return { prefix: 'model', reason: `${plainRole(role)} on ${f} is a sweep on a judgment model. Resend with model: "sonnet" or "haiku".` };
+    if (!f) return { prefix: 'model', reason: `${plainRole(role)} runs on this conversation's own model unless one is named. A dispatch with model: "haiku" passes for a read-only sweep, or "sonnet" if it must reason; a small search fits Grep and Glob directly.` };
+    if (rank(model) < rank('sonnet')) return { prefix: 'model', reason: `${plainRole(role)} on ${f} is a sweep on a judgment model. A dispatch with model: "sonnet" or "haiku" passes.` };
     return null;
   }
 
@@ -272,11 +272,11 @@ export function modelDecision(ti, { tier = 'unknown', dispatches = [], leadConte
       }
       if (g && g.deny) return { prefix: 'model', reason: g.reason };
       // The user named this model and only the id is missing: say that first,
-      // not "resend with sonnet", which would override the user's own words.
+      // not "a dispatch with model: sonnet passes", which would override the user's own words.
       if (userModel && userModel.family === f && !userModel.taskId && !numericTaskId(prompt)) {
-        return { prefix: 'model', reason: `the user named ${f}; add a TASK: line with a number (e.g. TASK: 1-1-0001) to the packet and resend. The grant covers that one task id.` };
+        return { prefix: 'model', reason: `the user named ${f}, and the packet has no TASK: line with a number (e.g. TASK: 1-1-0001), which the grant needs: it covers one numeric task id.` };
       }
-      return { prefix: 'model', reason: `${plainRole(role)} starts on Sonnet: resend with model: "sonnet". Move this task to ${f} only after a Sonnet attempt at the same task fails its check, in a fresh dispatch with a short note of what failed. If the task is too big for Sonnet, split it instead. A grant works when the user names the model in their own message, to the lead directly, not in a packet; it covers one numeric TASK id, or every helper when they said so ("however many opus agents you need").` };
+      return { prefix: 'model', reason: `${plainRole(role)} on ${f} has no grant and no earlier Sonnet attempt at this task. A dispatch with model: "sonnet" passes. ${f} passes for this task after a Sonnet attempt at it fails its check, in a fresh dispatch with a short note of what failed; a task too big for Sonnet can be split instead. A grant also passes: the user names the model in their own message to the lead, not in a packet, and it covers one numeric TASK id, or every helper when they said so ("however many opus agents you need").` };
     }
   }
   return null;
