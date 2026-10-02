@@ -42,7 +42,7 @@ Optional: leave `none` on a subscription. A dollar ceiling (list price) is enfor
 
 ## Shape
 
-tasks: <N> · at once: <M> · models: <which roles on which models> · why not smaller: <one line; when a small build was split across helpers, the pair the user was shown (helpers vs alone) and what they picked>
+tasks: <N> · at once: <M> · models: <which roles on which models> · why not smaller: <one line: what handing work over is expected to save, and the main tradeoff>
 
 ## Profile
 

@@ -34,6 +34,19 @@ Resume point for building the `orchestrate` skill.
   `guard-agent.mjs`. They are reworded together, keeping what was blocked and
   the way through, with one independent review, because a refusal's wording
   is a guard change.
+- Stage 2 (branch `phase/0009-stage2`): the card, SKILL §3 and
+  `references/models.md` give one rule for handing a step to a helper. Do it
+  yourself within about eight tool calls; past that, hand it over when that
+  costs less overall, counting the helper's cheaper model and the reads kept out
+  of the lead's context against the brief, the return kept and checks. The
+  measured 2–3× cost of splitting a small build stays on the card as the fact
+  behind the rule. "Let the user pick" before a split is dropped: how to build
+  is the lead's call (approved with plan revision 2). `bench/RULE.md` classes
+  this, before any run, as a wording simplification. Checked against
+  "Prompting Claude Opus 5", Controlling subagent spawning (platform.claude.com,
+  2026-10-01): Opus 5 delegates more readily, and delegation multiplies cost on
+  small tasks; its sample rule also keeps work that fits in a handful of tool
+  calls with the lead. The Opus 5.5 page lists no change to delegation.
 
 ## v0.21.0 — judgment: no test that teaches nothing, no review loop, 2026-10-01
 

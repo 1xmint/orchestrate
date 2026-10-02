@@ -142,16 +142,15 @@ where it went; a packet that needs it carries its path.
 ## 3. Choose how the work gets done
 
 **Direct.** The manager's context is for judgment. Do a step yourself when it
-fits in a handful of tool calls and small outputs: about eight steps or 15k
-tokens of growth. Everything else goes to a worker, and the conversation keeps
-only its packet and return — a file over about 150 lines, three or more
-files, a build or test suite, or a read whose answer is a paragraph.
-**Assisted**: one worker for one larger step. **Coordinated**: one packet per
-plan step, three or more independent steps going to `orch-coordinator` (§5);
-a ledger and dependencies join when several tracks run at once or the work
-must survive this session ending. Before splitting a small build across
-helpers, tell the user it has cost about two to three times doing it alone,
-and let them pick.
+fits in about eight tool calls with small outputs, or 15k tokens of growth.
+Past that, hand it over when that costs less overall: a worker's cheaper
+model, and a big file, suite or long read kept out of your context, against
+the brief, the return you keep and checks. A small build split across helpers
+has cost two to three times doing it alone. Use the helper or model the user
+names for a step. **Assisted**: one worker for one larger step.
+**Coordinated**: one packet per plan step, three or more independent steps
+going to `orch-coordinator` (§5); a ledger and dependencies join when several
+tracks run at once or the work must survive this session ending.
 
 Filter command output to what decides the next step. Move down to a
 simpler one the moment the reason for the heavier one is gone — a small

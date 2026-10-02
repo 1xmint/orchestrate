@@ -29,10 +29,14 @@ test('the card body stays inside the cap it names, and has one home in code', ()
   assert.ok(!existsSync(join(HERE, '..', '..', 'references', 'ladder.md')), 'ladder.md is gone; the card text has one home now');
 });
 
-test('the card has the user pick before a small build is split across helpers', () => {
+test('the card weighs a helper by overall cost and carries the measured split cost', () => {
   // Live runs put the helper path at two to three times the lead's own cost on
-  // a small app, and the user had never been shown the pair before it was chosen.
-  assert.match(CARD, /Before splitting a small build across helpers, tell the user it has cost about two to three times doing it alone, and let them pick\./);
+  // a small app. The lead decides on overall cost, counting the cheaper model as
+  // a saving (quota first); it no longer stops to ask, because how to build is
+  // the lead's call (STATE.md, 0009 Stage 2).
+  assert.match(CARD, /hand it over when that costs less overall: a cheaper model and reads kept out of your context, against the brief, the return you keep and checks\./);
+  assert.match(CARD, /A small build split across helpers has cost two to three times doing it alone\./);
+  assert.doesNotMatch(CARD, /let them pick/);
 });
 
 test('the card points at the project page\'s Next as the plan, and no longer asks for three plain lines', () => {
@@ -59,7 +63,8 @@ test('the card names the helper kinds, and its builder advice clears the guard o
 test('the card keeps risky work and a request for a helper out of the do-it-yourself rule', () => {
   // A live lead built a password check on a payments page alone, with no
   // second look, though the user had asked for a helper and for safety.
-  assert.match(CARD, /about eight small tool calls and the user asked for no helper;/);
+  assert.match(CARD, /about eight tool calls;/);
+  assert.match(CARD, /Use the helper or model the user names for a step\./);
   assert.match(CARD, /Buy independent review, even of your own work, for money, auth,/);
 });
 
