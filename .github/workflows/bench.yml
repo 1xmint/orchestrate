@@ -101,10 +101,11 @@ jobs:
           OUT="$RUNNER_TEMP/out"
           STAGE="$RUNNER_TEMP/upload"
           COPY="$RUNNER_TEMP/copy"
-          HIDDEN="$RUNNER_TEMP/hidden"
+          HIDDEN="$RUNNER_TEMP/bench-hidden"
           mkdir -p "$OUT" "$STAGE"
 
-          # The hidden tests stay out of the checkout while the agent runs.
+          # The hidden tests stay out of the checkout while the agent runs. The
+          # folder keeps its name so grade-kept voids a run whose tools open it.
           [ -d bench-hidden ] && mv bench-hidden "$HIDDEN"
 
           # The no-plugin leg runs the working tree under --ablation with-without

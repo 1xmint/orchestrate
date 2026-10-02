@@ -71,6 +71,21 @@ test('validity: machine faults void; timeouts, turn limits and wrong results do 
   assert.equal(validity({ ...base }, '{"cmd":"ls src/benchmark.js"}').valid, true);
 });
 
+test('validity: only what a tool was asked to open counts as reading the hidden tests', () => {
+  const base = { error: null, unstarted: false };
+  const rec = o => JSON.stringify(o);
+  const use = (input, parent = null) => rec({ type: 'assistant', parent_tool_use_id: parent, message: { content: [{ type: 'text', text: 'see bench-hidden in the notes' }, { type: 'tool_use', name: 'Bash', input }] } });
+  const quiet = [
+    rec({ type: 'system', subtype: 'init', cwd: '/w/home/cwd', plugins: [{ path: '/r/bench/copy' }] }),
+    rec({ type: 'user', message: { content: [{ type: 'tool_result', content: 'README mentions bench-hidden/' }] } }),
+    use({ command: 'node --test test/' }),
+    rec({ type: 'result', subtype: 'success', result: 'done; nothing read from bench/' }),
+  ];
+  assert.equal(validity(base, quiet.join('\n')).valid, true, 'start-up, tool output, prose and the final message do not void');
+  assert.equal(validity(base, [...quiet, use({ file_path: '/r/bench-hidden/x/x.test.mjs' })].join('\n')).valid, false);
+  assert.equal(validity(base, [...quiet, use({ command: 'cat ../bench/x/graders/a.md' }, 'toolu_1')].join('\n')).valid, false, 'a helper reading counts too');
+});
+
 test('a usage-limit run voids its pair in the other arm, and nothing else', () => {
   const rows = pairVoid([
     row({ arm: 'x', index: 0, valid: false, voidReason: 'usage limit' }),
@@ -224,4 +239,26 @@ test('verdict: more than 25% slower sets needsReason without turning a win into 
 test('verdict: no successes in either arm is inconclusive, not a crash', () => {
   const v = verdict(arm(0), arm(0));
   assert.equal(v.result, 'inconclusive');
+});
+
+test('combine: legs downloaded apart are voided in pairs across arms and judged by the rule', async () => {
+  const { combine, findRows } = await import('./grade-kept.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'combine-'));
+  try {
+    const leg = (name, rows) => { mkdirSync(join(dir, `bench-${name}`, 'graded'), { recursive: true }); writeFileSync(join(dir, `bench-${name}`, 'graded', 'rows.json'), JSON.stringify(rows)); };
+    leg('none', rowsOf('no-plugin', 'c1', 1));
+    leg('current', rowsOf('current', 'c1', 2));
+    const proposed = rowsOf('proposed', 'c1', 3);
+    proposed[2] = { ...proposed[2], valid: false, voidReason: 'usage limit' };
+    leg('proposed', proposed);
+    const found = findRows(dir);
+    assert.equal(found.length, 3);
+    const c = combine(found.map(p => JSON.parse(readFileSync(p, 'utf8'))), { incumbent: 'current', candidate: 'proposed' });
+    assert.deepEqual(c.rows.filter(r => r.index === 2).map(r => r.valid), [false, false, false], 'run 3 is voided in every arm');
+    assert.equal(c.summary.current.valid, 2);
+    assert.equal(c.summary.proposed.successes, 2);
+    assert.equal(c.verdict.result, 'inconclusive', 'equal successes and equal cost decide nothing');
+    assert.match(c.markdown, /Against no plugin \(reported, not deciding\):\n- current: /);
+    assert.equal(combine([rowsOf('current', 'c1', 1)], { incumbent: 'current', candidate: 'proposed' }).verdict, null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

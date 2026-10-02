@@ -8,6 +8,11 @@
 // Writes <out>/rows.json, <out>/table.md and <out>/traces/*.jsonl. The eval's
 // "with" arm is labelled <name>; its "without" arm is labelled "no-plugin".
 //
+//   node evals/grade-kept.mjs combine --dir <downloaded results> \
+//        --incumbent <arm> --candidate <arm> --out verdict.md
+//
+// Joins every leg's rows.json, voids pairs across legs, and writes the verdict.
+//
 // Assumptions about the eval's output that the pilot must confirm are marked
 // PILOT below. Everything else is the documented aggregate-result.json shape
 // (schemaVersion 1): cases[].arms.{with,without}[] with costUsd,
@@ -99,6 +104,25 @@ const SANDBOX = /cannot confine|no sandbox backend|bubblewrap|bwrap/i;
 const CRASH = /^exit \d+|crash|spawn |ENOENT|EACCES|could not start|failed to start|internal error|SIGSEGV|SIGKILL|killed/i;
 const READS_HIDDEN = /bench-hidden|(?:^|[^\w.-])bench(?:\/|\\\\|\\)/m;
 
+// What the agent asked its tools to do: the input of every tool_use, the
+// helpers' included. Only these count as reading, because the start-up record,
+// tool output and the plugin's own text can name a folder the agent never
+// opened, and that text is in one arm only. A trace with no parsable record
+// is scanned whole, so a changed format voids rather than passes.
+export function toolInputs(traceText) {
+  const out = [];
+  let records = 0;
+  for (const line of String(traceText || '').split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (!o || typeof o.type !== 'string') continue;
+    records++;
+    const content = o.type === 'assistant' && Array.isArray(o.message?.content) ? o.message.content : [];
+    for (const c of content) if (c?.type === 'tool_use') out.push(JSON.stringify(c.input ?? {}));
+  }
+  return records ? out.join('\n') : String(traceText || '');
+}
+
 // Void only machine faults. A timeout, running out of turns or a wrong result
 // is a failure and stays valid, with its cost.
 export function validity(row, traceText = '') {
@@ -112,7 +136,7 @@ export function validity(row, traceText = '') {
     if (SANDBOX.test(e)) return { valid: false, reason: 'sandbox unavailable' };
     if (CRASH.test(e)) return { valid: false, reason: 'runner crash' };
   }
-  if (traceText && READS_HIDDEN.test(traceText)) return { valid: false, reason: 'trace reads bench-hidden or bench' };
+  if (traceText && READS_HIDDEN.test(toolInputs(traceText))) return { valid: false, reason: 'trace reads bench-hidden or bench' };
   return { valid: true };
 }
 
@@ -294,6 +318,50 @@ export function verdict(incumbent, candidate, { confirmed = false, safetyStopRem
   return { result: 'inconclusive', reasons, needsConfirmation: [], needsReason };
 }
 
+// ----------------------------------------------------------------- combine
+
+// Every rows.json under a folder of downloaded results, one per matrix leg.
+export function findRows(dir) {
+  const out = [];
+  const walk = d => {
+    let names = [];
+    try { names = readdirSync(d); } catch { return; }
+    for (const n of names) {
+      const p = join(d, n);
+      let s; try { s = statSync(p); } catch { continue; }
+      if (s.isDirectory()) walk(p);
+      else if (n === 'rows.json') out.push(p);
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
+// The legs graded themselves; a voided run there voids its pair here, across
+// every arm. RULE.md decides candidate against incumbent; every plugin arm
+// against no plugin is reported and decides nothing.
+export function combine(rowSets, { incumbent, candidate, confirmed = false, safetyStopRemoved = false }) {
+  const rows = pairVoid(rowSets.flat());
+  const s = summarize(rows);
+  const missing = [incumbent, candidate].filter(a => !s[a]);
+  const v = missing.length ? null : verdict(s[incumbent], s[candidate], { confirmed, safetyStopRemoved });
+  const L = [`# Bench verdict: ${candidate} against ${incumbent}`, ''];
+  if (v) {
+    L.push(`**${v.result}**`, '', ...v.reasons.map(r => `- ${r}`));
+    if (v.needsConfirmation.length) L.push(`- next: 3 more runs for both arms on ${v.needsConfirmation.join(', ')}, then combine with --confirmed`);
+    if (v.needsReason) L.push('- a written reason for the slower time is needed before it ships');
+  } else L.push(`No verdict: no rows for ${missing.join(' and ')}.`);
+  if (s[NO_PLUGIN]) {
+    L.push('', 'Against no plugin (reported, not deciding):');
+    for (const a of Object.keys(s).filter(a => a !== NO_PLUGIN)) {
+      const w = verdict(s[NO_PLUGIN], s[a]);
+      L.push(`- ${a}: ${w.result}; ${w.reasons.join('; ')}`);
+    }
+  }
+  L.push('', table(rows));
+  return { rows, summary: s, verdict: v, markdown: L.join('\n') };
+}
+
 // --------------------------------------------------------------------- CLI
 
 export function gradeAggregate(aggregate, { hiddenDir, arm }) {
@@ -315,6 +383,15 @@ export function gradeAggregate(aggregate, { hiddenDir, arm }) {
 
 function main(argv) {
   const get = k => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : null; };
+  if (argv[0] === 'combine') {
+    const dir = get('dir'), incumbent = get('incumbent'), candidate = get('candidate'), file = get('out');
+    if (!dir || !incumbent || !candidate || !file) { console.error('usage: grade-kept.mjs combine --dir <downloaded results> --incumbent <arm> --candidate <arm> --out <verdict.md> [--confirmed] [--safety-stop-removed]'); return 1; }
+    const sets = findRows(dir).map(p => JSON.parse(readFileSync(p, 'utf8')));
+    const c = combine(sets, { incumbent, candidate, confirmed: argv.includes('--confirmed'), safetyStopRemoved: argv.includes('--safety-stop-removed') });
+    writeFileSync(file, c.markdown);
+    process.stdout.write(c.markdown);
+    return c.verdict ? 0 : 1;
+  }
   const agg = get('aggregate'), hidden = get('hidden'), arm = get('arm'), out = get('out');
   if (!agg || !arm || !out) { console.error('usage: grade-kept.mjs --aggregate <file> --hidden <bench-hidden dir> --arm <name> --out <dir>'); return 1; }
   const aggregate = JSON.parse(readFileSync(agg, 'utf8'));
