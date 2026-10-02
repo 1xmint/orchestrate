@@ -2,6 +2,26 @@
 
 Resume point for building the `orchestrate` skill.
 
+**In progress: 0009 — measure against plain Claude before changing,
+2026-10-01.** Plan: `docs/research/0009-plan.md` (revision 2). Work branch
+`phase/0009-bench`. This becomes the next release's section when it ships.
+
+- The bench (`bench/`, `bench-hidden/`, `evals/grade-kept.mjs`,
+  `.github/workflows/bench.yml`) fits "nothing that bills an outside service
+  or needs its own API key": it is for developing this plugin only and is not
+  installed; the owner starts it by hand; it signs in with the owner's own
+  subscription token, never an API key; GitHub Actions minutes are free on a
+  public repository. Each batch has a `--max-cost-usd` stop-loss written in
+  `bench/RULE.md` before it runs.
+- The rule that decides a comparison is in `bench/RULE.md`, written before any
+  run: gates, then successes, then cost per success, then time.
+- Every case's hidden checks are proven to pass a known-right solution and
+  fail a known-wrong one (`bench/grader-check.test.mjs`), so a hard case is
+  never mistaken for a broken one.
+- `gate.mjs` reads the merge gate only from a workflow that runs on push or
+  pull request, so the hand-started bench job is never taken as a project's
+  gate.
+
 ## v0.21.0 — judgment: no test that teaches nothing, no review loop, 2026-10-01
 
 From the owner's correction after 0.20.1: the session had spent $10 on a test
