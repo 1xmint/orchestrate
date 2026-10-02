@@ -21,6 +21,19 @@ Resume point for building the `orchestrate` skill.
 - `gate.mjs` reads the merge gate only from a workflow that runs on push or
   pull request, so the hand-started bench job is never taken as a project's
   gate.
+- Plan revision 2 turned the guard's Sonnet-first refusal into an allow. That
+  part is dropped; Stage 2 is wording only, and the refusal and its grant code
+  stay. Three reasons: AGENTS.md says a hook refuses a helper on the wrong
+  model; the record (`guard-agent.mjs`, the comment above the refusal) shows
+  56 of 58 builders ran on Opus while the rule was only written; and
+  `bench/RULE.md` keeps a removed capability when a result is inconclusive.
+  Removing it would need its own comparison (current against current without
+  the refusal) and an AGENTS.md change in the same pull request.
+- Hook notes now state facts (Stage 0). Two refusals still end in an order:
+  the worker-limit one in `lib/workers.mjs` and the Sonnet-first one in
+  `guard-agent.mjs`. They are reworded together, keeping what was blocked and
+  the way through, with one independent review, because a refusal's wording
+  is a guard change.
 
 ## v0.21.0 — judgment: no test that teaches nothing, no review loop, 2026-10-01
 
