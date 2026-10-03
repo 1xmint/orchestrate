@@ -138,7 +138,24 @@ release's section when it ships.
     array when nothing is in flight"). Not measured; it rides the candidate
     bundle. Cost: one extra turn when it fires, never when something is out,
     the user is the one waited on, or the record shows a reminder was set.
-  - **Not done, and why.** Step 0 and step 3 need the owner's machine and
+  - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
+    settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
+    per run (skill 19,995, Plain style 5,094, card about 2,196, profile line
+    about 991) and cost about $0.04 more than plain Claude on three cases
+    where both did the same work (about $0.115, so 1.35x; level on a fourth,
+    `docs/research/0007-eval-release.md`). The candidate reads 13,865 (skill
+    7,625, style 3,669, card 2,187, profile line 384), 49% of that. If the
+    whole extra scales with bytes, the ratio on such cases is about 1.17x; if
+    one extra model call to load the skill (about a cent at Opus 5.5's listed
+    prices, `references/models.md`) does not shrink, about 1.22x. Both are
+    over the 1.15x line, so on tasks the size of 0.20.0's cases the run is not
+    bought (decision 1b holds the bar). Two unknowns move it below the line:
+    a longer task spreads the one-time read over more turns (at 20 turns and
+    about $0.40 a run the same arithmetic gives about 1.11x), and a task
+    small enough that the skill never loads pays only the style and the card
+    (about 1.08x). Pilot part 2 (already approved, $4) shows both: its trace
+    says whether the skill loaded and what a bench run costs. The prediction
+    is then one line of arithmetic, written here before any comparison cap.
     records; step 2a (which hook notes Claude never acts on) needs the session
     records too. Left for the owner, each with the audit's evidence in PR #52:
     setting `worktree.baseRef` to "head"; a smaller worktree-removal reader in
