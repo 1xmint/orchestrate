@@ -82,8 +82,8 @@ return you keep and checks. A small build split across helpers has cost two to
 three times doing it alone. A sweep you hand over names `model: "haiku"`: an
 unnamed `Explore` runs on your own model. **Assisted**: one worker for one
 larger step. **Coordinated**: three or more independent steps with `OWNS` and
-`DONE WHEN` go to `orch-coordinator`. Use the helper or model the user names;
-pilot one helper before many. Before a new dependency, abstraction or worker, name
+`DONE WHEN` go to `orch-coordinator`. Use the helper or model the user names
+(for one task, its packet needs a numeric `TASK:` line); pilot one helper before many. Before a new dependency, abstraction or worker, name
 the requirement it serves now.
 
 ## Dispatch and prove

@@ -317,6 +317,70 @@ test('built-in sweepers must name a cheap model', () => {
   assert.equal(modelDecision({ subagent_type: 'general-purpose', model: 'sonnet', prompt: 'x' }, pro), null);
 });
 
+test('a finder honours the model the user named, the same grant a builder reads', () => {
+  // The user said "however many opus agents you need"; Explore on opus was
+  // refused with "a dispatch with model: sonnet or haiku passes".
+  const runModel = { family: 'opus', at: '2026-10-03T00:00:00Z' };
+  assert.equal(modelDecision({ subagent_type: 'Explore', model: 'opus', prompt: 'find every caller of parse()' }, { ...pro, runModel }), null, 'a grant for every helper');
+  // A one-task grant binds the finder's numeric task id, like a builder's.
+  const userModel = { family: 'opus', at: '2026-10-03T00:00:00Z' };
+  assert.deepEqual(modelDecision({ subagent_type: 'Explore', model: 'opus', prompt: 'TASK: 10-3-0009\nfind it' }, { ...pro, userModel }), { grantBind: '10-3-0009', at: userModel.at, family: 'opus' });
+  assert.match(modelDecision({ subagent_type: 'Explore', model: 'opus', prompt: 'find it' }, { ...pro, userModel }).reason, /^the user named opus, and the packet has no TASK: line with a number/);
+  assert.match(modelDecision({ subagent_type: 'Explore', model: 'opus', prompt: 'TASK: 10-3-0010\nfind it' }, { ...pro, userModel: { ...userModel, taskId: '10-3-0009' } }).reason, /10-3-0009/, 'a grant spent on another task is refused by name');
+  // Still refused: no grant, a grant for another family, and no model at all.
+  assert.equal(modelDecision({ subagent_type: 'Explore', model: 'opus', prompt: 'find it' }, pro).prefix, 'model');
+  assert.equal(modelDecision({ subagent_type: 'Explore', model: 'opus', prompt: 'find it' }, { ...pro, runModel: { ...runModel, family: 'fable' } }).prefix, 'model');
+  assert.equal(modelDecision({ subagent_type: 'Explore', prompt: 'find it' }, { ...pro, runModel }).prefix, 'model', 'an unnamed model is still the lead\'s own');
+  // A prior Sonnet attempt does not lift a finder: only the user's word does.
+  const tried = [{ agent: 'Explore', model: 'sonnet', key: 'find it' }];
+  assert.equal(modelDecision({ subagent_type: 'Explore', model: 'opus', prompt: 'find it' }, { ...pro, dispatches: tried }).prefix, 'model');
+});
+
+test('the task key skips the FOR line and the template header lines every task of a job shares', () => {
+  // A Sonnet builder on "Add the search box" let an Opus builder on "Rewrite
+  // the sync engine" through: both keyed on the shared For line.
+  const For = 'For: the notes app gets search and sync\n';
+  assert.equal(taskKey(`${For}Add the search box to the notes page`), 'add the search box to the notes page');
+  assert.notEqual(taskKey(`${For}Add the search box`), taskKey(`${For}Rewrite the sync engine`));
+  assert.equal(taskKey('FOR: a person ships a flag\nRUN: 20261003-x\nREVIEW: yes\nWHERE: repo /r  base main @ abc\nworktree: yes\nOBJECTIVE\nAdd the flag'), 'add the flag');
+  assert.equal(taskKey('PRIOR ATTEMPTS: sonnet failed the check\nFor: x\nAdd the flag'), 'add the flag', 'a retry\'s added line does not change the key');
+  assert.equal(taskKey('Context matters here: keep it'), 'context matters here: keep it', 'an ordinary sentence is not a heading');
+  const ti = model => ({ subagent_type: 'orch-implementer', model, prompt: `${For}Rewrite the sync engine` });
+  const sonnetOnSearch = [{ agent: 'orch-implementer', model: 'sonnet', key: taskKey(`${For}Add the search box`) }];
+  assert.equal(modelDecision(ti('opus'), { ...pro, dispatches: sonnetOnSearch }).prefix, 'model', 'another task of the same job is not an escalation');
+  const sonnetOnSync = [{ agent: 'orch-implementer', model: 'sonnet', key: taskKey(`${For}Rewrite the sync engine`) }];
+  assert.equal(modelDecision(ti('opus'), { ...pro, dispatches: sonnetOnSync }), null, 'the same task after a Sonnet attempt still escalates');
+  // A packet with nothing but header lines has no key, and matches no attempt.
+  assert.equal(taskKey('FOR: x\nOBJECTIVE'), '');
+  assert.equal(modelDecision({ subagent_type: 'orch-implementer', model: 'opus', prompt: 'FOR: x\nOBJECTIVE' }, { ...pro, dispatches: [{ agent: 'orch-implementer', model: 'sonnet', key: '' }] }).prefix, 'model');
+});
+
+test('the plan is asked for only when Fable is named, and its answer is used', () => {
+  let asked = 0;
+  const tier = () => { asked++; return 'max20'; };
+  assert.equal(modelDecision({ subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 1-1-0001' }, { tier }), null);
+  assert.equal(asked, 0, 'no Fable, no plan lookup');
+  assert.equal(modelDecision({ subagent_type: 'orch-reviewer', model: 'fable', prompt: 'TASK: 1-1-0001' }, { tier }), null, 'Fable on a plan that includes it');
+  assert.equal(asked, 1);
+  assert.equal(modelDecision({ subagent_type: 'orch-reviewer', model: 'fable', prompt: 'TASK: 1-1-0001' }, { tier: () => 'pro' }).prefix, 'model');
+});
+
+test('guard-agent as a process: the user named opus and the prompt only points at its packet file', () => {
+  // The refusal said "the packet has no TASK: line with a number"; the file
+  // the prompt names had one.
+  const home = sandbox();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-pk-'));
+  const file = join(dir, '10-3-0002.md');
+  writeFileSync(file, 'TASK: 10-3-0002\nFOR: the notes app gets search\nDONE WHEN\n- npm test passes\nPROGRESS: /r/p2.md\nWHERE: worktree: yes\n');
+  writeSession(home, 's-pk', { userModel: { family: 'opus', at: '2026-10-03T00:00:00Z' } });
+  const first = dispatch(home, 's-pk', { subagent_type: 'orch-implementer', model: 'opus', prompt: `Your packet is in ${file}` });
+  assert.doesNotMatch(first.stdout, /permissionDecision/, 'the grant binds the id in the file');
+  const other = join(dir, '10-3-0003.md');
+  writeFileSync(other, 'TASK: 10-3-0003\nFOR: x\n');
+  const second = dispatch(home, 's-pk', { subagent_type: 'orch-implementer', model: 'opus', prompt: `Your packet is in ${other}` });
+  assert.match(second.json.hookSpecificOutput.permissionDecisionReason, /10-3-0002.*10-3-0003/, 'and refuses another file\'s id by name');
+});
+
 test('a fork is refused only when the conversation it would copy is large', () => {
   assert.equal(modelDecision({ subagent_type: 'fork', prompt: 'x' }, { ...pro, leadContext: FORK_MAX_CONTEXT + 1 }).prefix, 'model');
   assert.equal(modelDecision({ subagent_type: 'fork', prompt: 'x' }, { ...pro, leadContext: 40000 }), null);
