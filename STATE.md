@@ -309,6 +309,49 @@ release's section when it ships.
     refusals now say what did not run, why, and who can run it, not "stop
     and tell the user". The guard takes its file helpers from `lib/files.mjs`
     (tier re-exports them): a plain `ls` 46 to 39 ms, bare Node 21.
+  - **The dispatch guard read whole** (independent read, one blocker and six
+    should-fix, each run through the real hook). The budget gate was skipped
+    whenever a dispatch named no model, though every role has one in its
+    agent file: a builder over a run's ceiling passed by leaving the model
+    out; it now prices the model the helper will run on, and a budget
+    refusal is recorded with the others. The project-page gate held every
+    role it did not know, so Claude Code's own `statusline-setup` and the
+    user's own agents were refused; it now holds only the building roles,
+    and the read and build role lists live in one place (`lib/workflow.mjs`)
+    with a test against each agent file's tools. A finder ignored the model
+    the user named; it now reads the same grant as a builder. A prompt that
+    only points at a packet file was judged on the pointer: the grant said
+    the packet had no TASK line, and the dispatch row lost its task,
+    progress file and review flag, so the review hold never held; the
+    packet is now read once (prompt and the files it names) for every
+    check. With no TASK line the task key fell back to the FOR line, the
+    same for every task of a job, so an Opus builder rode a Sonnet one's
+    attempt. Inside a helper the guard refuses but sends no note.
+    Wording, 2026-10-03 (prompting best-practices page: say what to do,
+    give the reason): orch-researcher and orch-advisor point a one-page
+    lookup at Explore on haiku (the guard refuses `general-purpose` while
+    the capped roles are installed); SKILL.md says a grant for one task
+    needs its numeric `TASK:` line (skill 7,575 to 7,631 bytes).
+  - **The band says what Claude is doing now** (independent read of the
+    band, the after-summary hook and the status line, two blockers). At a
+    prompt the band showed stored text first, so a finished first request
+    or the project page's step stood in for what the user had just asked;
+    a new request now shows itself, a resume word shows the next open step,
+    an acknowledgement shows nothing. The after-summary checkpoint was built
+    before the host writes that summary's boundary, so it held the stretch
+    before the previous summary and the newest stretch had none; it now
+    holds the stretch just summarised. A closed run no longer supplies the
+    next step (`boundRun`, shared with keep-going). This session's own line
+    beats another session's pause, which no longer promises keep-going. A
+    Stop that turn-check refuses shows "Working on", not the question
+    persist-check wrote in parallel. A working line hides when the host
+    says the session is not working (after Esc). A failed read no longer
+    blanks the band until the file changes. API error kinds are in plain
+    words, and keep-going is promised only for the usage limit. The status
+    line caches the account it reads from `~/.claude.json` by size and
+    time, and a copy left in the plugin cache hands over to the installed
+    one. "Needs you: Anything else?" stays: nothing yet tells an offer from
+    a question, and keep-going stops on the same message.
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line
