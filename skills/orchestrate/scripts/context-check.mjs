@@ -97,6 +97,10 @@ export function stepWork(work, launchRoot, path) {
   if (!launchRoot || !path) return work || null;
   const abs = resolvePath(path);
   if (!underRoot(abs, launchRoot) && normSlashes(abs).toLowerCase() !== normSlashes(launchRoot).toLowerCase()) return work || null;
+  // A helper's own folder is a copy of the project, not where the project is:
+  // three reads there moved the project to "<repo>/.claude" (whole-file
+  // review, 2026-10-03).
+  if (/\/\.claude\/worktrees\//i.test(normSlashes(abs))) return work || null;
   const root = (work && work.root && (underRoot(abs, work.root) || normSlashes(abs).toLowerCase() === normSlashes(work.root).toLowerCase()))
     ? work.root
     : (findRepoRoot(dirname(abs)) || launchRoot);
@@ -162,7 +166,10 @@ export function failStreak(returned) {
     if (v === 'PASS') break;
     if (v !== 'FAIL') continue;
     if (key == null) key = String(list[i].agentId || list[i].toolUseId || list[i].at || i);
-    of.unshift(String(list[i].reviewOf || '?').slice(0, 8));
+    // A task id stays whole ("10-03-0001" and "10-03-0002" cut to eight read
+    // the same); a commit or tool id is cut to eight.
+    const of1 = String(list[i].reviewOf || '?');
+    of.unshift(/^\d+-\d+-\d+$/.test(of1) ? of1 : of1.slice(0, 8));
   }
   return { count: of.length, of, key };
 }
@@ -291,7 +298,10 @@ export function check(input) {
     const r = sampleContext({ transcriptPath: input.transcript_path, session, runMd: bound, permissionMode: modeOf(input), settingsPath: SETTINGS_PATH, env: process.env });
     contextLine = r.notice;
   }
-  const fact = workCallsFact(workCalls, loadPolicy().lead.workCallsEvery);
+  // Said once, on the call that reaches the count; a later call that is not a
+  // work call leaves the count where it is and says nothing (whole-file review,
+  // 2026-10-03: it repeated on every such call).
+  const fact = workCallsChanged ? workCallsFact(workCalls, loadPolicy().lead.workCallsEvery) : null;
   if (fact) contextLine = contextLine ? `${contextLine} · ${fact}` : `[orchestrate · context] ${fact}`;
   if (contextLine) out.push(contextLine);
   if (state) {
@@ -334,6 +344,9 @@ export function check(input) {
     if (!state.leftoverTold && nReturned && state.leftoverSeen !== nReturned && !anyHelperRunning({ dispatches: state.dispatches, returned: state.returned })) {
       state.leftoverSeen = nReturned;
       leftoverTold = true;
+      // Noted before the git look, so a look that runs out of time is not
+      // repeated on every later tool call.
+      try { saveSession(state); } catch {}
       const left = leftoverNote({ cwd: state.cwd || input.cwd, returned: state.returned, dispatches: state.dispatches });
       if (left) {
         out.push(`[orchestrate · context] ${left.text}; nothing has removed them.`);

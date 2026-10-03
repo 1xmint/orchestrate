@@ -59,9 +59,23 @@ export function leftoverText({ folders, branches }) {
   return `${what} ${folders + branches === 1 ? 'is' : 'are'} still here`;
 }
 
+// The git look runs inside hooks with a five-second limit, one of them after
+// every tool call, and a slow repository with several helper folders took all
+// of it: the hook was killed before it could note that it had looked, so it
+// looked again on the next call (whole-file review, 2026-10-03). All the git
+// calls of one look share LOOK_MS; a call with no time left is skipped, as a
+// failed one is.
+const LOOK_MS = 1500;
+let until = null;
+const gitOut = (args, cwd) => {
+  const left = until == null ? 5000 : until - Date.now();
+  if (left < 50) throw new Error('no time left for git');
+  return execFileSync('git', args, { cwd, encoding: 'utf8', timeout: Math.min(5000, left), stdio: ['ignore', 'pipe', 'ignore'] });
+};
+
 // What git reports now: the folders it lists and the helper branches it lists.
 export function gitHelperState(cwd) {
-  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
+  const git = args => gitOut(args, cwd);
   let known = [], branches = [];
   try { known = git(['worktree', 'list', '--porcelain']).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9).trim()); } catch {}
   try { branches = git(['branch', '--list', '--format=%(refname:short)', 'worktree-agent-*']).split('\n').map(x => x.trim()).filter(Boolean); } catch {}
@@ -71,9 +85,12 @@ export function gitHelperState(cwd) {
 // The whole check for one session: null when nothing is left.
 export function leftoverNote({ cwd, returned, dispatches }) {
   if (!cwd || !Array.isArray(returned) || !returned.some(r => r && r.agentId) || anyHelperRunning({ dispatches, returned })) return null;
-  const { known, branches } = gitHelperState(cwd);
-  const c = leftoverHelpers({ cwd, returned, merged: mergedBranches(cwd), exists: existsSync, clean: folderIsClean, known, branches });
-  return c.folders + c.branches ? { ...c, text: leftoverText(c) } : null;
+  until = Date.now() + LOOK_MS;
+  try {
+    const { known, branches } = gitHelperState(cwd);
+    const c = leftoverHelpers({ cwd, returned, merged: mergedBranches(cwd), exists: existsSync, clean: folderIsClean, known, branches });
+    return c.folders + c.branches ? { ...c, text: leftoverText(c) } : null;
+  } finally { until = null; }
 }
 
 // Helper branches whose work is really in the current branch: the branch has at
@@ -81,7 +98,7 @@ export function leftoverNote({ cwd, returned, dispatches }) {
 // the current branch contains it. A helper branch that never committed sits at
 // the tip it was cut from, which `--merged` lists too, so that alone is not enough.
 export function mergedBranches(cwd) {
-  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
+  const git = args => gitOut(args, cwd);
   try {
     const names = git(['branch', '--merged', 'HEAD', '--format=%(refname:short)']).split('\n').map(x => x.trim()).filter(n => /^worktree-agent-[A-Za-z0-9]+$/.test(n));
     return names.filter(n => {
@@ -92,5 +109,5 @@ export function mergedBranches(cwd) {
 
 // A helper folder with nothing unsaved in it (no changed or new files).
 export function folderIsClean(dir) {
-  try { return execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() === ''; } catch { return false; }
+  try { return gitOut(['-C', dir, 'status', '--porcelain']).trim() === ''; } catch { return false; }
 }

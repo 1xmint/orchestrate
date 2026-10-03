@@ -98,6 +98,11 @@ export function segmentTurns(path) {
       if (!line.trim()) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
       if (o && o.type === 'user') {
+        // A skill's body loaded mid-run (isMeta) and a compaction summary are
+        // the host's text, not a message that resumed the helper; they do not
+        // start a new segment (whole-file review, 2026-10-03: a reviewer that
+        // used every turn read as having used a few).
+        if (o.isMeta || o.isCompactSummary) continue;
         const c = o.message && o.message.content;
         const hasText = typeof c === 'string' || (Array.isArray(c) && c.some(b => b && b.type === 'text'));
         if (hasText) segment = new Set();

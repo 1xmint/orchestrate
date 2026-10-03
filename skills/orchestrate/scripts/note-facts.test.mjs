@@ -35,7 +35,8 @@ test('the lead-setting note states the cost and when a change lands', () => {
 
 test('the idle note states that a background dispatch returns control at once', () => {
   const d = heartbeatDecision({ run: { ready: ['9-9-0005', '9-9-0006'] }, rec: { turns: 3 } });
-  assert.match(d.why, /nothing new has been dispatched this turn\. A background dispatch hands control straight back\.$/);
+  assert.match(d.why, /^2 tasks are unblocked \(9-9-0005, 9-9-0006\)\. A background dispatch hands control straight back\.$/);
+  assert.doesNotMatch(d.why, /dispatched this turn/, 'not known here, so not said');
 });
 
 test('the usage-band lines give the percentage and no orders', () => {

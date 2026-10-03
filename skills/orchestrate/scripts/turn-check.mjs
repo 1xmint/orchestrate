@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// turn-check.mjs — the session's Stop hook and management heartbeat, registered
-// from SKILL.md's frontmatter so it is live only while the skill is in play.
+// turn-check.mjs — the session's management heartbeat at Stop, registered in
+// hooks/hooks.json beside persist-check.mjs.
 // Idle and Pickup below are for a coordinated run this session has explicitly
 // bound; the review hold is not — it reads a task's own return, which lands
 // in session state whether or not a run is bound, so it checks regardless.
@@ -191,6 +191,10 @@ export function turnEdits(transcriptTail) {
     if (!line.includes('"type"')) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
     const content = o && o.message && o.message.content;
+    // A message the user typed while a turn was running is stored as a queued
+    // command, not a user record; it starts a turn all the same (whole-file
+    // review, 2026-10-03: edits from before it kept counting).
+    if (o && o.type === 'attachment' && o.attachment && o.attachment.type === 'queued_command' && o.attachment.origin && o.attachment.origin.kind === 'human') { paths = []; continue; }
     if (o && o.type === 'user') {
       const real = typeof content === 'string' ? content.trim() !== ''
         : Array.isArray(content) && content.some(c => c && c.type === 'text');
@@ -276,7 +280,9 @@ export function heartbeatDecision({ run, rec }) {
   if (ready.length >= IDLE_READY_MIN && prev.readyBlockedFor !== readyKey) {
     out.readyBlockedFor = readyKey;
     const shown = ready.slice(0, 4).join(', ') + (ready.length > 4 ? ` +${ready.length - 4} more` : '');
-    return { rec: out, kind: 'idle', why: `${ready.length} tasks are unblocked (${shown}) and nothing new has been dispatched this turn. A background dispatch hands control straight back.` };
+    // Whether anything was dispatched this turn is not known here, so it is
+    // not said (whole-file review, 2026-10-03).
+    return { rec: out, kind: 'idle', why: `${ready.length} tasks are unblocked (${shown}). A background dispatch hands control straight back.` };
   }
 
   return { rec: out, kind: null };
@@ -367,6 +373,9 @@ function main() {
   try { input = JSON.parse(payload); } catch { return; }
   if (!input || typeof input !== 'object') return;
   if (input.stop_hook_active === true) return;
+  // A helper's own Stop is not the lead's turn (AGENTS.md: every hook goes
+  // silent inside a helper).
+  if (input.agent_id) return;
 
   checkHeartbeat(input);
   const note = checkProject(input, emitted);
