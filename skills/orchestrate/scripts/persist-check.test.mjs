@@ -517,6 +517,30 @@ test('without keep-going: a reminder set in the record means the promise may be 
   assert.equal(r.stdout.trim(), '');
 });
 
+// ---- a test count no output shows ---------------------------------------------
+// SKILL.md: copy each number from a proof line; two closing messages carried
+// figures that did not exist (lib/proof-claim.mjs).
+
+test('a closing test count that no output shows is refused once with the fact', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const transcript_path = join(home, 'transcript.jsonl');
+  writeFileSync(transcript_path, [
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'b1', content: 'ℹ tests 37\nℹ pass 36\nℹ fail 1' }] } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: 'Done. All 42 tests pass.' }] } },
+  ].map(r => JSON.stringify(r)).join('\n') + '\n');
+  const stop = (extra = {}) => run({ hook_event_name: 'Stop', session_id: 'sess-p1', stop_hook_active: false, transcript_path, last_assistant_message: 'Done. All 42 tests pass.', ...extra }, home);
+  const out = JSON.parse(stop().stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /^Your last message gives 42 as a count of passing tests or checks; no command output, helper report or message in this session's recent record shows that number\./);
+  assert.equal(stop().stdout.trim(), '', 'once per message');
+  // The count the output shows, a Stop a hook already refused, and a Stop with
+  // no record to compare against are all left alone.
+  const fresh = () => mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'sess-p2', stop_hook_active: false, transcript_path, last_assistant_message: 'Done: 36 tests pass, 1 fails.' }, fresh()).stdout.trim(), '');
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'sess-p3', stop_hook_active: true, transcript_path, last_assistant_message: 'Done. All 42 tests pass.' }, fresh()).stdout.trim(), '');
+  assert.equal(run({ hook_event_name: 'Stop', session_id: 'sess-p4', stop_hook_active: false, last_assistant_message: 'Done. All 42 tests pass.' }, fresh()).stdout.trim(), '');
+});
+
 test('no git repo at cwd is silent, whatever the transcript claims', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
   const notARepo = mkdtempSync(join(tmpdir(), 'orch-persist-norepo-'));

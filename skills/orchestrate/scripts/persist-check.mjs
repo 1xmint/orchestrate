@@ -54,6 +54,7 @@ import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mj
 import { modeOf } from './lib/modes.mjs';
 import { classifyClaim, lastAssistantText, contradicts, countedPaths, namesAllPaths } from './lib/commit-claim.mjs';
 import { claimsWait, nothingOut, WAIT_FACT, SCHEDULING_TOOL } from './lib/wait-claim.mjs';
+import { claimedCounts, unseenCounts } from './lib/proof-claim.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -358,7 +359,7 @@ function commitsSince(cwd, startHead) {
   } catch { return null; }
 }
 
-// Appended to the closing-message blocks (the commit claim, the wait claim):
+// Appended to the closing-message blocks (the commit, test-count and wait claims):
 // the block replaces nothing the lead has
 // already said, but a headless caller's `result` is whatever the lead sends
 // next, so a one-line reply to this block silently becomes the report the
@@ -403,6 +404,33 @@ function checkCommitClaim(input, state) {
   st.commitClaimBlocked = claimHash;
   try { saveSession(st); } catch {}
   return commitClaimReason(claim, git, commitsSinceStart);
+}
+
+// How much of the record a test count is looked for in. Read only when the
+// closing message gives a count, which is rare; a long session's older output
+// may fall outside it, and then the count is said to be unseen once.
+const PROOF_SCAN_CAP = 1048576;
+
+// A count of passing tests in the closing message that appears in no output
+// the session saw (lib/proof-claim.mjs). The same guards as the commit check:
+// never on a Stop a hook already refused, once per message, and silent when
+// there is no record to compare against.
+function checkProofClaim(input, state) {
+  if (input.stop_hook_active || !input.transcript_path) return null;
+  let text = typeof input.last_assistant_message === 'string' ? input.last_assistant_message.trim() : '';
+  if (!text) text = lastAssistantText(readTail(input.transcript_path, PERSIST_SCAN_CAP));
+  if (!text || !claimedCounts(text).length) return null;
+  const tail = readTail(input.transcript_path, PROOF_SCAN_CAP);
+  if (!tail) return null;
+  const unseen = unseenCounts(text, tail);
+  if (!unseen.length) return null;
+  const claimHash = createHash('sha256').update(text).digest('hex').slice(0, 16);
+  if (state && state.proofClaimBlocked === claimHash) return null;
+  const st = state || { session_id: input.session_id };
+  st.proofClaimBlocked = claimHash;
+  try { saveSession(st); } catch {}
+  const list = unseen.length === 1 ? unseen[0] : `${unseen.slice(0, -1).join(', ')} and ${unseen[unseen.length - 1]}`;
+  return `Your last message gives ${list} as a count of passing tests or checks; no command output, helper report or message in this session's recent record shows that number.${RESEND_NOTE}`;
 }
 
 // The same fact for a session with keep-going off: a closing promise to wait
@@ -487,6 +515,8 @@ export function check(input) {
   // with nothing armed gets this too.
   const commitClaimReasonText = checkCommitClaim(input, state);
   if (commitClaimReasonText) return { kind: 'continue', why: commitClaimReasonText };
+  const proofClaimReasonText = checkProofClaim(input, state);
+  if (proofClaimReasonText) return { kind: 'continue', why: proofClaimReasonText };
   // This is deliberately outside auto-continue: reaching the compaction line
   // is unsafe even for an ordinary Stop. A block is once per epoch, and an
   // active Stop hook must not block itself again.

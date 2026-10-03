@@ -138,6 +138,15 @@ release's section when it ships.
     array when nothing is in flight"). Not measured; it rides the candidate
     bundle. Cost: one extra turn when it fires, never when something is out,
     the user is the one waited on, or the record shows a reminder was set.
+  - **Test counts held to the record** (`lib/proof-claim.mjs`): SKILL.md's
+    "copy each number from a proof line" was prose only, after two closing
+    messages carried figures that did not exist. A count of passing tests or
+    checks in the closing message ("all 42 tests pass", "120 passing") that
+    appears in no command output, helper report, notification or user message
+    in the last megabyte of the record is sent back once with that fact. Only
+    counts of two digits or more; the assistant's own words are not evidence.
+    Same guards as the commit check (never on a Stop a hook already refused,
+    so inside a keep-going stretch it sees only the first Stop).
   - **A read of the always-on text as the lead reads it** (fresh context,
     Opus, against the prompting guide and the Opus 5.5 page, 2026-10-03), and
     an inventory of every hook line (Sonnet). Fixed: the style said "ask once"
@@ -156,7 +165,7 @@ release's section when it ships.
     line always read "codex: not checked in the last hour (run profile.mjs)"
     and running it changed nothing; the line now shows only a fresh reading.
     The keep-going line went from 467 to about 330 bytes. Per-run read now
-    13,282 bytes (skill 7,541, style 3,782, card 1,959; the skill keeps its
+    13,280 bytes (skill 7,539, style 3,782, card 1,959; the skill keeps its
     maintainer rule, which the portable build needs and a test pins). Not changed, and
     why: the "helper size" note on every dispatch (about 80 bytes, pinned by
     eight hook tests, and a guard change needs its own review); the skill's
