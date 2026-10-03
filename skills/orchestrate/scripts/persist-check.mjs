@@ -349,11 +349,11 @@ const STORE = () => join(DIR, 'persist-checks.json');
 
 // `git status --porcelain`, parsed to a count and up to three file names, with
 // the plugin's own untracked folders (.claude/, .orchestrator/) left out. Any
-// failure (no git on PATH, cwd not inside a repo, the 3s timeout) is a silent
+// failure (no git on PATH, cwd not inside a repo, the 2s timeout, so both git calls fit in the hook's five seconds) is a silent
 // skip: this check only ever fires when it can be sure of the repo's state.
 function gitPorcelain(cwd) {
   try {
-    const r = spawnSync('git', ['status', '--porcelain'], { cwd, timeout: 3000, encoding: 'utf8' });
+    const r = spawnSync('git', ['status', '--porcelain'], { cwd, timeout: 2000, encoding: 'utf8' });
     if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return null;
     const files = countedPaths(r.stdout.split('\n').map(l => l.trimEnd()).filter(Boolean).map(l => l.slice(3).trim()));
     return { count: files.length, files: files.slice(0, 3), allFiles: files };
@@ -366,7 +366,7 @@ function gitPorcelain(cwd) {
 function commitsSince(cwd, startHead) {
   if (!startHead) return null;
   try {
-    const r = spawnSync('git', ['rev-list', '--count', `${startHead}..HEAD`], { cwd, timeout: 3000, encoding: 'utf8' });
+    const r = spawnSync('git', ['rev-list', '--count', `${startHead}..HEAD`], { cwd, timeout: 2000, encoding: 'utf8' });
     if (r.error || r.status !== 0 || typeof r.stdout !== 'string') return null;
     const n = parseInt(r.stdout.trim(), 10);
     return Number.isFinite(n) ? n : null;
