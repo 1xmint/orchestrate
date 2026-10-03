@@ -26,3 +26,35 @@ test('scripts/test.mjs --help lists files and exits 0 without running anything',
   assert.match(result.stdout, /\d+ test files/);
   assert.doesNotMatch(result.stdout, /^(✔|✖|ℹ tests)/m, 'a --help run must not execute the test suite itself');
 });
+
+// A red CI run names what failed on the check itself: each failing test is one
+// GitHub annotation with its file, line and message, escaped so a newline or a
+// comma in the message cannot cut the command short.
+import { annotation } from '../../../scripts/gh-annotate.mjs';
+import { reporterArgs } from '../../../scripts/test.mjs';
+
+test('a failing test becomes one escaped GitHub annotation', () => {
+  const line = annotation({
+    name: 'adds, then: carries',
+    file: join(ROOT, 'skills', 'x.test.mjs'),
+    line: 12,
+    details: { error: { failureType: 'testCodeFailure', cause: { message: 'expected 1\nactual 2 (100%)' } } },
+  }, ROOT);
+  assert.equal(line, '::error file=skills/x.test.mjs,line=12,title=adds%2C then%3A carries::expected 1%0Aactual 2 (100%25)\n');
+});
+
+test('a parent that failed only because a child failed adds no annotation of its own', () => {
+  assert.equal(annotation({ name: 'suite', details: { error: { failureType: 'subtestsFailed', message: '1 subtest failed' } } }, ROOT), null);
+});
+
+test('a failure with no file still names the test', () => {
+  assert.equal(annotation({ name: 'bare', details: { error: { message: 'boom' } } }, ROOT), '::error title=bare::boom\n');
+});
+
+test('the annotation reporter is added on GitHub only', () => {
+  assert.deepEqual(reporterArgs({}), []);
+  const args = reporterArgs({ GITHUB_ACTIONS: 'true' });
+  assert.ok(args.includes('--test-reporter=spec'), 'the readable output stays');
+  assert.ok(args.some(a => /^--test-reporter=file:.*gh-annotate\.mjs$/.test(a)), 'the annotation reporter is added');
+  assert.equal(args.filter(a => a === '--test-reporter-destination=stdout').length, 2, 'one destination per reporter');
+});
