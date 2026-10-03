@@ -67,7 +67,10 @@ release's section when it ships.
     and task ids; all are in plain words now, and the lead keeps the details.
   - **Step 2e, the per-run read: 27,278 to 13,481 bytes (51% less).** SKILL.md
     19,994 to 7,625; the Plain style 5,094 to 3,669; the card 2,190 to 2,187.
-    The profile line the skill loads with, not counted before, 991 to 384 (plus about 230 in a terminal with no usage reading, where it names the one-time status-line install).
+    The profile line the skill loads with, not counted before, 991 to 384
+    bytes; a terminal with no usage reading also gets one line naming the
+    one-time status-line install (`profile.test.mjs` holds the brief under
+    800 bytes).
     Where each rule went is in commit `e014f77`'s message; the auto-merge rule
     came back after the review. The prompting-guidance page was not re-read
     tonight (fetching it needed the owner's approval); these wording choices
@@ -86,7 +89,17 @@ release's section when it ships.
     coordinator's count went before the status word the ledger reads; the
     base check came after a debugger's reproduction; the profile cut dropped
     the only line that says live usage is off and how to turn it on (back, in
-    a terminal only). All fixed, with its nits, in the commit after this one.
+    a terminal only). All fixed, with its nits, in `00be057`. A third round
+    found three: a typed prompt with a system note in front, a queued message
+    or a summary was not read as the user speaking; a status question while a
+    helper was out ended keep-going (now only a background command alone can
+    end it that way); the usage line showed where no status line runs. Fixed
+    in `bec2bcf`. A fourth found two: a Monitor that runs a command may be
+    listed as a background command (type "shell"), so once one is started in
+    a stretch keep-going treats what is out as something that will report;
+    and a refusal with the host's words in front ("PreToolUse:Agent hook
+    error:") was missed, so the match now allows that prefix while still
+    reading only the start of the result.
   - **Also:** builders and debuggers check that their folder starts from the
     packet's base (Claude Code starts a helper folder from the remote's default
     branch unless `worktree.baseRef` is "head", code.claude.com/docs/en/

@@ -96,6 +96,11 @@ const textOf = c => typeof c === 'string' ? c
   : Array.isArray(c) ? c.map(b => (b && typeof b.text === 'string') ? b.text : (b && typeof b.content !== 'undefined') ? textOf(b.content) : '').join('\n')
   : '';
 
+// A refusal from this plugin's guard at the very start of a tool result, with
+// or without the host's own words in front of it.
+const REFUSALS = {};
+const REFUSAL = kinds => (REFUSALS[kinds] ||= new RegExp(`^\\s*(?:\\[?PreToolUse:[\\w-]+\\]? hook (?:blocking )?error:?\\s*)?orchestrate (?:${kinds}):`, 'i'));
+
 // The first line of an error, with numbers and paths blurred, so "the same
 // error" survives a changed line number or temp directory.
 export const errorKey = s => String(s || '').split('\n').map(l => l.trim()).find(Boolean)?.replace(/\d+/g, '#').replace(/[A-Za-z]:?[\\/][^\s'"]+/g, '<path>').slice(0, 160) || '';
@@ -155,12 +160,14 @@ export function scanTurn(tail) {
       for (const b of content) {
         if (!b || b.type !== 'tool_result') continue;
         const t = textOf(b.content);
-        // Anchored like the usage refusal below: only the guard's own error for
-        // this call, never a helper's report that quotes one.
-        if (b.is_error && /^\s*orchestrate (budget|guard):/.test(t)) denied = true;
         // Anchored to a refusal the guard returned for this very call, so a
-        // helper's report that only quotes one is still that helper's work.
-        const usageRefusal = Boolean(b.is_error) && /^\s*orchestrate quota:/.test(t);
+        // helper's report that only quotes one is still that helper's work. The
+        // host may put its own words in front ("PreToolUse:Agent hook error: ")
+        // and may not mark the result as an error, so neither is required: the
+        // anchor alone tells the guard's text from a report that quotes it
+        // (independent review, 2026-10-03, round 4).
+        if (REFUSAL('budget|guard').test(t)) denied = true;
+        const usageRefusal = REFUSAL('quota').test(t);
         if (usageRefusal) { quotaRefused = true; if (b.tool_use_id) usageRefused.add(b.tool_use_id); }
         if (b.is_error && !usageRefusal) { const k = errorKey(t); if (k) errors.push(k); }
       }
@@ -170,7 +177,8 @@ export function scanTurn(tail) {
   const tailText = lastText.trim().replace(/[\s*_`)\]]+$/, '');
   const asked = /\?$/.test(tailText);
   const goalMet = /\b(goal (is )?(met|complete|completed|achieved|reached)|all (the )?(steps|tasks|todos|items) (are )?(done|complete|finished)|nothing (left|more) to do|everything (is|in the plan is) (done|complete|finished))\b/i.test(lastText);
-  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange, prompted };
+  const monitorStarted = tools.includes('Monitor');
+  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange, prompted, monitorStarted };
 }
 
 // Whether the Stop payload says the host will wake this session later: a helper
@@ -188,9 +196,12 @@ export function workOut(input) {
 // in these lists for the whole session; without this a step that did nothing
 // would wait on them forever and keep-going would never stop.
 // True when every piece of work out is a background command and nothing is
-// scheduled. A helper, a Monitor, a workflow or a scheduled prompt reports
-// back and wakes the session; a background command may never (a dev server),
-// and one that runs for good cannot be told from a long build.
+// scheduled. A helper, a workflow or a scheduled prompt reports back and wakes
+// the session; a background command may never (a dev server), and one that
+// runs for good cannot be told from a long build. The type file names
+// "monitor" only for an MCP server's watch: a Monitor that runs a command may
+// be listed as "shell", which is why persistDecision also remembers whether a
+// Monitor was started (monitorSeen).
 export function onlyCommandsOut(input) {
   const tasks = input && Array.isArray(input.background_tasks) ? input.background_tasks : [];
   const crons = input && Array.isArray(input.session_crons) ? input.session_crons : [];
@@ -218,7 +229,11 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
   const item = next && next.state === 'open' && next.text ? next.text : null;
   const sameItem = item && rec.lastItem === item ? (Number(rec.sameItem) || 0) + 1 : (item ? 1 : 0);
-  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null };
+  // A Monitor started in this stretch may be reported as a background command
+  // (type "shell") and still wake the session when it fires, so it is
+  // remembered until keep-going is switched off or on again.
+  const monitorSeen = Boolean(rec.monitorSeen || scan.monitorStarted);
+  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null, monitorSeen };
   const g = shortGoal(goal);
   // `say` is the user's line when `why` carries what only the lead can use (a
   // path, a size); every other reason is already in plain words for both.
@@ -251,8 +266,10 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     // before the helper lands. Only background commands may never report (a
     // dev server), so with nothing but commands out, the same ones still out,
     // and a step after the user's own message that still did nothing, keep-going
-    // ends (independent review, 2026-10-03, rounds 1 to 3).
-    const settled = scan.prompted && commandsOnly && rec.waitingOn != null && rec.waitingOn === waitingOn;
+    // ends (independent review, 2026-10-03, rounds 1 to 3). A Monitor is listed
+    // as a background command too, so once one was started in this stretch the
+    // list cannot show which kind is out, and it stays a wait (round 4).
+    const settled = scan.prompted && commandsOnly && !monitorSeen && rec.waitingOn != null && rec.waitingOn === waitingOn;
     if (outstanding && !settled) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn }, kind: 'wait', why: 'a helper or background command is still out' };
     if (outstanding) return stop('the step after your message did no visible work while only a background command kept running');
     return stop('the last step did no visible work (no edit, command or helper)');

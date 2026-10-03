@@ -338,16 +338,24 @@ test('the same work still out after a wait with nothing done since ends the loop
 
 // Independent review round 2, 2026-10-03: a Monitor on CI stays listed and wakes
 // the session once per line; a step that only notes the line must not end
-// keep-going while CI still runs.
-test('woken by the work that is still out, an idle step waits again', () => {
-  const home = sandbox(); const dir = cwdDir();
-  arm(home, 'b6');
-  const monitor = { background_tasks: [{ id: 'm1', type: 'monitor', status: 'running', description: 'watch CI' }] };
-  const t = transcript(dir, said('Pushed; watching CI.'));
-  assert.equal(run(HOOK, stopPayload('b6', dir, t, monitor), home).stdout.trim(), '');
-  writeFileSync(t, lines(said('Pushed; watching CI.'), JSON.stringify({ type: 'user', message: { role: 'user', content: '<task-notification>\nlint passed\n</task-notification>' } }), said('Lint passed; waiting on the tests.')));
-  assert.equal(run(HOOK, stopPayload('b6', dir, t, monitor), home).stdout.trim(), '', 'a wait again, not a stop');
-  assert.equal(session(home, 'b6').persist.armed, true);
+// keep-going while CI still runs. Round 4: a Monitor that runs a command may be
+// listed as type "shell", like a dev server, so a status question from the user
+// while it runs must not end keep-going either.
+test('woken by the work that is still out, an idle step waits again, even after the user asks how it is going', () => {
+  for (const type of ['shell', 'monitor']) {
+    const home = sandbox(); const dir = cwdDir();
+    arm(home, 'b6');
+    const monitor = { background_tasks: [{ id: 'm1', type, status: 'running', description: 'watch CI' }] };
+    const start = [used('Monitor', 'm1'), result('m1', 'Monitor started.'), said('Pushed; watching CI.')];
+    const t = transcript(dir, ...start);
+    assert.equal(run(HOOK, stopPayload('b6', dir, t, monitor), home).stdout.trim(), '', type);
+    const woke = [...start, JSON.stringify({ type: 'user', message: { role: 'user', content: '<task-notification>\nlint passed\n</task-notification>' } }), said('Lint passed; waiting on the tests.')];
+    writeFileSync(t, lines(...woke));
+    assert.equal(run(HOOK, stopPayload('b6', dir, t, monitor), home).stdout.trim(), '', `${type}: a wait again, not a stop`);
+    writeFileSync(t, lines(...woke, JSON.stringify({ type: 'user', message: { role: 'user', content: "how's it going?" } }), said('CI is still running the tests.')));
+    assert.equal(run(HOOK, stopPayload('b6', dir, t, monitor), home).stdout.trim(), '', `${type}: the user's question is not a reason to stop`);
+    assert.equal(session(home, 'b6').persist.armed, true, type);
+  }
 });
 
 test('a wait does not use up a step: the count after the helper lands is where it was', () => {

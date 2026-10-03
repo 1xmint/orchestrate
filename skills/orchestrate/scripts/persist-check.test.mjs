@@ -94,6 +94,25 @@ test('a budget or credential refusal is still a denial, and is not read as a usa
   }
 });
 
+test('a refusal is read with or without the host\'s words in front, and only at the start of the result', () => {
+  // The host may report a hook's refusal as "PreToolUse:Agent hook error: ..."
+  // and may not mark it as an error (independent review, round 4).
+  const res = (content, extra = {}) => line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a1', content, ...extra }] } });
+  for (const front of ['', 'PreToolUse:Agent hook error: ', 'PreToolUse:Agent hook blocking error: ', '[PreToolUse:Bash] hook error: ']) {
+    for (const extra of [{ is_error: true }, {}]) {
+      const tag = `${JSON.stringify(front)} ${JSON.stringify(extra)}`;
+      assert.equal(scanTurn(res(`${front}orchestrate guard: refused`, extra)).denied, true, tag);
+      const q = scanTurn(res(`${front}orchestrate quota: the 5-hour usage window is at 82%.`, extra));
+      assert.equal(q.quotaRefused, true, tag);
+      assert.equal(q.denied, false, tag);
+    }
+  }
+  // A helper's report that quotes a refusal further down is the helper's work.
+  const quoted = scanTurn(res('Done. Earlier the hook said: orchestrate guard: refused', { is_error: true }));
+  assert.equal(quoted.denied, false);
+  assert.equal(scanTurn(res('Summary of the run.\norchestrate quota: the 5-hour usage window is at 82%.')).quotaRefused, false);
+});
+
 test('scanTurn ignores a line that fails to parse and one with no recognizable shape', () => {
   const scan = scanTurn('not json\n' + line({ type: 'other' }));
   assert.equal(scan.progressed, false);
@@ -172,7 +191,6 @@ test('the same work out after a wait with nothing done since is a stop; other wo
   // Woken by what is running (a Monitor line, a recurring prompt): a wait again.
   const woken = persistDecision({ rec: first.rec, scan: idle, outstanding: true, waitingOn: 'srv' });
   assert.equal(woken.kind, 'wait', 'the same work woke the session; it is still a wait');
-  // The user spoke and the step still did nothing: what runs will not wake it.
   // The user spoke and the step still did nothing, with only a background
   // command out (a dev server never reports): keep-going ends.
   const again = persistDecision({ rec: first.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'srv', commandsOnly: true });
@@ -185,6 +203,29 @@ test('the same work out after a wait with nothing done since is a stop; other wo
   const worked = persistDecision({ rec: first.rec, scan: { ...idle, progressed: true }, outstanding: true, waitingOn: 'srv' });
   assert.equal(worked.kind, 'continue');
   assert.equal(worked.rec.waitingOn, null, 'work in between starts the wait over');
+});
+
+test('once a Monitor was started, a background command listed as out is never taken for a dev server', () => {
+  // A Monitor that runs a command may be listed as type "shell", the same as a
+  // dev server; it still wakes the session when it fires (independent review,
+  // round 4). The stretch remembers that one was started, through waits and
+  // continues, so the "user spoke, nothing done" stop does not end it.
+  const idle = { progressed: false, denied: false, errors: [], asked: false, goalMet: false };
+  const started = persistDecision({ rec: {}, scan: { ...idle, progressed: true, monitorStarted: true } });
+  assert.equal(started.kind, 'continue');
+  assert.equal(started.rec.monitorSeen, true);
+  const wait = persistDecision({ rec: started.rec, scan: idle, outstanding: true, waitingOn: 'm1', commandsOnly: true });
+  assert.equal(wait.kind, 'wait');
+  assert.equal(wait.rec.monitorSeen, true, 'carried through a wait');
+  const asked = persistDecision({ rec: wait.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'm1', commandsOnly: true });
+  assert.equal(asked.kind, 'wait', 'a status question while the Monitor runs keeps keep-going on');
+  // Without a Monitor in the stretch, the same step ends it as before.
+  const plain = persistDecision({ rec: { ...wait.rec, monitorSeen: false }, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'm1', commandsOnly: true });
+  assert.equal(plain.kind, 'stop');
+  // scanTurn reports the Monitor call.
+  const used = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'm1', name: 'Monitor', input: { command: 'tail -f log' } }] } });
+  assert.equal(scanTurn(used).monitorStarted, true);
+  assert.equal(scanTurn(line({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash' }] } })).monitorStarted, false);
 });
 
 test('outKey names what is out, in a stable order; nothing out is an empty key', () => {
