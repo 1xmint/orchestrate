@@ -46,7 +46,7 @@ import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, r
 import { pauseRoot, pauseRecord, writePause, clearPause } from './lib/pause.mjs';
 import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
 import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
-import { recordBand, readBand, bandAtStop, openItem, sessionGoal, stopQuestion, withoutTaskIds, WAITING_TEXT } from './lib/band.mjs';
+import { recordBand, bandAtStop, openItem, sessionGoal, stopQuestion, withoutTaskIds, WAITING_TEXT } from './lib/band.mjs';
 import { syntheticPrompt } from './lib/persist-words.mjs';
 import { ownerTextOf } from './lib/compaction-snapshot.mjs';
 import { readProject } from './lib/project.mjs';
@@ -229,7 +229,7 @@ export const QUOTA_FACT = "helpers are refused while the plan's usage is past th
 // read files. `outstanding` is true when the Stop payload lists work that will
 // wake the session (see workOut); a step that did nothing then is a wait, not
 // a stop.
-export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '', commandsOnly = false, idleKnown = false }) {
+export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '', commandsOnly = false, idleKnown = false, now = new Date() }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -246,7 +246,7 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   // Told once per stretch that nothing listed would wake it: a step that polls
   // and then promises again does not hear it a second time (round 5).
   const waitTold = Boolean(rec.waitTold);
-  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null, lastOut: listed.join(','), monitorIds, waitTold };
+  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null, waitSince: null, lastOut: listed.join(','), monitorIds, waitTold };
   delete out.monitorSeen;
   const g = shortGoal(goal);
   // `say` is the user's line when `why` carries what only the lead can use (a
@@ -297,7 +297,10 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     // as a background command too, so once one was started in this stretch the
     // list cannot show which kind is out, and it stays a wait (round 4).
     const settled = scan.prompted && commandsOnly && monitorIds.length === 0 && rec.waitingOn != null && rec.waitingOn === waitingOn;
-    if (outstanding && !settled) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn }, kind: 'wait', why: 'a helper or background command is still out' };
+    // `waitSince` is when this run of waits began: the band counts "so far"
+    // from it, through wakes and a user's "is it stuck?" alike (independent
+    // review, round 7).
+    if (outstanding && !settled) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn, waitSince: rec.waitSince || new Date(now).toISOString() }, kind: 'wait', why: 'a helper or background command is still out' };
     if (outstanding) return stop('the step after your message did no visible work while only a background command kept running');
     return stop('the last step did no visible work (no edit, command or helper)');
   }
@@ -609,16 +612,10 @@ export function recordBandAtStop(input, dec, now = new Date()) {
       open: continued ? openItem(state, input.cwd) : '',
       goal: continued ? sessionGoal(state) : '',
     });
-    // A wait that follows a wait keeps the first one's time, so "so far" counts
-    // from when the session started waiting, not from the last wake (a Monitor
-    // line, one of two helpers landing) after which it still only waited
-    // (independent review, round 6).
-    let since = null;
-    if (note.kind === 'working' && note.text === WAITING_TEXT) {
-      since = now;
-      const prev = readBand(pauseRoot(input.cwd));
-      if (prev && prev.kind === 'working' && prev.text === WAITING_TEXT && prev.session === (input.session_id || null)) since = prev.since || prev.at;
-    }
+    // A wait carries when its run of waits began (the loop's `waitSince`), so
+    // "so far" does not restart at a wake after which the session still only
+    // waits, nor after the user asks how it is going (rounds 6 and 7).
+    const since = note.kind === 'working' && note.text === WAITING_TEXT && dec && dec.rec && dec.rec.waitSince ? dec.rec.waitSince : null;
     return recordBand({ cwd: input.cwd, session: input.session_id, kind: note.kind, text: note.text, now, since });
   } catch { return null; }
 }

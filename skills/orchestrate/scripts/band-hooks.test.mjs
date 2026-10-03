@@ -174,24 +174,37 @@ test('a Stop passed because a helper or command is out writes working on the wai
   }
 });
 
-test('a wait that follows a wait keeps the time the waiting began', () => {
-  // A Monitor line or one of two helpers landing wakes the session; a step that
-  // still only waits must not restart "so far" (independent review, round 6).
+test('a wait keeps the time its run of waits began, through wakes and the user asking', () => {
+  // A Monitor line, one of two helpers landing, or the user asking "is it
+  // stuck?" must not restart "so far" (independent review, rounds 6 and 7).
   const home = sandbox(); const dir = project();
   arm(home, 'w3');
   const began = new Date(Date.now() - 3 * 3600000 - 5 * 60000).toISOString();
-  writeFileSync(bandFile(dir), JSON.stringify({ session: 'w3', kind: 'working', text: WAITING_TEXT, at: new Date(Date.now() - 60000).toISOString(), since: began }));
+  // The loop's record as a wait three hours ago left it.
+  writeFileSync(join(home, '.claude', 'orchestrate', 'persist-checks.json'), JSON.stringify({ w3: { armedAt: '2026-10-03T00:00:00.000Z', lastSize: 0, waitingOn: 'r2', waitSince: began } }));
   const task = { id: 'r2', type: 'subagent', status: 'running', description: 'review the diff' };
-  const r = stop(home, 'w3', dir, transcript(dir, said('One review landed; waiting on the other.')), { background_tasks: [task] });
-  assert.equal(r.stdout.trim(), '');
-  const rec = bandRec(dir);
+  const log = [said('One review landed; waiting on the other.')];
+  const t = transcript(dir, ...log);
+  assert.equal(stop(home, 'w3', dir, t, { background_tasks: [task] }).stdout.trim(), '');
+  let rec = bandRec(dir);
   assert.equal(rec.since, began, 'the start of the wait is kept');
   assert.ok(Date.parse(rec.at) > Date.parse(began), 'the write time is new');
   assert.equal(lineOf(dir, 'w3'), `Working on: ${WAITING_TEXT}, 3 h 5 min so far`);
-  // Another session's wait, or a record that is not a wait, starts the clock.
-  writeFileSync(bandFile(dir), JSON.stringify({ session: 'other', kind: 'working', text: WAITING_TEXT, at: began, since: began }));
-  stop(home, 'w3', dir, transcript(dir, said('Still waiting on the other review.')), { background_tasks: [task] });
-  assert.ok(Date.now() - Date.parse(bandRec(dir).since) < 60000, 'a new clock for this session');
+  // The user asks; the band shows the prompt; the next step still only waits.
+  prompt(home, 'w3', dir, 'is it stuck?');
+  log.push(JSON.stringify({ type: 'user', message: { role: 'user', content: 'is it stuck?' } }), said('No: the second review is still running.'));
+  writeFileSync(t, lines(...log));
+  assert.equal(stop(home, 'w3', dir, t, { background_tasks: [task] }).stdout.trim(), '', 'a wait again');
+  rec = bandRec(dir);
+  assert.equal(rec.since, began, 'asking does not restart the clock');
+  // Work in between starts it over.
+  log.push(used('Edit', 'e9'), result('e9', 'ok'), said('Fixed what the first review found.'));
+  writeFileSync(t, lines(...log));
+  assert.match(stop(home, 'w3', dir, t, { background_tasks: [task] }).json.reason, /^orchestrate: /, 'work: a continue');
+  log.push(said('Waiting on the second review.'));
+  writeFileSync(t, lines(...log));
+  assert.equal(stop(home, 'w3', dir, t, { background_tasks: [task], stop_hook_active: true }).stdout.trim(), '', 'a wait again');
+  assert.ok(Date.now() - Date.parse(bandRec(dir).since) < 60000, 'a new run of waits, a new clock');
 });
 
 test('a question at the same Stop comes before the wait', () => {

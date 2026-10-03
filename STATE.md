@@ -168,7 +168,7 @@ release's section when it ships.
     misreading, that nothing writes the Codex status; a full `profile.mjs`
     run does. The sixth review caught it and it is undone.)
     The keep-going line went from 467 to about 360 bytes. Per-run read now
-    13,482 bytes (skill 7,539, style 3,799, card 2,144: the card keeps a short
+    13,530 bytes (skill 7,575, style 3,799, card 2,156: the card keeps a short
     stop list and the skill its maintainer rule, below). Not changed, and
     why: the "helper size" note on every dispatch (about 80 bytes, pinned by
     eight hook tests, and a guard change needs its own review); the skill's
@@ -190,6 +190,19 @@ release's section when it ships.
     message. The card keeps a short stop list, since a script install
     leaves the style off while still sending the card. A wait after a wait
     keeps the time the waiting began (`since` in the band record).
+  - **Seventh review** (fresh context, Opus) on the sixth's fixes: FAIL on
+    five, all fixed. The question skip also skipped "All 42 tests pass, so
+    shall I open the PR?" (now only a sentence that opens by asking); "a
+    total of 42" was taken for a total; the compaction summary, which restates
+    the lead's own claims, counted as evidence; a search result's repeated
+    "41 passed" summed to 205 (now only a command's output or a notification
+    is summed); a file read's line numbers matched almost any count (now
+    stripped). The wait clock restarted when the user typed (it now lives in
+    the loop's record as `waitSince`). The style's "do what does not hang on
+    the answer first" had no bound and invited building before asking: the
+    question now goes out when it comes up, at the end of that message. An
+    unasked-for offer is a statement, not a question, since a closing question
+    ends a keep-going stretch. The card says the questions close the message.
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line

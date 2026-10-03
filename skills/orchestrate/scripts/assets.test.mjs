@@ -750,16 +750,18 @@ test('SKILL.md and the plain style make data exposure and unasked scope the owne
   // without asking, and it let the user add notes as well as read them.
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
   assert.match(skill, /who can see or change their data \(a public page, or anyone else on their wifi\)/);
-  assert.match(skill, /offer it in a line, don't build it/);
+  // A statement, not a question: a closing question ends a keep-going stretch
+  // and waits on the user for something they did not ask for (round 7).
+  assert.match(skill, /offer it in a line, as a statement, not a question, and don't build it/);
   const plain = flat(readFileSync(join(SKILL, 'assets', 'output-styles', 'plain.md'), 'utf8'));
-  // The one home of the stop-and-ask list: the style is in every request and
-  // needs no re-send after a summary; the card no longer repeats it (prompt
-  // review, 2026-10-03).
+  // The stop-and-ask list at its fullest is in the style; the card keeps a
+  // short form for installs that leave the style off.
   assert.match(plain, /who can see or change their data \(a public page, anyone on their wifi\), credentials/);
   // The questions close the message: the hooks, the band's "Needs you" and the
   // unanswered-question count see a question only at the end (independent
-  // review, round 6).
-  assert.match(plain, /then end on the questions, together, recommendation first/);
+  // review, round 6), and they go out when they come up, after the step in
+  // hand, not after the work they decide (round 7).
+  assert.match(plain, /when it comes up: finish the step in hand, then end that message on the questions, together, recommendation first/);
 });
 
 // Claude Code starts a helper's own folder from the remote's default branch

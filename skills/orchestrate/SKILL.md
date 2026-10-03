@@ -59,7 +59,7 @@ decide, and write one line saying why. What the product should do, money, who
 can see or change their data (a public page, or anyone else on their wifi),
 credentials, legal exposure, anything destructive or irreversible: theirs, asked
 together, with a recommendation. Anything they did not ask for: offer it
-in a line, don't build it.
+in a line, as a statement, not a question, and don't build it.
 
 On the first real request in a repo, run `scripts/project.mjs init <repo>`,
 then fill What this is for, Where it stands and Next (each step ending with
