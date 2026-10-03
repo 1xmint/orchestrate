@@ -11,7 +11,6 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanTurn, persistDecision, errorKey, PERSIST_STEP_CAP, runGoalLine } from './persist-check.mjs';
 import { persistIntent, persistLine } from './router.mjs';
-import { PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -127,20 +126,10 @@ test('every hardstop fires', () => {
   assert.equal(first.kind, 'continue');
   assert.equal(persistDecision({ rec: first.rec, scan: { ...base, errors: ['Error: x'] } }).kind, 'stop');
   assert.equal(persistDecision({ rec: first.rec, scan: { ...base, errors: ['Error: y'] } }).kind, 'continue');
-});
-
-test('the loop\'s 5-hour stop default is 90, on purpose', () => {
-  assert.equal(PERSIST_STOP_FIVE_HOUR, 90);
-});
-
-test('the loop stops near the 5-hour limit, and only there', () => {
-  const at = pct => ({ fiveHour: { pct, resetsAt: null }, week: null });
-  const above = PERSIST_STOP_FIVE_HOUR + 1;
-  const below = PERSIST_STOP_FIVE_HOUR - 20;
-  assert.equal(persistDecision({ scan: base, quota: at(above) }).kind, 'stop');
-  assert.match(persistDecision({ scan: base, quota: at(above) }).why, new RegExp(`${above}%`));
-  assert.equal(persistDecision({ scan: base, quota: at(below) }).kind, 'continue');
-  assert.equal(persistDecision({ scan: base, quota: null }).kind, 'continue', 'no status line means no usage stop');
+  // A helper refused for usage is the one refusal that is not a stop: the lead
+  // can still work, and the next continue says so. The usage line itself is gone
+  // (persist-pause.test.mjs holds the 90% case end to end).
+  assert.equal(persistDecision({ scan: { ...base, quotaRefused: true } }).kind, 'continue');
 });
 
 test('context advice rides along only when given', () => {

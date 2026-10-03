@@ -10,16 +10,26 @@
 // the model does not hand back a turn with executable work still in front of
 // it. For everyone else it reads one small session file and exits.
 //
+// It is registered a second time on StopFailure, the host's moment for a turn
+// that ended in an API error (a usage limit among them). The host ignores what
+// a hook prints there, so the script only writes the pause record
+// (lib/pause.mjs, docs/pause.md) and never touches the keep-going state: where
+// the host waits and resumes, the loop is still armed when it does.
+//
 // It is biased to STOP. It continues only while the last step did visible work,
 // and every stop is keyed on something observable from outside the model's own
 // view of itself, because the model is worst at judging its own state
 // (docs/research/0003, 0004). Parallelism is not the point; the quota waste is
 // the idle turn re-reading the whole conversation, not the work.
 //
-//   stop when: a dispatch was denied · the same error came back twice · the last
-//   message asks the user something · the last message says the goal is met ·
-//   the same open item named three continues in a row · the step cap · a step
-//   that did no work.
+//   stop when: a dispatch was denied by the budget or the credential check · the
+//   same error came back twice · the last message asks the user something · the
+//   last message says the goal is met · the same open item named three continues
+//   in a row · the step cap · a step that did no work while nothing is out.
+//
+// A usage limit is not a stop. The plugin's own 90% five-hour stop is gone (it
+// turned the loop off just before the host's resume), and a helper refused for
+// usage is a fact the next continue states, not a reason to end the loop.
 //
 // Never blocks twice in one Stop, never exits non-zero, never fails the Stop on
 // its own errors.
@@ -30,7 +40,7 @@ import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
-import { readQuota, resetClock, PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
+import { pauseRoot, pauseRecord, writePause, clearPause } from './lib/pause.mjs';
 import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
 import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
 import { readProject } from './lib/project.mjs';
@@ -85,10 +95,17 @@ export const errorKey = s => String(s || '').split('\n').map(l => l.trim()).find
 // skips anything that does not parse (the slice can start mid-line). Only the
 // assistant's own words can say "done" or ask a question, so the user's goal
 // text and this hook's own block reasons never trip either check.
+//
+// A dispatch refused by the budget or the credential check is `denied`, a safety
+// stop. One refused for usage ("orchestrate quota:") is `quotaRefused` instead:
+// the lead can still work without a helper, so it is a fact to state, not a stop.
+// It is also kept out of `errors`: three helpers sent in one step and all
+// refused would otherwise read as "the same error twice".
 export function scanTurn(tail) {
   const tools = [];
   const errors = [];
   let denied = false;
+  let quotaRefused = false;
   let lastText = '';
   let lastChange = null;
   for (const line of String(tail || '').split('\n')) {
@@ -109,8 +126,10 @@ export function scanTurn(tail) {
       for (const b of content) {
         if (!b || b.type !== 'tool_result') continue;
         const t = textOf(b.content);
-        if (/orchestrate (budget|guard|quota):/.test(t)) denied = true;
-        if (b.is_error) { const k = errorKey(t); if (k) errors.push(k); }
+        if (/orchestrate (budget|guard):/.test(t)) denied = true;
+        const usageRefusal = /orchestrate quota:/.test(t);
+        if (usageRefusal) quotaRefused = true;
+        if (b.is_error && !usageRefusal) { const k = errorKey(t); if (k) errors.push(k); }
       }
     }
   }
@@ -118,14 +137,29 @@ export function scanTurn(tail) {
   const tailText = lastText.trim().replace(/[\s*_`)\]]+$/, '');
   const asked = /\?$/.test(tailText);
   const goalMet = /\b(goal (is )?(met|complete|completed|achieved|reached)|all (the )?(steps|tasks|todos|items) (are )?(done|complete|finished)|nothing (left|more) to do|everything (is|in the plan is) (done|complete|finished))\b/i.test(lastText);
-  return { progressed, denied, errors, asked, goalMet, tools: tools.length, lastChange };
+  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange };
 }
 
-// Continue or stop, from the scan and the loop's own record. Pure: returns the
-// next record rather than writing it. `goal` is already-resolved text (the
+// Whether the Stop payload says the host will wake this session later: a helper
+// or background command still running, or a scheduled prompt. The docs pages do
+// not list `background_tasks` and `session_crons` (the SDK type file does), so
+// a field that is absent is unknown, not empty: only a non-empty list counts.
+export function workOut(input) {
+  const listed = v => Array.isArray(v) && v.length > 0;
+  return Boolean(input) && (listed(input.background_tasks) || listed(input.session_crons));
+}
+
+// Said on the continue that follows a helper refused for usage. Both limits are
+// named because the one refusal covers either (guard-agent.mjs).
+export const QUOTA_FACT = "helpers are refused while the plan's usage is past the helper line (the 5-hour window or the week); this session can still work";
+
+// Continue, wait or stop, from the scan and the loop's own record. Pure: returns
+// the next record rather than writing it. `goal` is already-resolved text (the
 // bound run's Goal line, or '' when there is none) — this function does not
-// read files.
-export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', quota = null, workCalls = null, next = null }) {
+// read files. `outstanding` is true when the Stop payload lists work that will
+// wake the session (see workOut); a step that did nothing then is a wait, not
+// a stop.
+export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -138,15 +172,22 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate')) {
     return stop(checkpointFact(contextReading));
   }
-  if (quota && quota.fiveHour && quota.fiveHour.pct >= PERSIST_STOP_FIVE_HOUR) return stop(`the 5-hour usage window is at ${Math.round(quota.fiveHour.pct)}% (resets ${resetClock(quota.fiveHour.resetsAt)})`);
-  if (scan.denied) return stop('a dispatch was denied (budget, credential or usage limit)');
+  if (scan.denied) return stop('a dispatch was denied (budget or credential)');
   if (repeat) return stop(`the same error came back twice: ${repeat}`);
   if (scan.asked) return stop('the last message asks the user something');
   if (scan.goalMet) return stop('the last message says the goal is met');
   if (next && next.state === 'all-done') return stop(ALL_DONE_TEXT);
   if (sameItem > PERSIST_SAME_ITEM_CAP) return stop(`${PERSIST_SAME_ITEM_CAP} continues in a row named the same open item, and it is still open: ${item.length > 120 ? `${item.slice(0, 117)}...` : item}`);
   if (steps > PERSIST_STEP_CAP) return stop(`reached the limit of ${PERSIST_STEP_CAP} auto-continued steps in a row`);
-  if (!scan.progressed) return stop('the last step did no visible work (no edit, command or dispatch)');
+  if (!scan.progressed) {
+    // A helper or background command is still out, or a prompt is scheduled: the
+    // host wakes this session when it lands, and a stop here would have turned
+    // keep-going off before that. The Stop passes unblocked and the loop stays
+    // armed. It is neither a continue (an idle turn re-reads the whole
+    // conversation for nothing) nor a step, so the counters stand as they were.
+    if (outstanding) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0 }, kind: 'wait', why: 'a helper or background command is still out' };
+    return stop('the last step did no visible work (no edit, command or dispatch)');
+  }
 
   const parts = [];
   if (g) parts.push(`"${g}"`);
@@ -157,6 +198,7 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   else parts.push(`step ${steps} of ${PERSIST_STEP_CAP}`);
   if (Number.isFinite(workCalls) && workCalls >= 100) parts.push(`${workCalls} work calls since your last dispatch`);
   if (scan.lastChange) parts.push(`last edited ${scan.lastChange}`);
+  if (scan.quotaRefused) parts.push(QUOTA_FACT);
   let why = `orchestrate: ${parts.join(' · ')}`;
   if (contextNotice) why += ` ${contextNotice}`;
   return { rec: out, kind: 'continue', why };
@@ -292,6 +334,10 @@ export function check(input) {
   // would be both wrong (the helper does not own that loop) and pure noise
   // read back into a context that did not ask for it.
   if (input && input.agent_id) return null;
+  // A turn that ended normally is the end of any pause this session recorded at
+  // StopFailure. This script already runs at every Stop, so it is the simplest
+  // place to clear it; router.mjs does the same at every prompt.
+  try { clearPause(pauseRoot(input.cwd), input.session_id, 'stop'); } catch {}
   const state = loadSession(input.session_id);
   const p = state && state.persist;
 
@@ -334,7 +380,7 @@ export function check(input) {
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
   const workCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : null;
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), quota: readQuota(), workCalls, next: nextFor(state, input) });
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input) });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };
@@ -347,12 +393,30 @@ export function check(input) {
   return dec;
 }
 
+// The StopFailure half: writes the pause record and nothing else. It writes for
+// every error kind the host sends, since whether a subscription limit arrives
+// as `rate_limit` is unchecked and the first real one should answer it. It does
+// not read or change the keep-going state beyond asking whether it is on (for
+// the record's wording), and a helper's own StopFailure writes nothing. Returns
+// the record written, or null.
+export function recordStopFailure(input, now = new Date()) {
+  if (!input || input.agent_id) return null;
+  const root = pauseRoot(input.cwd);
+  if (!root) return null;
+  const state = loadSession(input.session_id);
+  const armed = Boolean(state && state.persist && state.persist.armed);
+  const rec = pauseRecord({ error: input.error, session: input.session_id, now, armed });
+  return writePause(root, rec) ? rec : null;
+}
+
 function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
   let input = null;
   try { input = JSON.parse(payload); } catch { return; }
   if (!input || typeof input !== 'object') return;
+  // The host ignores a hook's output at StopFailure, so nothing is printed there.
+  if (input.hook_event_name === 'StopFailure') { recordStopFailure(input); return; }
   // stop_hook_active is deliberately not an early exit here: a loop that keeps a
   // turn alive is exactly a Stop hook that fires again after its own block. The
   // step cap and the no-work stop are what end it.
