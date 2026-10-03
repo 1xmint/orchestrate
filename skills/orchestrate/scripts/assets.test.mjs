@@ -600,11 +600,15 @@ test('every plugin hook names a script that exists, through the plugin root', ()
   const root = join(SKILL, '..', '..');
   const hooks = JSON.parse(readFileSync(join(root, 'hooks', 'hooks.json'), 'utf8')).hooks;
   const events = Object.keys(hooks);
-  assert.deepEqual(events.sort(), ['PostCompact', 'PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'SubagentStop', 'UserPromptSubmit']);
+  assert.deepEqual(events.sort(), ['PostCompact', 'PostToolUse', 'PreToolUse', 'SessionStart', 'Stop', 'StopFailure', 'SubagentStop', 'UserPromptSubmit']);
   // The Stop hooks are the persist loop first (the direct work it exists for
   // rarely loads the skill, so it must stay a no-op for an unarmed session) and
   // then the Pickup-line check, which only speaks for a bound run.
   assert.deepEqual(hooks.Stop.flatMap(g => g.hooks.map(h => /scripts\/(\S+?\.mjs)/.exec(h.command)[1])), ['persist-check.mjs', 'turn-check.mjs']);
+  // StopFailure is the host's moment for a turn that ended in an API error. The
+  // persist script is on it alone, to write the pause record: the host ignores
+  // what a hook prints there, and the Pickup check has nothing to say about it.
+  assert.deepEqual(hooks.StopFailure.flatMap(g => g.hooks.map(h => /scripts\/(\S+?\.mjs)/.exec(h.command)[1])), ['persist-check.mjs']);
 
   for (const groups of Object.values(hooks)) {
     for (const g of groups) {

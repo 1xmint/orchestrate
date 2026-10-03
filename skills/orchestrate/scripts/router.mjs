@@ -47,6 +47,7 @@ import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact
 import { loadPolicy } from './lib/policy.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
 import { projectNote } from './lib/project.mjs';
+import { pauseRoot, clearPause } from './lib/pause.mjs';
 import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
@@ -282,6 +283,9 @@ function handlePrompt(input) {
   // that subagent's own work — the plan tier, the run ledger, the card — so
   // printing it there was pure noise a helper paid to read about itself.
   if (input && input.agent_id) return;
+  // A prompt of this session ends any pause recorded for it (lib/pause.mjs).
+  // This hook already runs on every prompt, so nothing new is registered for it.
+  try { clearPause(pauseRoot(input.cwd), input.session_id, 'prompt'); } catch {}
   if (!routerSettings().enabled) return;
   const text = promptText(input);
   if (text == null) return;

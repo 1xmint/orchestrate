@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanTurn, persistDecision, shortGoal, errorKey, endMessage, PERSIST_STEP_CAP } from './persist-check.mjs';
+import { scanTurn, persistDecision, shortGoal, errorKey, endMessage, workOut, QUOTA_FACT, PERSIST_STEP_CAP } from './persist-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'persist-check.mjs');
@@ -78,6 +78,22 @@ test('an "orchestrate project:" denial is one the lead fixes in a step, so it do
   assert.equal(denied.denied, false);
 });
 
+test('a helper refused for usage is neither a denial nor an error: the lead can still work without it', () => {
+  const refusal = i => line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: `a${i}`, is_error: true, content: 'orchestrate quota: the 5-hour usage window is at 82%, so a new helper would likely be cut off mid-task.' }] } });
+  const scan = scanTurn(refusal(1) + refusal(2) + refusal(3));
+  assert.equal(scan.quotaRefused, true);
+  assert.equal(scan.denied, false, 'a usage refusal is not a safety stop');
+  assert.deepEqual(scan.errors, [], 'three helpers refused in one step are not "the same error twice"');
+});
+
+test('a budget or credential refusal is still a denial, and is not read as a usage refusal', () => {
+  for (const prefix of ['budget', 'guard']) {
+    const scan = scanTurn(line({ type: 'user', message: { content: [{ type: 'tool_result', is_error: true, content: `orchestrate ${prefix}: refused` }] } }));
+    assert.equal(scan.denied, true, prefix);
+    assert.equal(scan.quotaRefused, false, prefix);
+  }
+});
+
 test('scanTurn ignores a line that fails to parse and one with no recognizable shape', () => {
   const scan = scanTurn('not json\n' + line({ type: 'other' }));
   assert.equal(scan.progressed, false);
@@ -105,6 +121,47 @@ test('persistDecision stops when the last step did no visible work', () => {
   const d = persistDecision({ rec: {}, scan: { progressed: false, denied: false, errors: [], asked: false, goalMet: false } });
   assert.equal(d.kind, 'stop');
   assert.match(d.why, /no visible work/);
+});
+
+test('persistDecision states that helpers are refused only on the continue that follows a refusal, as a fact', () => {
+  const scan = { progressed: true, denied: false, quotaRefused: true, errors: [], asked: false, goalMet: false };
+  const d = persistDecision({ rec: {}, scan, goal: 'ship it' });
+  assert.equal(d.kind, 'continue');
+  assert.ok(d.why.includes(QUOTA_FACT));
+  assert.match(d.why, /helpers are refused/);
+  assert.match(d.why, /this session can still work/);
+  assert.doesNotMatch(d.why, /\b(must|should|do not|don't|stop trying)\b/i, 'a fact, not an order');
+  assert.doesNotMatch(persistDecision({ rec: {}, scan: { ...scan, quotaRefused: false }, goal: 'ship it' }).why, /helpers are refused/);
+});
+
+test('workOut counts only a non-empty list: an absent field is unknown, not empty', () => {
+  const task = { id: 'b1', type: 'shell', status: 'running', description: 'npm test' };
+  const cron = { id: 'c1', schedule: '*/5 * * * *', recurring: true, prompt: 'check CI' };
+  assert.equal(workOut({ background_tasks: [task] }), true);
+  assert.equal(workOut({ session_crons: [cron] }), true);
+  assert.equal(workOut({ background_tasks: [], session_crons: [cron] }), true);
+  assert.equal(workOut({ background_tasks: [], session_crons: [] }), false);
+  assert.equal(workOut({}), false);
+  assert.equal(workOut(null), false);
+  assert.equal(workOut({ background_tasks: 'running', session_crons: 3 }), false, 'a field of the wrong shape is unknown too');
+});
+
+test('a step that did no work while something is out is a wait: not a stop, not a step, counters unchanged', () => {
+  const idle = { progressed: false, denied: false, errors: [], asked: false, goalMet: false };
+  const rec = { steps: 3, lastItem: 'fix the parser', sameItem: 2, errors: [] };
+  const w = persistDecision({ rec, scan: idle, outstanding: true });
+  assert.equal(w.kind, 'wait');
+  assert.equal(w.rec.steps, 3);
+  assert.equal(w.rec.sameItem, 2);
+  assert.equal(w.rec.lastItem, 'fix the parser');
+  assert.equal(persistDecision({ rec, scan: idle, outstanding: false }).kind, 'stop');
+  assert.match(persistDecision({ rec, scan: idle }).why, /no visible work/);
+  // Everything else still stops while work is out: only the idle-step stop waits.
+  assert.equal(persistDecision({ rec, scan: { ...idle, asked: true }, outstanding: true }).kind, 'stop');
+  assert.equal(persistDecision({ rec, scan: { ...idle, goalMet: true }, outstanding: true }).kind, 'stop');
+  assert.equal(persistDecision({ rec, scan: { ...idle, denied: true }, outstanding: true }).kind, 'stop');
+  // And a step that did work while work is out is an ordinary continue.
+  assert.equal(persistDecision({ rec, scan: { ...idle, progressed: true }, outstanding: true }).kind, 'continue');
 });
 
 // ---- shortGoal / errorKey / endMessage -----------------------------------------

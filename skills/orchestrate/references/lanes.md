@@ -132,8 +132,10 @@ When the user asks in plain words to keep going toward a goal ("keep coding unti
 done", "execute the plan"), the router pins that goal and `persist-check.mjs` refuses a Stop while
 each step does real work (an edit, a command, a dispatch). It needs no run ledger. It ends, and
 disarms, on the first of: you say the goal is met; your last message asks the user something; a
-dispatch is denied; the same error comes back twice; a step does no work; three continues on
-the same open item; 25 steps; the 5-hour usage window passes 90%. Each continued step's
+dispatch is denied by the budget or the credential check; the same error comes back twice; a
+step does no work while no helper or background command is out; three continues on the same open
+item; 25 steps. A usage limit is not on that list: the host waits and resumes, and a helper
+refused for usage is stated in the next continue. Each continued step's
 message names the step count, the goal and the last file changed, so the user can catch drift
 without a separate check-in. After a compaction the goal is restored verbatim.
 `persist off` turns it off for the session.
