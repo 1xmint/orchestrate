@@ -755,8 +755,11 @@ test('SKILL.md and the plain style make data exposure and unasked scope the owne
   // The one home of the stop-and-ask list: the style is in every request and
   // needs no re-send after a summary; the card no longer repeats it (prompt
   // review, 2026-10-03).
-  assert.match(plain, /who can see or change their data \(a public page, anyone else on their wifi\), credentials/);
-  assert.match(plain, /recommendation first, all together, in the message that carries your next step/);
+  assert.match(plain, /who can see or change their data \(a public page, anyone on their wifi\), credentials/);
+  // The questions close the message: the hooks, the band's "Needs you" and the
+  // unanswered-question count see a question only at the end (independent
+  // review, round 6).
+  assert.match(plain, /then end on the questions, together, recommendation first/);
 });
 
 // Claude Code starts a helper's own folder from the remote's default branch

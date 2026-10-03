@@ -36,9 +36,11 @@ end to 100 characters (with three dots). It is the first of these that exists:
 2. at a Stop that passed on a wait: the fixed words "waiting on a helper or
    background command", and from its first minute how long the wait has gone
    on (", 12 min so far", ", 4 h 10 min so far"), worked out on every look
-   from the record's time, so "is it stuck?" has an answer without typing.
-   During a turn the session was woken for, the time still counts from the
-   wait's Stop until the next Stop or prompt rewrites the record;
+   from the record's `since`, so "is it stuck?" has an answer without typing.
+   A wake after which the session still only waits (a Monitor line, one of
+   two helpers landing) keeps the clock; during a turn the session was woken
+   for, the time still counts until the next Stop or prompt rewrites the
+   record;
 3. at a Stop that ends on a question: the question, the sentence the message
    closes on.
 
@@ -72,6 +74,9 @@ later write replaces it.
 ```
 
 - `kind` is `working`, `needs` or `idle`. An idle record carries no text.
+- A wait's record also carries `since`, when the waiting began: a Stop that
+  waits right after this session's own wait keeps it, so "so far" counts from
+  the first of them, while `at` is always the time of the write.
 - `session` is the id the host gave the hook, or null when it gave none.
 - It is written only where the plugin's `.orchestrator` folder already exists, so
   a hook that runs in every folder a session opens leaves no folder behind in a

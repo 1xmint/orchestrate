@@ -16,7 +16,12 @@ test('a count of passing tests or checks is a claim; other numbers are not', () 
     ['Tests: 37 passed, 0 failed.', ['37']],
     ['npm test: 120 passing', ['120']],
     ['All 12 unit tests now pass and the page loads.', ['12']],
-    ['42 of 44 checks pass; two fail on Windows.', ['42', '44']],
+    // The total after "of" is not a passing count (independent review, round 6).
+    ['42 of 44 checks pass; two fail on Windows.', ['42']],
+    ['39 of 42 tests pass. Should I skip the 3 Windows ones?', ['39']],
+    // A question claims nothing; nor does the end of a version number.
+    ['Do all 42 tests pass on your machine?', []],
+    ['v2.0.10 passed the smoke test.', []],
     ['3 tests pass', []],
     ['The build took 42 seconds and 12 files changed.', []],
     ['I added 12 tests; they pass.', []],
@@ -46,4 +51,16 @@ test('a count the record shows passes; one it does not is reported', () => {
   assert.deepEqual(unseenCounts('All 42 tests pass.', output('took 1420 ms; 4.2 s total')), ['42']);
   // No claim, nothing to report.
   assert.deepEqual(unseenCounts('The header is in.', ''), []);
+});
+
+test('a total across suites printed in one output counts; the host\'s copy of an edit does not', () => {
+  // cargo prints one line per crate: 12 and 30 are the 42.
+  assert.deepEqual(unseenCounts('All 42 tests pass across the two crates.', output('test result: ok. 12 passed; 0 failed\ntest result: ok. 30 passed; 0 failed')), []);
+  // A figure the lead wrote into a file is in the host's record of the edit,
+  // not in anything the model was shown, so it proves nothing.
+  const edit = rec({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'e1', content: 'The file was updated.' }] }, toolUseResult: { newString: 'All 42 tests pass' } });
+  assert.deepEqual(unseenCounts('All 42 tests pass.', edit), ['42']);
+  // A helper's hand-back the host queued in is shown to the model, so it counts.
+  const queued = rec({ type: 'attachment', attachment: { type: 'queued_command', prompt: '<task-notification>CI: 1,520 checks passed</task-notification>' } });
+  assert.deepEqual(unseenCounts('1,520 checks pass.', queued), []);
 });

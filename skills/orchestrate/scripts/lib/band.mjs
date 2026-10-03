@@ -53,11 +53,11 @@ export function writeBand(root, rec, { create = false } = {}) {
 // Records one state for the session whose payload this is. The folder comes from
 // the payload's `cwd` through `pauseRoot`, as the pause record's does. Returns
 // the record written, or null.
-export function recordBand({ cwd, session = null, kind, text = '', now = new Date(), create = false } = {}) {
+export function recordBand({ cwd, session = null, kind, text = '', now = new Date(), since = null, create = false } = {}) {
   try {
     const root = pauseRoot(cwd);
     if (!root) return null;
-    const rec = bandRecord({ session, kind, text, now });
+    const rec = bandRecord({ session, kind, text, now, since });
     return writeBand(root, rec, { create }) ? rec : null;
   } catch { return null; }
 }

@@ -36,10 +36,14 @@ export function withoutTaskIds(text) {
 const idOf = s => (s == null || s === '' ? null : String(s));
 
 // The record for one state. Pure. An unknown kind is idle, and an idle record
-// carries no text.
-export function bandRecord({ session = null, kind, text = '', now = new Date() } = {}) {
+// carries no text. `since`, given only for a wait, is when the waiting began:
+// `at` stays the time of the write, so the other-session age check still
+// reads how fresh the record is.
+export function bandRecord({ session = null, kind, text = '', now = new Date(), since = null } = {}) {
   const k = BAND_KINDS.includes(kind) ? kind : 'idle';
-  return { session: idOf(session), kind: k, text: k === 'idle' ? '' : bandClip(text), at: new Date(now).toISOString() };
+  const rec = { session: idOf(session), kind: k, text: k === 'idle' ? '' : bandClip(text), at: new Date(now).toISOString() };
+  if (since != null && k === 'working' && Number.isFinite(Date.parse(since))) rec.since = new Date(since).toISOString();
+  return rec;
 }
 
 // A record from the file's text; null when it is not one.
@@ -48,7 +52,9 @@ export function parseBand(text) {
   try { rec = JSON.parse(text); } catch { return null; }
   if (!rec || typeof rec !== 'object' || Array.isArray(rec)) return null;
   if (!BAND_KINDS.includes(rec.kind) || typeof rec.text !== 'string' || typeof rec.at !== 'string') return null;
-  return { session: idOf(rec.session), kind: rec.kind, text: rec.text, at: rec.at };
+  const out = { session: idOf(rec.session), kind: rec.kind, text: rec.text, at: rec.at };
+  if (typeof rec.since === 'string') out.since = rec.since;
+  return out;
 }
 
 // The pause record (docs/pause.md), read the way lib/pause.mjs reads it: a
@@ -98,7 +104,7 @@ export function bandLine({ pause = null, band = null, session = null, now = Date
   if (!said) return '';
   if (band.kind === 'needs') return `${b}Needs you: ${said}`;
   if (band.kind === 'working') {
-    const waited = said === WAITING_TEXT ? waitedFor(band.at, now) : '';
+    const waited = said === WAITING_TEXT ? waitedFor(band.since || band.at, now) : '';
     return `${b}Working on: ${said}${waited ? `, ${waited} so far` : ''}`;
   }
   return '';
@@ -107,9 +113,10 @@ export function bandLine({ pause = null, band = null, session = null, now = Date
 // How long a wait has gone on since the Stop that started it: the answer to
 // "is it stuck?" without typing (about four hours on a check that never
 // reported back is in the owner's record). Nothing under a minute, whole
-// minutes after that, hours from sixty minutes. The record is rewritten at the
-// next Stop or prompt; during a turn the session was woken for, the time still
-// counts from the wait's Stop (docs/band.md).
+// minutes after that, hours from sixty minutes. It counts from the record's
+// `since` (the first of a run of waits) or else its `at`; during a turn the
+// session was woken for, it still counts until the next Stop or prompt
+// rewrites the record (docs/band.md).
 export function waitedFor(at, now) {
   const ms = Number(now) - Date.parse(at);
   if (!Number.isFinite(ms) || ms < 60000) return '';

@@ -40,8 +40,8 @@ spends the user's money. An API-key session is `api`.
 ## Codex routing
 
 Codex is the worker lane while the profile line reads `codex: … ok`, until its
-shared allowance runs out; with no codex line, or another reading, the card's
-builders are. Ask for the Codex
+shared allowance runs out; when it reads "not checked", one `profile.mjs` run
+checks it. With any other reading the card's builders are. Ask for the Codex
 tier once, when the first Codex dispatch is considered and the profile has none,
 then store it with `profile.mjs --set codex.tier=plus|pro5|pro20`.
 

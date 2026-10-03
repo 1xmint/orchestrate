@@ -174,6 +174,26 @@ test('a Stop passed because a helper or command is out writes working on the wai
   }
 });
 
+test('a wait that follows a wait keeps the time the waiting began', () => {
+  // A Monitor line or one of two helpers landing wakes the session; a step that
+  // still only waits must not restart "so far" (independent review, round 6).
+  const home = sandbox(); const dir = project();
+  arm(home, 'w3');
+  const began = new Date(Date.now() - 3 * 3600000 - 5 * 60000).toISOString();
+  writeFileSync(bandFile(dir), JSON.stringify({ session: 'w3', kind: 'working', text: WAITING_TEXT, at: new Date(Date.now() - 60000).toISOString(), since: began }));
+  const task = { id: 'r2', type: 'subagent', status: 'running', description: 'review the diff' };
+  const r = stop(home, 'w3', dir, transcript(dir, said('One review landed; waiting on the other.')), { background_tasks: [task] });
+  assert.equal(r.stdout.trim(), '');
+  const rec = bandRec(dir);
+  assert.equal(rec.since, began, 'the start of the wait is kept');
+  assert.ok(Date.parse(rec.at) > Date.parse(began), 'the write time is new');
+  assert.equal(lineOf(dir, 'w3'), `Working on: ${WAITING_TEXT}, 3 h 5 min so far`);
+  // Another session's wait, or a record that is not a wait, starts the clock.
+  writeFileSync(bandFile(dir), JSON.stringify({ session: 'other', kind: 'working', text: WAITING_TEXT, at: began, since: began }));
+  stop(home, 'w3', dir, transcript(dir, said('Still waiting on the other review.')), { background_tasks: [task] });
+  assert.ok(Date.now() - Date.parse(bandRec(dir).since) < 60000, 'a new clock for this session');
+});
+
 test('a question at the same Stop comes before the wait', () => {
   const home = sandbox(); const dir = project();
   arm(home, 'w2');

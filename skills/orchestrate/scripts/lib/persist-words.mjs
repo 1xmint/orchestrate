@@ -79,6 +79,6 @@ export function persistLine(persist) {
   // Said at arming and after each resume or summary while armed. What the hook
   // weighs inside "no work" (a helper refused for usage, a background command
   // out) is the hook's to judge, not the lead's to act on, so it is not spelled
-  // out here (prompt review, 2026-10-03: 467 bytes to about 330).
+  // out here (prompt review, 2026-10-03: 467 bytes to about 360).
   return `${lead}. A Stop is refused while each step does real work. It ends when you say the goal is met or ask the user something, or on a helper refused by the budget or the credential check, the same error twice, a step that does no work while nothing is out, three continues on the same open item, or 25 steps. A usage limit does not end it. "persist off" turns it off.`;
 }

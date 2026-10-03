@@ -162,14 +162,14 @@ release's section when it ships.
     not the file just read); SKILL.md's "wait on a helper with `Monitor`" read
     as polling a helper that wakes the session by itself; "second opinion
     before committing" read as before every git commit; routing.md's Codex
-    lane had no condition. The stop-and-ask list was in both the style and the
-    card: the style keeps it, with the home-wifi example the card carried.
-    Nothing writes the Codex status cache (only the tests do), so the profile
-    line always read "codex: not checked in the last hour (run profile.mjs)"
-    and running it changed nothing; the line now shows only a fresh reading.
-    The keep-going line went from 467 to about 330 bytes. Per-run read now
-    13,280 bytes (skill 7,539, style 3,782, card 1,959; the skill keeps its
-    maintainer rule, which the portable build needs and a test pins). Not changed, and
+    lane had no condition. The stop-and-ask list in the style gained the
+    home-wifi example the card carried.
+    (A change that hid the Codex line without a fresh reading rested on a
+    misreading, that nothing writes the Codex status; a full `profile.mjs`
+    run does. The sixth review caught it and it is undone.)
+    The keep-going line went from 467 to about 360 bytes. Per-run read now
+    13,482 bytes (skill 7,539, style 3,799, card 2,144: the card keeps a short
+    stop list and the skill its maintainer rule, below). Not changed, and
     why: the "helper size" note on every dispatch (about 80 bytes, pinned by
     eight hook tests, and a guard change needs its own review); the skill's
     "How to talk to the user" section (pinned; only serves hosts without the
@@ -177,6 +177,19 @@ release's section when it ships.
     teaches the same at the refusal: a candidate for step 2a). Commit
     `e014f77`'s message says `execution.md` keeps the Plan-mode rules; that
     file was cut later (`11a3675`), and the guard (`workflow.mjs`) holds them.
+  - **Sixth review** (fresh context, Opus) on the band clock, the wording
+    pass, the test-count check and the stretch-aware claims: FAIL on six.
+    The Codex line change rested on a misreading (a full `profile.mjs` run
+    does write the cache) and is undone, with routing.md saying to run it
+    once when the line reads "not checked". The test-count check took the
+    total in "39 of 42 tests pass" for a passing count, read questions and
+    version numbers as claims, missed a sum printed in one output, and took
+    the host's own copy of an edit as evidence; all fixed. The style's new
+    wording put questions mid-message, where the hooks, the band's "Needs
+    you" and the unanswered count cannot see them: questions now close the
+    message. The card keeps a short stop list, since a script install
+    leaves the style off while still sending the card. A wait after a wait
+    keeps the time the waiting began (`since` in the band record).
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line

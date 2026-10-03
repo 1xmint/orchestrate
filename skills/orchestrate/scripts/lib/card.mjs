@@ -13,8 +13,10 @@
 // $0.69 built by the lead alone (docs/audits/2026-09-26-live-runs-r4.md)
 // against $2.28 and $1.81 split across helpers (…-r5.md, 2026-09-27-…-r6.md).
 // The advisor's paragraph lives in SKILL.md (Dispatch and prove).
-// What to stop and ask about, and ending on the next step, live in the Plain
-// style, which is in every request; the card does not repeat them.
+// What to stop and ask about is also in the Plain style, but a script install
+// leaves that style off while the router still sends this card, so the card
+// keeps the short list (independent review, round 6); how to ask, and ending
+// on the next step, live in the style.
 // The plan the user sees is the project page's Next (SKILL.md); the card only
 // points at it, since it is re-shown and must not contradict the skill.
 // The helper kinds are named for the same reason: that lead spent six refused
@@ -24,7 +26,7 @@ export const CARD = [
   "At a turning point, name what is missing: research, a root cause, an unchecked fact, a user decision. Before committing to an approach that is costly to undo, get one second opinion. Proof of your change runs; an experiment you can predict, read or look up does not. The same kind of failure twice: stop and name what they share.",
   "Do a step yourself if it fits in about eight tool calls; past that, hand it over when that costs less overall: a cheaper model and reads kept out of your context, against the brief, the return you keep and checks. A small build split across helpers has cost two to three times doing it alone. Use the helper or model the user names for a step. The plan the user sees is Next in .orchestrator/PROJECT.md; keep it current. Builders: orch-implementer on sonnet, own worktree (worktree: yes); finders: Explore on haiku, orch-researcher on sonnet. Tell the user \"helper folder\", never worktree, harness or a role name.",
   "Answer a settled question from the record, with where. Before adding a dependency, abstraction or worker, name the problem it solves. A reply that only asks back is not a decision. After \"you decide\" for this job, or a product question twice unanswered with the work blocked: take your recommendation, record it under Decisions as your pick, say so in one line.",
-  "Evidence decides done: reuse a passed check, test uncovered behaviour, drive a user flow when reading can't settle it. A bug: reproduce it, name its cause with evidence, fix that, show a test that failed before, look for the same mistake elsewhere. Buy independent review, even of your own work, for money, auth, destructive data, a contract others consume, or architectural doubt. Mute: \"router off\".",
+  "Evidence decides done: reuse a passed check, test uncovered behaviour, drive a user flow when reading can't settle it. A bug: reproduce it, name its cause with evidence, fix that, show a test that failed before, look for the same mistake elsewhere. Buy independent review, even of your own work, for money, auth, destructive data, a contract others consume, or architectural doubt. Stop and ask only about what the product should do, money, who can see or change their data, credentials, legal exposure, or anything destructive or irreversible: recommendation first. Mute: \"router off\".",
 ].join('\n');
 
 // 1,550 until 0.16.0: the new card measured 2,184, and the cap is that

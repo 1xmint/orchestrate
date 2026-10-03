@@ -323,6 +323,7 @@ function cachedCodexStatus() {
   return c && c.at && Date.now() - Date.parse(c.at) < CODEX_STATUS_MS ? c : null;
 }
 function codexBriefLine(c) {
+  if (!c) return 'codex: not checked in the last hour (run profile.mjs)';
   if (c.status === 'not-installed') return 'codex: not installed';
   if (c.status === 'not-signed-in') return 'codex: not signed in';
   if (c.status === 'limit') return `codex: limit until ${c.until || 'unknown'}`;
@@ -473,12 +474,7 @@ if (brief) {
     // installer would shadow the roles a plugin carries).
     const fix = agents.source === 'plugin' ? 'update the plugin' : 'run scripts/install-agents.mjs';
     console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')}; ${fix})` : ''}`);
-    // Only a fresh reading is said. Nothing in the plugin writes that reading
-    // today (found 2026-10-03: only the tests do), so without this guard every
-    // skill load read "codex: not checked in the last hour (run profile.mjs)",
-    // and running profile.mjs did not change it.
-    const codex = cachedCodexStatus();
-    if (codex) console.log(codexBriefLine(codex));
+    console.log(codexBriefLine(cachedCodexStatus()));
     console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''}`);
     console.log(`this plan includes: ${included}`);
     const paidMode = loadProfile().paidServices || 'ask';

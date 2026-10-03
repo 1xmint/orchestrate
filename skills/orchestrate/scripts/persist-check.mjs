@@ -46,7 +46,7 @@ import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, r
 import { pauseRoot, pauseRecord, writePause, clearPause } from './lib/pause.mjs';
 import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
 import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
-import { recordBand, bandAtStop, openItem, sessionGoal, stopQuestion, withoutTaskIds } from './lib/band.mjs';
+import { recordBand, readBand, bandAtStop, openItem, sessionGoal, stopQuestion, withoutTaskIds, WAITING_TEXT } from './lib/band.mjs';
 import { syntheticPrompt } from './lib/persist-words.mjs';
 import { ownerTextOf } from './lib/compaction-snapshot.mjs';
 import { readProject } from './lib/project.mjs';
@@ -609,7 +609,17 @@ export function recordBandAtStop(input, dec, now = new Date()) {
       open: continued ? openItem(state, input.cwd) : '',
       goal: continued ? sessionGoal(state) : '',
     });
-    return recordBand({ cwd: input.cwd, session: input.session_id, kind: note.kind, text: note.text, now });
+    // A wait that follows a wait keeps the first one's time, so "so far" counts
+    // from when the session started waiting, not from the last wake (a Monitor
+    // line, one of two helpers landing) after which it still only waited
+    // (independent review, round 6).
+    let since = null;
+    if (note.kind === 'working' && note.text === WAITING_TEXT) {
+      since = now;
+      const prev = readBand(pauseRoot(input.cwd));
+      if (prev && prev.kind === 'working' && prev.text === WAITING_TEXT && prev.session === (input.session_id || null)) since = prev.since || prev.at;
+    }
+    return recordBand({ cwd: input.cwd, session: input.session_id, kind: note.kind, text: note.text, now, since });
   } catch { return null; }
 }
 

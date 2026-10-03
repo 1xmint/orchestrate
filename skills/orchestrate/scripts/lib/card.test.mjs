@@ -77,14 +77,15 @@ test('the card tells the lead to say "helper folder", never worktree, harness or
   assert.match(CARD, /Tell the user "helper folder", never worktree, harness or a role name\./);
 });
 
-test('the card leaves the stop-and-ask list to the Plain style', () => {
+test('the card makes who can see or change the user\'s data their call', () => {
   // The 0.18.0 release check: Claude built a no-password server any device on
   // the home wifi could open, said so, and asked only about the paid option.
-  // The list that makes who can see or change the data the user's call lives
-  // in the style, which is in every request and needs no re-send after a
-  // summary (assets.test.mjs); a second copy here cost 261 bytes a send.
-  assert.doesNotMatch(CARD, /Stop and ask only about|who can see or change their data|not a menu/);
+  // "A public surface" did not read as covering the home wifi. The Plain style
+  // says the same at more length, but a script install leaves the style off
+  // while the router still sends this card.
+  assert.match(CARD, /Stop and ask only about what the product should do, money, who can see or change their data, credentials/);
   assert.doesNotMatch(CARD, /a public surface/);
+  assert.doesNotMatch(CARD, /not a menu/, 'how to end a message is the style\'s');
 });
 
 test('the model the card names for each helper matches that helper\'s own definition', async () => {
