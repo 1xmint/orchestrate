@@ -20,7 +20,7 @@
 // set-shaped recommendations) fired on two failed fetches as readily as on two
 // real sources.
 
-import { readFileSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
@@ -28,22 +28,16 @@ import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail, findRepoRoot } from './lib/tier.mjs';
 import { fileChange } from './lib/file-change.mjs';
 import { projectPath } from './lib/project.mjs';
+import { pickupSection, pickupWritten } from './lib/runs.mjs';
 
-export function pickupSection(runMdText) {
-  const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
-  return m ? m[1].trim() : '';
-}
+// Where these live now, so a hook that runs on every tool call can use them
+// without loading this whole file (lib/helper-leftovers.mjs, and lib/runs.mjs
+// for the Pickup text readers). Still exported from here for every importer.
+export { anyHelperRunning, leftoverHelpers, leftoverText, gitHelperState, leftoverNote, mergedBranches, folderIsClean } from './lib/helper-leftovers.mjs';
+export { pickupSection, pickupWritten };
 
 export function pickupHash(runMdText) {
   return createHash('sha256').update(pickupSection(runMdText)).digest('hex').slice(0, 16);
-}
-
-// A Pickup section still holding its template placeholders is not written.
-export function pickupWritten(section) {
-  const prompt = /Pickup prompt:\s*(.*)/.exec(section || '');
-  if (!prompt) return false;
-  const v = prompt[1].trim();
-  return Boolean(v) && !/^<.*>$/.test(v);
 }
 
 // Hash comparison, not timestamps: a clock is not a fact here (a hook rewrites
@@ -133,16 +127,6 @@ const judgeLooks = (looks, returned, now = Date.now()) => {
 };
 const failKey = (id, fail) => (fail && fail.at ? `${id}:failed@${fail.at}` : `${id}:failed`);
 
-// A dispatch of this session with no return yet, sent within the last six
-// hours (an older one is a helper that died without a return, not one working).
-export function anyHelperRunning({ dispatches, returned, now }) {
-  const rs = Array.isArray(returned) ? returned : [];
-  const t0 = Number.isFinite(now) ? now : Date.now();
-  return (Array.isArray(dispatches) ? dispatches : []).some(d => d && (d.toolUseId || d.agentId)
-    && !(Date.parse(d.at) < t0 - 6 * 3600 * 1000)
-    && !rs.some(r => r && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId))));
-}
-
 function freeFormOpen(returned, dispatches, now) {
   const ds = Array.isArray(dispatches) ? dispatches : [];
   const out = [];
@@ -185,78 +169,6 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
     return { block: true, task: f.id, freeForm: true, failed: Boolean(f.failed), noVerdict: Boolean(f.failed) && !f.fail, blockedFor: [...already, key] };
   }
   return { block: false, task: null, blockedFor: [...already] };
-}
-
-// Helper folders and branches left behind. A helper that works in its own
-// worktree leaves a folder `<cwd>/.claude/worktrees/agent-<id>` and a branch
-// `worktree-agent-<id>`. Both stay unless someone removes them, and the person
-// who asked is never told. Counts what git reports now, for this session's
-// helpers: a folder counts only if git still lists it and it is on disk (a
-// folder git no longer knows is not counted); a branch counts only if it still
-// exists. A folder or branch counts when its work is merged, or (a folder, and
-// its branch with it) the helper returned and the folder holds nothing unsaved.
-// Removes nothing.
-//   known: folder paths git lists; branches: helper branch names git lists.
-export function leftoverHelpers({ cwd, returned, merged, exists, clean, known, branches }) {
-  const seen = new Set();
-  let folders = 0, branchCount = 0, foldersMerged = 0;
-  const norm = p => { let r = String(p); try { r = realpathSync(r); } catch { r = resolvePath(r); } r = r.replace(/\\/g, '/').replace(/\/+$/, ''); return process.platform === 'win32' ? r.toLowerCase() : r; };
-  const knownSet = new Set((known || []).map(norm));
-  for (const r of Array.isArray(returned) ? returned : []) {
-    const id = r && r.agentId ? String(r.agentId) : '';
-    if (!id || seen.has(id) || !/^[A-Za-z0-9]+$/.test(id)) continue;
-    seen.add(id);
-    const dir = join(String(cwd), '.claude', 'worktrees', `agent-${id}`);
-    const isMerged = (merged || []).includes(`worktree-agent-${id}`);
-    let folder = false;
-    if (exists(dir) && knownSet.has(norm(dir)) && (isMerged || (typeof clean === 'function' && clean(dir)))) { folder = true; folders++; if (isMerged) foldersMerged++; }
-    if ((branches || []).includes(`worktree-agent-${id}`) && (isMerged || folder)) branchCount++;
-  }
-  return { folders, branches: branchCount, allMerged: foldersMerged === folders };
-}
-
-// The note's words, by what is really left: folders only, branches only, or both.
-export function leftoverText({ folders, branches }) {
-  const fw = `${folders} helper ${folders === 1 ? 'folder' : 'folders'}`;
-  const what = folders && branches ? `${fw} and ${branches} ${branches === 1 ? 'branch' : 'branches'}`
-    : folders ? fw : `${branches} helper ${branches === 1 ? 'branch' : 'branches'}`;
-  return `${what} ${folders + branches === 1 ? 'is' : 'are'} still here`;
-}
-
-// What git reports now: the folders it lists and the helper branches it lists.
-export function gitHelperState(cwd) {
-  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
-  let known = [], branches = [];
-  try { known = git(['worktree', 'list', '--porcelain']).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9).trim()); } catch {}
-  try { branches = git(['branch', '--list', '--format=%(refname:short)', 'worktree-agent-*']).split('\n').map(x => x.trim()).filter(Boolean); } catch {}
-  return { known, branches };
-}
-
-// The whole check for one session: null when nothing is left.
-export function leftoverNote({ cwd, returned, dispatches }) {
-  if (!cwd || !Array.isArray(returned) || !returned.some(r => r && r.agentId) || anyHelperRunning({ dispatches, returned })) return null;
-  const { known, branches } = gitHelperState(cwd);
-  const c = leftoverHelpers({ cwd, returned, merged: mergedBranches(cwd), exists: existsSync, clean: folderIsClean, known, branches });
-  return c.folders + c.branches ? { ...c, text: leftoverText(c) } : null;
-}
-
-// Helper branches whose work is really in the current branch: the branch has at
-// least one commit of its own (its reflog records a commit, merge or pick) and
-// the current branch contains it. A helper branch that never committed sits at
-// the tip it was cut from, which `--merged` lists too, so that alone is not enough.
-export function mergedBranches(cwd) {
-  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
-  try {
-    const names = git(['branch', '--merged', 'HEAD', '--format=%(refname:short)']).split('\n').map(x => x.trim()).filter(n => /^worktree-agent-[A-Za-z0-9]+$/.test(n));
-    return names.filter(n => {
-      try { return git(['reflog', 'show', '--format=%gs', `refs/heads/${n}`]).split('\n').some(l => /^(commit|merge|cherry-pick|rebase)/.test(l.trim())); } catch { return false; }
-    });
-  } catch { return []; }
-}
-
-// A helper folder with nothing unsaved in it (no changed or new files).
-export function folderIsClean(dir) {
-  try { return execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() === ''; } catch { return false; }
 }
 
 // The project page, kept honest. A turn that edited a tracked file in the repo

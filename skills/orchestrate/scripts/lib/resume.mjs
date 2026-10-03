@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { CONTEXT_DIR } from './context-scan.mjs';
 import { sanitizeId } from './tier.mjs';
 import { formatAgo } from './handoff.mjs';
-import { pickupSection, pickupWritten } from '../turn-check.mjs';
+import { pickupSection, pickupWritten } from './runs.mjs';
 
 // A bounded excerpt of what the run is for, for a session that has lost the
 // thread: resumed, compacted, or picking up someone else's ledger. Outcome,

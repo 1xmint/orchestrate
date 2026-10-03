@@ -195,6 +195,24 @@ export function parseBudget(text) {
   return out;
 }
 
+// The text under a RUN.md's "## Pickup" heading, and whether it was written.
+// They live here, not in turn-check.mjs where they began, so the code that
+// shows a resuming session its Pickup (lib/resume.mjs) does not import the
+// whole Stop hook, which every tool call's hook would then load with it.
+// turn-check.mjs re-exports both.
+export function pickupSection(runMdText) {
+  const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
+  return m ? m[1].trim() : '';
+}
+
+// A Pickup section still holding its template placeholders is not written.
+export function pickupWritten(section) {
+  const prompt = /Pickup prompt:\s*(.*)/.exec(section || '');
+  if (!prompt) return false;
+  const v = prompt[1].trim();
+  return Boolean(v) && !/^<.*>$/.test(v);
+}
+
 // One run, read from its RUN.md. `open` is true while a task row still carries
 // a non-final glyph and no `Closed:` line says the goal was met or dropped: a
 // finished run can keep a blocked row (work only another machine can do), and

@@ -156,6 +156,36 @@ test('an unannounced sample records nothing until markAnnounced and markTicked a
   assert.equal(storedContext('s1', null, dir).tokens, checkpointAt, 'marking does not disturb the reading');
 });
 
+test('the size line is said once per step of growth; samples inside a step say nothing and keep its key', () => {
+  const { dir } = tempHome();
+  const every = policy().context.tickEvery;
+  const line = tokens => assistantLine({ input_tokens: tokens }, `m${tokens}`);
+  const p = transcript([line(every * 2 + 1000)]);
+  const sample = () => sampleContext({ transcriptPath: p, session: 's1', policy: policy(), dir });
+  const storedTick = () => JSON.parse(readFileSync(storePath('s1', null, dir), 'utf8')).tickKey;
+
+  const first = sample();
+  assert.match(first.notice, /^\[orchestrate · context\] ~51k · newest checkpoint: none/, 'the first sample says the size');
+  assert.equal(first.tick, 'none|2');
+  assert.equal(storedTick(), 'none|2');
+
+  const idle = sample();
+  assert.equal(idle.notice, '', 'a file that did not grow says nothing');
+  assert.equal(idle.tick, null);
+
+  appendFileSync(p, line(every * 2 + 3000));
+  const inside = sample();
+  assert.equal(inside.notice, '', 'growth inside the same step says nothing');
+  assert.equal(inside.tick, null);
+  assert.equal(storedTick(), 'none|2', 'and the key it said is kept');
+
+  appendFileSync(p, line(every * 3 + 1000));
+  const next = sample();
+  assert.match(next.notice, /^\[orchestrate · context\] ~76k · newest checkpoint: none/, 'the next step is said');
+  assert.equal(next.tick, 'none|3');
+  assert.equal(storedTick(), 'none|3');
+});
+
 test('markAnnounced on a store that does not exist writes nothing', () => {
   const { dir } = tempHome();
   markAnnounced('ghost', null, 'k', dir);
