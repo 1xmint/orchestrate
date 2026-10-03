@@ -1,0 +1,59 @@
+// lib/session-save.test.mjs — hooks that write the session file at the same
+// time keep each other's writes. Each case runs in its own Node process with
+// its own HOME, since lib/tier.mjs reads HOME when it loads.
+
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const TIER = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), 'tier.mjs')).href;
+const sessionFile = home => join(home, '.claude', 'orchestrate', 'sessions', 's1.json');
+const script = body => `import { loadSession, saveSession } from ${JSON.stringify(TIER)};\n${body}`;
+const runIn = (home, body) => spawnSync(process.execPath, ['--input-type=module', '-e', script(body)], { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
+
+test('a save writes back only what this writer changed, and keeps what another wrote meanwhile', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-save-'));
+  mkdirSync(dirname(sessionFile(home)), { recursive: true });
+  writeFileSync(sessionFile(home), JSON.stringify({ v: 1, session_id: 's1', returned: [], workCalls: { count: 3 }, gone: true }));
+  const r = runIn(home, `
+    const a = loadSession('s1');            // the hook after a tool call
+    const b = loadSession('s1');            // the hook that files a helper's return
+    b.returned = [{ agentId: 'h1', verdict: 'PASS' }];
+    saveSession(b);
+    a.workCalls = { count: 4 };
+    delete a.gone;
+    saveSession(a);                         // loaded before b saved
+    const c = { v: 1, session_id: 's1', fresh: 1 };  // a state nobody loaded
+    saveSession(c);
+  `);
+  assert.equal(r.status, 0, r.stderr);
+  const s = JSON.parse(readFileSync(sessionFile(home), 'utf8'));
+  assert.deepEqual(s.returned, [{ agentId: 'h1', verdict: 'PASS' }], 'the return row survives the other hook\'s save');
+  assert.deepEqual(s.workCalls, { count: 4 });
+  assert.equal('gone' in s, false, 'a key the writer deleted is deleted');
+  assert.equal(s.fresh, 1, 'a new object adds its keys');
+  assert.ok(Array.isArray(s.returned), 'and drops none of the others');
+  assert.equal(existsSync(`${sessionFile(home)}.lock`), false, 'no lock is left behind');
+});
+
+test('hooks saving at the same moment from separate processes lose none of each other\'s keys', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-save-race-'));
+  mkdirSync(dirname(sessionFile(home)), { recursive: true });
+  writeFileSync(sessionFile(home), JSON.stringify({ v: 1, session_id: 's1' }));
+  const writers = Array.from({ length: 6 }, (_, i) => new Promise(resolve => {
+    const p = spawn(process.execPath, ['--input-type=module', '-e', script(`
+      const s = loadSession('s1');
+      const until = Date.now() + 40; while (Date.now() < until) {}   // hold the loaded copy a while
+      s['k${i}'] = ${i};
+      saveSession(s);
+    `)], { env: { ...process.env, HOME: home, USERPROFILE: home }, stdio: 'ignore' });
+    p.on('exit', resolve);
+  }));
+  await Promise.all(writers);
+  const s = JSON.parse(readFileSync(sessionFile(home), 'utf8'));
+  for (let i = 0; i < 6; i++) assert.equal(s[`k${i}`], i, `writer ${i}'s key survives`);
+});

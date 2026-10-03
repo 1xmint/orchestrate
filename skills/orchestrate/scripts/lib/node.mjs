@@ -19,7 +19,7 @@ const fs = require('node:fs');
 export const {
   appendFileSync, closeSync, copyFileSync, createWriteStream, existsSync, fstatSync,
   mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync,
-  renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync, writeSync,
+  renameSync, rmSync, rmdirSync, statSync, unlinkSync, utimesSync, writeFileSync, writeSync,
 } = fs;
 
 export const createHash = (...a) => require('node:crypto').createHash(...a);

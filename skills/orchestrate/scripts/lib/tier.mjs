@@ -5,7 +5,7 @@
 // so every existing importer keeps working unchanged.
 // No network, no child processes, never throws to a caller (returns null instead).
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from './node.mjs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, rmdirSync, openSync, readSync, closeSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { lastMeasuredTokens } from './context-scan.mjs';
@@ -141,13 +141,60 @@ export function sessionPath(sessionId) {
   return join(SESSIONS_DIR, `${sanitizeId(sessionId)}.json`);
 }
 
+// What a hook loaded, per top-level key, so its save writes back only what it
+// changed (saveSession).
+const LOADED = new WeakMap();
+const snapshot = state => new Map(Object.entries(state).map(([k, v]) => [k, JSON.stringify(v)]));
+
 export function loadSession(sessionId) {
-  return readJson(sessionPath(sessionId));
+  const s = readJson(sessionPath(sessionId));
+  if (s && typeof s === 'object' && !Array.isArray(s)) LOADED.set(s, snapshot(s));
+  return s;
 }
 
+// A short, best-effort lock beside a file: a directory, since making one is
+// atomic everywhere. A lock older than two seconds is a hook that died holding
+// it. Gives up waiting after a fifth of a second and goes ahead unlocked: a
+// hook must not hang on another.
+const NAP = new Int32Array(new SharedArrayBuffer(4));
+export function withFileLock(path, fn) {
+  const lock = `${path}.lock`;
+  const until = Date.now() + 200;
+  let held = false;
+  for (let tries = 0; !held && tries < 100; tries++) {
+    try { mkdirSync(lock); held = true; break; } catch (e) {
+      if (e && e.code === 'ENOENT') { try { mkdirSync(dirname(path), { recursive: true }); } catch { break; } continue; }
+      if (!e || e.code !== 'EEXIST') break;
+      try { if (Date.now() - statSync(lock).mtimeMs > 2000) { rmdirSync(lock); continue; } } catch {}
+      if (Date.now() > until) break;
+      Atomics.wait(NAP, 0, 0, 5);
+    }
+  }
+  try { return fn(); } finally { if (held) { try { rmdirSync(lock); } catch {} } }
+}
+
+// Several hooks write this file at once: the hook after every tool call, the
+// one that files a helper's return, the dispatch guard, the Stop hooks.
+// Writing the whole object back lost a write another hook made in between: a
+// helper's return row vanished in about one race in four (whole-file review,
+// 2026-10-03). So a save takes the lock, reads the file as it is now, and
+// writes back only the top-level keys this hook changed since it loaded them
+// (every key, for a state it did not load), keeping the rest as they are.
 export function saveSession(state) {
   state.updated = new Date().toISOString();
-  writeJsonAtomic(sessionPath(state.session_id), state);
+  const path = sessionPath(state.session_id);
+  const before = LOADED.get(state);
+  withFileLock(path, () => {
+    const fresh = readJson(path);
+    let out = state;
+    if (fresh && typeof fresh === 'object' && !Array.isArray(fresh)) {
+      out = { ...fresh };
+      for (const [k, v] of Object.entries(state)) if (!before || before.get(k) !== JSON.stringify(v)) out[k] = v;
+      if (before) for (const k of before.keys()) if (!(k in state)) delete out[k];
+    }
+    writeJsonAtomic(path, out);
+  });
+  LOADED.set(state, snapshot(state));
 }
 
 export function pruneSessions(maxAgeDays = 7) {
