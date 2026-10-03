@@ -108,3 +108,13 @@ test('the card says not to test what can be known, and to stop at the same kind 
   assert.match(CARD, /The same kind of failure twice: stop and name what they share\./);
   assert.match(CARD, /show a test that failed before, look for the same mistake elsewhere\./);
 });
+
+test('the card carries decision 2c: a question back is not a decision, and a twice-unanswered question is settled by the lead', () => {
+  // The record (plan 0010 step 2c): a reply that only asked back was written
+  // down as the owner's decision, and the same product question went out three
+  // times unchanged. Decided 2026-10-03: after "you decide" for the job, or a
+  // product question twice unanswered with the work blocked, the lead takes its
+  // own recommendation, records it as its pick and says so; one word reverses it.
+  assert.match(CARD, /A reply that only asks back is not a decision\./);
+  assert.match(CARD, /After "you decide" for this job, or a product question twice unanswered with the work blocked: take your recommendation, record it under Decisions as your pick, say so in one line\./);
+});

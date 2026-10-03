@@ -1098,3 +1098,23 @@ test("a helper's compaction leaves the lead's working project in place", () => {
   run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo, transcript_path: t });
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).work, join(repo, 'app'), "the helper's compaction kept the lead's working project");
 });
+
+// Decision 2c (2026-10-03): the same product question went to the owner three
+// times unchanged in the record. The router counts a question left open and
+// says so from the second time, with the replies, so the count survives a
+// summary; the card says what to do about it.
+test('the same question left open twice is stated, with the replies', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const tr = join(repo, 'asked.jsonl');
+  const ask = text => writeFileSync(tr, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) + '\n');
+  prompt(home, repo, 'build the reminder feature for the bakery app', { session_id: 's-ask', transcript_path: tr });
+  ask('The reminders work. Do you want email or SMS for them?');
+  const first = prompt(home, repo, 'continue', { session_id: 's-ask', transcript_path: tr });
+  assert.doesNotMatch(first, /orchestrate · question/, 'once is not yet a pattern');
+  ask('Still open before I wire it: Do you want email or SMS for them?');
+  const second = prompt(home, repo, 'keep going', { session_id: 's-ask', transcript_path: tr });
+  assert.match(second, /\[orchestrate · question\] This question has gone out 2 times unchanged; the replies were "continue", "keep going": "Do you want email or SMS for them\?"/);
+  ask('Do you want email or SMS for them?');
+  const answered = prompt(home, repo, 'email is fine', { session_id: 's-ask', transcript_path: tr });
+  assert.doesNotMatch(answered, /orchestrate · question/, 'an answer clears it');
+});

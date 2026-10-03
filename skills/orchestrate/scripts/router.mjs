@@ -48,6 +48,8 @@ import { loadPolicy } from './lib/policy.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
 import { projectNote } from './lib/project.mjs';
 import { pauseRoot, clearPause } from './lib/pause.mjs';
+import { lastQuestion, nextAsked, askedLine } from './lib/asked.mjs';
+import { lastAssistantText } from './lib/commit-claim.mjs';
 import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
@@ -461,6 +463,18 @@ function handlePrompt(input) {
   // mode is said once, whatever the prompt looks like.
   const mode = modeNote(state, input);
   if (mode) out.push(mode);
+
+  // A question the lead put to the user that came back unanswered again
+  // (lib/asked.mjs): counted here, the one place that sees the reply, and said
+  // from the second time, because a count is what a summary loses. A slash
+  // command is not a reply to anything, so it does not count.
+  if (!/^\s*\//.test(trimmed)) {
+    let question = null;
+    try { question = input.transcript_path ? lastQuestion(lastAssistantText(readTail(input.transcript_path, 131072))) : null; } catch {}
+    state.asked = nextAsked(state.asked, { question, reply: trimmed, nudge: Boolean(intent) || Boolean(explicit) });
+    const asked = askedLine(state.asked);
+    if (asked) out.push(asked);
+  }
 
   // The additions that ride along with the full card only: a partial-install
   // notice (guard-agent.mjs refuses general-purpose/claude once orch-implementer
