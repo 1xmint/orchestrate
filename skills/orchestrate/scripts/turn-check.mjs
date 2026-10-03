@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// turn-check.mjs — the session's Stop hook and management heartbeat, registered
-// from SKILL.md's frontmatter so it is live only while the skill is in play.
+// turn-check.mjs — the session's management heartbeat at Stop, registered in
+// hooks/hooks.json beside persist-check.mjs.
 // Idle and Pickup below are for a coordinated run this session has explicitly
 // bound; the review hold is not — it reads a task's own return, which lands
 // in session state whether or not a run is bound, so it checks regardless.
@@ -14,36 +14,31 @@
 //   3. pickup — a run whose Pickup is older than the last dispatch cannot be
 //      resumed, so the next session would start blind.
 //
+// A Stop it refuses also leaves the band's record (the line above the prompt,
+// docs/band.md) saying the turn goes on, after the refusal is printed.
+//
 // It never asks for more research, more testing or a better answer: a Stop hook
 // that demands improvement after the work is finished is a loop with no exit
 // condition, and the one that used to live here (a source-count floor under
 // set-shaped recommendations) fired on two failed fetches as readily as on two
 // real sources.
 
-import { readFileSync, existsSync, realpathSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { readFileSync, existsSync, execFileSync, createHash } from './lib/node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail } from './lib/tier.mjs';
+import { DIR, readJson, putEntry, sanitizeId, sessionRun, loadSession, readTail, findRepoRoot } from './lib/tier.mjs';
 import { fileChange } from './lib/file-change.mjs';
 import { projectPath } from './lib/project.mjs';
+import { pickupSection, pickupWritten } from './lib/runs.mjs';
 
-export function pickupSection(runMdText) {
-  const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
-  return m ? m[1].trim() : '';
-}
+// Where these live now, so a hook that runs on every tool call can use them
+// without loading this whole file (lib/helper-leftovers.mjs, and lib/runs.mjs
+// for the Pickup text readers). Still exported from here for every importer.
+export { anyHelperRunning, leftoverHelpers, leftoverText, gitHelperState, leftoverNote, mergedBranches, folderIsClean } from './lib/helper-leftovers.mjs';
+export { pickupSection, pickupWritten };
 
 export function pickupHash(runMdText) {
   return createHash('sha256').update(pickupSection(runMdText)).digest('hex').slice(0, 16);
-}
-
-// A Pickup section still holding its template placeholders is not written.
-export function pickupWritten(section) {
-  const prompt = /Pickup prompt:\s*(.*)/.exec(section || '');
-  if (!prompt) return false;
-  const v = prompt[1].trim();
-  return Boolean(v) && !/^<.*>$/.test(v);
 }
 
 // Hash comparison, not timestamps: a clock is not a fact here (a hook rewrites
@@ -133,16 +128,6 @@ const judgeLooks = (looks, returned, now = Date.now()) => {
 };
 const failKey = (id, fail) => (fail && fail.at ? `${id}:failed@${fail.at}` : `${id}:failed`);
 
-// A dispatch of this session with no return yet, sent within the last six
-// hours (an older one is a helper that died without a return, not one working).
-export function anyHelperRunning({ dispatches, returned, now }) {
-  const rs = Array.isArray(returned) ? returned : [];
-  const t0 = Number.isFinite(now) ? now : Date.now();
-  return (Array.isArray(dispatches) ? dispatches : []).some(d => d && (d.toolUseId || d.agentId)
-    && !(Date.parse(d.at) < t0 - 6 * 3600 * 1000)
-    && !rs.some(r => r && ((r.toolUseId && d.toolUseId && r.toolUseId === d.toolUseId) || (r.agentId && d.agentId && r.agentId === d.agentId))));
-}
-
 function freeFormOpen(returned, dispatches, now) {
   const ds = Array.isArray(dispatches) ? dispatches : [];
   const out = [];
@@ -187,78 +172,6 @@ export function reviewHoldDecision({ returned, dispatches, lastMessage, blockedF
   return { block: false, task: null, blockedFor: [...already] };
 }
 
-// Helper folders and branches left behind. A helper that works in its own
-// worktree leaves a folder `<cwd>/.claude/worktrees/agent-<id>` and a branch
-// `worktree-agent-<id>`. Both stay unless someone removes them, and the person
-// who asked is never told. Counts what git reports now, for this session's
-// helpers: a folder counts only if git still lists it and it is on disk (a
-// folder git no longer knows is not counted); a branch counts only if it still
-// exists. A folder or branch counts when its work is merged, or (a folder, and
-// its branch with it) the helper returned and the folder holds nothing unsaved.
-// Removes nothing.
-//   known: folder paths git lists; branches: helper branch names git lists.
-export function leftoverHelpers({ cwd, returned, merged, exists, clean, known, branches }) {
-  const seen = new Set();
-  let folders = 0, branchCount = 0, foldersMerged = 0;
-  const norm = p => { let r = String(p); try { r = realpathSync(r); } catch { r = resolvePath(r); } r = r.replace(/\\/g, '/').replace(/\/+$/, ''); return process.platform === 'win32' ? r.toLowerCase() : r; };
-  const knownSet = new Set((known || []).map(norm));
-  for (const r of Array.isArray(returned) ? returned : []) {
-    const id = r && r.agentId ? String(r.agentId) : '';
-    if (!id || seen.has(id) || !/^[A-Za-z0-9]+$/.test(id)) continue;
-    seen.add(id);
-    const dir = join(String(cwd), '.claude', 'worktrees', `agent-${id}`);
-    const isMerged = (merged || []).includes(`worktree-agent-${id}`);
-    let folder = false;
-    if (exists(dir) && knownSet.has(norm(dir)) && (isMerged || (typeof clean === 'function' && clean(dir)))) { folder = true; folders++; if (isMerged) foldersMerged++; }
-    if ((branches || []).includes(`worktree-agent-${id}`) && (isMerged || folder)) branchCount++;
-  }
-  return { folders, branches: branchCount, allMerged: foldersMerged === folders };
-}
-
-// The note's words, by what is really left: folders only, branches only, or both.
-export function leftoverText({ folders, branches }) {
-  const fw = `${folders} helper ${folders === 1 ? 'folder' : 'folders'}`;
-  const what = folders && branches ? `${fw} and ${branches} ${branches === 1 ? 'branch' : 'branches'}`
-    : folders ? fw : `${branches} helper ${branches === 1 ? 'branch' : 'branches'}`;
-  return `${what} ${folders + branches === 1 ? 'is' : 'are'} still here`;
-}
-
-// What git reports now: the folders it lists and the helper branches it lists.
-export function gitHelperState(cwd) {
-  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
-  let known = [], branches = [];
-  try { known = git(['worktree', 'list', '--porcelain']).split('\n').filter(l => l.startsWith('worktree ')).map(l => l.slice(9).trim()); } catch {}
-  try { branches = git(['branch', '--list', '--format=%(refname:short)', 'worktree-agent-*']).split('\n').map(x => x.trim()).filter(Boolean); } catch {}
-  return { known, branches };
-}
-
-// The whole check for one session: null when nothing is left.
-export function leftoverNote({ cwd, returned, dispatches }) {
-  if (!cwd || !Array.isArray(returned) || !returned.some(r => r && r.agentId) || anyHelperRunning({ dispatches, returned })) return null;
-  const { known, branches } = gitHelperState(cwd);
-  const c = leftoverHelpers({ cwd, returned, merged: mergedBranches(cwd), exists: existsSync, clean: folderIsClean, known, branches });
-  return c.folders + c.branches ? { ...c, text: leftoverText(c) } : null;
-}
-
-// Helper branches whose work is really in the current branch: the branch has at
-// least one commit of its own (its reflog records a commit, merge or pick) and
-// the current branch contains it. A helper branch that never committed sits at
-// the tip it was cut from, which `--merged` lists too, so that alone is not enough.
-export function mergedBranches(cwd) {
-  const git = args => execFileSync('git', args, { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] });
-  try {
-    const names = git(['branch', '--merged', 'HEAD', '--format=%(refname:short)']).split('\n').map(x => x.trim()).filter(n => /^worktree-agent-[A-Za-z0-9]+$/.test(n));
-    return names.filter(n => {
-      try { return git(['reflog', 'show', '--format=%gs', `refs/heads/${n}`]).split('\n').some(l => /^(commit|merge|cherry-pick|rebase)/.test(l.trim())); } catch { return false; }
-    });
-  } catch { return []; }
-}
-
-// A helper folder with nothing unsaved in it (no changed or new files).
-export function folderIsClean(dir) {
-  try { return execFileSync('git', ['-C', dir, 'status', '--porcelain'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim() === ''; } catch { return false; }
-}
-
 // The project page, kept honest. A turn that edited a tracked file in the repo
 // (not under .orchestrator/ or .claude/, not git-ignored) without editing
 // .orchestrator/PROJECT.md counts one; any PROJECT.md edit resets the count to
@@ -281,6 +194,10 @@ export function turnEdits(transcriptTail) {
     if (!line.includes('"type"')) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
     const content = o && o.message && o.message.content;
+    // A message the user typed while a turn was running is stored as a queued
+    // command, not a user record; it starts a turn all the same (whole-file
+    // review, 2026-10-03: edits from before it kept counting).
+    if (o && o.type === 'attachment' && o.attachment && o.attachment.type === 'queued_command' && o.attachment.origin && o.attachment.origin.kind === 'human') { paths = []; continue; }
     if (o && o.type === 'user') {
       const real = typeof content === 'string' ? content.trim() !== ''
         : Array.isArray(content) && content.some(c => c && c.type === 'text');
@@ -310,9 +227,6 @@ export function projectCount({ prev, paths, root, ignored = () => false }) {
   return count >= PROJECT_TURNS ? { count: 0, block: true, turns: count } : { count, block: false };
 }
 
-function gitRoot(cwd) {
-  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; }
-}
 function gitIgnored(root, p) {
   try { execFileSync('git', ['check-ignore', '-q', '--', p], { cwd: root, timeout: 5000, stdio: 'ignore' }); return true; } catch { return false; }
 }
@@ -321,7 +235,10 @@ function gitIgnored(root, p) {
 // another pulse already spoke this Stop (`quiet`), the note waits one Stop.
 function checkProject(input, quiet) {
   if (!input.cwd || !input.transcript_path) return null;
-  const root = gitRoot(input.cwd);
+  // A walk up the folders, not a `git` process: this runs at every Stop of
+  // every session, and only a project with a page goes further. Starting git
+  // there cost a process launch each turn (tens of milliseconds on Windows).
+  const root = findRepoRoot(input.cwd);
   if (!root || !existsSync(projectPath(root))) return null;
   const { paths } = turnEdits(readTail(input.transcript_path, 1048576));
   const path = STORE();
@@ -330,7 +247,7 @@ function checkProject(input, quiet) {
   const d = projectCount({ prev: (store[key] || {}).count, paths, root, ignored: p => gitIgnored(root, p) });
   const say = d.block && !quiet;
   store[key] = { count: d.block && quiet ? PROJECT_TURNS - 1 : d.count };
-  try { writeJsonAtomic(path, store); } catch {}
+  try { putEntry(path, key, store[key]); } catch {}
   return say ? `orchestrate: ${d.turns} turns changed project files and .orchestrator/PROJECT.md did not change; Where it stands / Next may be stale.` : null;
 }
 
@@ -366,7 +283,9 @@ export function heartbeatDecision({ run, rec }) {
   if (ready.length >= IDLE_READY_MIN && prev.readyBlockedFor !== readyKey) {
     out.readyBlockedFor = readyKey;
     const shown = ready.slice(0, 4).join(', ') + (ready.length > 4 ? ` +${ready.length - 4} more` : '');
-    return { rec: out, kind: 'idle', why: `${ready.length} tasks are unblocked (${shown}) and nothing new has been dispatched this turn. A background dispatch hands control straight back.` };
+    // Whether anything was dispatched this turn is not known here, so it is
+    // not said (whole-file review, 2026-10-03).
+    return { rec: out, kind: 'idle', why: `${ready.length} tasks are unblocked (${shown}). A background dispatch hands control straight back.` };
   }
 
   return { rec: out, kind: null };
@@ -394,7 +313,7 @@ function checkHeartbeat(input) {
     updated = { ...hb.rec, checkedAt: new Date().toISOString() };
     if (hb.kind) {
       store[key] = updated;
-      try { writeJsonAtomic(path, store); } catch {}
+      try { putEntry(path, key, store[key]); } catch {}
       return emitBlock(`orchestrate: ${hb.why}`);
     }
   }
@@ -413,7 +332,7 @@ function checkHeartbeat(input) {
   if (rh.block) {
     updated.reviewBlockedFor = rh.blockedFor;
     store[key] = updated;
-    try { writeJsonAtomic(path, store); } catch {}
+    try { putEntry(path, key, store[key]); } catch {}
     // What clears the hold, stated as a fact: without it the lead guesses.
     // SKIP_EXPLAINED needs "skipped" and "review" in one sentence.
     const clears = `It clears on a passing orch-reviewer with REVIEW OF: ${rh.task}, or a closing line saying why the review was skipped.`;
@@ -428,12 +347,12 @@ function checkHeartbeat(input) {
   // to the lead on its next tool call (context-check.mjs), so a closing message
   // is never followed by an error notice.
 
-  if (!bound) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
+  if (!bound) { store[key] = updated; try { putEntry(path, key, store[key]); } catch {} return; }
 
   // Then Pickup honesty, only after a dispatch, only for the run this session
   // drives, exactly as before.
   const lastDispatchAt = state.lastDispatchAt || null;
-  if (!lastDispatchAt) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
+  if (!lastDispatchAt) { store[key] = updated; try { putEntry(path, key, store[key]); } catch {} return; }
 
   const text = readFileSync(run.runMd, 'utf8');
   const hash = pickupHash(text);
@@ -441,30 +360,52 @@ function checkHeartbeat(input) {
   const d = shouldBlock({ pickupHash: hash, section, lastDispatchAt, prev: rec });
   updated = { ...updated, hash };
 
-  if (!d.block) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
+  if (!d.block) { store[key] = updated; try { putEntry(path, key, store[key]); } catch {} return; }
 
   updated.blockedFor = hash;
   store[key] = updated;
-  try { writeJsonAtomic(path, store); } catch {}
+  try { putEntry(path, key, store[key]); } catch {}
 
   emitBlock(`orchestrate: ${d.why}. The Pickup section of ${run.runMd} (one sentence that continues from here, its confidence, the resume risk) is the only thing the next session reads first.`);
 }
 
-function main() {
+// A refused Stop means the turn goes on, so the band says so (docs/band.md):
+// `working`, on what the turn is about, held for this Stop so persist-check.mjs,
+// which runs beside this hook and may already have written "Needs you" or
+// nothing for it, does not leave or put that line up (lib/band.mjs
+// `recordStopBand`). After the block is printed, so it changes nothing this hook
+// prints or decides; loaded only on a block, so an ordinary Stop pays nothing
+// for it. Never throws.
+async function holdBand(input) {
+  try {
+    const { recordStopBand, turnText, stopKey } = await import('./lib/band.mjs');
+    const key = stopKey(input);
+    recordStopBand({ cwd: input.cwd, session: input.session_id, kind: 'working', text: turnText(loadSession(input.session_id), input.cwd), hold: key, key });
+  } catch {}
+}
+
+async function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
   let input = null;
   try { input = JSON.parse(payload); } catch { return; }
   if (!input || typeof input !== 'object') return;
   if (input.stop_hook_active === true) return;
+  // A helper's own Stop is not the lead's turn (AGENTS.md: every hook goes
+  // silent inside a helper).
+  if (input.agent_id) return;
 
-  checkHeartbeat(input);
-  const note = checkProject(input, emitted);
-  if (note) emitBlock(note);
+  try {
+    checkHeartbeat(input);
+    const note = checkProject(input, emitted);
+    if (note) emitBlock(note);
+  } finally {
+    if (emitted) await holdBand(input);
+  }
 }
 
 // Only when run as a hook, not when a test imports the pure functions above.
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { main(); } catch {}
+  try { await main(); } catch {}
   process.exit(0);
 }

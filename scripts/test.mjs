@@ -13,7 +13,7 @@
 
 import { readdirSync, statSync, existsSync } from 'node:fs';
 import { join, resolve, dirname, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -53,8 +53,18 @@ function main() {
     console.log(`${files.length} test files`);
     process.exit(0);
   }
-  const result = spawnSync(process.execPath, ['--test', ...files], { stdio: 'inherit' });
+  const result = spawnSync(process.execPath, ['--test', ...reporterArgs(), ...files], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
+}
+
+// On GitHub, each failing test also becomes a check annotation (gh-annotate.mjs),
+// so a red run names what failed without opening the log. Elsewhere the
+// default output is unchanged.
+export function reporterArgs(env = process.env) {
+  if (env.GITHUB_ACTIONS !== 'true') return [];
+  const annotate = pathToFileURL(join(ROOT, 'scripts', 'gh-annotate.mjs')).href;
+  return ['--test-reporter=spec', '--test-reporter-destination=stdout',
+    `--test-reporter=${annotate}`, '--test-reporter-destination=stdout'];
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

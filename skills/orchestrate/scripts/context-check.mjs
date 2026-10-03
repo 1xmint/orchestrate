@@ -19,16 +19,16 @@
 // Most calls read one small file, see too little growth, and exit. Never
 // blocks, never exits non-zero, never fails the tool call.
 
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from './lib/node.mjs';
 import { resolve as resolvePath, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { sampleContext, agentTranscriptPath, markAnnounced, storedAdvisedKey } from './lib/context-store.mjs';
 import { modeNote, modeOf } from './lib/modes.mjs';
 import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, segmentTurns } from './lib/workers.mjs';
-import { loadSession, saveSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
+import { loadSession, saveSession, updateSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
 import { loadPolicy, sizeBudget } from './lib/policy.mjs';
-import { leftoverNote, anyHelperRunning } from './turn-check.mjs';
+import { leftoverNote, anyHelperRunning } from './lib/helper-leftovers.mjs';
 
 // ---- which roles can edit ---------------------------------------------------
 // "N tool calls since your last edit" is a fact only for a role that has an
@@ -97,6 +97,10 @@ export function stepWork(work, launchRoot, path) {
   if (!launchRoot || !path) return work || null;
   const abs = resolvePath(path);
   if (!underRoot(abs, launchRoot) && normSlashes(abs).toLowerCase() !== normSlashes(launchRoot).toLowerCase()) return work || null;
+  // A helper's own folder is a copy of the project, not where the project is:
+  // three reads there moved the project to "<repo>/.claude" (whole-file
+  // review, 2026-10-03).
+  if (/\/\.claude\/worktrees\//i.test(normSlashes(abs))) return work || null;
   const root = (work && work.root && (underRoot(abs, work.root) || normSlashes(abs).toLowerCase() === normSlashes(work.root).toLowerCase()))
     ? work.root
     : (findRepoRoot(dirname(abs)) || launchRoot);
@@ -120,7 +124,7 @@ export function stepWork(work, launchRoot, path) {
 // Distinct from lib/context-scan.mjs's EDIT_TOOLS, which counts only file edits for
 // the "tool calls since your last edit" line — this counts reading and
 // searching too, because a long solo stretch of Read/Grep/Glob is the same
-// failure as a long stretch of Edit/Bash (challenge.md D1).
+// failure as a long stretch of Edit/Bash.
 export const WORK_CALL_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell', 'Read', 'Grep', 'Glob']);
 
 // The real settings.json, for the one figure that has to reflect what the
@@ -162,7 +166,10 @@ export function failStreak(returned) {
     if (v === 'PASS') break;
     if (v !== 'FAIL') continue;
     if (key == null) key = String(list[i].agentId || list[i].toolUseId || list[i].at || i);
-    of.unshift(String(list[i].reviewOf || '?').slice(0, 8));
+    // A task id stays whole ("10-03-0001" and "10-03-0002" cut to eight read
+    // the same); a commit or tool id is cut to eight.
+    const of1 = String(list[i].reviewOf || '?');
+    of.unshift(/^\d+-\d+-\d+$/.test(of1) ? of1 : of1.slice(0, 8));
   }
   return { count: of.length, of, key };
 }
@@ -230,7 +237,8 @@ function parseToolResponse(raw) {
 // which matches the `toolUseId` guard-agent.mjs stored on the dispatch row,
 // and its `tool_response` carries `agentId` and a `status` of "completed"
 // (a foreground helper already back) or "async_launched" (a background one,
-// still running). Marks the row in place; saves only when it changed.
+// still running). Marks the row in place and says whether it changed; the
+// caller writes it under the lock only then.
 function markDispatchReturn(state, input) {
   if (input.tool_name !== 'Agent' && input.tool_name !== 'Task') return false;
   const toolUseId = input.tool_use_id ? String(input.tool_use_id) : null;
@@ -281,6 +289,11 @@ export function check(input) {
   }
   if (!routerSettings().enabled) return '';
   const out = [];
+  // The dispatch row is marked inside the session file's lock: marked on the
+  // loaded copy and saved with the rest, the whole list went back and a row
+  // the dispatch guard added meanwhile was lost (independent review of the
+  // hook-fix batch, 2026-10-03: 5 of 31 rows in a measured race).
+  if (input.tool_name === 'Agent' || input.tool_name === 'Task') updateSession(session, s => markDispatchReturn(s, input));
   const state = loadSession(session);
   const prevWorkCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : 0;
   const workCalls = stepWorkCalls(prevWorkCalls, input.tool_name, input.tool_input);
@@ -291,7 +304,10 @@ export function check(input) {
     const r = sampleContext({ transcriptPath: input.transcript_path, session, runMd: bound, permissionMode: modeOf(input), settingsPath: SETTINGS_PATH, env: process.env });
     contextLine = r.notice;
   }
-  const fact = workCallsFact(workCalls, loadPolicy().lead.workCallsEvery);
+  // Said once, on the call that reaches the count; a later call that is not a
+  // work call leaves the count where it is and says nothing (whole-file review,
+  // 2026-10-03: it repeated on every such call).
+  const fact = workCallsChanged ? workCallsFact(workCalls, loadPolicy().lead.workCallsEvery) : null;
   if (fact) contextLine = contextLine ? `${contextLine} · ${fact}` : `[orchestrate · context] ${fact}`;
   if (contextLine) out.push(contextLine);
   if (state) {
@@ -324,7 +340,6 @@ export function check(input) {
     }
     if (workCallsChanged) state.workCalls = { count: workCalls };
     const workChanged = trackWork(state, input);
-    const returnChanged = markDispatchReturn(state, input);
     // Helper folders and branches left behind: once every helper of the session
     // has returned and something is left, said once, as a fact, while the lead
     // can still act on it. Nothing is removed.
@@ -334,13 +349,16 @@ export function check(input) {
     if (!state.leftoverTold && nReturned && state.leftoverSeen !== nReturned && !anyHelperRunning({ dispatches: state.dispatches, returned: state.returned })) {
       state.leftoverSeen = nReturned;
       leftoverTold = true;
+      // Noted before the git look, so a look that runs out of time is not
+      // repeated on every later tool call.
+      try { saveSession(state); } catch {}
       const left = leftoverNote({ cwd: state.cwd || input.cwd, returned: state.returned, dispatches: state.dispatches });
       if (left) {
         out.push(`[orchestrate · context] ${left.text}; nothing has removed them.`);
         state.leftoverTold = true;
       }
     }
-    if (leftoverTold || streakTold || (state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
+    if (leftoverTold || streakTold || (state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged) { try { saveSession(state); } catch {} }
   } else if (workCallsChanged) {
     try { saveSession({ v: 1, session_id: session, started: new Date().toISOString(), workCalls: { count: workCalls } }); } catch {}
   }

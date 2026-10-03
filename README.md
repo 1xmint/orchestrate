@@ -38,7 +38,7 @@ claude plugin install orchestrate@orchestrate --scope user
 ```
 
 Either way it brings the skill, the eight role agents, the output style and the
-nine global hooks in one step.
+ten global hooks in one step.
 
 The agents are planner, implementer, researcher, browser, reviewer, debugger,
 coordinator and advisor. The coordinator runs a wave of three or more
@@ -228,17 +228,27 @@ install. You should not need to type them.
 | Hook | When | What it holds |
 |---|---|---|
 | `router.mjs` | every prompt, and on resume or compact | once a session, a short card on how work gets shaped, opened by at most one sentence that matters right now (a usage limit reached today, a run this session continues, or auto-continue armed). The full local state the model cannot see — plan tier, your own model, agents installed, spend, context size — is printed on request by typing `router status`. While a run is open it also names the returns still waiting to be graded and the tasks whose blockers have all landed, so a session stops waiting on one agent when there is work it could start. On resume it brings back the run's goal, constraints and next step. After that, silence unless one of those facts changes. Turn it off for a session by typing `router off` |
-| `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It refuses, with the exact retry: nesting except a bounded child of `orch-coordinator`; built-in `general-purpose` (no turn cap) while the capped role agents are installed; more than two workers while the coordinator holds its third slot, or a second browser task; in Plan mode, any helper that could write, a worktree or a progress file; a Claude helper aimed at a worktree a live Codex worker holds; a coding, research or browser helper above Sonnet before a cheaper attempt at the same task; a search helper with no cheap model named; a copy of a conversation already past ~100k measured tokens; Fable on a plan where it costs credits; and any new helper once the 5-hour window is at 80% or the week at 90% |
-| `guard-bash.mjs` | before every shell command, in Bash or PowerShell | pauses on a command that deletes, force-pushes, rewinds history or publishes, and asks you before it runs. A background helper's question is shown to you in the main session; where nobody can answer (auto or bypass modes), it is refused and told to report back instead. Folders a build recreates (build, dist, node_modules and the like) pass in silence, and so does an exact command you list in `.orchestrator/allow-bash.json`. A helper's own worktree branch, once merged, may be removed without asking; a forced delete, or deleting any other branch, still asks |
+| `guard-agent.mjs` | before every Agent dispatch | blocks any brief carrying something shaped like a credential, and records every dispatch so the ledger and the meter can report what ran. It refuses, with the exact retry: nesting except a bounded child of `orch-coordinator`; built-in `general-purpose` (no turn cap) while the capped role agents are installed; more than two workers while the coordinator holds its third slot, or a second browser task; in Plan mode, any helper not known to only read, a worktree or a progress file; a Claude helper aimed at a worktree a live Codex worker holds; a coding, research or browser helper above Sonnet before a cheaper attempt at the same task, unless you named that model; a search helper with no model named, or above Sonnet unless you named that model; any helper whose estimate (on the model it will run on, named or not) would cross a run's budget ceiling; the first building helper in a repo before `.orchestrator/PROJECT.md` has a step under Next; a copy of a conversation already past ~100k measured tokens; Fable on a plan where it costs credits; and any new helper once the 5-hour window is at 80% or the week at 90% |
+| `guard-bash.mjs` | before every shell command, in Bash or PowerShell | pauses on a command that deletes, force-pushes, rewinds history or publishes, and asks you before it runs. A background helper's question is shown to you in the main session; where nobody can answer (auto or bypass modes), it is refused, and the reason says who can run it instead. It reads a line one command at a time, so a commit message, a notes file or a search that only names such a command is not one. Folders a build recreates (build, dist, node_modules and the like) pass in silence, and so does an exact command you list in `.orchestrator/allow-bash.json`. Deleting a branch with `git branch -d`, which git itself refuses while the branch's work is unmerged, passes; a forced delete still asks |
 | `context-check.mjs` | after each tool call | reads only what the conversation added since last time and says something only when the advice changes: prepare a checkpoint (with none written since the last compaction, it asks for one once and names the file), recommend compacting or a fresh conversation at the next safe point, or look for what stayed large after a compaction. It also notices when the app enters or leaves Plan mode, and when a helper stopped at its turn cap. Inside a helper it records that helper's size and speaks only at its size budget: write the progress file at ~80k, return PARTIAL at ~120k (a coordinator 150k and 200k) |
-| `persist-check.mjs` | when a turn ends | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refusal, the same error twice, three continues on the same open item, 25 steps, or 90% of the 5-hour window. The context reader's advice rides along when it changes. On every ordinary Stop, whether or not that loop is armed, it also checks the closing message's own claim about `git commit` against `git status`: a message that says nothing is committed while the tree is clean, or that says the work is committed while files are still uncommitted, is sent back with the exact `git status` reading, once per claim per session. The plugin's own untracked folders (`.claude/` for helper worktrees, `.orchestrator/` for the ledger) do not count as uncommitted work |
+| `persist-check.mjs` | when a turn ends, and when a turn ends in an API error | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refused dispatch (budget or credential), the same error twice, three continues on the same open item, or 25 steps. A usage limit does not stop it: a helper refused for usage is stated in the next continue, and a turn that ends in an API error, a usage limit among them, leaves keep-going armed and writes `.orchestrator/pause.json` (see `docs/pause.md`). While the Stop payload lists a helper, background command or scheduled prompt still out, a step that did no work waits instead of ending the loop; it ends only when nothing but background commands is out, no Monitor started in this stretch is still listed, you spoke since, and the step still did nothing (a dev server never reports back). A helper send refused for usage is not work. The context reader's advice rides along when it changes. On every ordinary Stop, whether or not that loop is armed, it also checks the closing message's own claim about `git commit` against `git status`: a message that says nothing is committed while the tree is clean, or that says the work is committed while files are still uncommitted, is sent back with the exact `git status` reading, once per claim per session. The plugin's own untracked folders (`.claude/` for helper worktrees, `.orchestrator/` for the ledger) do not count as uncommitted work. A closing message that promises to wait or check back ("I'll let you know when CI finishes") while the Stop payload lists nothing out that would wake the session is sent back once with that fact (once per keep-going stretch, or once per message with it off), unless the record shows a reminder or scheduled task was set. A count of passing tests in the closing message ("all 42 tests pass") that no command output, helper report or message in the recent record shows is sent back once with that fact |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run this session is bound to, prices it, and records which run and task it belongs to in `returns/returns.jsonl`. It does not touch the task rows: two returns landing together each rewrote the whole file, and the second erased the first |
 | `turn-check.mjs` | when a turn ends | one rule, and only for a run this session is bound to: it asks once for the Pickup line when that line has not moved since the last dispatch, so a session that dies is still resumable |
-| `postcompact-check.mjs` | just after a helper's own conversation is compacted | saves the summary the helper was left with under the run it belongs to, so when its return lands the ledger can say that it lost its earlier context along the way. Does nothing for your own session |
+| `postcompact-check.mjs` | just after a conversation is compacted | for a helper, saves the summary it was left with under the run it belongs to, so when its return lands the ledger can say that it lost its earlier context along the way. For your own session, writes the checkpoint of the stretch that was just summarised, from the conversation itself |
 
-`guard-agent.mjs` only refuses `general-purpose`/`claude` once all eight role agents are installed; on a partial install that guard is silently off, so `router.mjs` says so once on the first card of a session, naming how many of the eight are present.
+`guard-agent.mjs` refuses `general-purpose`/`claude` once `orch-implementer` is installed, whatever the other seven roles are; without it that guard is off. On a partial install `router.mjs` says so once on the first card of a session, naming how many of the eight are present.
 
 Every hook that reads a brief's task id uses one rule (`lib/task-id.mjs`): the token after `TASK:` counts as an id only when it contains a digit. A brief written as prose ("TASK: build the login page") has no id, so its return is filed with none rather than under the word "build".
+
+**The band.** On a plugin install, one dim line above the prompt (in a terminal
+or the Claude desktop app) says what the session is on (`Working on: ...`), what it
+needs from you (`Needs you: ...`) or that it is paused for the usage limit.
+`router.mjs` and `persist-check.mjs` write a small record,
+`.orchestrator/band.json`, and a Claude Code mod (`hooks/band.mjs`, named under
+`"modules"` in `hooks/hooks.json`) reads it and draws the line. The mod calls
+nothing that writes, sends or runs, and nothing it shows reaches the model.
+`docs/band.md` says where each line comes from, why a Claude Code build without
+mods still loads the hooks, and what has not been checked.
 
 The router, the guard and the ledger are global, registered once from the
 plugin's own `hooks/hooks.json` so they run whether or not the skill is
@@ -291,7 +301,7 @@ Orchestrate can see how much of your 5-hour and weekly limits you have used, and
 act on it:
 - at 60% of the 5-hour window, it works one step at a time on cheaper models;
 - at 80% of the 5-hour window, or 90% of the week, it stops starting helpers;
-- at 90% of the 5-hour window, it stops continuing on its own.
+- keep-going is not stopped by usage: where Claude Code waits for a limit to reset and resumes, it is still on when it does, and a turn that ends on the limit leaves a one-line note in `.orchestrator/pause.json` (`docs/pause.md`).
 
 Claude Code gives those numbers to exactly one place: the status line, the bar
 under the prompt in a terminal. A plugin is not allowed to install a status line
@@ -303,7 +313,11 @@ node skills/orchestrate/scripts/statusline.mjs --install
 
 It backs up `~/.claude/settings.json` first. If you already had a status line,
 yours keeps running, with the usage shown after it. `--uninstall` puts back what
-was there.
+was there. The setting names the copy you installed it from, which for a plugin
+install sits in a folder named for its version. After an update that copy hands
+over to the one Claude Code now has installed (a copy older than this handover
+does not), and running `--install` again from the new version points the
+setting at it.
 
 **The Claude desktop app does not run status lines.** On one machine the status
 line was installed and working when run by hand, yet the desktop app never ran
@@ -579,14 +593,15 @@ nothing about how the work is done.
 
 If you only want shorter answers, Claude Code ships a built-in **Concise** style
 that leads with the result and drops the narration. Try that first. The seven
-rules that matter most live in `SKILL.md` §9 for the times the style is off, and
+rules that matter most live in `SKILL.md` (How to talk to the user) for the times the style is off, and
 for hosts that have no output styles at all.
 
 ## What one goal costs
 
 Every dispatch that names a model arrives with a price on it, in list-price
 dollars — the same unit `/usage` computes its Session figure in. **List price is
-not what a subscription is billed.** A dispatch that names no model gets no
+not what a subscription is billed.** A role helper that names no model is
+priced on its own agent file's model; a built-in agent that names none gets no
 price, because nothing knows what it will run on. A running counter shows only
 when a run has a budget ceiling, as spend against that ceiling; there is no
 open-ended counter, because one with no ceiling reads as an allowance and
@@ -877,13 +892,14 @@ skills/orchestrate/
   scripts/              router, guard, ledger, turn-check, persist-check,
                         context-check, context, codex-worker, gate, profile, run-init,
                         measure, diagnose, map, install-agents, install-project, batch,
-                        smoke, statusline
+                        statusline
   scripts/lib/          context (the one context reader), policy, workers, modes, host,
                         quota, tier, settings, prices, listing, template
   assets/               RUN.md template, packet template, worker report schema, eight role
                         agents, the Plain output style
 .claude-plugin/          plugin manifest, so /plugin install works
 hooks/hooks.json         the global hooks, for the plugin path
+hooks/band.mjs           the band: a mod that draws one line above the prompt and writes nothing
 evals/                  test prompts for the skill-creator loop
 scripts/install.mjs     installs the skill, agents and hooks
 scripts/package.mjs     builds the two .skill zips

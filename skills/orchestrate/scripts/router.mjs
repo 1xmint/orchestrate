@@ -18,15 +18,17 @@
 // prompt and kept as `startHead`, so the Stop hook's commit check (lib/
 // commit-claim.mjs) can later count commits made since this session began.
 //
+// On a real prompt it also leaves one small record for the band, the line above
+// the prompt (lib/band.mjs, docs/band.md). That record is not model-facing and
+// changes nothing this hook prints.
+//
 //   echo '<hook json>' | node router.mjs          hook mode (stdin)
 //   node router.mjs --state                       what it would inject, no writes
 //   node router.mjs --cost <transcript.jsonl>     what the router cost that session
 //   node router.mjs --prune                       delete session state older than 7 days
 
-import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
-import { join, dirname, resolve, basename } from 'node:path';
+import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync, createHash, spawnSync } from './lib/node.mjs';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
@@ -35,24 +37,28 @@ import {
   SESSIONS_DIR, PROFILE_PATH,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext } from './lib/context-store.mjs';
-import { readContext, idPart, countBoundaries } from './lib/context-scan.mjs';
+import { readContext, countBoundaries } from './lib/context-scan.mjs';
 import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
 import { helperJustCompacted } from './lib/helper-compaction.mjs';
 import { readGoal, goalLine, goalDue, markShown } from './lib/goal.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
-import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport } from './lib/listing.mjs';
+import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport, pluginFit } from './lib/listing.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR, limitsFromTail, scanLimits } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { findPreviousSession } from './lib/handoff.mjs';
 import { projectNote } from './lib/project.mjs';
+import { pauseRoot, clearPause } from './lib/pause.mjs';
+import { lastQuestion, nextAsked, askedLine } from './lib/asked.mjs';
+import { lastAssistantText } from './lib/commit-claim.mjs';
+import { recordBand, openItem, sessionGoal, bandAtPrompt, bandClip } from './lib/band.mjs';
 import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
   stillRunningNative, unreturned, unreturnedNote, STALE_SEEN_PATH, staleNote, compactionFact,
 } from './lib/recover.mjs';
-import { PERSIST_INTENT, syntheticPrompt, persistIntent, promptIntent, barePersistPhrase, GOAL_CAP, persistLine } from './lib/persist-words.mjs';
+import { PERSIST_INTENT, syntheticPrompt, persistIntent, promptIntent, barePersistPhrase, GOAL_CAP, persistLine, approves } from './lib/persist-words.mjs';
 import { runOpenWork } from './lib/runs.mjs';
 import {
   stateLine, statusReply, actionableLine, contextBand, contextPhrase, quotaPhrase, quotaBand,
@@ -60,7 +66,7 @@ import {
   stateHash, codexState,
 } from './lib/state-line.mjs';
 import {
-  RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt, latestCheckpointFor,
+  RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt,
   handoffLine, continueIntent, CONTINUE_WORD,
 } from './lib/resume.mjs';
 
@@ -111,20 +117,9 @@ export function leadNote(self, tier, now = Date.now(), path = LEAD_NOTE_PATH) {
   return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. A change takes effect in a new session; switching mid-session re-reads everything uncached.`;
 }
 
-// The id of the newest compaction boundary this hook can see in the transcript.
-function newestBoundaryId(input) {
-  try {
-    const c = readContext(input.transcript_path, { session: input.session_id }).compaction;
-    return c && c.uuid ? idPart(c.uuid) : null;
-  } catch { return null; }
-}
-
-// A checkpoint file counts as this compaction's when its name carries the
-// newest visible boundary's id and it was written in the last two minutes.
-function checkpointIsFresh(path, boundaryId, now = Date.now()) {
-  try {
-    return Boolean(boundaryId) && basename(path).includes(boundaryId) && now - statSync(path).mtimeMs <= 120000;
-  } catch { return false; }
+// A checkpoint file written in the last two minutes.
+function writtenLately(path, now = Date.now()) {
+  try { return now - statSync(path).mtimeMs <= 120000; } catch { return false; }
 }
 
 function gatherContext(input, state) {
@@ -170,6 +165,16 @@ function gatherContext(input, state) {
 
 function transcriptSize(p) {
   try { return p ? statSync(p).size : 0; } catch { return 0; }
+}
+
+// A slash command, a paste or a two-word reply is not the start of a session's
+// work, and the card is worth its tokens only on something substantive.
+// A short request that names building or fixing ("migrate to postgres",
+// "fix login properly") is the start of work whatever its length.
+function isSubstantive(trimmed) {
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+  return !/^\s*\//.test(trimmed) && !/```/.test(trimmed)
+    && (wordCount >= 4 || (wordCount >= 2 && (BUILD_WORDS.test(trimmed) || FIX_WORDS.test(trimmed))));
 }
 
 // A build word (or "and then", which chains a second step onto the first)
@@ -276,15 +281,60 @@ function promptText(input) {
 // state, and the old router treated it as one.
 const HOST_TAGS = /<(system-reminder|local-command-caveat|local-command-stdout|command-name|command-message|command-args)>[\s\S]*?<\/\1>/g;
 
+// What the band shows from a real prompt on (lib/band-line.mjs `bandAtPrompt`,
+// docs/band.md): what Claude is doing right now. A prompt that asks for
+// something names itself, whatever is stored; one that only resumes
+// ("continue", "go ahead", "try again", or keep-going armed on a goal already
+// pinned) names the stored next open item, else the goal; anything else (a
+// thank-you, an "ok") names nothing, so a finished or older item is never
+// claimed. The text is kept in the session as `bandText` for a Stop refused in
+// this turn (lib/band.mjs `turnText`). A slash command starts no work, so it
+// leaves the record alone. Written for the muted router and the router turned
+// off too: the band is not model-facing. Reads and writes small files; never
+// changes what this hook prints (lib/band.mjs, docs/band.md).
+function recordBandAtPrompt(input, state, trimmed, { armedNow = false } = {}) {
+  try {
+    if (/^\s*\//.test(trimmed)) return;
+    const intent = promptIntent(trimmed);
+    // "keep going until the login page works" names a goal of its own; "keep
+    // going until it's done" only resumes.
+    const ownGoal = persistIntent(trimmed) && !barePersistPhrase(trimmed);
+    const resumes = !ownGoal && (intent === 'resume' || intent === 'retry' || Boolean(armedNow));
+    const request = ownGoal || (!resumes && isSubstantive(trimmed)) ? trimmed : '';
+    const note = bandAtPrompt({ request, resumes, open: resumes ? openItem(state, input.cwd) : '', goal: resumes ? sessionGoal(state) : '' });
+    if (state) state.bandText = bandClip(note.text);
+    recordBand({ cwd: input.cwd, session: input.session_id, kind: note.kind, text: note.text });
+  } catch {}
+}
+
+// The router turned off in its settings says nothing and arms nothing, but the
+// Stop hook still writes the band at every Stop, so a prompt still leaves its
+// line: otherwise a question the user has just answered stays up through the
+// whole next turn. The same filters as a prompt with the router on (a notice
+// the host submits, a slash command); the session file is read and, when there
+// is one, the line's text is saved beside it, and none is made.
+function bandWhileOff(input, text) {
+  try {
+    const trimmed = text.replace(HOST_TAGS, ' ').trim();
+    if (syntheticPrompt(trimmed) || input.source === 'system' || !trimmed) return;
+    const state = loadSession(input.session_id);
+    recordBandAtPrompt(input, state || {}, trimmed);
+    if (state) saveSession(state);
+  } catch {}
+}
+
 function handlePrompt(input) {
   // A hook fires inside a subagent's own call too, with `agent_id` set on the
   // stdin payload (hooks doc, "common input fields"). Nothing here is about
   // that subagent's own work — the plan tier, the run ledger, the card — so
   // printing it there was pure noise a helper paid to read about itself.
   if (input && input.agent_id) return;
-  if (!routerSettings().enabled) return;
+  // A prompt of this session ends any pause recorded for it (lib/pause.mjs).
+  // This hook already runs on every prompt, so nothing new is registered for it.
+  try { clearPause(pauseRoot(input.cwd), input.session_id, 'prompt'); } catch {}
   const text = promptText(input);
   if (text == null) return;
+  if (!routerSettings().enabled) { bandWhileOff(input, text); return; }
   const state = loadSession(input.session_id) || newState(input);
   // A session recorded before this field existed has no startHead yet; fill
   // it in from whatever the repo's HEAD is now, the same as a brand-new one.
@@ -307,7 +357,11 @@ function handlePrompt(input) {
   // USER INPUT]" or "<task-notification>". Nothing in it is the user's words,
   // so it must not arm a loop, pin a goal, grant a model or spend the card.
   // Seen live: a finished helper's notice became the persist goal.
-  if (syntheticPrompt(trimmed)) { saveSession(state); return; }
+  // Claude Code 2.1.288's prompt schema also has a `source` field ("system"
+  // for a notice or a message from another session); it is not sent yet, so it
+  // is read beside the text, to take effect when the host turns it on. A
+  // prompt that is nothing but the host's own tags is the host's too.
+  if (syntheticPrompt(trimmed) || input.source === 'system' || (!trimmed && text.trim())) { saveSession(state); return; }
 
   // A fresh session reading this record later (findPreviousSession) needs to
   // know this one is still recent, on every real prompt, not only the first.
@@ -361,6 +415,10 @@ function handlePrompt(input) {
     state.persistMuted = off;
     if (off && state.persist) state.persist = { ...state.persist, armed: false, endedAt: new Date().toISOString(), endReason: 'the user said persist off' };
     saveSession(state);
+    // Said, so neither the lead nor a later "why did it stop?" has to guess.
+    emit('UserPromptSubmit', off
+      ? '[orchestrate · persist] keep-going is off for this session; "persist on" lets it turn on again.'
+      : '[orchestrate · persist] keep-going can turn on again: on an explicit "keep going until …", or on "continue" with an open run.');
     return;
   }
 
@@ -388,10 +446,17 @@ function handlePrompt(input) {
   // Armed before the mute check: "router off" silences the card, not a loop
   // the user asked for by name.
   let armedNow = false;
+  const wasOn = Boolean(state.persist && state.persist.armed);
+  const goalBefore = state.persist ? state.persist.goal : undefined;
   let ctx = null;
   const getCtx = () => ctx || (ctx = gatherContext(input, state));
-  const intent = state.persistMuted ? null : promptIntent(trimmed);
-  const explicit = !state.persistMuted && intent !== 'status' && persistIntent(trimmed);
+  // "persist off" holds for the session, explicit asks included; one held back
+  // is said, so the lead can tell the user why nothing keeps going (whole-file
+  // review of the router, 2026-10-03: it was ignored without a word).
+  const wordIntent = promptIntent(trimmed);
+  const intent = state.persistMuted ? null : wordIntent;
+  const explicit = !state.persistMuted && wordIntent !== 'status' && persistIntent(trimmed);
+  const heldBack = state.persistMuted && wordIntent !== 'status' && persistIntent(trimmed);
   if (explicit) {
     // A bare "keep going" or "continue until complete" names no goal; it means
     // the one already pinned or the open run's, never the phrase itself.
@@ -403,9 +468,16 @@ function handlePrompt(input) {
       else if (g && g.source === 'ledger') { goal = g.text; goalSource = 'ledger'; }
       else { goal = ''; goalSource = 'none'; }
     }
-    state.persist = { armed: true, goal, goalSource, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
+    // Already on: the goal may change, but the stretch goes on, so the loop's
+    // record (its count, the wait's clock, a Monitor it holds for) is kept
+    // (whole-file review, 2026-10-03).
+    const on = state.persist && state.persist.armed && state.persist.armedAt;
+    state.persist = { armed: true, goal, goalSource, armedAt: on ? state.persist.armedAt : new Date().toISOString(), sizeAtArm: on ? state.persist.sizeAtArm : transcriptSize(input.transcript_path) };
     armedNow = true;
-  } else if (intent === 'resume') {
+  } else if (intent === 'resume' && !(state.persist && state.persist.armed)) {
+    // Already on: left as it is. A new arming would reset the loop's record,
+    // and with it the wait's clock and the Monitor it holds for (independent
+    // review, round 8).
     // The gate: the goal comes from an open run's ledger, that run says what
     // done looks like, and a task is not done. A project page's purpose is not
     // a finish line, so it never arms this.
@@ -417,21 +489,15 @@ function handlePrompt(input) {
       state.persist = { armed: true, goal: g.text, goalSource: 'ledger', armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
       armedNow = true;
     }
-  } else if (intent === 'retry' && state.persist && state.persist.armedAt) {
+  } else if (intent === 'retry' && state.persist && state.persist.armedAt && !state.persist.armed) {
     // Restores keep-going that was on before the stop; never starts it.
     const { endedAt, endReason, ...rest } = state.persist;
     state.persist = { ...rest, armed: true, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
     armedNow = true;
   }
-  if (state.muted) { saveSession(state); return; }
+  if (state.muted) { recordBandAtPrompt(input, state, trimmed, { armedNow }); saveSession(state); return; }
 
-  // A slash command, a paste or a two-word reply is not the start of a session's
-  // work, and the card is worth its tokens only on something substantive.
-  // A short request that names building or fixing ("migrate to postgres",
-  // "fix login properly") is the start of work whatever its length.
-  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-  const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed)
-    && (wordCount >= 4 || (wordCount >= 2 && (BUILD_WORDS.test(trimmed) || FIX_WORDS.test(trimmed))));
+  const substantive = isSubstantive(trimmed);
 
   // What this session is for, recorded once so a later session in the same
   // folder can answer "continue what?" for itself.
@@ -444,7 +510,10 @@ function handlePrompt(input) {
   // and the full card still arrives on the first request big enough to need it.
   // Not when an open run is already bound: picking up run work is never a
   // small, one-off ask, whatever the sentence looks like.
-  const small = substantive && !ctx.run && isSmallPrompt(trimmed);
+  // A prompt that arms keep-going is never small: it starts up to 25 steps, and
+  // the short card beside the full one said "just do it yourself" (review of
+  // the hook fixes, 2026-10-03).
+  const small = substantive && !ctx.run && !armedNow && isSmallPrompt(trimmed);
   const out = [];
   // Plugin settings cannot carry env vars, and this plugin never writes to
   // them without being asked. Offered once, on the first substantive prompt
@@ -458,6 +527,19 @@ function handlePrompt(input) {
   const mode = modeNote(state, input);
   if (mode) out.push(mode);
 
+  // A question the lead put to the user that came back unanswered again
+  // (lib/asked.mjs): counted here, the one place that sees the reply, and said
+  // from the second time, because a count is what a summary loses. A slash
+  // command is not a reply to anything, so it does not count.
+  if (!/^\s*\//.test(trimmed)) {
+    let question = null;
+    try { question = input.transcript_path ? lastQuestion(lastAssistantText(readTail(input.transcript_path, 131072))) : null; } catch {}
+    // "go ahead" answers the question; "continue" nudges past it.
+    state.asked = nextAsked(state.asked, { question, reply: trimmed, nudge: (Boolean(wordIntent) && !approves(trimmed)) || Boolean(explicit) });
+    const asked = askedLine(state.asked);
+    if (asked) out.push(asked);
+  }
+
   // The additions that ride along with the full card only: a partial-install
   // notice (guard-agent.mjs refuses general-purpose/claude once orch-implementer
   // itself is installed, whatever the other seven roles are) and a run's resume
@@ -467,9 +549,11 @@ function handlePrompt(input) {
     if (!input.agent_id && ctx.agentsExpected && ctx.agents < ctx.agentsExpected) {
       out.push(`Only ${ctx.agents} of the plugin's ${ctx.agentsExpected} helper roles are installed; type \`claude plugin install orchestrate@orchestrate\` to finish.`);
     }
-    if (ctx.run) {
+    // Not again when a resume or a summary already printed it this session.
+    if (ctx.run && state.runExcerptFor !== ctx.run.runMd) {
       const ex = resumeExcerpt(ctx.run.runMd);
       if (ex) out.push(`[orchestrate · run ${ctx.run.runMd}]\n${ex}`);
+      state.runExcerptFor = ctx.run.runMd;
     }
   };
 
@@ -507,6 +591,18 @@ function handlePrompt(input) {
     state.lastStateHash = hash;
     state.lastActionable = changed;
   }
+  // A short word that arms keep-going ("continue", "go ahead") starts up to 25
+  // steps the user may not watch: the full card and the run's page go with it,
+  // as with a first request (whole-file review of the router, 2026-10-03).
+  if (armedNow && state.cardSent !== true) {
+    const opening = actionableLine(ctx);
+    out.push(opening ? `[orchestrate] ${opening}` : '[orchestrate]');
+    out.push(cardBody());
+    sendFullCardExtras();
+    state.cardSent = true;
+    state.lastStateHash = stateHash(ctx);
+    state.lastActionable = opening;
+  }
 
   // A brand-new session's first prompt naming no goal of its own — "continue"
   // is one word and never trips the substantive gate above, so this checks
@@ -515,7 +611,7 @@ function handlePrompt(input) {
   // it does the previous session's own words stand in.
   if (freshSession && !state.handoffShown && continueIntent(trimmed)) {
     const page = projectNote(ctx.repoRoot, input.cwd);
-    if (page) { out.push(page); state.projectShown = true; markShown(state, substantive ? 1 : 0); }
+    if (page) { if (!state.projectShown) { out.push(page); state.projectShown = true; markShown(state, substantive ? 1 : 0); } }
     else {
       const prev = findPreviousSession({ sessionsDir: SESSIONS_DIR, cwd: input.cwd, exceptId: input.session_id, now: Date.now() });
       if (prev) out.push(handoffLine(prev, ctx));
@@ -564,8 +660,12 @@ function handlePrompt(input) {
   // Which installed plugins fit, when the set is first seen or grows; the lead's
   // own per-step size; and a lead setting above quota-first.
   if (substantive) {
-    const line = pluginFitReport(input.transcript_path);
-    if (line) out.push(`[orchestrate · plugins] ${line}`);
+    // Read once the listings are found: they do not change within a session.
+    if (!state.pluginsRead) {
+      const fit = pluginFit(input.transcript_path);
+      if (fit.found) state.pluginsRead = true;
+      if (fit.line) out.push(`[orchestrate · plugins] ${fit.line}`);
+    }
     const note = contextLine(input);
     if (note) out.push(note);
     const lead = leadNote(ctx.self, ctx.tier);
@@ -585,12 +685,18 @@ function handlePrompt(input) {
 
   if (runGrant) out.push(runGrant);
 
-  if (armedNow) {
+  // Said when keep-going turns on or its goal changes, not again on every
+  // "keep going" while it is on (whole-file review of the router, 2026-10-03).
+  if (armedNow && (!wasOn || state.persist.goal !== goalBefore)) {
     out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);
-    // The existing budget and readiness machinery only engages for a run. Point
-    // at it once, for work big enough to deserve it, rather than rebuild it.
-    if (!ctx.run) out.push('If this goal is several separable tracks, or will outlive this session, open a run first (run-init.mjs) so readiness is tracked; for direct work, just start.');
+    // The budget and readiness tracking engage only for a run: said once a
+    // session, as a fact.
+    if (!ctx.run && !state.runHintShown) {
+      out.push('No run is open, so readiness and budget are not tracked for this goal; run-init.mjs opens one.');
+      state.runHintShown = true;
+    }
   }
+  if (heldBack) out.push('[orchestrate · persist] keep-going is off for this session (the user said "persist off"); "persist on" lets it turn on again.');
 
   // The goal, as one fact, on every tenth prompt since it was last shown; on the
   // others nothing is added. Compaction and resume show it in handleSessionStart.
@@ -602,6 +708,7 @@ function handlePrompt(input) {
   }
 
   if (substantive) state.prompts++;
+  recordBandAtPrompt(input, state, trimmed, { armedNow });
   saveSession(state);
   maybePrune();
   emit('UserPromptSubmit', out.join('\n'));
@@ -651,9 +758,12 @@ function handleSessionStart(input) {
   // The working project is learned from touched paths since the last
   // compaction (context-check.mjs), so it is relearned after this one too.
   if (source === 'compact') { state.compactions = nextCompactions(state, input.transcript_path); state.work = null; }
-  // Write the plugin's own checkpoint before anything below names it, so the
-  // compacted line names the file whichever hook ran first — this one, or
-  // postcompact-check.mjs on the lead side. Idempotent and silent on error.
+  // Write the plugin's own checkpoint of the stretch just summarised before
+  // anything below names it, so the compacted line names the file whichever
+  // hook ran first — this one, or postcompact-check.mjs on the lead side. This
+  // hook runs before the host writes the summary's boundary (nextCompactions
+  // above), so the stretch is everything after the newest boundary on file
+  // (`pending`, lib/compaction-snapshot.mjs). Idempotent and silent on error.
   let snapshotPath = null;
   if (source === 'compact') {
     try {
@@ -661,6 +771,7 @@ function handleSessionStart(input) {
       snapshotPath = writeCompactionSnapshot({
         session: input.session_id, reading, transcriptPath: input.transcript_path,
         ctx: { runMd: ctx.run && ctx.run.runMd, runDir: ctx.run && ctx.run.dir, cwd: input.cwd },
+        pending: true,
       });
     } catch { snapshotPath = null; }
   }
@@ -673,17 +784,16 @@ function handleSessionStart(input) {
   if (ctx.run) {
     const ex = resumeExcerpt(ctx.run.runMd);
     out.push(`[orchestrate · ${word}] run ${ctx.run.runMd}${ex ? `\n${ex}` : ' — nothing written under Goal or Pickup yet'}`);
+    state.runExcerptFor = ctx.run.runMd;
   } else if (source === 'compact') {
     // Name the file, never inject its text: one line naming the path is the
     // whole context cost of a compaction; the lead reads the file when it
-    // needs it. `latestCheckpointFor` finds whichever checkpoint is newest —
-    // the plugin's own snapshot just written, or one the lead wrote itself.
-    // The host writes the boundary record after this hook, so the newest
-    // boundary visible here can be the previous compaction's. The path is
-    // named only when it belongs to that boundary and was written in the last
-    // two minutes; otherwise the note is promised for the first action.
-    const cp = snapshotPath || latestCheckpointFor(input.session_id);
-    out.push(`[orchestrate · compacted] ${cp && checkpointIsFresh(cp, newestBoundaryId(input)) ? `checkpoint: ${cp}` : 'checkpoint note follows at first action'}`);
+    // needs it. The writer above returns the file for the stretch just
+    // summarised: the plugin's own, or one the lead wrote at that path. It is
+    // named only when it was written in the last two minutes, so a lead's file
+    // from long before the summary is not passed off as this one; otherwise
+    // the note is promised for the first action.
+    out.push(`[orchestrate · compacted] ${snapshotPath && writtenLately(snapshotPath) ? `checkpoint: ${snapshotPath}` : 'checkpoint note follows at first action'}`);
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
   }
@@ -714,7 +824,10 @@ function handleSessionStart(input) {
   const mode = modeNote(state, input);
   if (mode) out.push(mode);
 
-  state.cardSent = true;
+  // Only a compaction prints the card here; after a resume it is still owed to
+  // the first request that earns it (whole-file review of the router,
+  // 2026-10-03: a resumed session never got it).
+  if (source === 'compact' && !state.muted) state.cardSent = true;
   state.lastStateHash = stateHash(ctx);
   state.lastActionable = actionableLine(ctx);
   saveSession(state);

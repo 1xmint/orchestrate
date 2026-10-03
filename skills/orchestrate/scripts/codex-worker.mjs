@@ -30,8 +30,7 @@
 // throttled, malformed) · 4 hand to Claude (quota, login, Codex unavailable,
 // permission) · 5 both providers unavailable · 2 usage.
 
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, createWriteStream, readdirSync, statSync } from 'node:fs';
+import { spawn, spawnSync, existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync, createWriteStream, readdirSync, statSync } from './lib/node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, basename, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';

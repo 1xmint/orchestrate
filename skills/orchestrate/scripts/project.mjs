@@ -7,7 +7,7 @@
 //                                   Next has a filled step; exit 1 past 60 lines
 //                                   or when the file is missing
 
-import { existsSync } from 'node:fs';
+import { existsSync } from './lib/node.mjs';
 import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ensureProject, readProject, projectPath, nextSteps, MAX_LINES } from './lib/project.mjs';

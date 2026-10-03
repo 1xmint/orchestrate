@@ -16,8 +16,7 @@
 // prompts or file contents. The home folder is written as ~ so the output can be
 // pasted as it is.
 
-import { readFileSync, existsSync, statSync, readdirSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, existsSync, statSync, readdirSync, spawnSync } from './lib/node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';

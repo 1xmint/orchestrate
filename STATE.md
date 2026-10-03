@@ -30,6 +30,356 @@ release's section when it ships.
   comparison on a written prediction, the two held-back tasks, release on the
   owner's go.
 
+- 2026-10-03, overnight (branch `night/0010-free-steps`, draft PR #52 into
+  `phase/0009-bench`): the plan's free steps are built, each with tests, all
+  green on GitHub CI. Nothing paid ran; step 4 waits on step 0's looks on the
+  owner's machine.
+  - **Step 1.** `bench/RULE.md` has the dated outcome table and the bundle as
+    kind "addition"; `verdict` names the row it lands on. A missing or empty
+    work folder is a failed run, not a note. `evalRootOf` treated the
+    filesystem root as an eval root, so on Linux, with the eval's temp folder
+    gone, the scorer graded the first folder under `/home`: the likely reason
+    pilot part 1 read one valid run and no successes. A scorer crash now fails
+    the bench job after the leak scan and the upload. The scenario suite passes
+    `--compact-after 1`. `bench/hook-bytes.mjs` counts Stop blocks from the
+    host's "Stop hook feedback:" record (read in the 2.1.42 and 2.1.288
+    programs); the zero in `docs/research/0009-hook-bytes.md` was blind.
+  - **Step 2b, the pause** (`docs/pause.md`). The 90% stop is gone. A helper
+    refused for usage is a fact on the next continue, not a stop, and a step
+    whose only work was such sends is no work. `persist-check.mjs` is also on
+    `StopFailure` (a second named exception in `hooks-registered-once`), where
+    it only writes `.orchestrator/pause.json`, and only where that folder
+    exists. A Stop with a helper, background command or scheduled prompt out
+    waits instead of stopping, and the same work still out after a wait with
+    nothing done since ends keep-going (a dev server would otherwise hold it
+    forever). Checked 2026-10-03: code.claude.com/docs/en/hooks-guide
+    (StopFailure output is ignored; a Stop hook is overridden after eight
+    blocks in a row without progress) and the 2.1.288 type file (`error`,
+    `background_tasks`, `session_crons`).
+  - **Step 2c.** The card carries decision 2c; the router states, from the
+    second time, that the same question went out unanswered, quoting the
+    replies (`lib/asked.mjs`). The card stays at 2,187 characters.
+  - **Step 2d.** `plain-words.test.mjs` produces every line the user sees
+    directly (keep-going's stop line for each reason, the band, the pause text,
+    the status line) and fails on the eval's machinery list plus paths and
+    terms of art. It caught "Auto-continue stopped", "a dispatch was denied",
+    a checkpoint path and token count in a user line, "the done-when", "ctx"
+    and task ids; all are in plain words now, and the lead keeps the details.
+  - **Step 2e, the per-run read: 27,278 to 13,481 bytes (51% less).** SKILL.md
+    19,994 to 7,625; the Plain style 5,094 to 3,669; the card 2,190 to 2,187.
+    The profile line the skill loads with, not counted before, 991 to 384
+    bytes; a terminal with no usage reading also gets one line naming the
+    one-time status-line install (`profile.test.mjs` holds the brief under
+    800 bytes).
+    Where each rule went is in commit `e014f77`'s message; the auto-merge rule
+    came back after the review. The prompting-guidance page was not re-read
+    tonight (fetching it needed the owner's approval); these wording choices
+    rest on the 2026-09-21 reading in AGENTS.md, and step 5 is the run that
+    judges them.
+  - **The band** (section 4, `docs/band.md`): `hooks/band.mjs` under `modules`
+    in `hooks/hooks.json`. Read in the shipped programs: 2.1.286 and 2.1.250
+    know the key, and 2.1.200 drops an unknown key, so the command hooks load
+    either way. CI's new `validate` job runs `claude plugin validate` on
+    2.1.286 with no sign-in. The band starts no timer where nothing draws.
+  - **Independent review** (fresh context, Opus): FAIL, seven should-fix, no
+    blocker; all fixed in `11a3675`. This entry is its sixth. A second round
+    (a new reviewer) failed the fixes on four: the wait rule ended keep-going
+    while a Monitor or a recurring prompt was still waking the session (now it
+    ends only when the user spoke and the step still did nothing); the
+    coordinator's count went before the status word the ledger reads; the
+    base check came after a debugger's reproduction; the profile cut dropped
+    the only line that says live usage is off and how to turn it on (back, in
+    a terminal only). All fixed, with its nits, in `00be057`. A third round
+    found three: a typed prompt with a system note in front, a queued message
+    or a summary was not read as the user speaking; a status question while a
+    helper was out ended keep-going (now only a background command alone can
+    end it that way); the usage line showed where no status line runs. Fixed
+    in `bec2bcf`. A fourth found two: a Monitor that runs a command may be
+    listed as a background command (type "shell"), so once one is started in
+    a stretch keep-going treats what is out as something that will report;
+    and a refusal with the host's words in front ("PreToolUse:Agent hook
+    error:") was missed, so the match now allows that prefix while still
+    reading only the start of the result. A fifth, on the later work below,
+    passed the faster hooks and failed the wait check on four: it refused
+    messages that promise nothing ("Let me know when the deploy is done and
+    I'll check again", "we'll watch the config directory"); its fact predicted
+    more than the payload shows (a reminder sent into the conversation is not
+    listed); its continue dropped the size advice it marked as delivered; and a
+    step that polled reset it, so a poll-then-promise stretch ran to the step
+    cap. Also: a Monitor held keep-going for the rest of the stretch, and the
+    size block came after the wait check. All fixed in the commit after
+    this one.
+  - **Also:** builders and debuggers check that their folder starts from the
+    packet's base (Claude Code starts a helper folder from the remote's default
+    branch unless `worktree.baseRef` is "head", code.claude.com/docs/en/
+    worktrees; three of tonight's own helpers started from main); the
+    coordinator grades every task it sent, a missing return as BLOCKED; cut
+    `smoke.mjs`, `profile.example.json` and `references/execution.md` (no
+    caller); turn-check walks folders instead of starting git each Stop; the
+    router reads the plugin listings once per session.
+  - **Faster hooks.** Every hook is a new Node process, and most of its start
+    went on parts of Node it never used: importing `node:fs` as an ES module
+    loads the promise and stream halves of fs, and `node:crypto` and
+    `node:child_process` are large. Every script now takes them from
+    `lib/node.mjs`, which uses `require` for fs and loads crypto and
+    child_process on first use; `lib/node.test.mjs` holds both. Measured
+    2026-10-03 on Linux, Node 22, 50 runs each (bare Node starts in about
+    21 ms): the hook after every tool call 65 to 47 ms, the shell-command check
+    68 to 45, the prompt hook 72 to 48, the Stop hook 69 to 47.
+  - **Waiting on nothing** (`docs/pause.md`, `lib/wait-claim.mjs`): when one
+    of the closing message's last three sentences promises, as "I", to wait or
+    check back on something outside the conversation or at a time ("I'll let
+    you know when CI finishes") and the Stop payload lists nothing out, the
+    Stop is sent back once with what the payload shows; with keep-going on it
+    is one continue per stretch, and the next step that only waits ends
+    keep-going in plain words. Idea C's "waits that could never wake" (about
+    four hours on a check that never reported back) is the failure; the
+    payload lists what the host wakes a session for (2.1.288 type file: "Empty
+    array when nothing is in flight"). Not measured; it rides the candidate
+    bundle. Cost: one extra turn when it fires, never when something is out,
+    the user is the one waited on, or the record shows a reminder was set.
+  - **Test counts held to the record** (`lib/proof-claim.mjs`): SKILL.md's
+    "copy each number from a proof line" was prose only, after two closing
+    messages carried figures that did not exist. A count of passing tests or
+    checks in the closing message ("all 42 tests pass", "120 passing") that
+    appears in no command output, helper report, notification or user message
+    in the last megabyte of the record is sent back once with that fact. Only
+    counts of two digits or more; the assistant's own words are not evidence.
+    Same guards as the commit check: once per message, and never on the
+    Stop that answers a claim refusal. Both checks used to skip any Stop a
+    hook had refused, and inside a keep-going stretch every Stop follows the
+    loop's own refusal, so a stretch's closing report was never read; the
+    loop's record now says which kind of refusal came last.
+  - **A read of the always-on text as the lead reads it** (fresh context,
+    Opus, against the prompting guide and the Opus 5.5 page, 2026-10-03), and
+    an inventory of every hook line (Sonnet). Fixed: the style said "ask once"
+    while the card's rule 2c needs a question to go unanswered twice (the
+    style now asks for all such questions together, in the message carrying
+    the next step); the missing-brief line told the lead to write CLAUDE.md or
+    AGENTS.md where `references/brief.md` keeps a public repo's brief
+    untracked (now a fact and a pointer); the card's "the brief wins" read as
+    overruling the user's own ask (now: check your proposal against the brief,
+    not the file just read); SKILL.md's "wait on a helper with `Monitor`" read
+    as polling a helper that wakes the session by itself; "second opinion
+    before committing" read as before every git commit; routing.md's Codex
+    lane had no condition. The stop-and-ask list in the style gained the
+    home-wifi example the card carried.
+    (A change that hid the Codex line without a fresh reading rested on a
+    misreading, that nothing writes the Codex status; a full `profile.mjs`
+    run does. The sixth review caught it and it is undone.)
+    The keep-going line went from 467 to about 360 bytes. Per-run read now
+    13,558 bytes (skill 7,575, style 3,827, card 2,156: the card keeps a short
+    stop list and the skill its maintainer rule, below). Not changed, and
+    why: the "helper size" note on every dispatch (about 80 bytes, pinned by
+    eight hook tests, and a guard change needs its own review); the skill's
+    "How to talk to the user" section (pinned; only serves hosts without the
+    style); the Plan-mode notes (orders with no failure named, but the guard
+    teaches the same at the refusal: a candidate for step 2a). Commit
+    `e014f77`'s message says `execution.md` keeps the Plan-mode rules; that
+    file was cut later (`11a3675`), and the guard (`workflow.mjs`) holds them.
+  - **Sixth review** (fresh context, Opus) on the band clock, the wording
+    pass, the test-count check and the stretch-aware claims: FAIL on six.
+    The Codex line change rested on a misreading (a full `profile.mjs` run
+    does write the cache) and is undone, with routing.md saying to run it
+    once when the line reads "not checked". The test-count check took the
+    total in "39 of 42 tests pass" for a passing count, read questions and
+    version numbers as claims, missed a sum printed in one output, and took
+    the host's own copy of an edit as evidence; all fixed. The style's new
+    wording put questions mid-message, where the hooks, the band's "Needs
+    you" and the unanswered count cannot see them: questions now close the
+    message. The card keeps a short stop list, since a script install
+    leaves the style off while still sending the card. A wait after a wait
+    keeps the time the waiting began (`since` in the band record).
+  - **Seventh review** (fresh context, Opus) on the sixth's fixes: FAIL on
+    five, all fixed. The question skip also skipped "All 42 tests pass, so
+    shall I open the PR?" (now only a sentence that opens by asking); "a
+    total of 42" was taken for a total; the compaction summary, which restates
+    the lead's own claims, counted as evidence; a search result's repeated
+    "41 passed" summed to 205 (now only a command's output or a notification
+    is summed); a file read's line numbers matched almost any count (now
+    stripped). The wait clock restarted when the user typed (it now lives in
+    the loop's record as `waitSince`). The style's "do what does not hang on
+    the answer first" had no bound and invited building before asking: the
+    question now goes out when it comes up, at the end of that message. An
+    unasked-for offer is a statement, not a question, since a closing question
+    ends a keep-going stretch. The card says the questions close the message.
+  - **"Proceed" and "go ahead" resume an open run** like "continue", as the
+    whole reply ("ok, go ahead", "proceed with the plan"): they are how a plan
+    is most often approved, they answer the question asked (where "continue"
+    only nudges), and they arm keep-going only through the same gate (an open
+    run with a finish line and a task not done). Not
+    from the record, which names "continue", "resume", "whats left" and "ok
+    lets resume"; a false arm stops at the first step that does no work.
+  - **Eighth review** (fresh context, Opus): FAIL on seven, all fixed. "Go
+    ahead" counted as no answer to the question asked, and as a resume it
+    armed on "why did you go ahead?", "never go ahead without asking" and "go
+    ahead and push to main" (now only as the whole reply, with more hold-back
+    words). A resume or retry while keep-going was on re-armed it, resetting
+    the wait's clock and the Monitor hold (now left as it is). The test-count
+    check still refused estimates, step, PR and build numbers, conditions and
+    report headings, and vouched for almost any two-digit count because a
+    number anywhere counted (a SHA fragment, a search hit's line number, a
+    tool count): a number now counts only within a few words of a test or
+    pass word, which on this session's own record cut the made-up two-digit
+    counts it vouches for from 85 of 90 to 32. The style's "finish the step in
+    hand" could read as leave to take the very action asked about: it now
+    stops short of it (style cap 3,800 to 3,850, dated in its test).
+  - **The Stop hook read whole** (fresh context, Opus, real hook runs on
+    sixteen situations): FAIL on one blocker and four should-fix, all fixed.
+    With keep-going on, reaching the compact line ended the loop whether or
+    not a save point existed, and the user line written today said "no save
+    point yet" even when there was one; the host summarises by itself at that
+    line and step 2b keeps keep-going on through a summary, so it now carries
+    on, saying once per summary epoch when no save point exists (only a
+    conversation still near the line right after a summary ends it). "Keep
+    going" said while keep-going was on re-armed it and reset its record (the
+    round-8 guard covered only "continue"). A claim refusal inside a stretch
+    left the loop judging the reply on the work before it; the record now
+    moves to the refusal. Several false claims in one message are said in one
+    refusal, since the reply is not read again. The same-error line showed the
+    user a blurred key with paths cut mid-word ("/hom<path>"); the user now
+    reads "the same error came back twice", and paths are blurred from their
+    start. The two Stop hooks' shared records (`persist-checks.json`,
+    `turn-checks.json`, one entry per session) were read and written whole:
+    two sessions stopping at the same moment lost one's entry (the loop's
+    step count and its said-once marks), and the files grew by an entry per
+    session for good. Each Stop now sets its own entry under the file's
+    lock and keeps the newest `STORE_MAX` (`putEntry`).
+  - **The other hooks read whole, and the session file locked** (fresh
+    context, Opus, one read each of the router and of context-check,
+    turn-check and ledger, then one review of the fixes). Several hooks write
+    the session file at once and each wrote its whole copy back: a helper's
+    return row was lost in 11 of 40 measured races, taking the review hold
+    with it. A save now takes a short lock beside the file (a directory; one
+    left stale is taken over, and a hook waits for it only briefly), reads
+    the file as it is and writes back only the keys it changed; a hook that
+    changes a list another hook appends to (the guard's dispatch row, the
+    ledger's return row, the mark on a dispatch row when its helper comes
+    back) loads, changes and writes inside the lock (`updateSession`), since
+    a merge by key keeps only one of two such changes. An independent
+    review of that fix raced the real hooks: 0 rows lost where the old code
+    lost 10 dispatch, 12 refusal and 6 return rows in ten rounds; it found
+    the dispatch-row mark still outside the lock (5 of 31 rows lost), now
+    moved in. Router: a run made by
+    `run-init.mjs` and left unfilled armed 25 steps toward the template's
+    own words, because a placeholder after a label or a list marker counted
+    as written (one check now, `writtenLine`); a "continue" that arms
+    keep-going sends the full card and the run page when the session has
+    not had them, and a resume no longer marks the card sent; the
+    keep-going line is said when it turns on or its goal changes; "persist
+    off" and "persist on" say what they did, and an ask held back by
+    "persist off" is said. The helper-leftover git look shares one 1.5 s
+    budget and is noted before it runs (a slow repository had the hook
+    after every tool call killed at its limit and looking again on every
+    call). A return is matched to its dispatch through the helper's launch
+    record, and a row counts as out only while neither its helper id nor
+    its call id is among the returns (a background helper's row never gets
+    a return time); a resumed helper keeps both return files. At the
+    compact line the loop now stops only when the Stop after a summary is
+    still there (`seenEpoch` in the loop's record) or the policy says a
+    fresh conversation serves better: a step of five or more calls after
+    each summary got past the old check, and the loop ran through four
+    summaries; back at the line by ordinary work after several summaries,
+    it stops saying that instead, since one more summary would help there
+    but drops detail. The work a step did before a refused claim, a
+    refused helper included, is carried to the next Stop, so the reply in
+    words is not judged a step that did nothing and a budget refusal still
+    ends the loop. The guard change (`guard-agent.mjs` saves through
+    `updateSession`) was reviewed: the same refusals and allows on crafted
+    payloads before and after.
+  - **The shell guard reads one command at a time** (an independent read of
+    `guard-bash.mjs` whole, ten findings, each run through the real hook). Its
+    rules read the whole line, so `rm -rf node_modules && npm install` asked
+    (and was refused in a helper or auto mode) with `&&` and `npm` taken for
+    targets, and a commit message, heredoc body or grep pattern that named a
+    stopped command was taken for one. `commandsIn` in `lib/shell-run.mjs`
+    now hands each rule one command's words: quotes off, redirections out,
+    heredoc bodies and search or echo words as text, and what a shell is
+    handed (`bash -c`, `$( )`, `eval`, `ssh host`, `pwsh -Command`) read as
+    commands; a line that also starts a shell reads what it writes. Plain
+    spellings the guard named but missed are caught (`rm -Rf`, `git push
+    -d`/`-fu`/`+branch`, `git clean --force`, `pnpm -r publish`, `flyctl
+    deploy`, `ri -r -fo`); `Remove-Item -Recurse` without `-Force` is the
+    recursive delete it is (learn.microsoft.com, Remove-Item, read
+    2026-10-03); a `--dry-run` publish passes; the temp folder follows links
+    and counts `/tmp`; the merge check reads merge as a word ("emergency"
+    was refused) and lets a read end in `2>&1`. Wording, checked against the
+    prompting best-practices page on 2026-10-03 (give the reason; say what to
+    do; a fact where a fact does): the ask's tail and the helper and headless
+    refusals now say what did not run, why, and who can run it, not "stop
+    and tell the user". The guard takes its file helpers from `lib/files.mjs`
+    (tier re-exports them): a plain `ls` 46 to 39 ms, bare Node 21.
+  - **The dispatch guard read whole** (independent read, one blocker and six
+    should-fix, each run through the real hook). The budget gate was skipped
+    whenever a dispatch named no model, though every role has one in its
+    agent file: a builder over a run's ceiling passed by leaving the model
+    out; it now prices the model the helper will run on, and a budget
+    refusal is recorded with the others. The project-page gate held every
+    role it did not know, so Claude Code's own `statusline-setup` and the
+    user's own agents were refused; it now holds only the building roles,
+    and the read and build role lists live in one place (`lib/workflow.mjs`)
+    with a test against each agent file's tools. A finder ignored the model
+    the user named; it now reads the same grant as a builder. A prompt that
+    only points at a packet file was judged on the pointer: the grant said
+    the packet had no TASK line, and the dispatch row lost its task,
+    progress file and review flag, so the review hold never held; the
+    packet is now read once (prompt and the files it names) for every
+    check. With no TASK line the task key fell back to the FOR line, the
+    same for every task of a job, so an Opus builder rode a Sonnet one's
+    attempt. Inside a helper the guard refuses but sends no note.
+    Wording, 2026-10-03 (prompting best-practices page: say what to do,
+    give the reason): orch-researcher and orch-advisor point a one-page
+    lookup at Explore on haiku (the guard refuses `general-purpose` while
+    the capped roles are installed); SKILL.md says a grant for one task
+    needs its numeric `TASK:` line (skill 7,575 to 7,631 bytes).
+  - **The band says what Claude is doing now** (independent read of the
+    band, the after-summary hook and the status line, two blockers). At a
+    prompt the band showed stored text first, so a finished first request
+    or the project page's step stood in for what the user had just asked;
+    a new request now shows itself, a resume word shows the next open step,
+    an acknowledgement shows nothing. The after-summary checkpoint was built
+    before the host writes that summary's boundary, so it held the stretch
+    before the previous summary and the newest stretch had none; it now
+    holds the stretch just summarised. A closed run no longer supplies the
+    next step (`boundRun`, shared with keep-going). This session's own line
+    beats another session's pause, which no longer promises keep-going. A
+    Stop that turn-check refuses shows "Working on", not the question
+    persist-check wrote in parallel. A working line hides when the host
+    says the session is not working (after Esc). A failed read no longer
+    blanks the band until the file changes. API error kinds are in plain
+    words, and keep-going is promised only for the usage limit. The status
+    line caches the account it reads from `~/.claude.json` by size and
+    time, and a copy left in the plugin cache hands over to the installed
+    one. "Needs you: Anything else?" stays: nothing yet tells an offer from
+    a question, and keep-going stops on the same message.
+  - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
+    settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
+    per run (skill 19,995, Plain style 5,094, card about 2,196, profile line
+    about 991) and cost about $0.04 more than plain Claude on three cases
+    where both did the same work (about $0.115, so 1.35x; level on a fourth,
+    `docs/research/0007-eval-release.md`). The candidate reads 13,865 (skill
+    7,625, style 3,669, card 2,187, profile line 384), 49% of that. If the
+    whole extra scales with bytes, the ratio on such cases is about 1.17x; if
+    one extra model call to load the skill (about a cent at Opus 5.5's listed
+    prices, `references/models.md`) does not shrink, about 1.22x. Both are
+    over the 1.15x line, so on tasks the size of 0.20.0's cases the run is not
+    bought (decision 1b holds the bar). Two unknowns move it below the line:
+    a longer task spreads the one-time read over more turns (at 20 turns and
+    about $0.40 a run the same arithmetic gives about 1.11x), and a task
+    small enough that the skill never loads pays only the style and the card
+    (about 1.08x). Pilot part 2 (already approved, $4) shows both: its trace
+    says whether the skill loaded and what a bench run costs. The prediction
+    is then one line of arithmetic, written here before any comparison cap.
+    records; step 2a (which hook notes Claude never acts on) needs the session
+    records too. Left for the owner, each with the audit's evidence in PR #52:
+    setting `worktree.baseRef` to "head"; a smaller worktree-removal reader in
+    `guard-bash.mjs` (a guard change: independent review first); whether the
+    Codex lane, live usage, the coordinator, `map.mjs`, `batch.mjs` and
+    `suggest.mjs` earn their upkeep. Checked in the shipped program: 2.1.200
+    already lists `StopFailure` among its hook events and fires it with an
+    `error` field, so the new key is known from 2.1.200 on; builds before that
+    were not read.
+
 - The bench (`bench/`, `bench-hidden/`, `evals/grade-kept.mjs`,
   `.github/workflows/bench.yml`) fits "nothing that bills an outside service
   or needs its own API key": it is for developing this plugin only and is not
@@ -75,6 +425,19 @@ release's section when it ships.
   "continue" or "try again") starts the count again. README, `lanes.md` and the
   line printed on arming state both limits; `docs-drift.test.mjs` pins them to
   the code, which it did not do for the 25-step limit before.
+- Stage 2 (branch `phase/0009-stage2`): the card, SKILL §3 and
+  `references/models.md` give one rule for handing a step to a helper. Do it
+  yourself within about eight tool calls; past that, hand it over when that
+  costs less overall, counting the helper's cheaper model and the reads kept out
+  of the lead's context against the brief, the return kept and checks. The
+  measured 2–3× cost of splitting a small build stays on the card as the fact
+  behind the rule. "Let the user pick" before a split is dropped: how to build
+  is the lead's call (approved with plan revision 2). `bench/RULE.md` classes
+  this, before any run, as a wording simplification. Checked against
+  "Prompting Claude Opus 5", Controlling subagent spawning (platform.claude.com,
+  2026-10-01): Opus 5 delegates more readily, and delegation multiplies cost on
+  small tasks; its sample rule also keeps work that fits in a handful of tool
+  calls with the lead. The Opus 5.5 page lists no change to delegation.
 
 ## v0.21.0 — judgment: no test that teaches nothing, no review loop, 2026-10-01
 

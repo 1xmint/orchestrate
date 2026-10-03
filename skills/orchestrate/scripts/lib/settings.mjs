@@ -12,7 +12,7 @@
 // Pure functions, so the unit test can run the whole merge on a copy of a real
 // settings.json without touching the machine.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync } from './node.mjs';
 import { join, dirname, basename } from 'node:path';
 
 export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'guard-bash.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'postcompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];
@@ -103,6 +103,10 @@ export function registrations(scriptsDir, { router = false, guard = false } = {}
     // The other half of the router's "keep going" arming: without it the router
     // pins a goal nothing ever acts on.
     out.push({ event: 'Stop', matcher: null, command: commandFor(join(scriptsDir, 'persist-check.mjs')), timeout: 5 });
+    // The same script at the host's moment for a turn that ended in an API error:
+    // it only writes the pause record there (docs/pause.md). The plugin's
+    // hooks.json registers it too; a test keeps the two lists in step.
+    out.push({ event: 'StopFailure', matcher: null, command: commandFor(join(scriptsDir, 'persist-check.mjs')), timeout: 5 });
     // Context sampled at tool boundaries, and Plan-mode changes noticed mid-turn.
     // The plugin's hooks.json registers the same script; a test keeps the two
     // lists in step.

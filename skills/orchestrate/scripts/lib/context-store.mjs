@@ -9,7 +9,7 @@
 // lib/context-scan.mjs and lib/context-advice.mjs; this file only adds the
 // reading/writing of records.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, readdirSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { loadPolicy } from './policy.mjs';
@@ -115,10 +115,12 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
     : 0;
 
   // The host runs the compaction hooks before it appends the boundary record,
-  // so they cannot write the note for the summary they follow. This is the
-  // first read that sees the boundary: write it here. The writer returns on an
-  // existing file before it reads the transcript, so later calls cost one
-  // existence check. Lead only; never throws.
+  // so they write the note of the stretch just summarised under the epoch that
+  // ended (lib/compaction-snapshot.mjs, `pending`). The new epoch's copy, the
+  // one the post-compaction ask looks for, is written here, at the first read
+  // that sees the boundary. The writer returns on an existing file before it
+  // reads the transcript, so later calls cost one existence check. Lead only;
+  // never throws.
   if (!agent && reading.compaction && transcriptPath) {
     try {
       writeCompactionSnapshot({
@@ -151,7 +153,9 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
   // each `tickEvery` of growth and after each compaction, so it never has to
   // guess the size from memory or an old summary.
   const lastTick = prev ? prev.tickKey || null : null;
-  const tick = contextTick(reading, policy, noticeCtx);
+  // Told the key already said, it builds no line for it: that line would be
+  // dropped just below, and building it costs file reads on every tool call.
+  const tick = contextTick(reading, policy, noticeCtx, lastTick);
   const ticked = Boolean(tick.key) && tick.key !== lastTick;
   if (!notice && ticked) notice = tick.text;
   const { offset, size: sz, toolUses, ...clean } = reading;

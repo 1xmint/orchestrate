@@ -16,7 +16,7 @@
 // runner, a task runner beats a package manifest, and CI is the tiebreak,
 // because CI is what actually blocks a merge.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from './lib/node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

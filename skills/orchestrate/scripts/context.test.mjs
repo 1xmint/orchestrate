@@ -432,8 +432,15 @@ test('compact by default; a fresh conversation only after repeated compactions',
   const far = Math.max(compactAt, policy.context.autocompactDefault) + 100000;
   assert.match(at(far, 2).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} · compacted 2× · newest checkpoint: none · compaction will summarise without a checkpoint$`));
   assert.match(at(far, 0).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} · newest checkpoint: none · compaction will summarise without a checkpoint$`));
-  const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: big, compactions: 2 } });
-  assert.match(stop.why, /Compacted 2 times already/);
+  // Keep-going carries on at the compact line, but once the session has been
+  // summarised often enough that a fresh conversation serves better, it ends
+  // and says how many summaries came before.
+  const once1 = persistDecision({ scan: { errors: [] }, contextAdvice: once.a, contextReading: { tokens: big, compactions: 1 }, epoch: 'e1' });
+  assert.equal(once1.kind, 'continue');
+  assert.match(once1.why, /Compacted 1 time already/);
+  const told = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: big, compactions: 2 }, epoch: 'e2' });
+  assert.equal(told.kind, 'stop');
+  assert.match(told.why, /after 2 summaries/);
 });
 
 test('the size line can be turned off, and only speaks for a measured size', () => {

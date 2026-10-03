@@ -3,11 +3,11 @@
 // writes through, and the machine-wide "last run opened" pointer.
 // No network, no child processes, never throws to a caller (returns null instead).
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { nextSteps } from './project.mjs';
-import { readJson, writeJsonAtomic, isWritten, isUnderRoot, findRepoRoot, loadSession, saveSession } from './tier.mjs';
+import { readJson, writeJsonAtomic, isWritten, writtenLine, isUnderRoot, findRepoRoot, loadSession, saveSession } from './tier.mjs';
 
 export const OPEN_GLYPHS = /📋|🔨|🔍|◐|⛔/;
 
@@ -195,6 +195,24 @@ export function parseBudget(text) {
   return out;
 }
 
+// The text under a RUN.md's "## Pickup" heading, and whether it was written.
+// They live here, not in turn-check.mjs where they began, so the code that
+// shows a resuming session its Pickup (lib/resume.mjs) does not import the
+// whole Stop hook, which every tool call's hook would then load with it.
+// turn-check.mjs re-exports both.
+export function pickupSection(runMdText) {
+  const m = /## Pickup\s*\n([\s\S]*?)(?:\n## |\s*$)/.exec(String(runMdText || ''));
+  return m ? m[1].trim() : '';
+}
+
+// A Pickup section still holding its template placeholders is not written.
+export function pickupWritten(section) {
+  const prompt = /Pickup prompt:\s*(.*)/.exec(section || '');
+  if (!prompt) return false;
+  const v = prompt[1].trim();
+  return Boolean(v) && !/^<.*>$/.test(v);
+}
+
 // One run, read from its RUN.md. `open` is true while a task row still carries
 // a non-final glyph and no `Closed:` line says the goal was met or dropped: a
 // finished run can keep a blocked row (work only another machine can do), and
@@ -309,7 +327,17 @@ export function bindSessionRun(sessionId, run) {
 // session's helper return into a four-day-old ledger.
 export function sessionRun(sessionId) {
   const state = loadSession(sessionId);
-  const r = state && state.run;
+  return boundRun(state && state.run);
+}
+
+// The run a session's binding (`state.run`) names, while that binding still
+// holds: a stale run keeps only a recent binding made on purpose, and a closed
+// run only one made on purpose after it was closed. Null otherwise. Every reader
+// of a bound run's tasks goes through this (the turn checks through sessionRun,
+// the band's open item and keep-going's next item through lib/band.mjs and
+// persist-check.mjs), so a run closed as dropped names no task anywhere.
+export function boundRun(binding) {
+  const r = binding;
   if (!r || !r.runMd || !existsSync(r.runMd)) return null;
   const run = readRun(r.runMd, r.root);
   if (run && run.stale && !(r.explicit && Date.now() - Date.parse(r.boundAt || 0) < STALE_RUN_MS)) return null;
@@ -349,7 +377,7 @@ export function resolveRun(sessionId, cwd, { forWrite = false } = {}) {
 // ---- what is open in a run --------------------------------------------------
 // One read of a RUN.md's task rows and Done when, for the two callers that need
 // to know whether keep-going has anything real to keep going toward.
-const filledLine = l => l.trim() && !/^<.*>$/.test(l.trim());
+const filledLine = writtenLine;
 const sectionBody = (text, name) => {
   const m = new RegExp(`## ${name}\\s*\\n([\\s\\S]*?)(?:\\n## |\\s*$)`).exec(String(text || ''));
   return m ? m[1].split('\n').filter(filledLine).join('\n').trim() : '';
@@ -389,7 +417,9 @@ export function runOpenWork(runText) {
   return { doneWhen: sectionBody(runText, 'Done when'), notDone: t.notDone, total: t.tasks.length };
 }
 
-export const ALL_DONE_TEXT = 'all tasks done; the done-when has not been checked';
+// Shown to the user when keep-going stops on it, so in their words: "done when"
+// is the ledger's heading, said here as the finish line.
+export const ALL_DONE_TEXT = 'every step is marked done, and nobody has checked the finish line yet';
 const ISO_AT = /\b(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?)/g;
 const latestStamp = text => {
   let best = null;
@@ -408,10 +438,13 @@ const clip120 = s => { const t = String(s || '').replace(/\s+/g, ' ').trim(); re
 // Pickup and task changes are compared by the ISO dates written in them; a run
 // with no dates to compare ignores Pickup and uses the first open task. Every
 // task done is its own state, not a reason to name filler. Pure.
+// `pickup: false` leaves Pickup out: it is the lead's note to its next session
+// (role names, folders, task numbers, a time), so a line the user reads (the
+// band) names the task by its row instead.
 //   { state: 'open' | 'all-done' | 'none', source, text }
-export function nextOpen(runText, projectText) {
+export function nextOpen(runText, projectText, { pickup = true } = {}) {
   const { tasks, notDone } = runTasks(runText);
-  const pickupBody = sectionBody(runText, 'Pickup');
+  const pickupBody = pickup ? sectionBody(runText, 'Pickup') : '';
   const pm = /Pickup prompt:\s*(.*)/.exec(pickupBody);
   const pickupPrompt = pm && pm[1].trim() && !/^<.*>$/.test(pm[1].trim()) ? pm[1].trim() : '';
   const pickupAt = latestStamp(pickupBody);

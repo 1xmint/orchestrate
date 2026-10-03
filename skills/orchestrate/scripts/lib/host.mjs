@@ -6,7 +6,7 @@
 // session's own transcript records (their `version` and `entrypoint`) and the
 // environment the host gives hooks and commands, and never from a CLI probe.
 
-import { existsSync } from 'node:fs';
+import { existsSync } from './node.mjs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { readContext } from './context-scan.mjs';

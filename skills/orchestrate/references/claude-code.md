@@ -110,7 +110,7 @@ definitions), `background` (stay backgrounded even if Claude asks to run it in t
 2026-09-10). Since the plugin path is this skill's primary distribution channel, per-role
 `permissionMode` narrowing is not a lever available here — `tools`/`disallowedTools` (which
 plugin subagents do respect) is the only mechanism that reaches every install path, which is why
-`SKILL.md §10` / `assets/agents/*.md` lean on that one exclusively.
+`SKILL.md`'s Rails and `assets/agents/*.md` lean on that one exclusively.
 
 **Skill files** load from `~/.claude/skills/<name>/SKILL.md` or `.claude/skills/`. Descriptions
 of all skills sit in context every turn (the listing gets ~1% of the context window; a
@@ -182,7 +182,8 @@ there (code.claude.com/docs/en/hooks, "Hooks in skills and agents", read 2026-09
 hooks register on invocation and keep running for the rest of the session; a subagent's are
 removed when it finishes, and its `Stop` becomes `SubagentStop`. Claude Code overrides a Stop
 hook after eight consecutive blocks with no progress, so every Stop hook here blocks once per
-thing and honours `stop_hook_active`. Agent-type hooks are labelled experimental. This skill
+thing and never refuses the Stop that answers its own refusal (`stop_hook_active`, or, inside
+a keep-going stretch, the loop's note of which refusal came last). Agent-type hooks are labelled experimental. This skill
 registers no prompt or agent hook at all: it had one, a second model reading every reply, and
 it was deleted in v0.8.0 after firing zero times in about 1,800 turns.
 

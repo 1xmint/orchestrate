@@ -4,12 +4,12 @@
 // to show one. Split out because all of it answers the same question: what
 // was this session doing, and how much of it is safe to hand back.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from './node.mjs';
 import { join } from 'node:path';
 import { CONTEXT_DIR } from './context-scan.mjs';
-import { sanitizeId } from './tier.mjs';
+import { sanitizeId, writtenLine } from './tier.mjs';
 import { formatAgo } from './handoff.mjs';
-import { pickupSection, pickupWritten } from '../turn-check.mjs';
+import { pickupSection, pickupWritten } from './runs.mjs';
 
 // A bounded excerpt of what the run is for, for a session that has lost the
 // thread: resumed, compacted, or picking up someone else's ledger. Outcome,
@@ -46,7 +46,7 @@ export function sectionExcerpt(md, sections, cap = RESUME_CAP, { intro = true } 
     const re = (spec && spec.pattern) || new RegExp(`## ${name}\\s*\\n([\\s\\S]*?)(?:\\n## |\\s*$)`);
     const m = re.exec(text);
     if (!m) return '';
-    const body = m[1].split('\n').filter(l => l.trim() && !/^<.*>$/.test(l.trim())).join('\n').trim();
+    const body = m[1].split('\n').filter(writtenLine).join('\n').trim();
     if (!body) return '';
     return intro && name ? `${name}: ${body}` : body;
   };

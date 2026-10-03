@@ -38,6 +38,17 @@ test('Pickup is used only when newer than the last task change', () => {
   assert.equal(undated.source, 'task', 'a run with no dates to compare ignores Pickup');
 });
 
+// Pickup is the lead's note to its next session; the band reads the rows
+// instead (whole-file review: the note reached the user as written).
+test('with pickup off, a newer Pickup is passed over for the first task not done', () => {
+  const rows = [row('9-1-0001', '🔨 running', 'first task', '—', 'started 2026-09-10')];
+  const t = runText({ rows, pickup: 'Pickup prompt: dispatch 9-1-0002 now\nUpdated: 2026-09-12' });
+  assert.equal(runs.nextOpen(t, null).source, 'pickup', 'as before for the loop');
+  const n = runs.nextOpen(t, null, { pickup: false });
+  assert.equal(n.source, 'task');
+  assert.match(n.text, /^9-1-0001 first task$/);
+});
+
 test('with no tasks, the first item of the project page Next is next', () => {
   const n = runs.nextOpen(runText({ rows: [] }), PROJECT);
   assert.equal(n.state, 'open');
@@ -49,7 +60,7 @@ test('with no tasks, the first item of the project page Next is next', () => {
 test('every task done is its own state, not filler', () => {
   const n = runs.nextOpen(runText({ rows: [row('9-1-0001', '✅ done', 'a'), row('9-1-0002', '✅ done', 'b')] }), PROJECT);
   assert.equal(n.state, 'all-done');
-  assert.equal(n.text, 'all tasks done; the done-when has not been checked');
+  assert.equal(n.text, runs.ALL_DONE_TEXT);
   assert.equal(runs.nextOpen('', '').state, 'none');
 });
 

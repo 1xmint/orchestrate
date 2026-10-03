@@ -220,23 +220,17 @@ test('every family\'s price in models.md\'s table matches prices.mjs, and so doe
   }
 });
 
-test('SKILL.md names every hook script hooks.json registers', () => {
+// The skill body used to list every hook script and their number, so a test
+// kept that list in step with hooks.json. The list cost the lead about 650
+// bytes on every load and changed nothing it did: each hook states its own fact
+// when it speaks. Plan 0010 step 2e dropped it; this keeps it from coming back
+// as a second copy of what README.md and hooks.json already say.
+test('SKILL.md names no hook script and states no hook count', () => {
   const SKILL_MD = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
-  const scripts = scriptsFromHooksJson(HOOKS);
-  for (const script of scripts) {
-    assert.ok(SKILL_MD.includes(`\`${script}\``), `SKILL.md never names ${script}, which hooks.json registers`);
+  for (const script of scriptsFromHooksJson(HOOKS)) {
+    assert.ok(!SKILL_MD.includes(`\`${script}\``), `SKILL.md names ${script}; the hook list lives in README.md`);
   }
-});
-
-test('SKILL.md\'s "<Number> hooks run around you" is the count of distinct scripts hooks.json registers', () => {
-  const SKILL_MD = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
-  const m = /^(\w+) hooks run around you/m.exec(SKILL_MD);
-  assert.ok(m, 'SKILL.md no longer says "<Number> hooks run around you"; update this test with it');
-  const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen'];
-  const n = WORDS.indexOf(m[1].toLowerCase());
-  assert.ok(n >= 0, `"${m[1]}" is not a number word this test knows`);
-  assert.equal(n, scriptsFromHooksJson(HOOKS).length,
-    `SKILL.md says "${m[1]} hooks" but hooks/hooks.json registers ${scriptsFromHooksJson(HOOKS).length} distinct scripts`);
+  assert.doesNotMatch(SKILL_MD, /^\w+ hooks run around you/m, 'SKILL.md states a hook count');
 });
 
 test('scripts/test.mjs collects the eval and bench tests, never bench-hidden or a case fixture', async () => {

@@ -21,15 +21,13 @@
 //
 // It never blocks and never fails a stop.
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, openSync, readSync, closeSync, fstatSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, openSync, readSync, closeSync, fstatSync, createHash, spawnSync } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
-import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
+import { DIR, sanitizeId, loadSession, updateSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole, advisorDollars } from './lib/prices.mjs';
 import { advisorTotals } from './lib/context-scan.mjs';
-import { roleMaxTurns, segmentTurns, runningExternal } from './lib/workers.mjs';
+import { roleMaxTurns, segmentTurns, runningExternal, nativeAgent, helperFiles } from './lib/workers.mjs';
 import { checkReturn } from './lib/report.mjs';
 import { taskIdIn } from './lib/task-id.mjs';
 import { reviewOfIn } from './lib/review-of.mjs';
@@ -434,13 +432,30 @@ export function offScriptNote(opening) {
   return opening ? `its OUTCOME line opens with "${opening}", not DONE, PARTIAL, BLOCKED, PASS or FAIL, so no status was recorded` : null;
 }
 
-function dispatchFor(sessionId, task, agentId = null) {
+// The dispatch row this return answers. By the helper's id once the row knows
+// it; else through the host's launch record of the helper (its .meta.json
+// names the Agent call that started it), which exists from the start and so
+// tells two foreground helpers apart; else by the task the return names; else
+// the one dispatch with no return yet, if there is exactly one. Never the
+// newest of any kind: with two helpers out, that filed one's free-form return
+// under the other's task, and a Stop then waited on a task still running
+// (whole-file review, 2026-10-03).
+function dispatchFor(input, task) {
   try {
-    const state = loadSession(sessionId);
-    const own = dispatchByAgent(state && state.dispatches, agentId);
+    const state = loadSession(input.session_id);
+    const ds = state && Array.isArray(state.dispatches) ? state.dispatches : [];
+    const own = dispatchByAgent(ds, input.agent_id);
     if (own) return own;
-    const list = (state && Array.isArray(state.dispatches) ? state.dispatches : []).filter(d => !task || d.task === task);
-    return list[list.length - 1] || null;
+    const native = input.agent_id && input.transcript_path ? nativeAgent(ds, helperFiles(input.transcript_path), input.agent_id) : null;
+    if (native && native.dispatch) return native.dispatch;
+    if (task) { const list = ds.filter(d => d && d.task === task); return list[list.length - 1] || null; }
+    // A row is open while nothing says its helper came back: no returnedAt, and
+    // neither its helper id nor its call id among the returns (a background
+    // helper never gets returnedAt; its return carries its id).
+    const rs = Array.isArray(state && state.returned) ? state.returned : [];
+    const back = new Set(rs.flatMap(r => (r ? [r.toolUseId, r.agentId] : [])).filter(Boolean).map(String));
+    const open = ds.filter(d => d && !d.returnedAt && !(d.toolUseId && back.has(String(d.toolUseId))) && !(d.agentId && back.has(String(d.agentId))));
+    return open.length === 1 ? open[0] : null;
   } catch { return null; }
 }
 
@@ -462,12 +477,13 @@ function ownReviewOf(input) {
 // returned and which invocation it was. Counting the files in the directory
 // gave two concurrent returns the same number, and the second overwrote the
 // first.
+// A helper resumed by a message and stopping again has the same id, so the
+// text's own short hash is added: a reviewer's FAIL and its later PASS each
+// keep their file (whole-file review, 2026-10-03).
 export function returnFilename(agent, input, text) {
   const who = input && (input.agent_id || input.tool_use_id);
-  const id = who
-    ? sanitizeId(String(who)).slice(-12)
-    : createHash('sha256').update(`${input && input.session_id}|${agent}|${text}`).digest('hex').slice(0, 12);
-  return `${agent}-${id}.md`;
+  const h = n => createHash('sha256').update(`${input && input.session_id}|${agent}|${text}`).digest('hex').slice(0, n);
+  return who ? `${agent}-${sanitizeId(String(who)).slice(-12)}-${h(6)}.md` : `${agent}-${h(12)}.md`;
 }
 
 // Which run this return belongs to: the RUN line the packet gave it, then the
@@ -703,9 +719,8 @@ function main() {
   const silent = !text.trim();
   if (silent) text = '(stopped with no final message)\n';
 
-  // The recommended install registers this hook twice: once globally in
-  // settings.json, and once from SKILL.md's frontmatter while the skill is in
-  // play. Both fire on the same stop. Act once.
+  // The same stop can arrive twice (an older script install registered this
+  // hook in settings.json as well as in the plugin's hooks.json). Act once.
   if (alreadyHandled(input, agent, text)) return;
 
   const r = parseReturn(text);
@@ -730,7 +745,7 @@ function main() {
   r.status = silent && !cap.capped ? 'PARTIAL' : cap.status;
   const noEvidence = evidenceDowngrade(r.status, text);
   r.status = noEvidence.status;
-  const dispatch = dispatchFor(input.session_id, r.task, input.agent_id);
+  const dispatch = dispatchFor(input, r.task);
   if (!r.task && dispatch && dispatch.task) r.task = dispatch.task;
   const asked = dispatch && dispatch.model !== 'inherit' ? dispatch.model : '';
   const ranModel = usage.model || asked || 'inherit';
@@ -810,8 +825,10 @@ function main() {
   // What came back, against this session's dispatch records, so the router can
   // say which helpers never returned after a usage limit stopped them.
   try {
-    const state = input.session_id && loadSession(input.session_id);
-    if (state) {
+    // Loaded, changed and written under the session file's lock, so a return
+    // row filed while another hook saves is never dropped (review of the
+    // hook-fix batch, 2026-10-03).
+    if (input.session_id) updateSession(input.session_id, state => {
       state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
       // toolUseId is the id of the Agent call that started this helper, the
       // same one guard-agent.mjs stored on the dispatch row, so the worker
@@ -821,8 +838,7 @@ function main() {
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
       state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}), ...(shortened.long ? { longBytes: shortened.bytes } : {}), ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
-      saveSession(state);
-    }
+    });
   } catch {}
 
   // Deliberately silent. SubagentStop context is delivered into the helper that

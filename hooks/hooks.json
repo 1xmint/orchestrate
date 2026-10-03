@@ -72,6 +72,17 @@
         ]
       }
     ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/skills/orchestrate/scripts/persist-check.mjs\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [
@@ -94,5 +105,6 @@
         ]
       }
     ]
-  }
+  },
+  "modules": ["./band.mjs"]
 }

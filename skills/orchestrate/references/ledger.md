@@ -19,7 +19,8 @@ spend by judgment (a large step says why it is worth its size), not by a cap.
 Set one only on pay-per-use billing, or when the user asks for a limit: pass
 `--budget <n>` (list-price dollars) or write `Ceiling: $n` in the Budget
 section, and `Ceiling: none` switches it off again. A set ceiling is enforced
-exactly as before: the guard refuses a subagent that would cross it and asks,
+exactly as before: the guard refuses a subagent that would cross it, priced
+on the model it runs on whether or not the dispatch names one, and asks,
 never invents a tighter one, and raising it in the ledger lets the next
 dispatch through. Link to the repo's own documents rather than copying them.
 

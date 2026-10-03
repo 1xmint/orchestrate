@@ -13,8 +13,7 @@
 //   node install-agents.mjs --force    overwrite user-edited files too
 //   node install-agents.mjs --dry-run  say what would happen
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, createHash } from './lib/node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

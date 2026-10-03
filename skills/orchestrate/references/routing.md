@@ -39,7 +39,9 @@ spends the user's money. An API-key session is `api`.
 
 ## Codex routing
 
-Codex is the worker lane until its shared allowance runs out. Ask for the Codex
+Codex is the worker lane while the profile line reads `codex: … ok`, until its
+shared allowance runs out; when it reads "not checked", one `profile.mjs` run
+checks it. With any other reading the card's builders are. Ask for the Codex
 tier once, when the first Codex dispatch is considered and the profile has none,
 then store it with `profile.mjs --set codex.tier=plus|pro5|pro20`.
 
@@ -110,8 +112,9 @@ in plain words, so a wrong read of the job is corrected before money is spent.
 
 The guard prints a price tag on every dispatch that names a model: list-price
 dollars, either measured from this machine's own past runs or labelled as
-reasoned. A dispatch that names no model gets no tag, because nothing knows what
-it will run on.
+reasoned. A role helper that names no model is priced on its own agent file's
+model, and so is a budget ceiling's check; a built-in agent that names none
+gets no tag, because nothing knows what it will run on.
 
 **List price is not what a subscription is billed.** It is the unit `/usage`
 already shows the user for a session, and it is the only unit a dispatch can be

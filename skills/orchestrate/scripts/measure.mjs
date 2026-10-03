@@ -21,7 +21,7 @@
 // tool_use blocks named Agent, and the top-level timestamp, sessionId and
 // effort. Anything missing counts as zero; a corrupt line is skipped.
 
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from './lib/node.mjs';
 import { homedir } from 'node:os';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
