@@ -27,6 +27,20 @@ test('a count of passing tests or checks is a claim; other numbers are not', () 
     ['v2.0.10 passed the smoke test.', []],
     // "of" with no number before it is not a total (round 7).
     ['A total of 42 tests pass.', ['42']],
+    // Round 8: an estimate, a step, a PR or a build number, and a condition
+    // claim nothing; a report heading, an adjective and "42/42 passed" do.
+    ['Step 12 passed. About 1,200 tests pass.', []],
+    ['PR #42 passed CI', []],
+    ['Build 345 passed', []],
+    ['Once all 42 tests pass, I will merge.', []],
+    ['~40 tests pass', []],
+    ['How I checked: ran npm test, 42 passed.', ['42']],
+    ['What I checked: all 42 tests pass.', ['42']],
+    ['**What changed.** All 42 tests pass.', ['42']],
+    ['All 42 new tests pass', ['42']],
+    ['All 14 CI checks pass', ['14']],
+    ['Tests: 42/42 passed', ['42']],
+    ['42 passed, 0 failed', ['42']],
     ['3 tests pass', []],
     ['The build took 42 seconds and 12 files changed.', []],
     ['I added 12 tests; they pass.', []],
@@ -70,9 +84,21 @@ test('a total across suites printed in one run counts; the host\'s copy of an ed
   // not in anything the model was shown, so it proves nothing.
   const edit = rec({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'e1', content: 'The file was updated.' }] }, toolUseResult: { newString: 'All 42 tests pass' } });
   assert.deepEqual(unseenCounts('All 42 tests pass.', edit), ['42']);
-  // A helper's hand-back the host queued in is shown to the model, so it counts.
+  // A notification the host queued in is shown to the model, so it counts.
   const queued = rec({ type: 'attachment', attachment: { type: 'queued_command', prompt: '<task-notification>CI: 1,520 checks passed</task-notification>' } });
   assert.deepEqual(unseenCounts('1,520 checks pass.', queued), []);
+});
+
+test('a number is seen only as a count: not in a SHA, a line number, a tool count or this hook\'s own feedback (round 8)', () => {
+  assert.deepEqual(unseenCounts('All 45 tests pass.', output('commit 5bdfdba3c45c\nAuthor: x')), ['45']);
+  assert.deepEqual(unseenCounts('All 49 tests pass.', output('tool_uses: 49\nduration_ms: 100')), ['49']);
+  assert.deepEqual(unseenCounts('All 42 tests pass.', [used('g2', 'Grep'), result('g2', 'src/a.js:42:const x')].join('\n')), ['42']);
+  assert.deepEqual(unseenCounts('All 42 tests pass.', rec({ type: 'user', message: { content: 'Stop hook feedback:\nYour last message gives 42 as a count of passing tests' } })), ['42']);
+  assert.deepEqual(unseenCounts('All 42 tests pass.', output('Tests:       42 passed, 42 total')), []);
+  // A background run's output read from its file still adds up.
+  assert.deepEqual(unseenCounts('All 42 tests pass across the two crates.', [used('r9', 'Read'), result('r9', '1\ttest result: ok. 12 passed; 0 failed\n2\ttest result: ok. 30 passed; 0 failed')].join('\n')), []);
+  // The host's meta records are not evidence.
+  assert.deepEqual(unseenCounts('All 42 tests pass.', rec({ type: 'user', isMeta: true, message: { content: 'Earlier: 42 tests passed.' } })), ['42']);
 });
 
 test('the summary written at compaction and a file\'s line numbers prove nothing (round 7)', () => {
@@ -80,7 +106,9 @@ test('the summary written at compaction and a file\'s line numbers prove nothing
   const summary = rec({ type: 'user', isCompactSummary: true, message: { content: 'Earlier: all 42 tests pass.' } });
   assert.deepEqual(unseenCounts('All 42 tests pass.', [summary, output('ℹ pass 7')].join('\n')), ['42']);
   // A file read carries a line-number column that would match almost any count.
-  assert.deepEqual(unseenCounts('All 42 tests pass.', [used('r1', 'Read'), result('r1', '    41\tconst x = 1;\n    42\tconst y = 2;')].join('\n')), ['42']);
+  // Claude Code renders a read as "N\t..." (older builds pad and use "→").
+  assert.deepEqual(unseenCounts('All 42 tests pass.', [used('r1', 'Read'), result('r1', '41\tconst x = 1;\n42\tconst y = 2;')].join('\n')), ['42']);
+  assert.deepEqual(unseenCounts('All 42 tests pass.', [used('r3', 'Read'), result('r3', '    41→const x = 1;\n    42→const y = 2;')].join('\n')), ['42']);
   // The file's own text still counts.
   assert.deepEqual(unseenCounts('All 42 tests pass.', [used('r2', 'Read'), result('r2', '     1\tCI: 42 tests passed on main')].join('\n')), []);
 });

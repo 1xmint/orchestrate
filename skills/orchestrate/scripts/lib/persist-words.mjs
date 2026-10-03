@@ -40,24 +40,34 @@ export function persistIntent(text) {
 // work by hand about twelve times with "continue", "resume" or "try again" and
 // none of those armed keep-going.
 //   status  whats left, where are we, status: never arms, "?" or not.
-//   resume  continue, resume, carry on, pick up, go on, keep going, proceed,
-//           go ahead: arms only
+//   resume  continue, resume, carry on, pick up, go on, keep going, and
+//           "proceed" or "go ahead" as the whole reply: arms only
 //           when the router's gate finds an open run (see router.mjs).
 //   retry   try again: restores keep-going only if it was on before the stop.
 // A resume or retry is 12 words or fewer, names no new goal, and has no word
 // that says to hold back.
 const STATUS_WORDS = /^(what'?s left|whats left|where are we|status)$/i;
-// "proceed" and "go ahead" are how a plan is most often approved; they arm
-// nothing without an open run, as for the rest.
-const RESUME_WORDS = /\b(continue|resume|carry on|pick up|go on|keep going|keep at it|proceed|go ahead)\b/i;
+const RESUME_WORDS = /\b(continue|resume|carry on|pick up|go on|keep going)\b/i;
 const RETRY_WORDS = /\btry again\b/i;
-const HOLD_BACK = /\b(don'?t|do not|stop|wait|hold|pause|no)\b/i;
+const HOLD_BACK = /\b(don'?t|do not|stop|wait|hold|pause|no|not|never|before|yet|cancel|won'?t|can'?t|doesn'?t|didn'?t)\b/i;
+
+// "proceed" and "go ahead" are how a plan is most often approved. They are a
+// resume only as the whole reply ("ok, go ahead", "proceed with the plan"):
+// "go ahead and push to main" names a new step, "why did you go ahead?" is a
+// question, and "I will go ahead and test it myself" is not an approval
+// (independent review, round 8). An approval also answers a question the lead
+// asked, which "continue" does not (lib/asked.mjs).
+const APPROVE = /^(?:(?:yes|yeah|yep|ok|okay|sure|please|alright|great|fine|good|cool|then|so|perfect|sounds good|looks good|lgtm)[,!.]?\s+)*(?:proceed|go ahead)(?:\s+(?:with (?:it|that|this|the plan|the next (?:step|task|one))|then|now|please))?$/i;
+export function approves(text) {
+  return APPROVE.test(String(text || '').trim().replace(/[.!\s]+$/, ''));
+}
 const RESUME_MAX_WORDS = 12;
 
 export function promptIntent(text) {
   const t = String(text || '').trim().replace(/[.!?\s]+$/, '').trim();
   if (!t) return null;
   if (STATUS_WORDS.test(t)) return 'status';
+  if (approves(text)) return 'resume';
   if (t.split(/\s+/).length > RESUME_MAX_WORDS || HOLD_BACK.test(t) || NEW_GOAL_VERB.test(t)) return null;
   if (RETRY_WORDS.test(t)) return 'retry';
   if (RESUME_WORDS.test(t)) return 'resume';

@@ -168,7 +168,7 @@ release's section when it ships.
     misreading, that nothing writes the Codex status; a full `profile.mjs`
     run does. The sixth review caught it and it is undone.)
     The keep-going line went from 467 to about 360 bytes. Per-run read now
-    13,530 bytes (skill 7,575, style 3,799, card 2,156: the card keeps a short
+    13,558 bytes (skill 7,575, style 3,827, card 2,156: the card keeps a short
     stop list and the skill its maintainer rule, below). Not changed, and
     why: the "helper size" note on every dispatch (about 80 bytes, pinned by
     eight hook tests, and a guard change needs its own review); the skill's
@@ -203,11 +203,27 @@ release's section when it ships.
     question now goes out when it comes up, at the end of that message. An
     unasked-for offer is a statement, not a question, since a closing question
     ends a keep-going stretch. The card says the questions close the message.
-  - **"Proceed" and "go ahead" resume an open run** like "continue": they are
-    how a plan is most often approved, and they arm keep-going only through
-    the same gate (an open run with a finish line and a task not done). Not
+  - **"Proceed" and "go ahead" resume an open run** like "continue", as the
+    whole reply ("ok, go ahead", "proceed with the plan"): they are how a plan
+    is most often approved, they answer the question asked (where "continue"
+    only nudges), and they arm keep-going only through the same gate (an open
+    run with a finish line and a task not done). Not
     from the record, which names "continue", "resume", "whats left" and "ok
     lets resume"; a false arm stops at the first step that does no work.
+  - **Eighth review** (fresh context, Opus): FAIL on seven, all fixed. "Go
+    ahead" counted as no answer to the question asked, and as a resume it
+    armed on "why did you go ahead?", "never go ahead without asking" and "go
+    ahead and push to main" (now only as the whole reply, with more hold-back
+    words). A resume or retry while keep-going was on re-armed it, resetting
+    the wait's clock and the Monitor hold (now left as it is). The test-count
+    check still refused estimates, step, PR and build numbers, conditions and
+    report headings, and vouched for almost any two-digit count because a
+    number anywhere counted (a SHA fragment, a search hit's line number, a
+    tool count): a number now counts only within a few words of a test or
+    pass word, which on this session's own record cut the made-up two-digit
+    counts it vouches for from 85 of 90 to 32. The style's "finish the step in
+    hand" could read as leave to take the very action asked about: it now
+    stops short of it (style cap 3,800 to 3,850, dated in its test).
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line

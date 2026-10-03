@@ -559,7 +559,10 @@ test('the Plain output style ships, is valid, and says the same thing as the ski
   // 3,800 from plan 0010 step 2e (2026-10-03): every rule above kept, the
   // wording cut from 5,094 bytes, because this file is in the system prompt of
   // every session and is the most often paid part of the per-run read.
-  assert.ok(Buffer.byteLength(style) <= 3800, `the style is ${Buffer.byteLength(style)} bytes, cap 3800`);
+  // 3,850 the same night (independent review, round 8): the stop-and-ask rule
+  // says when to ask and that the step in hand stops short of the action
+  // asked about, which the cut had left as "finish the step in hand".
+  assert.ok(Buffer.byteLength(style) <= 3850, `the style is ${Buffer.byteLength(style)} bytes, cap 3850`);
 
   // A picture when the shape is the point, and never the one diagram format
   // the desktop app shows as plain text.
@@ -761,7 +764,7 @@ test('SKILL.md and the plain style make data exposure and unasked scope the owne
   // unanswered-question count see a question only at the end (independent
   // review, round 6), and they go out when they come up, after the step in
   // hand, not after the work they decide (round 7).
-  assert.match(plain, /when it comes up: finish the step in hand, then end that message on the questions, together, recommendation first/);
+  assert.match(plain, /as soon as one comes up: finish the step in hand short of that action, then end that message on the questions, together, recommendation first/);
 });
 
 // Claude Code starts a helper's own folder from the remote's default branch

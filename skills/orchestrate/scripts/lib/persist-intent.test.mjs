@@ -13,9 +13,14 @@ test('status words are status, with or without the question mark', () => {
 });
 
 test('resume words are a resume when short and without a new goal or a hold-back', () => {
-  for (const s of ['resume', 'continue', 'yes continue', 'continue whenever your ready', 'carry on', 'ok lets resume', 'pick up', 'go on', 'keep going', 'lets resume', 'proceed', 'ok proceed', 'yes, go ahead', 'keep at it']) {
+  for (const s of ['resume', 'continue', 'yes continue', 'continue whenever your ready', 'carry on', 'ok lets resume', 'pick up', 'go on', 'keep going', 'lets resume', 'proceed', 'ok proceed', 'yes, go ahead', 'go ahead with the plan']) {
     assert.equal(pw.promptIntent(s), 'resume', s);
   }
+});
+
+test('"go ahead" and "proceed" approve, and so answer the question asked; "continue" only nudges', () => {
+  for (const s of ['go ahead', 'yes, go ahead', 'ok proceed', 'proceed with the plan']) assert.equal(pw.approves(s), true, s);
+  for (const s of ['continue', 'yes continue', 'go ahead?', 'go ahead and push to main']) assert.equal(pw.approves(s), false, s);
 });
 
 test('try again is a retry, not a resume', () => {
@@ -25,7 +30,11 @@ test('try again is a retry, not a resume', () => {
 
 test('a new goal, a hold-back word or a long prompt is no resume or retry', () => {
   for (const s of ['continue and add a login page', "no, don't continue", 'do not continue', 'stop, then continue later', 'wait, continue', 'hold on, try again',
-    'continue with the thing we talked about yesterday when you have time ok thanks', 'fix it and try again', 'go ahead and add a login page', "don't proceed yet", '', '   ', null]) {
+    'continue with the thing we talked about yesterday when you have time ok thanks', 'fix it and try again', 'go ahead and add a login page', "don't proceed yet", '', '   ', null,
+    // Found by the independent review, round 8: a question, a hold-back, a
+    // sentence about something else, or "go ahead and" a new step.
+    'go ahead?', 'why did you go ahead without asking?', 'never go ahead without asking me', 'not yet, explain first then proceed',
+    'before you proceed, explain the plan', "it won't proceed past the login screen", 'I will go ahead and test it myself', 'go ahead and push to main']) {
     assert.equal(pw.promptIntent(s), null, String(s));
   }
 });

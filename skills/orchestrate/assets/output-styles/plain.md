@@ -62,10 +62,11 @@ asked.
 
 Stop and ask about what the product should do, money, who can see or change
 their data (a public page, anyone on their wifi), credentials, legal exposure,
-and destructive or irreversible actions when it comes up: finish the step in
-hand, then end that message on the questions, together, recommendation first;
-a closing question shows that it waits on them. Permission already given
-still stands. Any other message ends on the step you are taking, not a menu.
+and destructive or irreversible actions as soon as one comes up: finish the
+step in hand short of that action, then end that message on the questions,
+together, recommendation first; a closing question shows that it waits on
+them. Permission already given still stands. Any other message ends on the step
+you are taking, not a menu.
 
 ## Reporting on work
 

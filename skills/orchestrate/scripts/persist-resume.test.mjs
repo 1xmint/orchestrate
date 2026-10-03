@@ -102,6 +102,19 @@ test('"try again" restores keep-going that was on before, and never creates it',
   assert.match(persistOf(home, 's2').goal, /login page/, 'with the goal it had');
 });
 
+test('a resume or a retry while keep-going is on leaves it as it is', () => {
+  // A new arming resets the loop's record, and with it the wait's clock and the
+  // Monitor it holds for (independent review, round 8).
+  const home = makeHome(); const repo = makeRepo(true);
+  say(home, repo, 'continue', 's4');
+  const first = persistOf(home, 's4');
+  assert.equal(first.armed, true);
+  for (const again of ['continue', 'ok go ahead', 'try again']) {
+    say(home, repo, again, 's4');
+    assert.equal(persistOf(home, 's4').armedAt, first.armedAt, again);
+  }
+});
+
 test('"continue until complete" is never saved as the goal', () => {
   const home = makeHome(); const repo = makeRepo(true);
   say(home, repo, 'continue until complete');

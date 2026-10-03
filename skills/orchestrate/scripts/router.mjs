@@ -58,7 +58,7 @@ import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
   stillRunningNative, unreturned, unreturnedNote, STALE_SEEN_PATH, staleNote, compactionFact,
 } from './lib/recover.mjs';
-import { PERSIST_INTENT, syntheticPrompt, persistIntent, promptIntent, barePersistPhrase, GOAL_CAP, persistLine } from './lib/persist-words.mjs';
+import { PERSIST_INTENT, syntheticPrompt, persistIntent, promptIntent, barePersistPhrase, GOAL_CAP, persistLine, approves } from './lib/persist-words.mjs';
 import { runOpenWork } from './lib/runs.mjs';
 import {
   stateLine, statusReply, actionableLine, contextBand, contextPhrase, quotaPhrase, quotaBand,
@@ -439,7 +439,10 @@ function handlePrompt(input) {
     }
     state.persist = { armed: true, goal, goalSource, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
     armedNow = true;
-  } else if (intent === 'resume') {
+  } else if (intent === 'resume' && !(state.persist && state.persist.armed)) {
+    // Already on: left as it is. A new arming would reset the loop's record,
+    // and with it the wait's clock and the Monitor it holds for (independent
+    // review, round 8).
     // The gate: the goal comes from an open run's ledger, that run says what
     // done looks like, and a task is not done. A project page's purpose is not
     // a finish line, so it never arms this.
@@ -451,7 +454,7 @@ function handlePrompt(input) {
       state.persist = { armed: true, goal: g.text, goalSource: 'ledger', armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
       armedNow = true;
     }
-  } else if (intent === 'retry' && state.persist && state.persist.armedAt) {
+  } else if (intent === 'retry' && state.persist && state.persist.armedAt && !state.persist.armed) {
     // Restores keep-going that was on before the stop; never starts it.
     const { endedAt, endReason, ...rest } = state.persist;
     state.persist = { ...rest, armed: true, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
@@ -493,7 +496,8 @@ function handlePrompt(input) {
   if (!/^\s*\//.test(trimmed)) {
     let question = null;
     try { question = input.transcript_path ? lastQuestion(lastAssistantText(readTail(input.transcript_path, 131072))) : null; } catch {}
-    state.asked = nextAsked(state.asked, { question, reply: trimmed, nudge: Boolean(intent) || Boolean(explicit) });
+    // "go ahead" answers the question; "continue" nudges past it.
+    state.asked = nextAsked(state.asked, { question, reply: trimmed, nudge: (Boolean(intent) && !approves(trimmed)) || Boolean(explicit) });
     const asked = askedLine(state.asked);
     if (asked) out.push(asked);
   }
