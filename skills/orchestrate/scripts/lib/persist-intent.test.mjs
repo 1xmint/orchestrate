@@ -13,7 +13,7 @@ test('status words are status, with or without the question mark', () => {
 });
 
 test('resume words are a resume when short and without a new goal or a hold-back', () => {
-  for (const s of ['resume', 'continue', 'yes continue', 'continue whenever your ready', 'carry on', 'ok lets resume', 'pick up', 'go on', 'keep going', 'lets resume']) {
+  for (const s of ['resume', 'continue', 'yes continue', 'continue whenever your ready', 'carry on', 'ok lets resume', 'pick up', 'go on', 'keep going', 'lets resume', 'proceed', 'ok proceed', 'yes, go ahead', 'keep at it']) {
     assert.equal(pw.promptIntent(s), 'resume', s);
   }
 });
@@ -25,7 +25,7 @@ test('try again is a retry, not a resume', () => {
 
 test('a new goal, a hold-back word or a long prompt is no resume or retry', () => {
   for (const s of ['continue and add a login page', "no, don't continue", 'do not continue', 'stop, then continue later', 'wait, continue', 'hold on, try again',
-    'continue with the thing we talked about yesterday when you have time ok thanks', 'fix it and try again', '', '   ', null]) {
+    'continue with the thing we talked about yesterday when you have time ok thanks', 'fix it and try again', 'go ahead and add a login page', "don't proceed yet", '', '   ', null]) {
     assert.equal(pw.promptIntent(s), null, String(s));
   }
 });

@@ -40,13 +40,16 @@ export function persistIntent(text) {
 // work by hand about twelve times with "continue", "resume" or "try again" and
 // none of those armed keep-going.
 //   status  whats left, where are we, status: never arms, "?" or not.
-//   resume  continue, resume, carry on, pick up, go on, keep going: arms only
+//   resume  continue, resume, carry on, pick up, go on, keep going, proceed,
+//           go ahead: arms only
 //           when the router's gate finds an open run (see router.mjs).
 //   retry   try again: restores keep-going only if it was on before the stop.
 // A resume or retry is 12 words or fewer, names no new goal, and has no word
 // that says to hold back.
 const STATUS_WORDS = /^(what'?s left|whats left|where are we|status)$/i;
-const RESUME_WORDS = /\b(continue|resume|carry on|pick up|go on|keep going)\b/i;
+// "proceed" and "go ahead" are how a plan is most often approved; they arm
+// nothing without an open run, as for the rest.
+const RESUME_WORDS = /\b(continue|resume|carry on|pick up|go on|keep going|keep at it|proceed|go ahead)\b/i;
 const RETRY_WORDS = /\btry again\b/i;
 const HOLD_BACK = /\b(don'?t|do not|stop|wait|hold|pause|no)\b/i;
 const RESUME_MAX_WORDS = 12;

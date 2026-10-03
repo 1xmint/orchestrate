@@ -203,6 +203,11 @@ release's section when it ships.
     question now goes out when it comes up, at the end of that message. An
     unasked-for offer is a statement, not a question, since a closing question
     ends a keep-going stretch. The card says the questions close the message.
+  - **"Proceed" and "go ahead" resume an open run** like "continue": they are
+    how a plan is most often approved, and they arm keep-going only through
+    the same gate (an open run with a finish line and a task not done). Not
+    from the record, which names "continue", "resume", "whats left" and "ok
+    lets resume"; a false arm stops at the first step that does no work.
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line
