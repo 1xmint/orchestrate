@@ -8,7 +8,7 @@ covers both shells. It looks only at a short, fixed list of shapes that
 throw away something a person cannot get back — a shared branch, a folder
 of files, a published package, a live deployment, or real money — and stops
 those. Everything else, including loud everyday commands like `npm test` or
-`rm -rf node_modules`, passes through with no output at all.
+`rm -rf node_modules && npm install`, passes through with no output at all.
 
 ## What it is for, and what it does not catch
 
@@ -21,32 +21,98 @@ is written here, not chased:
 - git or rg settings made by an earlier command, before the line it reads;
 - a destructive or paying command spelled in a way none of the shapes below
   name;
-- anything a program does after it starts, beyond the words on the line.
+- anything a program does after it starts, beyond the words on the line: a
+  script file written in an earlier step and run now, an `npm run` script, a
+  Makefile target, or `xargs rm -rf` whose folders come from a pipe;
+- a command handed as one quoted string to a program the guard does not know
+  runs commands (`watch "…"`, `su -c "…"`), or nested more than 40 `$( )` deep.
+
+## How a line is read
+
+The rules below read a line one command at a time (`commandsIn` in
+`lib/shell-run.mjs`), so what one command says is not taken for another's:
+
+- The line splits where the shell splits it: `&&`, `||`, `;`, `|`, `&`,
+  newlines, `( )`, and a `{` or `}` standing as a word (a bash group or a
+  PowerShell script block such as `if (Test-Path dist) { … }`). A brace list
+  inside a word (`{a,b}`, `{1..3}`) and find's `{}` stay in their word.
+- A redirection is not a word: `2>/dev/null`, `>out.txt`, `2>&1`, `<in`,
+  PowerShell's `2>$null`. So `rm -rf build 2>/dev/null` deletes `build` and
+  nothing else, and `kill -9 12345 2>/dev/null` names one process.
+- Quotes come off, and quoted text is one word whatever it says: `rm -rf
+  "dist"` deletes `dist`, and `git commit -m "never git push --force"` is a
+  commit. A comment is skipped.
+- A heredoc body is text, so a commit message or a notes file written with
+  `cat <<'EOF'` can name any command. An unquoted heredoc (`<<EOF`) still runs
+  its `$( )` and backticks, so those are read.
+- The words of a search (`grep`, `rg`, `ag`, `ack`, `git grep`, `findstr`,
+  `Select-String`), an `echo`, `printf` or `Write-Output`, or a name lookup
+  (`man`, `which`, `type`, `Get-Command`) run nothing: `grep -n pkill
+  scripts/dev.sh` is a search.
+- What does run is read as commands of its own: `$( )`, backticks and `<( )`
+  (anywhere but inside single quotes or a quoted heredoc body); the string a
+  shell is handed with `-c` (`bash`, `sh`, `zsh` and the rest), wherever the
+  shell word stands (`sudo`, `xargs`, `docker exec`, `find -exec`); what
+  follows `pwsh -Command`, `powershell -c` and `cmd /c`; and what `eval` and
+  `ssh host` are given.
+- When a command on the line starts a shell (`bash x.sh`, `| sh`, `source`,
+  `./x.sh`), heredoc bodies, here-strings and echo or printf text on that line
+  are read as commands too: what they write may be the script the shell runs.
+  So `cat > x.sh <<'EOF'` … `rm -rf src` … `EOF` then `bash x.sh` asks, and a
+  notes file with the same words and no shell on the line does not. The price:
+  such a line whose notes name a stopped command asks.
+- A PowerShell here-string (`@'` … `'@`) is text.
+
+The payment rule and the merge check read the whole line their own way,
+described with them below; the worktree removal check has its own reader too.
 
 ## What it stops
 
-- `git push --force` / `git push -f` (rewrites a shared branch's history)
-- `git push origin --delete <branch>` and the `git push origin :<branch>`
-  shorthand (deletes a branch on the shared remote)
-- `git branch -D <branch>` and `git branch -d <branch>` (deletes a local
-  branch). `-D` and a merged `-d` cannot be told apart without doing the
-  merge check the command itself would do, so both are stopped — a plain
-  `git branch` (listing branches) is untouched. Git commands work the same
-  way in Bash and PowerShell, so this and every other `git ...` shape below
-  is stopped in either shell.
+- `git push --force` / `git push -f`, also `--force-with-lease`, `-f` among
+  other short flags (`-fu`, `-uf`) and a `+branch` (rewrites a shared
+  branch's history)
+- `git push origin --delete <branch>`, its short `-d`, and the `git push
+  origin :<branch>` shorthand (deletes a branch on the shared remote)
+- `git branch -D <branch>`, and `-d` with a force flag (`-df`, `-d --force`),
+  which delete a local branch whether or not its work was merged. A plain
+  `git branch -d <names>` passes: git itself refuses it while a branch's work
+  is unmerged. It passes alone, piped into a filter that only reads (`| tail`,
+  `| grep`), or in a chain whose other parts pass on their own; with anything
+  else after it (`| sh`, `> out.txt`) the line is stopped, and the reason
+  names that part. A plain `git branch` (listing branches) is untouched. Git
+  commands work the same way in Bash and PowerShell, so this and every other
+  `git ...` shape below is stopped in either shell.
 - `git rm -r <path>` (removes tracked files from the project)
-- `git clean -f`/`-fd` (permanently deletes untracked files, no undo)
-- `rm -rf <path>` / `rm -fr <path>` in Bash, and `Remove-Item -Recurse
-  -Force <path>` in PowerShell — including PowerShell's own aliases for
-  `Remove-Item` (`rm`, `del`, `ri`, `rmdir`) and its short `-r` form of
-  `-Recurse` — unless every target is either a well-known, reproducible
-  folder (`node_modules`, `dist`, `build`, `out`, `coverage`, `.cache`,
-  `.next`, `.nuxt`, `.turbo`, `.parcel-cache`, `target`, `__pycache__`,
-  `.pytest_cache`, `.tox`, `venv`, `.venv`, `tmp`, `temp`) or already inside
-  the OS temp directory
-- `npm publish` / `yarn publish` / `pnpm publish`
+- `git clean -f`/`-fd`/`--force` (permanently deletes untracked files, no
+  undo)
+- `rm` with a recursive flag in Bash (`-r`, `-R`, `--recursive`, or a cluster
+  holding one: `-rf`, `-fr`, `-Rf`, `-fR`), force or not, and `Remove-Item
+  -Recurse` in PowerShell, force or not — including PowerShell's own aliases
+  for `Remove-Item` (`rm`, `del`, `erase`, `ri`, `rd`, `rmdir`) and any start
+  of a parameter's name that names it alone (`-r`, `-Rec`, `-fo`; `-f` could
+  be `-Filter` or `-Force`, so PowerShell refuses it). With `-Recurse`,
+  PowerShell deletes a folder and everything in it without asking; it asks
+  "are you sure" only for a folder with children and no `-Recurse`, and
+  `-Force` only adds hidden and read-only files (learn.microsoft.com,
+  Remove-Item, read 2026-10-03). The targets are the command's own words and
+  the values of `-Path`/`-LiteralPath`; another parameter's value
+  (`-ErrorAction SilentlyContinue`) is not one. It passes when every target is
+  either a well-known, reproducible folder (`node_modules`, `dist`, `build`,
+  `out`, `coverage`, `.cache`, `.next`, `.nuxt`, `.turbo`, `.parcel-cache`,
+  `target`, `__pycache__`, `.pytest_cache`, `.tox`, `venv`, `.venv`, `tmp`,
+  `temp`) or already inside a temp folder: the one the OS names (`TMPDIR`,
+  `TEMP`) or `/tmp`, each followed through links the way the disk has it
+  (on macOS `/tmp` is `/private/tmp` and `TMPDIR` is under `/var/folders`; on
+  Windows, Git Bash's `/tmp` is the user's temp folder). A link inside temp
+  that leads out of it counts as where it leads
+- `npm publish` / `yarn publish` / `pnpm publish`, including past their own
+  flags (`pnpm -r publish`, `pnpm --filter x publish`, `npm -w pkg publish`,
+  `npm --workspace pkg publish`) and `yarn npm publish`. A `--dry-run`
+  publishes nothing and passes; `npm run publish` runs a script and is not
+  read
 - `gh release create`
-- `vercel --prod`, `fly deploy`, `wrangler publish`/`deploy`,
+- `vercel --prod`, `fly deploy` / `flyctl deploy`, `wrangler publish` /
+  `deploy` (also `wrangler pages deploy`; not with `--dry-run`),
   `netlify deploy --prod`
 - any `stripe` CLI command other than a read-only one (`login`, `logout`,
   `config`, `version`, `help`, `listen`, `status`, `samples`, `open`), run
@@ -80,23 +146,29 @@ is written here, not chased:
   a file, such as `rg -n stripe . > out.txt`; in a helper or a headless run,
   that ask is a refusal. A PowerShell line that sends a git read's errors to
   `$null` and also searches for merge wording is refused
-- dropping or truncating a database: `drop database`/`drop table`/`drop
-  schema`/`truncate` on a `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo`, or
-  `redis-cli` command line, including inside a `-c`/`-e`/`--eval` string;
-  `dropDatabase()`/`.drop()` in a `mongosh`/`mongo` command; `redis-cli
+- dropping or truncating a database: once a command on the line runs a
+  `psql`, `mysql`, `sqlite3`, `mongosh`, `mongo` or `redis-cli` client,
+  `drop database`/`drop table`/`drop schema`/`truncate` anywhere on the line,
+  since the SQL can reach the client as its `-c`/`-e`/`--eval` string, a pipe
+  (`echo "DROP TABLE x;" | psql`), a heredoc or a here-string;
+  `dropDatabase()`/`.drop()` the same way with a `mongosh`/`mongo` client, and
+  `dropDatabase()` in code run inline (`node -e`); `redis-cli
   flushall`/`flushdb`; `prisma migrate reset`; `prisma db push
   --force-reset`; `rails db:drop`/`db:reset`; `knex migrate:rollback --all`;
-  `dropdb`. Running a `.sql` file against a database (`psql -f x.sql`,
+  `dropdb`. A commit message that names `psql` and `DROP TABLE` runs no client
+  and passes. Running a `.sql` file against a database (`psql -f x.sql`,
   `mysql < x.sql`) is **not** stopped on its own — only when the command
   line itself also says drop or truncate.
 - ending programs by name rather than by one known process id: `taskkill
   /IM` (also `//IM` and `-IM`), `pkill`, `killall`, a `kill -9`/`-KILL`
   whose target is anything but plain process ids (`$(pgrep node)`, a
-  backtick, `-1`), and PowerShell's `Stop-Process -Name`/`-ProcessName` or
-  a `Get-Process | Stop-Process` pipe. `taskkill /PID 123`, `kill -9 12345`
-  and `Stop-Process -Id 5` name one process the caller already knows and
-  are **not** stopped. A name ends every program by that name on the
-  machine, other people's servers and sessions included.
+  backtick, `-1`), and PowerShell's `Stop-Process` given a name
+  (`-Name`/`-ProcessName`) or no id at all (the processes a `Get-Process node
+  |` pipe hands it). `taskkill /PID 123`, `kill -9 12345` and `Stop-Process
+  -Id 5` name one process the caller already knows and are **not** stopped,
+  whatever follows them (`kill -9 12345 && npm start`). A name ends every
+  program by that name on the machine, other people's servers and sessions
+  included.
 
 Throwing away every unsaved edit at once (`git reset --hard`, `git checkout
 -- .`, `git restore .`) is stopped only when the folder holds edits that
@@ -168,8 +240,13 @@ exact command to run instead.
 shell's spellings exactly kept losing to one more spelling. A line counts
 when both of these hold:
 
-- its letters and digits, with everything else taken out, contain `merge` or
-  `enqueuepullrequest` (GitHub's merge queue); and
+- it says merge as a word, or its letters and digits, with everything else
+  taken out, contain `enqueuepullrequest` (GitHub's merge queue). Merge is a
+  word when, with quotes, backticks, backslashes and `$` taken out, a run of
+  letters and digits starts with it, a capital inside a word starting a new
+  run: `merge`, `--merge`, `pulls/36/merge`, `mergePullRequest`,
+  `enablePullRequestAutoMerge`, `mergeable` and `merged` all say it;
+  `emergency` does not, so `gh issue list --label emergency` passes; and
 - it names `gh` as a word (also `gh.exe`, or a path ending in either), or its
   letters contain `pulls` or `graphql`, the REST and GraphQL addresses. A
   word also ends at `=`, `:` and `!`, and a short flag glued on the front is
@@ -181,9 +258,9 @@ Before looking, a backslash at a line end is joined up, quotes, backticks and
 (`{merge,}`, `{pr,merge}`, `{m..m}erge`, `{e..e..1}`). A group bash leaves
 as written (`{x}`, `{...base}`) stays text, and the group around it still
 expands: `g{h,{x}}` is `gh` and `g{x}`. When the braces would make more than
-64 copies, the line counts when one shell word holds the letters of `merge`
-(or `enqueuepullrequest`) in order and one holds `g` then `h` (or `pulls`,
-or `graphql`). Between two of those letters there may be punctuation, or
+64 copies, the line counts when one shell word says merge (or, holding a
+brace, has the letters of `merge` or `enqueuepullrequest` in order) and one
+holds `g` then `h` (or `pulls`, or `graphql`). Between two of those letters there may be punctuation, or
 other letters only across a brace or comma, which a choice can cut through:
 the shell expands braces inside a word, so they can pad a word but not join
 two, and `grantCheck` never becomes `gh`. A word with no brace must spell
@@ -209,10 +286,12 @@ x.sh`) the `bash` makes the line one the reader cannot vouch for, so it is
 read whole and refused.
 
 Two kinds of line are let off, each alone on its line with no word holding a
-quote, brace, `$` or separator:
+quote, brace, `$` or separator. A redirection to nowhere at the end (`2>&1`,
+`>/dev/null`, `2>/dev/null`) writes no file and starts no command, so it does
+not count against them:
 - a plain read of pull requests: `gh pr view`, `checks`, `list`, `status` or
   `diff`, optionally with `-R owner/repo`. So `gh pr view 36 --json
-  mergeable` passes;
+  mergeable` and `gh pr list --state merged 2>&1` pass;
 - a plain `git merge`, whatever the branch is called. So `git merge
   feature/graphql-schema` passes.
 
@@ -268,18 +347,23 @@ reads only the line in front of it.
 
 - **From the main, interactive session:** the command is held and the
   person is asked one plain sentence — no git jargon, no task ids, no role
-  names — with the option to say yes and let it run anyway.
+  names — with the option to say yes and let it run anyway. The reason ends
+  in facts, not orders: "Saying yes runs it. Until someone says yes, nothing
+  has run, and sending the same line again asks the same question."
 - **From a background helper:** Claude Code surfaces a background helper's
   permission prompt in the main session, so in `"default"`, `"acceptEdits"`
   and `"plan"` the helper gets the same plain question the main session
   would. In any other mode, or when the payload names no mode, nobody can
-  say yes, so the guard refuses the command outright, says the question
-  cannot be answered here, and tells the helper to report back what it was
-  about to run instead of retrying. A hook payload carries `agent_id` only
-  when it fires inside a helper's own call; that field is the signal.
+  say yes, so the guard refuses the command outright and says so as facts:
+  the question cannot be answered from inside a helper, sent again from there
+  it is refused again, and the session that started the helper can run it or
+  put the question to the user. A hook payload carries `agent_id` only when
+  it fires inside a helper's own call; that field is the signal.
 - **From a session with nobody able to see an interactive prompt at all:**
-  the guard also refuses outright, naming the mode in plain words in the
-  reason, rather than asking. Three `permission_mode` values put a session in
+  the guard also refuses outright rather than asking, and says in plain words,
+  naming no mode, that nobody will be asked to say yes here, that sent again
+  it is refused again, and that the user can run it themselves in a normal
+  session. Three `permission_mode` values put a session in
   this state: `"bypassPermissions"` (set for
   `--dangerously-skip-permissions`), `"auto"`, and `"dontAsk"` — a session in
   any of these never shows a prompt to anyone, so an "ask" there would either
@@ -338,12 +422,15 @@ from the list above.
 Add an entry to the `RULES` array in `guard-bash.mjs` (or extend `rmRule`
 for another delete-target rule) with:
 
-- `test(cmd)` — a predicate over the whole command string (already
-  whitespace-collapsed and trimmed); and
+- `test(view, line)` — a predicate over one command at a time (see "How a
+  line is read"): `view` is that command's words joined by single spaces,
+  `wordsOf(view)` gives the words back, and `line` is the whole line as sent,
+  for a rule that must read what reaches the command another way (the
+  database rule); and
 - `reason` — one plain sentence a person who has never used git or this CLI
-  can act on: what would happen, ending with "Say yes to continue. If
-  nobody can answer here, stop and tell the user what you were about to run
-  instead of trying again."
+  can act on: what would happen, ending with `ASK_TAIL` ("Saying yes runs it.
+  Until someone says yes, nothing has run, and sending the same line again
+  asks the same question.").
 
 Add a case to `guard-bash.test.mjs` for the new shape, and a case proving
 the command it must *not* catch still passes through silently — a rule that

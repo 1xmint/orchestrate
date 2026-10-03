@@ -10,9 +10,14 @@
 // deployment, or real money — and none of that is stopped by anything else in
 // this plugin. This hook is the one mechanical backstop for that short list.
 // Everything not on the list passes through with no output at all, including
-// the loud, ordinary stuff (`npm test`, `rm -rf node_modules`, a push to a
-// feature branch): a hook that talks on every command trains a person to
-// stop reading it.
+// the loud, ordinary stuff (`npm test`, `rm -rf node_modules && npm install`,
+// a push to a feature branch): a hook that talks on every command trains a
+// person to stop reading it.
+//
+// The rules read a line one command at a time (commandsIn, lib/shell-run.mjs):
+// quoted text, a heredoc body, a redirection and the words of a search or an
+// echo are not commands, and what a line hands to a shell to run (bash -c,
+// $(…), eval, ssh host …) is read as commands of its own.
 //
 // Reads the hook payload on stdin, prints one JSON object or nothing, always
 // exits 0 — a hook that crashes or prints malformed JSON degrades the whole
@@ -22,13 +27,13 @@
 // See docs/safety-guard.md for what is stopped, how a user allows a specific
 // command going forward, and how to add a new pattern.
 
-import { readFileSync, existsSync, spawnSync, createHash } from './lib/node.mjs';
-import { resolve as resolvePath, basename, isAbsolute } from 'node:path';
+import { readFileSync, existsSync, realpathSync, spawnSync, createHash } from './lib/node.mjs';
+import { resolve as resolvePath, basename, dirname, join, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId, loadSession } from './lib/tier.mjs';
+import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId, sessionPath } from './lib/files.mjs';
 import { mentionsMerge, mergeRefusal, ghView, REVIEW_PATHS } from './lib/merge-bar.mjs';
-import { paymentLine, withoutFileText } from './lib/shell-run.mjs';
+import { paymentLine, withoutFileText, commandsIn, isDataCommand, PS_HERE_STRING_RE } from './lib/shell-run.mjs';
 
 export { REVIEW_PATHS };
 
@@ -46,93 +51,158 @@ function normSlashes(p) {
   return String(p).replace(/\\/g, '/');
 }
 
+// The path as the disk has it: links followed for the part that exists, the
+// rest kept as written. On macOS /tmp is a link to /private/tmp and the OS
+// temp folder is under /var/folders, so comparing paths as written missed both.
+function onDisk(p) {
+  let head = p, tail = '';
+  for (let k = 0; k < 64; k++) {
+    try { const real = realpathSync(head); return tail ? join(real, tail) : real; } catch {}
+    const up = dirname(head);
+    if (up === head) break;
+    tail = tail ? join(basename(head), tail) : basename(head);
+    head = up;
+  }
+  return p;
+}
+
+// The temp folders: the one the OS names (TMPDIR, TEMP) and, outside Windows,
+// /tmp, each as the disk has it.
+function tempRoots() {
+  const roots = [tmpdir(), ...(process.platform === 'win32' ? [] : ['/tmp'])];
+  return [...new Set(roots.map(r => normSlashes(onDisk(resolvePath(r))).toLowerCase()))];
+}
+
 // Whether deleting `target` (as typed on the command line, resolved against
 // `cwd`) is the ordinary, reproducible kind of delete rather than the kind
 // that loses real work: a well-known build/dependency folder by name, or
-// anything already inside the OS temp directory.
+// anything already inside a temp folder. Git Bash's /tmp is the user's temp
+// folder on Windows.
 export function isSafeDeleteTarget(target, cwd) {
   const t = String(target || '').trim();
   if (!t || t === '/' || t === '~') return false;
   const base = basename(t.replace(/[\\/]+$/, ''));
   if (SAFE_DELETE_NAMES.has(base)) return true;
+  const typed = process.platform === 'win32' && /^\/tmp(\/|$)/.test(t) ? join(tmpdir(), t.slice(4)) : t;
   let resolved;
-  try { resolved = resolvePath(cwd || process.cwd(), t); } catch { return false; }
-  const tmp = resolvePath(tmpdir());
-  const r = normSlashes(resolved).toLowerCase();
-  const tmpNorm = normSlashes(tmp).toLowerCase();
-  return r === tmpNorm || r.startsWith(`${tmpNorm}/`);
+  try { resolved = resolvePath(cwd || process.cwd(), typed); } catch { return false; }
+  const r = normSlashes(onDisk(resolved)).toLowerCase();
+  return tempRoots().some(tmp => r === tmp || r.startsWith(`${tmp}/`));
 }
 
-// The bare arguments to `rm`/`git rm` — flags (anything starting with `-`)
-// stripped out. Good enough for the shapes this guard needs to reason about;
-// it is not a shell parser and does not try to be.
-function targets(afterCommand) {
-  return afterCommand.split(/\s+/).filter(a => a && !a.startsWith('-'));
+// One command as the rules read it: its words joined by single spaces, the
+// spaces inside one word (quoted text) kept as \u0001 so it stays one word,
+// and git's options before its command word taken out. wordsOf turns a view
+// back into its words.
+const KEEP = '\u0001';
+const rawViewOf = words => words.map(w => (w.value === '' ? "''" : w.value.replace(/\s/g, KEEP))).join(' ');
+const viewOf = words => plainGit(rawViewOf(words));
+let lastView = null, lastWords = [];
+function wordsOf(view) {
+  if (view !== lastView) { lastView = view; lastWords = String(view).split(' ').filter(Boolean).map(t => t.split(KEEP).join(' ')); }
+  return lastWords;
 }
+// The program a word names (/usr/bin/git, git.exe, "C:\Program Files\…\psql.exe"
+// all count), or '' for quoted text such as a commit message: a word with a
+// space in it names a program only when it starts like a path.
+function cmdName(word) {
+  const w = String(word || '');
+  if (/\s/.test(w) && !/^(?:[A-Za-z]:[\\/]|[\\/~.])/.test(w)) return '';
+  return w.replace(/^.*[\\/]/, '').replace(/\.(exe|cmd|bat)$/i, '').toLowerCase();
+}
+// The words after each `git <sub>` in one command.
+function gitArgs(t, sub) {
+  const out = [];
+  t.forEach((x, i) => { if (cmdName(x) === 'git' && t[i + 1] === sub) out.push(t.slice(i + 2)); });
+  return out;
+}
+// A cluster of short flags (-f, -fu, -Rf) holding one of these letters.
+const shortFlag = (a, letters) => /^-[A-Za-z0-9]+$/.test(a) && [...letters].some(l => a.includes(l));
+// Where, after the tool at `i`, the word naming what it does is one of `names`:
+// flags and the value right after a flag are passed over (npm -w pkg publish,
+// pnpm --filter x publish, pnpm -r publish), and so are the words in `through`
+// (yarn npm publish, wrangler pages deploy). -1 when another word comes first
+// (npm run publish runs a script).
+function leadsTo(t, i, names, through = []) {
+  for (let j = i + 1; j < t.length; j++) {
+    if (names.includes(t[j])) return j;
+    if (through.includes(t[j])) continue;
+    if (!t[j].startsWith('-')) return -1;
+    const next = t[j + 1];
+    if (!t[j].includes('=') && next !== undefined && !next.startsWith('-') && !names.includes(next) && !through.includes(next)) j++;
+  }
+  return -1;
+}
+const isDryRun = t => t.some(a => /^--dry-run(=true)?$/.test(a));
+const isProd = a => /^--prod(?![A-Za-z])/.test(a);
 
-// One entry per stopped shape. `reason` is the plain sentence a person who
-// has never used git or a CLI can act on: what would happen, and how to let
-// it through. `test` sees the whole command string, already collapsed to
-// single spaces. Order matters only in that the first match wins; the list
-// is short enough that overlaps do not matter in practice.
-// The tail every "ask" reason ends with. A headless run (no one who can type
-// "yes") gets this stripped off in `decide()` below and replaced with the
-// two real ways forward; a repeat of the same command in the same session
-// gets this kept but the whole reason prefixed "Asked already: " instead of
-// asked fresh, so a model that cannot get an answer stops and reports back
-// rather than sending the same command again.
-const ASK_TAIL = 'Say yes to continue. If nobody can answer here, stop and tell the user what you were about to run instead of trying again.';
-const ASK_TAIL_RE = / Say yes to continue\. If nobody can answer here, stop and tell the user what you were about to run instead of trying again\.$/;
+// The tail every "ask" reason ends with: what the question decides, and that
+// sending the same line again brings back the same question. A run where
+// nobody can say yes gets this stripped off in `decide()` below and replaced
+// with what does work; a repeat of the same command in the same session keeps
+// it, with the whole reason prefixed "Asked already: ".
+const ASK_TAIL = 'Saying yes runs it. Until someone says yes, nothing has run, and sending the same line again asks the same question.';
+const ASK_TAIL_RE = / Saying yes runs it\. Until someone says yes, nothing has run, and sending the same line again asks the same question\.$/;
 
 // Command-line database clients this guard watches for a destructive drop or
-// truncate. Matched by name only (word-boundaried), so `mongodb` in an
-// unrelated path does not trip `mongo`.
-const DB_TOOL_RE = /\b(psql|mysql|sqlite3|mongosh|mongo|redis-cli)\b/i;
-// `drop database|table|schema` or `truncate`, wherever they sit on the
-// command line — including inside a `-c`/`-e`/`--eval` string, since this
-// tests the whole command text, not just flags. Requires whitespace between
+// truncate, matched by program name.
+const DB_TOOLS = new Set(['psql', 'mysql', 'sqlite3', 'mongosh', 'mongo', 'redis-cli']);
+// Programs that run inline code (node -e, python -c) or code fed to them.
+const CODE_RUNNERS = new Set(['node', 'nodejs', 'deno', 'bun', 'python', 'python3', 'py', 'ruby', 'php', 'perl']);
+// `drop database|table|schema` or `truncate`. Requires whitespace between
 // `drop` and its object, so a file name like `drop_table.sql` never matches.
 const DROP_TRUNCATE_RE = /\b(drop\s+(database|table|schema)|truncate)\b/i;
 
-// Whether the command line destroys data in a database: one of the watched
-// CLI tools paired with drop/truncate anywhere on the line, or one of the
-// specific destructive shapes (a JS call inside a mongosh/mongo --eval, a
-// redis-cli flush, or a named ORM/migration command) that do not use the
-// word "drop" or "truncate" themselves. Not a shell parser — it reads the
-// whole command string, which is why `cat migrations/drop_table.sql` and
-// `grep -r "drop table" src` (no database CLI tool present) stay silent.
-function isDataStoreDestroy(cmd) {
-  if (DB_TOOL_RE.test(cmd) && DROP_TRUNCATE_RE.test(cmd)) return true;
-  if (/\bdropDatabase\s*\(\s*\)/.test(cmd)) return true;
-  if (DB_TOOL_RE.test(cmd) && /\.drop\s*\(\s*\)/.test(cmd)) return true;
-  if (/\bredis-cli\b/i.test(cmd) && /\b(flushall|flushdb)\b/i.test(cmd)) return true;
-  if (/\bprisma\s+migrate\s+reset\b/i.test(cmd)) return true;
-  if (/\bprisma\s+db\s+push\b/i.test(cmd) && /--force-reset\b/i.test(cmd)) return true;
-  if (/\brails\s+db:(drop|reset)\b/i.test(cmd)) return true;
-  if (/\bknex\s+migrate:rollback\b/i.test(cmd) && /--all\b/i.test(cmd)) return true;
-  if (/\bdropdb\b/i.test(cmd)) return true;
-  return false;
+// Whether a command destroys data in a database. Once the command runs a
+// database client, the drop or truncate is looked for in the whole line, since
+// the SQL can reach the client as its -c/-e/--eval string, a pipe, a heredoc
+// or a here-string; a mongo dropDatabase() the same way once the command runs
+// a client or inline code. The other shapes are commands of their own: a
+// redis-cli flush, prisma migrate reset, prisma db push --force-reset, rails
+// db:drop/db:reset, knex migrate:rollback --all, dropdb. So a commit message
+// that mentions psql and DROP TABLE is not one, and neither is
+// `cat migrations/drop_table.sql`.
+function isDataStoreDestroy(view, line) {
+  const t = wordsOf(view);
+  const names = t.map(cmdName);
+  const client = names.some(n => DB_TOOLS.has(n));
+  if (client && (DROP_TRUNCATE_RE.test(line) || /\.drop\s*\(\s*\)/.test(line))) return true;
+  if ((client || names.some(n => CODE_RUNNERS.has(n))) && /\bdropDatabase\s*\(\s*\)/.test(line)) return true;
+  if (names.includes('redis-cli') && t.some(a => /^(flushall|flushdb)$/i.test(a))) return true;
+  if (names.includes('dropdb')) return true;
+  return names.some((n, i) => (n === 'prisma' && t[i + 1] === 'migrate' && t[i + 2] === 'reset')
+    || (n === 'prisma' && t[i + 1] === 'db' && t[i + 2] === 'push' && t.includes('--force-reset'))
+    || (n === 'rails' && /^db:(drop|reset)\b/.test(t[i + 1] || ''))
+    || (n === 'knex' && t[i + 1] === 'migrate:rollback' && t.includes('--all')));
 }
 
-// Whether the command line ends processes by name rather than by one known
-// id: `taskkill /IM node.exe` (also `//IM` from a POSIX shell on Windows and
-// `-IM`), `pkill`, `killall`, a `kill -9`/`-KILL` whose target is anything
-// but plain process ids (a `$(pgrep …)`, a backtick, `-1` for everything), and
-// PowerShell's `Stop-Process -Name` or a `Get-Process | Stop-Process` pipe.
-// `taskkill /PID 123`, `kill -9 12345` and `Stop-Process -Id 5` name one
-// process the caller already knows and pass. A helper stopping the test
-// server it started has a pid for it; a name kills every program by that
-// name on the machine, other people's servers and sessions included.
-function isProcessKill(cmd) {
-  if (/\btaskkill\b/i.test(cmd) && /(^|\s)(\/\/?|-)im\b/i.test(cmd)) return true;
-  if (/\b(pkill|killall)\b/.test(cmd)) return true;
-  const k = /\bkill\s+(?:-9|-KILL|-SIGKILL|-s\s+(?:SIG)?KILL)\b\s*(.*)$/i.exec(cmd);
-  if (k) {
-    const targets = k[1].trim().split(/\s+/).filter(Boolean);
-    if (targets.length && !targets.every(t => /^\d+$/.test(t))) return true;
+// Whether a command ends processes by name rather than by one known id:
+// `taskkill /IM node.exe` (also `//IM` from a POSIX shell on Windows and
+// `-IM`), `pkill`, `killall`, a `kill -9`/`-KILL` whose target is anything but
+// plain process ids (a `$(pgrep …)`, a backtick, `-1` for everything), and
+// PowerShell's `Stop-Process` given a name or no id at all (`-Name node`, or
+// the processes a `Get-Process node |` pipe hands it). `taskkill /PID 123`,
+// `kill -9 12345` and `Stop-Process -Id 5` name one process the caller already
+// knows and pass. A helper stopping the test server it started has a pid for
+// it; a name kills every program by that name on the machine, other people's
+// servers and sessions included.
+function isProcessKill(view) {
+  const t = wordsOf(view);
+  const names = t.map(cmdName);
+  if (names.includes('taskkill') && t.some(a => /^(\/\/?|-)im$/i.test(a))) return true;
+  if (names.includes('pkill') || names.includes('killall')) return true;
+  for (let i = 0; i < t.length; i++) {
+    if (names[i] === 'kill') {
+      const sig = /^-(9|KILL|SIGKILL)$/i.test(t[i + 1] || '') ? 1 : /^-s$/i.test(t[i + 1] || '') && /^(SIG)?KILL$/i.test(t[i + 2] || '') ? 2 : 0;
+      const ids = t.slice(i + 1 + sig);
+      if (sig && ids.length && !ids.every(x => /^\d+$/.test(x))) return true;
+    }
+    if (names[i] === 'stop-process' || names[i] === 'spps') {
+      const rest = t.slice(i + 1);
+      if (rest.some(a => /^-(n|na|nam|name|processname)$/i.test(a))) return true;
+      if (!rest.some(a => /^-id$/i.test(a) || /^\d+(,\d+)*$/.test(a))) return true;
+    }
   }
-  if (/\bStop-Process\b/i.test(cmd) && /\s-(Process)?Name\b/i.test(cmd)) return true;
-  if (/\bGet-Process\b/i.test(cmd) && /\|\s*Stop-Process\b/i.test(cmd)) return true;
   return false;
 }
 
@@ -318,7 +388,6 @@ function readWorktreeRemove(words) {
 // unescaped '), a backtick before a quote (PowerShell's escape) and curly
 // quotes (PowerShell's quotes, plain letters to bash).
 const MIXED_QUOTE_RE = /\$'|`["']|[‘-‟]/;
-const PS_HERE_STRING_RE = /@(["'])[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*\1@/g;
 // Every word bash or PowerShell uses to move the shell to another folder.
 const CD_WORD_RE = /^(?:cd|chdir|pushd|popd|sl|set-location|push-location|pop-location)$/i;
 // A cd is not followed to one place: a cd inside ( ), after ;, or into a
@@ -408,16 +477,16 @@ function hasUnsavedEdits(folder) {
     return r.status === 0 && String(r.stdout || '').trim() !== '';
   } catch { return false; }
 }
-function discardAllRule(cmd, cwd) {
-  for (const seg of cmd.split(/&&|;|\|\|/)) {
-    const t = plainGit(seg).trim().split(/\s+/);
-    if (t[0] !== 'git') continue;
-    const rest = t.slice(2).map(unquote);
-    const whole = (t[1] === 'reset' && rest.includes('--hard'))
-      || ((t[1] === 'checkout' || t[1] === 'restore') && rest.some(a => a === '.' || a === ':/') && !rest.includes('--staged'));
+function discardAllRule(text, cwd, cmds = commandsIn(text)) {
+  for (const words of cmds) {
+    if (isDataCommand(words)) continue;
+    const raw = rawViewOf(words);
+    const t = wordsOf(plainGit(raw));
+    const whole = gitArgs(t, 'reset').some(rest => rest.includes('--hard'))
+      || ['checkout', 'restore'].some(sub => gitArgs(t, sub).some(rest => rest.some(a => a === '.' || a === ':/') && !rest.includes('--staged')));
     if (!whole) continue;
     let folder;
-    try { folder = resolvePath(cwd || process.cwd(), ...gitFolders(seg)); } catch { continue; }
+    try { folder = resolvePath(cwd || process.cwd(), ...gitFolders(raw).map(f => f.split(KEEP).join(' '))); } catch { continue; }
     if (hasUnsavedEdits(folder)) {
       return { name: 'discard-unsaved', reason: `This would throw away every change in this folder that was never saved to git, with no way to get it back. ${ASK_TAIL}` };
     }
@@ -491,7 +560,7 @@ function syntaxAfterPlainDelete(seg) {
 }
 // Whether a part passes on its own (no rule of this guard stops it).
 function segmentPasses(seg) {
-  return !(RULES.find(r => r.test(seg)) || rmRule(seg) || psRemoveRule(seg));
+  return !commandHit(seg);
 }
 function chainRestIsSafe(raw, flags) {
   const cmd = withoutStderrJoin(raw);
@@ -519,111 +588,202 @@ const isSafeBranchDeleteInChain = cmd => chainRestIsSafe(cmd, ['-d', '--delete']
 // A chain that is safe apart from a forced (-D) branch delete.
 const isChainSafeExceptForcedDelete = cmd => chainRestIsSafe(cmd, ['-D', '--force-delete']);
 
+// The small branch delete passes or not by what else the line holds, so once a
+// command deletes a branch the whole line is read. One shape passes: the whole
+// line is `git branch -d` (or --delete) of any names, which git itself refuses
+// while a branch is unmerged. A second: that delete in a chain whose every
+// other part passes alone, such as removing the worktree folder it belonged to
+// (isSafeWorktreeCleanupChain, isSafeBranchDeleteInChain above). -D, and a -d
+// with anything the chain reading cannot vouch for, still ask.
+function branchDeleteRefused(raw) {
+  const cmd = withoutStderrJoin(raw);
+  return !isPlainBranchDelete(cmd.trim(), ['-d', '--delete'])
+    && !isSafeWorktreeCleanupChain(cmd)
+    && !isSafeBranchDeleteInChain(cmd);
+}
+
+// One entry per stopped shape. `reason` is the plain sentence a person who
+// has never used git or a CLI can act on: what would happen, and what the
+// question decides. `test(view, line)` reads one command (viewOf above) and,
+// where a rule needs it, the whole line as sent. Commands are read in line
+// order and, within one, the first rule that matches wins.
 const RULES = [
   {
     name: 'branch-delete-remote',
-    test: cmd => /\bgit\s+push\b/.test(cmd) && (/--delete\b/.test(cmd) || /(^|\s):[^\s:][^\s]*/.test(cmd)),
+    // --delete, its short -d, or the :branch shorthand.
+    test: v => gitArgs(wordsOf(v), 'push').some(rest => rest.some(a => a === '--delete' || shortFlag(a, 'd') || /^:[^:]/.test(a))),
     reason: `This would permanently delete a branch on the shared remote, which anyone else using it would lose. ${ASK_TAIL}`,
   },
   {
     name: 'push-force',
-    test: cmd => /\bgit\s+push\b/.test(cmd) && /(--force(-with-lease)?\b|(^|\s)-f\b)/.test(cmd),
+    // --force, --force-with-lease, -f in any cluster (-fu), or a +branch.
+    test: v => gitArgs(wordsOf(v), 'push').some(rest => rest.some(a => a.startsWith('--force') || shortFlag(a, 'f') || /^\+./.test(a))),
     reason: `This would overwrite the history of a shared branch, which can erase other people’s work. ${ASK_TAIL}`,
   },
   {
     name: 'branch-delete-local',
-    // One shape passes: the whole command is `git branch -d` (or --delete) of
-    // helper worktree branches only, the ones Claude Code itself names
-    // worktree-agent-<hex>. Git refuses -d while a branch is unmerged, so that
-    // cleanup cannot lose work. -D, and -d of any other name, still ask.
-    // A second shape also passes: that same delete chained after removing the
-    // worktree folder it belonged to — see isSafeWorktreeCleanupChain above.
-    test: raw => {
-      const cmd = withoutStderrJoin(raw);
-      return (/\bgit\s+branch\b.*\s(-D|-d|--delete|--force-delete)(\s|$)/.test(cmd) || /\bgit\s+branch\s+(-D|-d|--delete|--force-delete)\b/.test(cmd) || CLUSTERED_DELETE_RE.test(cmd))
-        && !isPlainBranchDelete(cmd.trim(), ['-d', '--delete'])
-        && !isSafeWorktreeCleanupChain(cmd)
-        && !isSafeBranchDeleteInChain(cmd);
-    },
+    // A command that deletes a branch; whether the line is refused is
+    // branchDeleteRefused, read on the whole line.
+    test: v => gitArgs(wordsOf(v), 'branch').some(rest => rest.some(a => ['-D', '-d', '--delete', '--force-delete'].includes(a) || /^-[a-zA-Z]*[dD][a-zA-Z]*$/.test(a))),
     reason: `This would permanently delete a branch. ${ASK_TAIL}`,
   },
   {
     name: 'git-rm-recursive',
-    test: cmd => /\bgit\s+rm\b/.test(cmd) && /\s-\w*r\w*\b/.test(cmd),
+    test: v => gitArgs(wordsOf(v), 'rm').some(rest => rest.some(a => /^-[a-zA-Z]*r[a-zA-Z]*$/.test(a))),
     reason: `This would remove tracked files and folders from the project. ${ASK_TAIL}`,
   },
   {
     name: 'git-clean',
-    test: cmd => /\bgit\s+clean\b/.test(cmd) && /\s-\w*f\w*\b/.test(cmd),
+    test: v => gitArgs(wordsOf(v), 'clean').some(rest => rest.some(a => a === '--force' || /^-[a-zA-Z]*f[a-zA-Z]*$/.test(a))),
     reason: `This would permanently delete files that are not tracked by git, with no way to undo it. ${ASK_TAIL}`,
   },
   {
     name: 'npm-publish',
-    test: cmd => /\bnpm\s+publish\b/.test(cmd) || /\byarn\s+publish\b/.test(cmd) || /\bpnpm\s+publish\b/.test(cmd),
+    // npm, pnpm or yarn whose subcommand is publish, past any flags (pnpm -r,
+    // npm -w pkg, pnpm --filter x) and yarn's npm. --dry-run publishes nothing.
+    test: v => {
+      const t = wordsOf(v);
+      return !isDryRun(t) && t.some((x, i) => ['npm', 'pnpm', 'yarn'].includes(cmdName(x)) && leadsTo(t, i, ['publish'], cmdName(x) === 'yarn' ? ['npm'] : []) > i);
+    },
     reason: `This would publish a new version of this package for anyone to install. ${ASK_TAIL}`,
   },
   {
     name: 'gh-release',
-    test: cmd => /\bgh\s+release\s+create\b/.test(cmd),
+    test: v => { const t = wordsOf(v); return t.some((x, i) => cmdName(x) === 'gh' && t[i + 1] === 'release' && t[i + 2] === 'create'); },
     reason: `This would publish a new release of this project. ${ASK_TAIL}`,
   },
   {
     name: 'deploy',
-    test: cmd => (/\bvercel\b/.test(cmd) && /--prod\b/.test(cmd)) || /\bfly\s+deploy\b/.test(cmd) || /\bwrangler\s+(publish|deploy)\b/.test(cmd) || /\bnetlify\s+deploy\b.*--prod\b/.test(cmd),
+    // vercel --prod, fly or flyctl deploy, wrangler publish/deploy (also
+    // under pages or versions; not --dry-run), netlify deploy --prod.
+    test: v => {
+      const t = wordsOf(v);
+      return t.some((x, i) => {
+        const n = cmdName(x);
+        if (n === 'vercel' || n === 'vc') return t.slice(i + 1).some(isProd);
+        if (n === 'fly' || n === 'flyctl') return leadsTo(t, i, ['deploy']) > i;
+        if (n === 'wrangler') return !isDryRun(t) && leadsTo(t, i, ['deploy', 'publish'], ['pages', 'versions']) > i;
+        if (n === 'netlify') return leadsTo(t, i, ['deploy']) > i && t.slice(i + 1).some(isProd);
+        return false;
+      });
+    },
     reason: `This would deploy this project to its live, public address. ${ASK_TAIL}`,
   },
   {
     // Only a line that RUNS a payment action: a payment CLI as a command word,
     // a web call to a payment API host, or run code loading a payment SDK.
     // The brand word in a grep pattern, a regex or file text is not one
-    // (lib/shell-run.mjs; live notes I and Q).
+    // (lib/shell-run.mjs; live notes I and Q). Read on the whole line, in
+    // decideOne, not command by command.
     name: 'payment',
-    test: cmd => paymentLine(cmd),
+    test: (v, line) => paymentLine(line),
     reason: `This would create or change something in a real payment account, which can charge or move money. ${ASK_TAIL}`,
   },
   {
     name: 'data-store-destroy',
-    test: cmd => isDataStoreDestroy(cmd),
+    test: (v, line) => isDataStoreDestroy(v, line),
     reason: `This would permanently delete data in a database, which cannot be undone. ${ASK_TAIL}`,
   },
   {
     name: 'process-kill',
-    test: cmd => isProcessKill(cmd),
+    test: v => isProcessKill(v),
     reason: `This would end every running program with that name on this machine, not only the one you started, including other people’s servers and sessions. ${ASK_TAIL}`,
   },
 ];
 
-// `rm -rf`/`rm -fr`/etc: not a fixed pattern above, because whether it is
-// safe depends on *what* it deletes, not just the flags. Checked after the
-// fixed rules so a `git rm -r` (already covered) is not double-counted.
-function rmRule(cmd, cwd) {
-  const m = /\brm\s+(-\w*r\w*f\w*|-\w*f\w*r\w*)\s+(.+)$/.exec(cmd) || /\brm\s+(-\w*r\w*)\s+(.+)$/.exec(cmd);
-  if (!m) return null;
-  const list = targets(m[2]);
-  if (!list.length) return null;
-  const unsafe = list.some(t => !isSafeDeleteTarget(t, cwd));
-  if (!unsafe) return null;
-  return { name: 'rm-recursive', reason: `This would permanently delete files or folders that cannot be recovered. ${ASK_TAIL}` };
+// The first rule a line's commands meet (commandsIn, lib/shell-run.mjs). A
+// search, an echo or a name lookup runs nothing and is passed over. `chain` is
+// the whole line, for the small branch delete; without it (one part of a chain
+// read on its own) the caller reads branch deletes itself.
+function commandHit(text, cwd, chain, cmds = commandsIn(text)) {
+  const line = String(text || '');
+  for (const words of cmds) {
+    if (isDataCommand(words)) continue;
+    const v = viewOf(words);
+    for (const r of RULES) {
+      if (r.name === 'payment' || !r.test(v, line)) continue;
+      if (r.name !== 'branch-delete-local') return r;
+      if (chain !== undefined && branchDeleteRefused(chain)) return r;
+    }
+    const hit = rmRule(v, cwd) || psRemoveRule(v, cwd);
+    if (hit) return hit;
+  }
+  return null;
 }
 
-// The PowerShell equivalent of `rm -rf`: `Remove-Item` (or one of its
-// aliases `rm`, `del`, `ri`, `rmdir`) with both a recurse flag
-// (`-Recurse` or `-r`) and `-Force` present, in either order — that
-// combination is what makes the delete both cross directories and skip the
-// "are you sure" prompt PowerShell otherwise shows. Same
-// safe-target/OS-temp-dir exception as the Bash rule.
-function psRemoveRule(cmd, cwd) {
-  const m = /\b(Remove-Item|rm|del|ri|rmdir)\b(.*)$/i.exec(cmd);
+// Bash's rm with a recursive flag (-r, -R, --recursive, or a cluster holding
+// one: -rf, -Rf, -fR), force or not: not a fixed pattern above, because
+// whether it is safe depends on *what* it deletes. Checked after the fixed
+// rules so a `git rm -r` (already covered) is not double-counted. A flag that
+// is not rm's and names a Remove-Item parameter (-Recurse, -Force, -fo,
+// -ErrorAction) is PowerShell's Remove-Item under its rm alias, which
+// psRemoveRule reads.
+function rmRule(view, cwd) {
+  const t = wordsOf(view);
+  for (let i = 0; i < t.length; i++) {
+    if (cmdName(t[i]) !== 'rm') continue;
+    let recursive = false, powershell = false, ended = false;
+    const list = [];
+    for (const a of t.slice(i + 1)) {
+      if (ended || !a.startsWith('-') || a === '-') list.push(a);
+      else if (a === '--') ended = true;
+      else if (a.startsWith('--')) recursive ||= a === '--recursive';
+      else if (/^-[fiIrRdv]+$/.test(a)) recursive ||= /[rR]/.test(a);
+      else if (psParam(a) && psParam(a).name !== '?') powershell = true;
+      else recursive ||= /[rR]/.test(a);
+    }
+    if (powershell || !recursive) continue;
+    if (list.some(x => !isSafeDeleteTarget(x, cwd))) return { name: 'rm-recursive', reason: `This would permanently delete files or folders that cannot be recovered. ${ASK_TAIL}` };
+  }
+  return null;
+}
+
+// The PowerShell equivalent of `rm -rf`: `Remove-Item` (or one of its aliases
+// `rm`, `del`, `erase`, `ri`, `rd`, `rmdir`) with -Recurse, force or not. With
+// -Recurse PowerShell deletes a folder and everything in it without asking;
+// it asks "are you sure" only for a folder with children and no -Recurse, and
+// -Force only adds hidden and read-only files (learn.microsoft.com, Remove-Item,
+// read 2026-10-03). PowerShell takes any start of a parameter's name that
+// names it alone: -r and -Rec are -Recurse, -fo is -Force; -f could be -Filter
+// or -Force, so PowerShell refuses it. The targets are the bare words and the
+// values of -Path and -LiteralPath (a, b lists split at the commas); another
+// parameter's value (-ErrorAction SilentlyContinue) is not one. Same
+// safe-target/temp-folder exception as the Bash rule.
+const PS_REMOVE = new Set(['remove-item', 'rm', 'del', 'erase', 'ri', 'rd', 'rmdir']);
+const PS_PARAMS = ['recurse', 'force', 'whatif', 'confirm', 'verbose', 'debug', 'path', 'literalpath', 'pspath', 'lp',
+  'filter', 'include', 'exclude', 'credential', 'stream', 'erroraction', 'warningaction', 'informationaction',
+  'progressaction', 'errorvariable', 'warningvariable', 'informationvariable', 'outvariable', 'outbuffer', 'pipelinevariable'];
+const PS_SHORT = { ea: 'erroraction', wa: 'warningaction', infa: 'informationaction', proga: 'progressaction', ev: 'errorvariable', wv: 'warningvariable', iv: 'informationvariable', ov: 'outvariable', ob: 'outbuffer', pv: 'pipelinevariable', wi: 'whatif', cf: 'confirm', vb: 'verbose', db: 'debug' };
+const PS_SWITCHES = new Set(['recurse', 'force', 'whatif', 'confirm', 'verbose', 'debug']);
+const PS_PATH = new Set(['path', 'literalpath', 'pspath', 'lp']);
+// The parameter a word names, '?' when it names none or several, null when it
+// is not a parameter; and its value when written -Name:value.
+function psParam(a) {
+  const m = /^-([A-Za-z]+)(?::(.*))?$/.exec(a);
   if (!m) return null;
-  const rest = m[2];
-  const hasRecurse = /(^|\s)-r(ecurse)?\b/i.test(rest);
-  const hasForce = /(^|\s)-f(orce)?\b/i.test(rest);
-  if (!hasRecurse || !hasForce) return null;
-  const list = targets(rest);
-  if (!list.length) return null;
-  const unsafe = list.some(t => !isSafeDeleteTarget(t, cwd));
-  if (!unsafe) return null;
-  return { name: 'ps-remove-recursive', reason: `This would permanently delete files or folders that cannot be recovered. ${ASK_TAIL}` };
+  const n = m[1].toLowerCase();
+  const hits = PS_PARAMS.filter(p => p.startsWith(n));
+  const name = PS_SHORT[n] || (hits.includes(n) ? n : hits.length === 1 ? hits[0] : '?');
+  return { name, value: m[2] };
+}
+function psRemoveRule(view, cwd) {
+  const t = wordsOf(view);
+  for (let i = 0; i < t.length; i++) {
+    if (!PS_REMOVE.has(cmdName(t[i]))) continue;
+    let recursive = false;
+    const list = [];
+    for (let j = i + 1; j < t.length; j++) {
+      const p = psParam(t[j]);
+      if (!p) list.push(t[j]);
+      else if (p.name === 'recurse') recursive = !/^\$?false$/i.test(p.value ?? '');
+      else if (PS_PATH.has(p.name)) list.push(p.value ?? t[++j] ?? '');
+      else if (p.value === undefined && p.name !== '?' && !PS_SWITCHES.has(p.name)) j++;
+    }
+    const targets = list.flatMap(x => x.split(',')).map(x => x.trim()).filter(Boolean);
+    if (!recursive || !targets.length) continue;
+    if (targets.some(x => !isSafeDeleteTarget(x, cwd))) return { name: 'ps-remove-recursive', reason: `This would permanently delete files or folders that cannot be recovered. ${ASK_TAIL}` };
+  }
+  return null;
 }
 
 // Per-session memory of which exact commands have already gotten an "ask"
@@ -682,7 +842,9 @@ function decideOne(command, ctx = {}) {
       why = mergeRefusal(String(command), {
         cwd: ctx.cwd || process.cwd(),
         ghView: ctx.ghView || ghView,
-        session: () => { try { return ctx.session || (ctx.sessionId && loadSession(ctx.sessionId)) || {}; } catch { return {}; } },
+        // This session's saved state, read only (lib/tier.mjs loadSession
+        // also notes what it read, for a save this hook never makes).
+        session: () => { try { return ctx.session || (ctx.sessionId && readJson(sessionPath(ctx.sessionId))) || {}; } catch { return {}; } },
       });
     } catch (e) {
       why = `This line merges a pull request, and checking it failed (${String((e && e.message) || e).slice(0, 120)}), so it is refused. Nothing was run.`;
@@ -691,7 +853,8 @@ function decideOne(command, ctx = {}) {
   }
   const cmd = plainGit(asSent);
 
-  let hit = worktreeRemoveRule(String(command), ctx.cwd) || discardAllRule(asSent, ctx.cwd) || RULES.find(r => r.name !== 'payment' && r.test(cmd)) || (paymentLine(String(command)) && RULES.find(r => r.name === 'payment')) || rmRule(cmd, ctx.cwd) || psRemoveRule(cmd, ctx.cwd);
+  const cmds = commandsIn(String(command));
+  let hit = worktreeRemoveRule(String(command), ctx.cwd) || discardAllRule(String(command), ctx.cwd, cmds) || commandHit(String(command), ctx.cwd, cmd, cmds) || (paymentLine(String(command)) && RULES.find(r => r.name === 'payment'));
   if (!hit) return { kind: 'pass' };
 
   // Every branch delete in the line is the lowercase kind, so another part is
@@ -700,7 +863,7 @@ function decideOne(command, ctx = {}) {
     const segs = segmentsOf(withoutStderrJoin(cmd));
     if (segs.filter(isBranchDeleteSeg).every(s => isPlainBranchDelete(s, ['-d', '--delete']))) {
       const other = segs.filter(s => !isBranchDeleteSeg(s))
-        .map(s => RULES.find(r => r.name !== 'branch-delete-local' && r.test(s)) || rmRule(s, ctx.cwd) || psRemoveRule(s, ctx.cwd))
+        .map(s => commandHit(s, ctx.cwd))
         .find(Boolean);
       if (other) hit = other;
     }
@@ -746,9 +909,9 @@ function decideOne(command, ctx = {}) {
       return { kind: 'deny', reason: `${why} This is refused here because nobody will be asked to say yes to it here. Save what is needed first: commit the changes inside that folder, or copy the files into the main folder and commit them there. Then remove the folder without force. Or leave the folder where it is and tell the user it is there.` };
     }
     if (ctx.subagent) {
-      return { kind: 'deny', reason: `${why} The question cannot be answered here, so this is refused: report back what you were about to run instead of retrying.` };
+      return { kind: 'deny', reason: `${why} The question cannot be answered from inside a helper, so this is refused here, and sent again from here it is refused again. The session that started this helper can run it, or put the question to the user. Nothing was run.` };
     }
-    return { kind: 'deny', reason: `${why} This is refused here because nobody will be asked to say yes to it here. Nothing was run. Leave it and tell the user what you were about to run, or ask them to run it themselves in a normal session.` };
+    return { kind: 'deny', reason: `${why} This is refused here because nobody will be asked to say yes to it here, and sent again it is refused again. The user can run it themselves in a normal session. Nothing was run.` };
   }
   // A real interactive user who already said yes is not blocked by this: the
   // host applies their answer before the hook ever sees the next call. This

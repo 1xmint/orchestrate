@@ -42,15 +42,18 @@ export const REVIEW_PATHS = [
 ];
 
 // Whether a line may merge a pull request. Deliberately blunt, because every
-// attempt to read the shell's spellings exactly lost to one more spelling: the
-// line is flattened to its letters and digits, and it counts when those
-// contain "merge" (or "enqueuepullrequest", the merge queue) and the line also
-// names gh as a word, or holds "pulls" or "graphql" (the REST and GraphQL
-// addresses). Brace expansion ({merge,}, {m..m}) is expanded first, and a
-// backslash-newline joined. A plain read of one pull request, or a plain git
-// merge, passes: see readsOnly and plainGitMerge. Each step is linear in the
-// line and expansion stops at 400 steps, so a long line cannot run the hook
-// out of time.
+// attempt to read the shell's spellings exactly lost to one more spelling: it
+// counts when the line says merge as a word, or "enqueuepullrequest" (the
+// merge queue) in its letters, and also names gh as a word, or holds "pulls"
+// or "graphql" (the REST and GraphQL addresses). Merge is a word when, with
+// quotes, backticks, backslashes and $ taken out, a run of letters and digits
+// starts with it, a capital inside a word starting a new run
+// (mergePullRequest, enablePullRequestAutoMerge, pulls/36/merge, --merge,
+// mergeable): "emergency" is not one. Brace expansion ({merge,}, {m..m}) is
+// expanded first, and a backslash-newline joined. A plain read of pull
+// requests, or a plain git merge, passes: see readsOnly and plainGitMerge.
+// Each step is linear in the line and expansion stops at 400 steps, so a long
+// line cannot run the hook out of time.
 export function mentionsMerge(line) {
   if (readsOnly(line) || plainGitMerge(line)) return false;
   // A heredoc's body is not command text: bash expands no braces and reads no
@@ -60,9 +63,10 @@ export function mentionsMerge(line) {
   const { command, bodies } = splitHeredocs(String(line || '').replace(/\\\r?\n/g, ''));
   const text = command.replace(/["'`$]/g, '');
   const expanded = expandBraces(text, { calls: 0 });
-  const forms = (expanded || [text]).map(f => f.toLowerCase());
+  const cased = expanded || [text];
+  const forms = cased.map(f => f.toLowerCase());
   const flat = forms.map(f => f.replace(/[^a-z0-9]/g, '')).join(' ');
-  const bodyWords = bodies.flatMap(b => shellWords(b.toLowerCase()));
+  const bodyWords = bodies.flatMap(b => shellWords(b));
   // Braces this cannot expand can hide letters between the ones that stay, but
   // not move a letter out of its shell word: the shell expands braces inside
   // one word, and the first copy of a word is made of letters written in it.
@@ -73,15 +77,24 @@ export function mentionsMerge(line) {
   // it is not changed by expansion, so it must spell the word outright. Words
   // split where bash splits them: g{";",}h and g{\ ,}h are one word, gh in one
   // copy.
-  const words = expanded ? bodyWords : [...shellWords(command.toLowerCase()), ...bodyWords];
+  const words = expanded ? bodyWords : [...shellWords(command), ...bodyWords];
   const holds = (w, n) => {
-    if (/[{}]/.test(w)) return inOrder(w, n);
-    return n === 'gh' ? namesGh(w) : w.replace(/[^a-z0-9]/g, '').includes(n);
+    if (/[{}]/.test(w)) return inOrder(w.toLowerCase(), n);
+    if (n === 'gh') return namesGh(w.toLowerCase());
+    return n === 'merge' ? saysMerge(w) : w.toLowerCase().replace(/[^a-z0-9]/g, '').includes(n);
   };
   const has = (...needles) => needles.some(n => words.some(w => holds(w, n)));
-  const says = has('merge', 'enqueuepullrequest') || (expanded && (flat.includes('merge') || flat.includes('enqueuepullrequest')));
+  const says = has('merge', 'enqueuepullrequest') || (expanded && (cased.some(saysMerge) || flat.includes('enqueuepullrequest')));
   const names = has('gh', 'pulls', 'graphql') || (expanded && (forms.some(namesGh) || flat.includes('pulls') || flat.includes('graphql')));
   return Boolean(says && names);
+}
+
+// Whether text says merge as a word: a run of letters and digits starting
+// with it once quotes, backticks, backslashes and $ are out (bash drops them
+// too: mer\ge, mer""ge), a capital inside a word starting a new run.
+function saysMerge(text) {
+  return String(text).replace(/["'`$\\]/g, '').replace(/([a-z0-9])([A-Z])|([A-Z])([A-Z][a-z])/g, '$1$3 $2$4').toLowerCase()
+    .split(/[^a-z0-9]+/).some(w => w.startsWith('merge'));
 }
 
 // The line with each heredoc body taken out, and the bodies. A body runs from
@@ -205,8 +218,13 @@ const READS = new Set(['view', 'checks', 'list', 'status', 'diff']);
 // read: it only moves where gh runs. The path has none of $ ` ( ) { } | & ; < >
 // (a quoted one may hold spaces) and no second cd can follow.
 const CD_PREFIX_RE = /^cd\s+(?:"[\w./:@+,= ][\w./:@+,= -]*"|'[\w./:@+,= ][\w./:@+,= -]*'|[\w./:@+,=][\w./:@+,=-]*)\s*(?:;|&&)\s*(\S[\s\S]*)$/;
+// A redirection to nowhere (2>&1, 1>&2, >/dev/null, 2>/dev/null, &>/dev/null)
+// writes no file and starts no command, so a read or a git merge with one at
+// its end is still that read alone on its line.
+const NOWHERE_RE = /\s+(?:\d?>&\d|(?:\d|&)?>>?\s*\/dev\/null)(?=\s|$)/g;
+const withoutNowhere = line => String(line || '').trim().replace(NOWHERE_RE, '');
 function readsOnly(line) {
-  const text = String(line || '').trim();
+  const text = withoutNowhere(line);
   if (!text || /[\r\n]/.test(text)) return false;
   const cd = CD_PREFIX_RE.exec(text);
   return readsOnlyGh(cd ? cd[1] : text);
@@ -235,7 +253,7 @@ function readsOnlyGh(line) {
 // PowerShell splat). It runs git and nothing else, whatever the branch is
 // called, so `git merge feature/graphql-schema` passes.
 function plainGitMerge(line) {
-  const text = String(line || '').trim();
+  const text = withoutNowhere(line);
   if (!text || /[\r\n]/.test(text)) return false;
   const words = text.split(/\s+/);
   return /^git(?:\.exe)?$/i.test(words[0]) && words[1] === 'merge' && words.every(w => /^[\w./:=,#+-]+$/.test(w));

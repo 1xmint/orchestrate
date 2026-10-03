@@ -1,50 +1,23 @@
 // lib/tier.mjs — the one copy of what every orchestrate hook needs: paths under
 // ~/.claude/orchestrate, the session-to-run binding a hook writes through, and
-// small safe file helpers. Plan-tier and installed-agent detection now live in
-// lib/install.mjs, and run lookup in lib/runs.mjs; both are re-exported below
-// so every existing importer keeps working unchanged.
+// small safe file helpers. The paths and the file helpers live in
+// lib/files.mjs, plan-tier and installed-agent detection in lib/install.mjs,
+// and run lookup in lib/runs.mjs; all are re-exported here so every existing
+// importer keeps working unchanged.
 // No network, no child processes, never throws to a caller (returns null instead).
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, rmdirSync, openSync, readSync, closeSync } from './node.mjs';
-import { homedir } from 'node:os';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, readdirSync, statSync, unlinkSync, rmdirSync, openSync, readSync, closeSync } from './node.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { lastMeasuredTokens } from './context-scan.mjs';
+import { DIR, SESSIONS_DIR, readJson, writeJsonAtomic, sanitizeId, sessionPath } from './files.mjs';
 
-export const HOME = homedir();
-export const DIR = join(HOME, '.claude', 'orchestrate');
-export const SESSIONS_DIR = join(DIR, 'sessions');
+export { HOME, DIR, SESSIONS_DIR, readJson, writeJsonAtomic, findRepoRoot, sanitizeId, sessionPath } from './files.mjs';
 export const PROFILE_PATH = join(DIR, 'profile.json');
 export const TIERS = ['pro', 'max5', 'max20', 'team', 'api', 'unknown'];
-
-export function readJson(path) {
-  try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return null; }
-}
-
-export function writeJsonAtomic(path, obj) {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
-  // On Windows a rename can fail while another process holds the target open
-  // (a reader, an antivirus scan): the error still reaches the caller, but the
-  // temporary file does not stay behind.
-  try { renameSync(tmp, path); } catch (e) { try { unlinkSync(tmp); } catch {} throw e; }
-}
 
 export function today(d = new Date()) {
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-export function findRepoRoot(start) {
-  if (!start) return null;
-  let d = resolve(start);
-  for (let i = 0; i < 40; i++) {
-    if (existsSync(join(d, '.git'))) return d;
-    const parent = dirname(d);
-    if (parent === d) return null;
-    d = parent;
-  }
-  return null;
 }
 
 // True when `cwd` and `root` sit on the same branch of the folder tree — one
@@ -161,14 +134,6 @@ export function trimLog(path, max = 400) {
     const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
     if (lines.length > max) writeFileSync(path, lines.slice(-max).join('\n') + '\n');
   } catch {}
-}
-
-export function sanitizeId(s) {
-  return String(s || 'unknown').replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 120);
-}
-
-export function sessionPath(sessionId) {
-  return join(SESSIONS_DIR, `${sanitizeId(sessionId)}.json`);
 }
 
 // Load, change and write the session file in one step under its lock, for a
