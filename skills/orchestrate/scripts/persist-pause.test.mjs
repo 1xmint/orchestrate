@@ -378,6 +378,26 @@ test('a step that only promises to check back, with nothing out, hears the fact 
   assert.equal(session(home, 'n1').persist.armed, false);
 });
 
+// Inside a keep-going stretch every Stop follows the loop's own refusal, so a
+// check that skipped any refused Stop never read the stretch's closing report.
+// The closing-claim checks skip only the Stop right after their own refusal.
+test('keep-going: a closing claim is read inside a stretch, and the reply to a claim refusal is not refused again', () => {
+  const home = sandbox(); const dir = cwdDir();
+  arm(home, 'c7');
+  const t = join(dir, 't.jsonl');
+  const step1 = [used('Edit', 'e1'), result('e1', 'ok'), said('Edited the parser.')];
+  writeFileSync(t, lines(...step1));
+  assert.match(run(HOOK, stopPayload('c7', dir, t), home).json.reason, /^orchestrate: /, 'an ordinary continue');
+  const step2 = [...step1, used('Edit', 'e2'), result('e2', 'ok'), said('Goal met: all 42 tests pass.')];
+  writeFileSync(t, lines(...step2));
+  const claim = run(HOOK, stopPayload('c7', dir, t, { stop_hook_active: true, last_assistant_message: 'Goal met: all 42 tests pass.' }), home);
+  assert.match(claim.json.reason, /^Your last message gives 42 as a count of passing tests or checks/, 'read although the loop refused the Stop before');
+  const step3 = [...step2, said('Correction: 12 tests ran; I have not seen a count of 42.')];
+  writeFileSync(t, lines(...step3));
+  const reply = run(HOOK, stopPayload('c7', dir, t, { stop_hook_active: true, last_assistant_message: 'Correction: 12 tests ran; 12 passing.' }), home);
+  assert.doesNotMatch(String(reply.stdout), /count of passing tests/, 'the reply to a claim refusal is not refused for its own claim');
+});
+
 test('a wait does not use up a step: the count after the helper lands is where it was', () => {
   const home = sandbox(); const dir = cwdDir();
   arm(home, 'b3');

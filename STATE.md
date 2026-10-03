@@ -145,8 +145,11 @@ release's section when it ships.
     appears in no command output, helper report, notification or user message
     in the last megabyte of the record is sent back once with that fact. Only
     counts of two digits or more; the assistant's own words are not evidence.
-    Same guards as the commit check (never on a Stop a hook already refused,
-    so inside a keep-going stretch it sees only the first Stop).
+    Same guards as the commit check: once per message, and never on the
+    Stop that answers a claim refusal. Both checks used to skip any Stop a
+    hook had refused, and inside a keep-going stretch every Stop follows the
+    loop's own refusal, so a stretch's closing report was never read; the
+    loop's record now says which kind of refusal came last.
   - **A read of the always-on text as the lead reads it** (fresh context,
     Opus, against the prompting guide and the Opus 5.5 page, 2026-10-03), and
     an inventory of every hook line (Sonnet). Fixed: the style said "ask once"

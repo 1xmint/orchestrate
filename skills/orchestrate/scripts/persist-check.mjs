@@ -380,8 +380,8 @@ function commitClaimReason(claim, git, commitsSinceStart) {
 // ordinary Stop with no persist armed gets this too — and never blocks the
 // same claim twice in one session (docs/audits/2026-09-27-live-runs-r6.md,
 // docs/audits/2026-09-27-scoresheet-r6.md top-five item 1 and row 11).
-function checkCommitClaim(input, state) {
-  if (input.stop_hook_active || !input.cwd) return null;
+function checkCommitClaim(input, state, open = !input.stop_hook_active) {
+  if (!open || !input.cwd) return null;
   // The Stop payload's own last_assistant_message first: it is the closing
   // message itself, with no dependence on the transcript having been flushed.
   // The transcript tail is the fallback for a payload without it.
@@ -415,8 +415,8 @@ const PROOF_SCAN_CAP = 1048576;
 // the session saw (lib/proof-claim.mjs). The same guards as the commit check:
 // never on a Stop a hook already refused, once per message, and silent when
 // there is no record to compare against.
-function checkProofClaim(input, state) {
-  if (input.stop_hook_active || !input.transcript_path) return null;
+function checkProofClaim(input, state, open = !input.stop_hook_active) {
+  if (!open || !input.transcript_path) return null;
   let text = typeof input.last_assistant_message === 'string' ? input.last_assistant_message.trim() : '';
   if (!text) text = lastAssistantText(readTail(input.transcript_path, PERSIST_SCAN_CAP));
   if (!text || !claimedCounts(text).length) return null;
@@ -512,11 +512,22 @@ export function check(input) {
   let ctx = null;
   try { ctx = input.transcript_path ? sampleContext({ transcriptPath: input.transcript_path, session: input.session_id || null, announce: false, runMd: bound, permissionMode: modeOf(input) }) : null; } catch { ctx = null; }
   // Independent of auto-continue and everything below it: an ordinary Stop
-  // with nothing armed gets this too.
-  const commitClaimReasonText = checkCommitClaim(input, state);
-  if (commitClaimReasonText) return { kind: 'continue', why: commitClaimReasonText };
-  const proofClaimReasonText = checkProofClaim(input, state);
-  if (proofClaimReasonText) return { kind: 'continue', why: proofClaimReasonText };
+  // with nothing armed gets these too. They skip a Stop that follows a hook's
+  // refusal, so the lead's reply to one is never refused again; but inside a
+  // keep-going stretch every Stop follows the loop's own refusal, and the
+  // stretch's closing report would never be read. So there they skip only the
+  // Stop that follows a claim refusal (`lastBlock`).
+  const prev = store[key] || {};
+  const armedNow = Boolean(p && p.armed);
+  const claimsOpen = !input.stop_hook_active || (armedNow && prev.armedAt === p.armedAt && prev.lastBlock === 'loop');
+  const claimRefusal = why => {
+    if (armedNow) { store[key] = { ...prev, lastBlock: 'claim' }; try { writeJsonAtomic(path, store); } catch {} }
+    return { kind: 'continue', why };
+  };
+  const commitClaimReasonText = checkCommitClaim(input, state, claimsOpen);
+  if (commitClaimReasonText) return claimRefusal(commitClaimReasonText);
+  const proofClaimReasonText = checkProofClaim(input, state, claimsOpen);
+  if (proofClaimReasonText) return claimRefusal(proofClaimReasonText);
   // This is deliberately outside auto-continue: reaching the compaction line
   // is unsafe even for an ordinary Stop. A block is once per epoch, and an
   // active Stop hook must not block itself again.
@@ -552,7 +563,7 @@ export function check(input) {
   const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input), idleKnown: nothingOut(input) });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
-  store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };
+  store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString(), lastBlock: dec.kind === 'continue' ? 'loop' : null };
   try { writeJsonAtomic(path, store); } catch {}
 
   if (dec.kind === 'stop') {
