@@ -4,14 +4,15 @@ Four things can leave a session waiting. For each, on each screen: who writes
 the pause record, what wakes the session, what the band shows, and how many
 times the host may wake it. Written before the code (0010 master plan, step 2b).
 "Unchecked" means the pages named under "Facts" do not say. The band is the
-status line the plan's section 4 describes; it is not built yet, so its column
-entries say what it will read, not what is on screen today.
+status line the plan's section 4 describes. It is built (`docs/band.md`) but has
+not been seen on a screen, so its column entries say what it reads, not what has
+been seen.
 
 | Pause | Terminal | Desktop | Headless |
 |---|---|---|---|
 | **Usage limit** | **Record:** `persist-check.mjs` on `StopFailure`, to `.orchestrator/pause.json`. Whether a subscription limit arrives there as `rate_limit` is unchecked, so every error kind is written.<br>**Wakes:** the host's own carry-on after the reset.<br>**Band:** "Paused for the usage limit", no clock unless one is known.<br>**Host wakes:** at most twice (the plan cites the interactive-mode page; not re-read here). | **Record:** the same hook; that `StopFailure` fires on this screen is unchecked.<br>**Wakes:** the "Auto-continue when limits reset" tick on the session-limit card (not the weekly one) retries the interrupted turn; its default is not stated.<br>**Band:** the same line; drawing on this screen is unseen until plan step 0.<br>**Host wakes:** unchecked. | **Record:** the same hook, where hooks run; unchecked for `StopFailure` in a headless run.<br>**Wakes:** nothing in this plugin; whether the host retries is unchecked.<br>**Band:** nothing is drawn.<br>**Host wakes:** unchecked. |
 | **Helper out of turns** | **Record:** none; `ledger.mjs` files the helper's return.<br>**Wakes:** nothing is asleep; the return reaches the lead.<br>**Band:** nothing.<br>**Host wakes:** not applicable. | Same as Terminal. | Same as Terminal. |
-| **Background command still running** | **Record:** none. `persist-check.mjs` reads the Stop payload's `background_tasks` and `session_crons`; if either lists something, the "no visible work" stop does not fire, the Stop passes and keep-going stays armed.<br>**Wakes:** the background work finishing, or the scheduled prompt firing.<br>**Band:** unchecked.<br>**Host wakes:** unchecked. | Same as Terminal. | Same as Terminal. |
+| **Background command still running** | **Record:** none. `persist-check.mjs` reads the Stop payload's `background_tasks` and `session_crons`; if either lists something, the "no visible work" stop does not fire, the Stop passes and keep-going stays armed.<br>**Wakes:** the background work finishing, or the scheduled prompt firing.<br>**Band:** "Working on: waiting on a helper or background command" while keep-going is armed (`docs/band.md`); the draw is unseen.<br>**Host wakes:** unchecked. | Same as Terminal. | Same as Terminal. |
 | **A summary (compaction)** | **Record:** none; the session file keeps keep-going armed and `router.mjs` re-sends the goal at the `compact` session start.<br>**Wakes:** nothing is asleep; unchecked whether the host wakes anything.<br>**Band:** nothing.<br>**Host wakes:** unchecked. | Same as Terminal. | Same as Terminal. |
 
 ## The pause record
@@ -33,8 +34,11 @@ per project; a later pause replaces it.
   (`agent_id` on the payload) it writes nothing. The host ignores what a hook
   prints at `StopFailure`, so the hook cannot refuse anything there; it never
   touches the keep-going state.
-- `lib/pause.mjs` holds the reader (`readPause`), so the band can import it. The
-  band reads the file and never writes it.
+- `lib/pause.mjs` holds the reader (`readPause`). The band's mod cannot import it,
+  because it reads with `node:fs` and a mod may import only its own files by
+  relative path; `lib/band-line.mjs` has `parsePauseText`, which reads the file the
+  same way, and a test holds the two to the same answer. The band reads the file
+  and never writes it.
 
 **Cleared** at the next ordinary Stop of the same session and at the next
 prompt of the same session. Both places already run every turn:

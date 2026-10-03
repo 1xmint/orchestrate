@@ -18,6 +18,10 @@
 // prompt and kept as `startHead`, so the Stop hook's commit check (lib/
 // commit-claim.mjs) can later count commits made since this session began.
 //
+// On a real prompt it also leaves one small record for the band, the line above
+// the prompt (lib/band.mjs, docs/band.md). That record is not model-facing and
+// changes nothing this hook prints.
+//
 //   echo '<hook json>' | node router.mjs          hook mode (stdin)
 //   node router.mjs --state                       what it would inject, no writes
 //   node router.mjs --cost <transcript.jsonl>     what the router cost that session
@@ -50,6 +54,7 @@ import { projectNote } from './lib/project.mjs';
 import { pauseRoot, clearPause } from './lib/pause.mjs';
 import { lastQuestion, nextAsked, askedLine } from './lib/asked.mjs';
 import { lastAssistantText } from './lib/commit-claim.mjs';
+import { recordBand, openItem, sessionGoal } from './lib/band.mjs';
 import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
@@ -175,6 +180,16 @@ function transcriptSize(p) {
   try { return p ? statSync(p).size : 0; } catch { return 0; }
 }
 
+// A slash command, a paste or a two-word reply is not the start of a session's
+// work, and the card is worth its tokens only on something substantive.
+// A short request that names building or fixing ("migrate to postgres",
+// "fix login properly") is the start of work whatever its length.
+function isSubstantive(trimmed) {
+  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
+  return !/^\s*\//.test(trimmed) && !/```/.test(trimmed)
+    && (wordCount >= 4 || (wordCount >= 2 && (BUILD_WORDS.test(trimmed) || FIX_WORDS.test(trimmed))));
+}
+
 // A build word (or "and then", which chains a second step onto the first)
 // means the prompt is shaping work, not just naming a fix — the full card
 // earns its cost there even on a short sentence.
@@ -278,6 +293,21 @@ function promptText(input) {
 // changes. A message whose wording differs from the last one is not a change of
 // state, and the old router treated it as one.
 const HOST_TAGS = /<(system-reminder|local-command-caveat|local-command-stdout|command-name|command-message|command-args)>[\s\S]*?<\/\1>/g;
+
+// What the band shows from a real prompt on: this session is working, on the
+// next open item if the run or project page names one, else on the goal in the
+// user's own words (the keep-going goal, the first request pinned, or this
+// prompt when it is a request). A slash command starts no work, so it leaves the
+// record alone. Written for the muted router too: the band is not model-facing.
+// Reads and writes a small file; never changes what this hook prints or saves
+// (lib/band.mjs, docs/band.md).
+function bandAtPrompt(input, state, trimmed) {
+  try {
+    if (/^\s*\//.test(trimmed)) return;
+    const text = openItem(state, input.cwd) || sessionGoal(state) || (isSubstantive(trimmed) ? trimmed : '');
+    recordBand({ cwd: input.cwd, session: input.session_id, kind: 'working', text });
+  } catch {}
+}
 
 function handlePrompt(input) {
   // A hook fires inside a subagent's own call too, with `agent_id` set on the
@@ -429,15 +459,9 @@ function handlePrompt(input) {
     state.persist = { ...rest, armed: true, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
     armedNow = true;
   }
-  if (state.muted) { saveSession(state); return; }
+  if (state.muted) { bandAtPrompt(input, state, trimmed); saveSession(state); return; }
 
-  // A slash command, a paste or a two-word reply is not the start of a session's
-  // work, and the card is worth its tokens only on something substantive.
-  // A short request that names building or fixing ("migrate to postgres",
-  // "fix login properly") is the start of work whatever its length.
-  const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
-  const substantive = !/^\s*\//.test(trimmed) && !/```/.test(trimmed)
-    && (wordCount >= 4 || (wordCount >= 2 && (BUILD_WORDS.test(trimmed) || FIX_WORDS.test(trimmed))));
+  const substantive = isSubstantive(trimmed);
 
   // What this session is for, recorded once so a later session in the same
   // folder can answer "continue what?" for itself.
@@ -620,6 +644,7 @@ function handlePrompt(input) {
   }
 
   if (substantive) state.prompts++;
+  bandAtPrompt(input, state, trimmed);
   saveSession(state);
   maybePrune();
   emit('UserPromptSubmit', out.join('\n'));

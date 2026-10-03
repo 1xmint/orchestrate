@@ -31,6 +31,10 @@
 // turned the loop off just before the host's resume), and a helper refused for
 // usage is a fact the next continue states, not a reason to end the loop.
 //
+// After it has printed and decided, it leaves one small record for the band, the
+// line above the prompt (lib/band.mjs, docs/band.md): working, a question waiting
+// for the user, or idle. That write cannot change what it printed or decided.
+//
 // Never blocks twice in one Stop, never exits non-zero, never fails the Stop on
 // its own errors.
 
@@ -43,6 +47,7 @@ import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, r
 import { pauseRoot, pauseRecord, writePause, clearPause } from './lib/pause.mjs';
 import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
 import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
+import { recordBand, bandAtStop, openItem, sessionGoal, stopQuestion } from './lib/band.mjs';
 import { readProject } from './lib/project.mjs';
 import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
@@ -409,6 +414,30 @@ export function recordStopFailure(input, now = new Date()) {
   return writePause(root, rec) ? rec : null;
 }
 
+// What this Stop leaves for the band (lib/band.mjs, docs/band.md): work, a
+// question waiting for the user, or nothing. Run after the hook has printed what
+// it prints and decided what it decided, from `dec` as `check` returned it, so it
+// can change neither. A helper's own Stop writes nothing. Never throws.
+//   a Stop that was refused (the turn goes on)         working: the next open item, else the goal
+//   a question the closing message ends on             needs: that question, armed or not
+//   a Stop passed because a helper or command is out   working: waiting on it
+//   anything else                                      idle
+export function recordBandAtStop(input, dec, now = new Date()) {
+  try {
+    if (!input || input.agent_id) return null;
+    const continued = Boolean(dec) && dec.kind === 'continue';
+    const state = continued ? loadSession(input.session_id) : null;
+    const note = bandAtStop({
+      continued,
+      question: continued ? null : stopQuestion(input),
+      waiting: Boolean(dec) && dec.kind === 'wait',
+      open: continued ? openItem(state, input.cwd) : '',
+      goal: continued ? sessionGoal(state) : '',
+    });
+    return recordBand({ cwd: input.cwd, session: input.session_id, kind: note.kind, text: note.text, now });
+  } catch { return null; }
+}
+
 function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
@@ -423,6 +452,7 @@ function main() {
   const dec = check(input);
   if (dec && dec.kind === 'continue') emitBlock(dec.why);
   else if (dec && dec.kind === 'stop' && dec.why) emitSystemMessage(endMessage(dec.why));
+  recordBandAtStop(input, dec);
 }
 
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {

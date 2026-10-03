@@ -240,6 +240,16 @@ install. You should not need to type them.
 
 Every hook that reads a brief's task id uses one rule (`lib/task-id.mjs`): the token after `TASK:` counts as an id only when it contains a digit. A brief written as prose ("TASK: build the login page") has no id, so its return is filed with none rather than under the word "build".
 
+**The band.** On a plugin install, one dim line above the prompt (in a terminal
+or the Claude desktop app) says what the session is on (`Working on: ...`), what it
+needs from you (`Needs you: ...`) or that it is paused for the usage limit.
+`router.mjs` and `persist-check.mjs` write a small record,
+`.orchestrator/band.json`, and a Claude Code mod (`hooks/band.mjs`, named under
+`"modules"` in `hooks/hooks.json`) reads it and draws the line. The mod calls
+nothing that writes, sends or runs, and nothing it shows reaches the model.
+`docs/band.md` says where each line comes from, why a Claude Code build without
+mods still loads the hooks, and what has not been checked.
+
 The router, the guard and the ledger are global, registered once from the
 plugin's own `hooks/hooks.json` so they run whether or not the skill is
 currently in play — **for a plugin install.** `SKILL.md`'s frontmatter carries
@@ -884,6 +894,7 @@ skills/orchestrate/
                         agents, the Plain output style
 .claude-plugin/          plugin manifest, so /plugin install works
 hooks/hooks.json         the global hooks, for the plugin path
+hooks/band.mjs           the band: a mod that draws one line above the prompt and writes nothing
 evals/                  test prompts for the skill-creator loop
 scripts/install.mjs     installs the skill, agents and hooks
 scripts/package.mjs     builds the two .skill zips
