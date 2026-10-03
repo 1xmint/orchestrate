@@ -139,4 +139,5 @@ Simplify the words, never the facts. When the Plain style is off, these hold:
 A repo's own `AGENTS.md` or `CLAUDE.md` wins over this skill. A role's tool
 scope is a guarantee the host enforces: a reviewer's PASS is bankable because
 it could never fix what it found. No secrets in packets or ledgers. Noticed
-something the plugin could do better? `scripts/suggest.mjs add "<text>"`.
+something the plugin could do better? `scripts/suggest.mjs add "<text>"`. A new
+rule here needs a concrete failure it prevents and its cost on every turn.

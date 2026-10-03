@@ -156,7 +156,8 @@ release's section when it ships.
     line always read "codex: not checked in the last hour (run profile.mjs)"
     and running it changed nothing; the line now shows only a fresh reading.
     The keep-going line went from 467 to about 330 bytes. Per-run read now
-    13,199 bytes (skill 7,458, style 3,782, card 1,959). Not changed, and
+    13,282 bytes (skill 7,541, style 3,782, card 1,959; the skill keeps its
+    maintainer rule, which the portable build needs and a test pins). Not changed, and
     why: the "helper size" note on every dispatch (about 80 bytes, pinned by
     eight hook tests, and a guard change needs its own review); the skill's
     "How to talk to the user" section (pinned; only serves hosts without the
