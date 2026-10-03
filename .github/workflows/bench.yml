@@ -6,7 +6,9 @@ name: Bench
 # step scans exactly the files it staged for upload before it finishes.
 #
 # Failing cases are expected (the eval exits 1 or 2), so the exit code is
-# recorded and the grading and upload steps still run.
+# recorded and the grading and upload steps still run. A crash of the scorer is
+# not expected: it is recorded too, and the last step fails the job on it, so a
+# green job means the scorer ran.
 #
 # No-plugin leg: `claude plugin eval` has no flag that runs only the no-plugin
 # arm (its --ablation takes `none` or `with-without`), so that leg uses
@@ -120,7 +122,14 @@ jobs:
           set +e
           if [ "$SUITE" = scenario ]; then
             if [ "$ARM" = none ]; then PLUG=(--no-plugin); else PLUG=(--plugin-dir "$COPY"); fi
-            node bench/scenarios/resume.mjs "${PLUG[@]}" --label "$LABEL" --runs "$RUNS" --cap "$CAP" --out "$OUT/scenario" --model claude-opus-5-5
+            # --compact-after 1 asks for a summary straight after the cut-off turn,
+            # before the first "continue". It is always on for this suite, not an
+            # input: the test is a cut-off, a summary, then "continue", so a run
+            # without the summary measures something easier, and a switch nobody
+            # passes is how this one went unused. Both arms in a job get the same
+            # call. If a summary cannot be forced headless, summary.md says
+            # "/compact: untested" and the run still completes.
+            node bench/scenarios/resume.mjs "${PLUG[@]}" --label "$LABEL" --runs "$RUNS" --cap "$CAP" --out "$OUT/scenario" --model claude-opus-5-5 --compact-after 1
             RC=$?
           else
             CASE_ARGS=(); [ -n "$CASES" ] && CASE_ARGS=(--case "$CASES")
@@ -149,7 +158,10 @@ jobs:
                 ' "$AGG" "$GRADE_AGG"
               fi
               HIDDEN_ARG=(); [ -d bench-hidden ] && HIDDEN_ARG=(--hidden bench-hidden)
-              node evals/grade-kept.mjs --aggregate "$GRADE_AGG" "${HIDDEN_ARG[@]}" --arm "$LABEL" --out "$OUT/graded" || echo "grade-kept failed"
+              # A crash here must not stop the leak scan and the upload below (the
+              # files help to debug it), and must not pass: it leaves a marker
+              # outside the staged folder, and the last step fails the job on it.
+              node evals/grade-kept.mjs --aggregate "$GRADE_AGG" "${HIDDEN_ARG[@]}" --arm "$LABEL" --out "$OUT/graded" || { GK=$?; echo "grade-kept crashed (exit $GK); the job fails after the upload"; echo "exit $GK" > "$RUNNER_TEMP/grade-crash"; }
               cp "$OUT/aggregate-result.json" "$STAGE"/
               cp "$OUT"/*.html "$STAGE"/ 2>/dev/null || true
               cp "$OUT/graded/rows.json" "$OUT/graded/table.md" "$STAGE"/ 2>/dev/null || true
@@ -180,3 +192,14 @@ jobs:
           path: ${{ runner.temp }}/upload
           retention-days: 7
           if-no-files-found: warn
+      # Last on purpose: the scorer's crash is failed here, after the leak scan
+      # has gated the upload, so the files are there to debug it and a green job
+      # always means the scorer ran. It also runs when an earlier step failed, so
+      # a crash is named even then.
+      - name: Fail the job if the scorer crashed
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -f "$RUNNER_TEMP/grade-crash" ]; then
+            echo "::error::grade-kept crashed ($(cat "$RUNNER_TEMP/grade-crash")), so no score from this job can be trusted. The uploaded files are for debugging only."
+            exit 1
+          fi

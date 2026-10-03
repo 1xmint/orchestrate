@@ -5,6 +5,8 @@ Written before any run, so the result cannot be argued afterwards. It is the
 (`verdict`) applies it in exactly this order.
 
 **The incumbent** is what is shipped or on the branch now. **The candidate** is the change.
+From 2026-10-03, for the candidate bundle below, the incumbent is plain Claude: Claude Code with
+no plugin and no command typed (decision 1a of `docs/research/0010-master-plan.md`).
 
 - **Runs:** 3 per arm on every case, with arms that are compared run together in one job, never on different days.
 - **Valid run:** any run except one stopped by a machine fault: runner crash, credential rejected, usage-limit text, scaffold failed, left unstarted when the eval exits 2, or a trace that reads `bench-hidden/` or the copy's `bench/`. A voided run voids its pair in the other arm.
@@ -31,6 +33,37 @@ differently for each kind.
 | Comparison | Candidate | Kind | Why |
 |---|---|---|---|
 | A | current plus Stage 2 (when to hand a step to a helper) | wording simplification | The same choice restated as overall cost, with the cheaper model counted as a saving. It also drops "tell the user the split cost and let them pick" before a small build is split across helpers. That drop was approved with plan revision 2 (how to build is the lead's call), not decided here: a one-turn run has nobody to answer, so it cannot test an ask. For the same reason the three-tools prompt says the user is away, for every arm. |
+| B | The candidate bundle against plain Claude (step 1 of `docs/research/0010-master-plan.md`): Stage 0, the same-item stop, Stage 2, the hook-note trim, the pause at a usage limit, the wording fixes and the per-run-read cut | addition | Added 2026-10-03, before any run. It carries new behaviour, so it is the strictest kind: an inconclusive result does not ship it, apart from the one exception the outcome table below names. One bundled result cannot credit or blame any single change in it, so no separate verdict on Stage 0, Stage 2 or a cut comes from this run; each change still needs its own evidence (a payload test, or a count from the record) before a release names it. |
+
+## What each outcome ships
+
+Added 2026-10-03, before any comparison run, from step 1 of `docs/research/0010-master-plan.md`.
+The decision order above does not change; this table says what each way it can end ships and what
+the release may say. The yardstick is plain Claude, so for this comparison `combine` is run with
+`--incumbent no-plugin`. "Finishes" means successes, as defined above. A result's row is the first
+one its decision order reaches, and the last row sits on top of whichever that is. `verdict` in
+`evals/grade-kept.mjs` prints the row it landed on, and a test holds the first column below to the
+words it prints.
+
+| Candidate against plain Claude | What ships, and what the release may say |
+|---|---|
+| Fails a gate, or finishes fewer tasks in total | Nothing. "Behind plain Claude on N tasks; not released." |
+| One task finishes fewer | Both arms get three more runs on that task, together (decision order, Successes). Still fewer: the row above. |
+| Gates and finishes no worse; cost per finished task 1.15x or more | Nothing from the bench. "Level with plain Claude and dearer; not released." What decision 3 names still ships on its own evidence. |
+| Gates and finishes no worse; cost between 0.85x and 1.15x | What decision 3 names, as a dated exception to the Inconclusive rule above. "Level with plain Claude on five tasks at the same cost." |
+| Two or more finishes more, or cost at or under 0.85x with no fewer finishes | The whole candidate. "Ahead of plain Claude: N more finishes" or "at X of the cost." |
+| Any row, with the candidate's middle time per finished task more than 1.25x plain Claude's | Ships only with a written reason (decision order, Time). |
+
+Decision 3 is the one in section 6 of the master plan: Stage 0, the same-item stop, the pause at a
+usage limit, the wording fixes and the dropped 90% stop ship on their payload tests and the record
+even when the bench reads level. The exception to the Inconclusive rule is dated 2026-10-03 and
+covers only those; rows 3 and 4 ship nothing else, so the rest of the bundle waits for row 5.
+
+Three readings, so nothing is argued afterwards. Two or more finishes more with a cost per
+finished task of 1.15x or more is row 3, not row 5, because the decision order loses on cost before
+it looks for a win. When an arm finished nothing there is no cost per finished task, no row from 3
+to 5 applies, and the Inconclusive rule above decides. For time, `verdict` takes the middle time
+over an arm's valid runs, not only the finished ones.
 
 ## Stop-loss per batch
 
