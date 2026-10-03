@@ -28,7 +28,7 @@ import { modeNote, modeOf } from './lib/modes.mjs';
 import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, segmentTurns } from './lib/workers.mjs';
 import { loadSession, saveSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
 import { loadPolicy, sizeBudget } from './lib/policy.mjs';
-import { leftoverNote, anyHelperRunning } from './turn-check.mjs';
+import { leftoverNote, anyHelperRunning } from './lib/helper-leftovers.mjs';
 
 // ---- which roles can edit ---------------------------------------------------
 // "N tool calls since your last edit" is a fact only for a role that has an

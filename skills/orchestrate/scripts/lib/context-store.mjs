@@ -151,7 +151,9 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
   // each `tickEvery` of growth and after each compaction, so it never has to
   // guess the size from memory or an old summary.
   const lastTick = prev ? prev.tickKey || null : null;
-  const tick = contextTick(reading, policy, noticeCtx);
+  // Told the key already said, it builds no line for it: that line would be
+  // dropped just below, and building it costs file reads on every tool call.
+  const tick = contextTick(reading, policy, noticeCtx, lastTick);
   const ticked = Boolean(tick.key) && tick.key !== lastTick;
   if (!notice && ticked) notice = tick.text;
   const { offset, size: sz, toolUses, ...clean } = reading;
