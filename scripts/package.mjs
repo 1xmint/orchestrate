@@ -56,12 +56,12 @@ export function toSpec(text) {
   let body = text.slice(m[0].length);
   // The `!`cmd`` injection line, and the sentence that refers to it.
   body = body.replace(/^!`[^`]*`\n\n?/m, '');
-  body = body.replace(/ The\n?line above is this machine's profile, injected at no cost\./, '');
+  body = body.replace(/ The\s+line\s+above\s+is\s+this\s+machine's\s+profile\./, '');
   // Nothing enforces the rules here, so say so plainly instead of promising
   // hooks the host will never run.
   body = body.replace(
-    /Eight hooks run around you\.[\s\S]*?decides\s+what\s+a\s+task\s+deserves\./,
-    'This host runs none of the skill\'s hooks, so nothing keeps credentials out\nof a packet, saves a return under the run, or holds the Pickup line for you.\nHold them yourself; they are stated where they apply below. Nothing mechanical\never decided what a task deserves, so the rest reads the same here.'
+    /Hooks\s+run\s+around\s+you:[\s\S]*?never\s+by\s+ending\s+the\s+turn\./,
+    'This host runs none of the skill\'s hooks, so nothing keeps credentials out\nof a packet, saves a return under the run, or holds the Pickup line for you.\nHold them yourself. Nothing mechanical ever decided what a task deserves, so\nthe rest reads the same here.'
   );
   body = body.replace(/^Tier `unknown` above:/m, 'Start by running `profile.mjs` in the skill folder. Tier `unknown`:');
   body = body.replace(/The ledger hook saves and indexes the return; you set the row,\nbecause you are the one who read it\./, 'Save the return under the run folder and set the row yourself.');

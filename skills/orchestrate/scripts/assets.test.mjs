@@ -422,9 +422,13 @@ test('the run ledger keeps the goal above the task table', () => {
   assert.match(run, /why not smaller/);
   assert.match(run, /what handing work over is expected to save, and the main tradeoff/, 'the Shape line records why helpers were worth it');
   assert.match(run, /Ceiling:/, 'the Budget block seeds a ceiling');
+  // The ledger's own page carries how to fill it and that a ceiling is opt-in;
+  // the skill body only points there (per-run read cut, plan 0010 step 2e).
+  const ledger = flat(readFileSync(join(SKILL, 'references', 'ledger.md'), 'utf8'));
+  assert.match(ledger, /[Ff]ill the sections above the task table before the first dispatch/);
+  assert.match(ledger, /no dollar ceiling by default/, 'the ceiling is opt-in');
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
-  assert.match(skill, /[Ff]ill the sections above the task table before the first dispatch/);
-  assert.match(skill, /dollar ceiling is opt-in/, 'the skill makes the ceiling opt-in');
+  assert.match(skill, /`ledger\.md` \(work across sessions\)/, 'the skill points at the ledger page');
   assert.doesNotMatch(run, /before the first dispatch>/, 'the template no longer requires a budget');
   assert.match(run, /^Ceiling: \{\{BUDGET\}\}/m);
   assert.match(skill, /hand it over when that costs less overall: a worker's cheaper model,/);
@@ -435,7 +439,7 @@ test('the run ledger keeps the goal above the task table', () => {
 test('the safety rails survive a post-compaction truncation of SKILL.md', () => {
   // Claude Code re-injects an invoked skill's body after compaction, capped at
   // 5,000 tokens and keeping the start of the file. These two rails matter
-  // most when context is short, so they live near the top, not only in §10,
+  // most when context is short, so they live near the top, not only in Rails,
   // and this test checks the first 20,000 characters, not a line number.
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8').slice(0, 20000));
   assert.match(skill, /Destructive, publishing, paying and credential actions stop and ask/);
@@ -443,13 +447,16 @@ test('the safety rails survive a post-compaction truncation of SKILL.md', () => 
 });
 
 test('SKILL.md body stays at or under its pinned size', () => {
-  // A behaviour pin, not a line count. Claude Code re-injects an invoked
-  // skill's body after compaction capped at about 5,000 tokens, so a body
-  // under 20,000 bytes survives compaction whole; anything past that is cut
-  // off silently. Detail that does not fit lives in references/ and is named
-  // from the body, so the cap is a hard line, not a measured size plus slack.
+  // A behaviour pin, not a line count. The skill body, the Plain style and the
+  // card are what Claude reads because the plugin is installed, and the 0.20.0
+  // eval put the plugin at about a third more cost than plain Claude on short
+  // tasks, from reading its own instructions (docs/research/0007-eval-release.md).
+  // Plan 0010 step 2e cut that read by more than half: 27,284 bytes to about
+  // 13,200, the skill body from 19,994 to about 7,300. Detail lives in
+  // references/ and is named from the body. Claude Code also keeps only the
+  // first 5,000 tokens of a skill after a summary, which this is well inside.
   const bytes = Buffer.byteLength(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'), 'utf8');
-  const CAP = 20000;
+  const CAP = 7600;
   assert.ok(bytes < CAP, `SKILL.md is ${bytes} bytes, cap is ${CAP}`);
 });
 
@@ -458,10 +465,10 @@ test('SKILL.md body stays at or under its pinned size', () => {
 // is what actually changes an output.
 // Case-insensitive: the same rule opens a bullet in one file and a sentence in
 // the other. What has to match is the rule, not its capital letter.
-// The six rules that must survive with the style turned off, so SKILL.md §9 and
-// the style are checked against the same list. The style says more than this;
-// §9 is deliberately the short version, because a longer §9 competes with the
-// style rather than backing it up.
+// The rules that must survive with the style turned off, so the skill's "How
+// to talk to the user" and the style are checked against the same list. The
+// style says more than this; the skill's is deliberately the short version,
+// because a longer one competes with the style rather than backing it up.
 const SPEECH_RULES = [
   // The two that matter most to the person on the other end, and the two the
   // skill did not say at all until a user pointed out that it was agreeing with
@@ -476,7 +483,7 @@ const SPEECH_RULES = [
 ];
 
 test('SKILL.md carries the plain-speech rules, each with its own test', () => {
-  const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8');
+  const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
   assert.match(skill, /How to talk to the user/);
   // The reader is an adult who has not learned the words, not a child. The
   // difference shows up in the output: one gets simpler words, the other gets
@@ -487,7 +494,7 @@ test('SKILL.md carries the plain-speech rules, each with its own test', () => {
   for (const r of SPEECH_RULES) assert.match(skill, r, String(r));
 });
 
-test('the Plain output style ships, is valid, and says the same thing as §9', () => {
+test('the Plain output style ships, is valid, and says the same thing as the skill', () => {
   const p = join(SKILL, 'assets', 'output-styles', 'plain.md');
   assert.ok(existsSync(p), 'assets/output-styles/plain.md ships with the skill');
   const style = readFileSync(p, 'utf8');
@@ -502,7 +509,7 @@ test('the Plain output style ships, is valid, and says the same thing as §9', (
   // anybody choosing it, and disabling the plugin is the way off.
   assert.match(fm, /^force-for-plugin: true$/m);
 
-  for (const r of SPEECH_RULES) assert.match(style, r, `the style and §9 agree on ${r}`);
+  for (const r of SPEECH_RULES) assert.match(style.replace(/\s+/g, ' '), r, `the style and the skill agree on ${r}`);
 
   // Anthropic's own Opus 5 scope paragraph, verbatim. It is what stops a model
   // that verifies its own work anyway from expanding the task while it does so.
@@ -514,7 +521,7 @@ test('the Plain output style ships, is valid, and says the same thing as §9', (
   // The two verification lines point opposite ways on purpose: one stops Opus 5
   // re-proving what it already proved, the other stops a low-effort model
   // answering a current fact from memory. Neither asks for more self-checking.
-  assert.match(style, /A name you recognise is not a fact you know/);
+  assert.match(style.replace(/\s+/g, ' '), /A name you recognise is not a fact you know/);
   assert.doesNotMatch(style, /double-check|re-verify|verify (your|it) again/i,
     'never an instruction to re-check its own work: that is the one thing both model guides forbid');
 
@@ -527,7 +534,10 @@ test('the Plain output style ships, is valid, and says the same thing as §9', (
   // 5,100 in 0.20.0: "one idea per sentence" read as clipped fragments, and
   // nothing said to draw a flow or that Mermaid shows as text in the desktop
   // app (live notes K and R, 2026-10-01).
-  assert.ok(Buffer.byteLength(style) <= 5100, `the style is ${Buffer.byteLength(style)} bytes, cap 5100`);
+  // 3,800 from plan 0010 step 2e (2026-10-03): every rule above kept, the
+  // wording cut from 5,094 bytes, because this file is in the system prompt of
+  // every session and is the most often paid part of the per-run read.
+  assert.ok(Buffer.byteLength(style) <= 3800, `the style is ${Buffer.byteLength(style)} bytes, cap 3800`);
 
   // A picture when the shape is the point, and never the one diagram format
   // the desktop app shows as plain text.

@@ -475,7 +475,11 @@ if (brief) {
     // and invites spending it; the tier is what the model actually reasons
     // from, and measure.mjs reports what a finished run cost.
     const included = { max5: 'Opus, Sonnet, Haiku and Fable', max20: 'Opus, Sonnet, Haiku and Fable', pro: 'Opus, Sonnet and Haiku; Fable costs credits, so ask first', team: 'Opus, Sonnet and Haiku; Fable costs credits, so ask first', api: 'all, billed per token; ask before Fable' }[tier.tier] || 'unknown, ask the user once';
-    console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')})` : ''}`);
+    // The fix rides with the gap, so the skill body need not carry it: a script
+    // install runs the installer, a plugin install is updated, never both (the
+    // installer would shadow the roles a plugin carries).
+    const fix = agents.source === 'plugin' ? 'update the plugin' : 'run scripts/install-agents.mjs';
+    console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')}; ${fix})` : ''}`);
     console.log(codexBriefLine(cachedCodexStatus()));
     const auto = (readJson(join(HOME, '.claude', 'settings.json')) || {}).env || {};
     if (!auto.CLAUDE_CODE_AUTO_COMPACT_WINDOW) console.log('auto-compact is at the window limit; run `profile.mjs --autocompact 200k`');

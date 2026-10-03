@@ -110,7 +110,7 @@ definitions), `background` (stay backgrounded even if Claude asks to run it in t
 2026-09-10). Since the plugin path is this skill's primary distribution channel, per-role
 `permissionMode` narrowing is not a lever available here — `tools`/`disallowedTools` (which
 plugin subagents do respect) is the only mechanism that reaches every install path, which is why
-`SKILL.md §10` / `assets/agents/*.md` lean on that one exclusively.
+`SKILL.md`'s Rails and `assets/agents/*.md` lean on that one exclusively.
 
 **Skill files** load from `~/.claude/skills/<name>/SKILL.md` or `.claude/skills/`. Descriptions
 of all skills sit in context every turn (the listing gets ~1% of the context window; a

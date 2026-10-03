@@ -129,7 +129,7 @@ that recognising a name is not knowing its current state.
 
 ## When a helper is worth it at all
 
-The rule is SKILL.md §3 (Direct): do a step yourself when it fits in about
+The rule is SKILL.md's **Direct**: do a step yourself when it fits in about
 eight tool calls with small outputs, or about 15k tokens of growth; past that,
 hand it over when that costs less overall. A worker saves by running on a
 cheaper model and by keeping a file over about 150 lines, a build or test

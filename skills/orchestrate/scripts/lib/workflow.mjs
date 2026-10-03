@@ -67,7 +67,7 @@ export function workflowDecision(input, ti, { policy = loadPolicy(), installed =
   // The gate is about orch-implementer specifically, not the full set: it is
   // the one capped role that writes code, so it is the uncapped helper's only
   // real substitute. Once its file is installed, general-purpose/claude is
-  // refused even on a partial install of the other seven roles (SKILL.md §0);
+  // refused even on a partial install of the other seven roles (profile.mjs names the fix);
   // only when orch-implementer itself is missing does general-purpose remain
   // the sole choice for a writing role.
   const implementerMissing = missing ? missing.includes(UNCAPPED_GATE_ROLE) : installed < AGENT_NAMES.length;

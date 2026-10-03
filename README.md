@@ -579,7 +579,7 @@ nothing about how the work is done.
 
 If you only want shorter answers, Claude Code ships a built-in **Concise** style
 that leads with the result and drops the narration. Try that first. The seven
-rules that matter most live in `SKILL.md` §9 for the times the style is off, and
+rules that matter most live in `SKILL.md` (How to talk to the user) for the times the style is off, and
 for hosts that have no output styles at all.
 
 ## What one goal costs

@@ -36,7 +36,7 @@ can start here (above). `scripts/batch.mjs <RUN.md> --spec "…" --files
 "a,b,c" [--done-when "…"] [--concurrency 2] [--per-task N]` reads the run's own
 task id sequence and groups the files into a few tasks, each `OWNS` its own
 file set so the `orch-implementer` worktrees can run at once with no merge
-conflict — the same rule SKILL.md §4 already states for parallel tasks, just
+conflict — the same rule SKILL.md states for concurrent writers, just
 generated rather than typed by hand. Default concurrency 2, the plugin's own
 worker limit across Claude and Codex; by default the files are split evenly
 across that many tasks, at most 15 files each. It used to be concurrency 20 with
@@ -64,8 +64,8 @@ run's `packets/` directory and always pass the model and effort:
 The report lands at `<run dir>/workers/<task>/report.json`. A usage-limit error
 stops Codex until the reset and writes a Claude packet for only the unfinished
 part. Login, throttling, permission, timeout, malformed output and failing
-checks are each reported as themselves. SKILL.md §5 has the full start,
-monitor, grade, commit and merge recipe.
+checks are each reported as themselves. `dispatch.md`'s Codex workers has the
+full start, monitor, grade, commit and merge recipe.
 
 ## `fork`
 

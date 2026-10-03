@@ -12,8 +12,8 @@
 // "Two to three times doing it alone": the same small three-part app cost
 // $0.69 built by the lead alone (docs/audits/2026-09-26-live-runs-r4.md)
 // against $2.28 and $1.81 split across helpers (…-r5.md, 2026-09-27-…-r6.md).
-// The advisor's moments and "keep preparing while it runs" live in SKILL.md §5.
-// The plan the user sees is the project page's Next (SKILL.md §1); the card only
+// The advisor's paragraph lives in SKILL.md (Dispatch and prove).
+// The plan the user sees is the project page's Next (SKILL.md); the card only
 // points at it, since it is re-shown and must not contradict the skill.
 // The helper kinds are named for the same reason: that lead spent six refused
 // dispatches finding them. "worktree: yes" is the packet line the guard reads.
