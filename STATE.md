@@ -287,6 +287,28 @@ release's section when it ships.
     ends the loop. The guard change (`guard-agent.mjs` saves through
     `updateSession`) was reviewed: the same refusals and allows on crafted
     payloads before and after.
+  - **The shell guard reads one command at a time** (an independent read of
+    `guard-bash.mjs` whole, ten findings, each run through the real hook). Its
+    rules read the whole line, so `rm -rf node_modules && npm install` asked
+    (and was refused in a helper or auto mode) with `&&` and `npm` taken for
+    targets, and a commit message, heredoc body or grep pattern that named a
+    stopped command was taken for one. `commandsIn` in `lib/shell-run.mjs`
+    now hands each rule one command's words: quotes off, redirections out,
+    heredoc bodies and search or echo words as text, and what a shell is
+    handed (`bash -c`, `$( )`, `eval`, `ssh host`, `pwsh -Command`) read as
+    commands; a line that also starts a shell reads what it writes. Plain
+    spellings the guard named but missed are caught (`rm -Rf`, `git push
+    -d`/`-fu`/`+branch`, `git clean --force`, `pnpm -r publish`, `flyctl
+    deploy`, `ri -r -fo`); `Remove-Item -Recurse` without `-Force` is the
+    recursive delete it is (learn.microsoft.com, Remove-Item, read
+    2026-10-03); a `--dry-run` publish passes; the temp folder follows links
+    and counts `/tmp`; the merge check reads merge as a word ("emergency"
+    was refused) and lets a read end in `2>&1`. Wording, checked against the
+    prompting best-practices page on 2026-10-03 (give the reason; say what to
+    do; a fact where a fact does): the ask's tail and the helper and headless
+    refusals now say what did not run, why, and who can run it, not "stop
+    and tell the user". The guard takes its file helpers from `lib/files.mjs`
+    (tier re-exports them): a plain `ls` 46 to 39 ms, bare Node 21.
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line
