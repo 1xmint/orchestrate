@@ -24,7 +24,7 @@ function scripts(dir = SCRIPTS) {
 }
 
 test('no script outside the tests takes fs, crypto or child_process from Node directly', () => {
-  const direct = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)['"]node:(?:fs|crypto|child_process)['"]/;
+  const direct = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)['"](?:node:)?(?:fs|fs\/promises|crypto|child_process)['"]/;
   const found = scripts()
     .filter(p => relative(SCRIPTS, p) !== join('lib', 'node.mjs'))
     .filter(p => direct.test(readFileSync(p, 'utf8')))

@@ -134,7 +134,8 @@ each step does real work (an edit, a command, a dispatch). It needs no run ledge
 disarms, on the first of: you say the goal is met; your last message asks a question; a
 helper is refused by the budget or the credential check; the same error comes back twice; a
 step does no work (a helper refused for usage is not work) while nothing is out, or, with only a
-background command out, after the user spoke and the step still did nothing; three continues on the same open
+background command out (not a Monitor started in this stretch), after the user spoke and the step
+still did nothing; three continues on the same open
 item; 25 steps. A step whose message only promises to wait or check back, with nothing out that
 would wake the session, is told so once before that stop applies. A usage limit is not on that
 list: the host waits and resumes, and a helper refused for usage is stated in the next continue. Each continued step's

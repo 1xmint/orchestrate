@@ -53,7 +53,7 @@ import { readProject } from './lib/project.mjs';
 import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
 import { classifyClaim, lastAssistantText, contradicts, countedPaths, namesAllPaths } from './lib/commit-claim.mjs';
-import { claimsWait, nothingOut, WAIT_FACT } from './lib/wait-claim.mjs';
+import { claimsWait, nothingOut, WAIT_FACT, SCHEDULING_TOOL } from './lib/wait-claim.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -177,10 +177,13 @@ export function scanTurn(tail) {
   const asked = /\?$/.test(tailText);
   const goalMet = /\b(goal (is )?(met|complete|completed|achieved|reached)|all (the )?(steps|tasks|todos|items) (are )?(done|complete|finished)|nothing (left|more) to do|everything (is|in the plan is) (done|complete|finished))\b/i.test(lastText);
   const monitorStarted = tools.includes('Monitor');
-  // A promise to wait or check back, unless the message ends on a question:
-  // then it is the user who is waited on.
-  const waitClaim = !asked && claimsWait(lastText);
-  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange, prompted, monitorStarted, waitClaim };
+  // A promise to wait or check back, unless the message ends on a question
+  // (then it is the user who is waited on) or the step called a tool that can
+  // wake the session from outside the payload's lists (a reminder sent into
+  // this conversation).
+  const scheduled = tools.some(n => SCHEDULING_TOOL.test(n));
+  const waitClaim = !asked && !scheduled && claimsWait(lastText);
+  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange, prompted, monitorStarted, scheduled, waitClaim };
 }
 
 // Whether the Stop payload says the host will wake this session later: a helper
@@ -231,14 +234,19 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
   const item = next && next.state === 'open' && next.text ? next.text : null;
   const sameItem = item && rec.lastItem === item ? (Number(rec.sameItem) || 0) + 1 : (item ? 1 : 0);
-  // A Monitor started in this stretch may be reported as a background command
-  // (type "shell") and still wake the session when it fires, so it is
-  // remembered until keep-going is switched off or on again.
-  const monitorSeen = Boolean(rec.monitorSeen || scan.monitorStarted);
-  // Whether this stretch was already told that nothing would wake it; work
-  // since then starts that over.
-  const waitTold = scan.progressed ? false : Boolean(rec.waitTold);
-  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null, monitorSeen, waitTold };
+  // A Monitor that runs a command may be listed as a background command (type
+  // "shell") and still wake the session when it fires. Its id is not marked,
+  // so the ids that first appear at the Stop after a step that started one are
+  // held, and only while they are still listed: once they are gone, what is
+  // left is judged as before (independent review, rounds 4 and 5).
+  const listed = String(waitingOn || '').split(',').filter(Boolean);
+  const before = new Set(String(rec.lastOut || '').split(',').filter(Boolean));
+  const monitorIds = [...new Set([...(rec.monitorIds || []), ...(scan.monitorStarted ? listed.filter(id => !before.has(id)) : [])])].filter(id => listed.includes(id));
+  // Told once per stretch that nothing listed would wake it: a step that polls
+  // and then promises again does not hear it a second time (round 5).
+  const waitTold = Boolean(rec.waitTold);
+  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null, lastOut: listed.join(','), monitorIds, waitTold };
+  delete out.monitorSeen;
   const g = shortGoal(goal);
   // `say` is the user's line when `why` carries what only the lead can use (a
   // path, a size); every other reason is already in plain words for both.
@@ -266,7 +274,11 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     // Monitor, a background command) or tell the user it cannot watch. An idle
     // step after that ends keep-going as any idle step does.
     if (!outstanding && idleKnown && scan.waitClaim) {
-      if (!rec.waitTold) return { rec: { ...out, waitTold: true }, kind: 'continue', why: `orchestrate: your last message says this session will wait or check back; ${WAIT_FACT}.` };
+      if (!waitTold) {
+        let why = `orchestrate: your last message says this session will wait or check back; ${WAIT_FACT}.`;
+        if (contextNotice) why += ` ${contextNotice}`;
+        return { rec: { ...out, waitTold: true }, kind: 'continue', why };
+      }
       return stop('the last step only waited, and nothing was running that would wake this session');
     }
     // A helper or background command is still out, or a prompt is scheduled: the
@@ -283,7 +295,7 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     // ends (independent review, 2026-10-03, rounds 1 to 3). A Monitor is listed
     // as a background command too, so once one was started in this stretch the
     // list cannot show which kind is out, and it stays a wait (round 4).
-    const settled = scan.prompted && commandsOnly && !monitorSeen && rec.waitingOn != null && rec.waitingOn === waitingOn;
+    const settled = scan.prompted && commandsOnly && monitorIds.length === 0 && rec.waitingOn != null && rec.waitingOn === waitingOn;
     if (outstanding && !settled) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn }, kind: 'wait', why: 'a helper or background command is still out' };
     if (outstanding) return stop('the step after your message did no visible work while only a background command kept running');
     return stop('the last step did no visible work (no edit, command or helper)');
@@ -401,8 +413,12 @@ function checkWaitClaim(input, state) {
   if (input.stop_hook_active || !nothingOut(input)) return null;
   if (state && state.persist && state.persist.armed) return null;
   let text = typeof input.last_assistant_message === 'string' ? input.last_assistant_message.trim() : '';
-  if (!text) text = lastAssistantText(input.transcript_path ? readTail(input.transcript_path, PERSIST_SCAN_CAP) : '');
+  const tail = input.transcript_path ? readTail(input.transcript_path, PERSIST_SCAN_CAP) : '';
+  if (!text) text = lastAssistantText(tail);
   if (!text || /\?$/.test(text.trim().replace(/[\s*_`)\]]+$/, '')) || !claimsWait(text)) return null;
+  // A reminder or scheduled task set in the recent record may wake the session
+  // from outside the payload's lists.
+  if (tail && scanTurn(tail).scheduled) return null;
   const claimHash = createHash('sha256').update(text).digest('hex').slice(0, 16);
   if (state && state.waitClaimBlocked === claimHash) return null;
   const st = state || { session_id: input.session_id };
@@ -470,8 +486,6 @@ export function check(input) {
   // with nothing armed gets this too.
   const commitClaimReasonText = checkCommitClaim(input, state);
   if (commitClaimReasonText) return { kind: 'continue', why: commitClaimReasonText };
-  const waitClaimReasonText = checkWaitClaim(input, state);
-  if (waitClaimReasonText) return { kind: 'continue', why: waitClaimReasonText };
   // This is deliberately outside auto-continue: reaching the compaction line
   // is unsafe even for an ordinary Stop. A block is once per epoch, and an
   // active Stop hook must not block itself again.
@@ -485,9 +499,12 @@ export function check(input) {
       try { writeJsonAtomic(path, store); } catch {}
       return { rec: store[key], kind: 'continue', why: `orchestrate: ${checkpointFact({ ...ctx.reading, session: ctx.reading.session || input.session_id || null })} This Stop is refused once for it.` };
     }
-    return null;
   }
-  if (!p || !p.armed) return null;
+  // After the size block, which is the more urgent of the two (round 5).
+  if (!p || !p.armed) {
+    const waitClaimReasonText = checkWaitClaim(input, state);
+    return waitClaimReasonText ? { kind: 'continue', why: waitClaimReasonText } : null;
+  }
   // A new arming starts a fresh count; the scan starts where the arming did.
   let rec = store[key] || {};
   if (rec.armedAt !== p.armedAt) rec = { armedAt: p.armedAt, lastSize: Number(p.sizeAtArm) || 0 };

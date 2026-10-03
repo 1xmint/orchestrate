@@ -99,7 +99,16 @@ release's section when it ships.
     a stretch keep-going treats what is out as something that will report;
     and a refusal with the host's words in front ("PreToolUse:Agent hook
     error:") was missed, so the match now allows that prefix while still
-    reading only the start of the result.
+    reading only the start of the result. A fifth, on the later work below,
+    passed the faster hooks and failed the wait check on four: it refused
+    messages that promise nothing ("Let me know when the deploy is done and
+    I'll check again", "we'll watch the config directory"); its fact predicted
+    more than the payload shows (a reminder sent into the conversation is not
+    listed); its continue dropped the size advice it marked as delivered; and a
+    step that polled reset it, so a poll-then-promise stretch ran to the step
+    cap. Also: a Monitor held keep-going for the rest of the stretch, and the
+    size block came after the wait check. All fixed in the commit after
+    this one.
   - **Also:** builders and debuggers check that their folder starts from the
     packet's base (Claude Code starts a helper folder from the remote's default
     branch unless `worktree.baseRef` is "head", code.claude.com/docs/en/
@@ -117,17 +126,18 @@ release's section when it ships.
     2026-10-03 on Linux, Node 22, 50 runs each (bare Node starts in about
     21 ms): the hook after every tool call 65 to 47 ms, the shell-command check
     68 to 45, the prompt hook 72 to 48, the Stop hook 69 to 47.
-  - **Waiting on nothing** (`docs/pause.md`, `lib/wait-claim.mjs`): a closing
-    message that promises to wait or check back ("I'll let you know when CI
-    finishes") while the Stop payload lists nothing out is sent back once with
-    that fact; with keep-going on it is one continue, and an idle step after it
-    ends keep-going in plain words. Idea C's "waits that could never wake"
-    (about four hours on a check that never reported back) is the failure; the
-    host wakes a session only for what the payload lists (2.1.288 type file:
-    "Empty array when nothing is in flight"). Not measured; it rides the
-    candidate bundle. Cost: one extra turn when it fires, never when a helper,
-    command, Monitor or scheduled prompt is out or the user is the one waited
-    on.
+  - **Waiting on nothing** (`docs/pause.md`, `lib/wait-claim.mjs`): when one
+    of the closing message's last three sentences promises, as "I", to wait or
+    check back on something outside the conversation or at a time ("I'll let
+    you know when CI finishes") and the Stop payload lists nothing out, the
+    Stop is sent back once with what the payload shows; with keep-going on it
+    is one continue per stretch, and the next step that only waits ends
+    keep-going in plain words. Idea C's "waits that could never wake" (about
+    four hours on a check that never reported back) is the failure; the
+    payload lists what the host wakes a session for (2.1.288 type file: "Empty
+    array when nothing is in flight"). Not measured; it rides the candidate
+    bundle. Cost: one extra turn when it fires, never when something is out,
+    the user is the one waited on, or the record shows a reminder was set.
   - **Not done, and why.** Step 0 and step 3 need the owner's machine and
     records; step 2a (which hook notes Claude never acts on) needs the session
     records too. Left for the owner, each with the audit's evidence in PR #52:

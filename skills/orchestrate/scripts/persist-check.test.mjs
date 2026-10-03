@@ -205,23 +205,29 @@ test('the same work out after a wait with nothing done since is a stop; other wo
   assert.equal(worked.rec.waitingOn, null, 'work in between starts the wait over');
 });
 
-test('once a Monitor was started, a background command listed as out is never taken for a dev server', () => {
+test('a Monitor started in this stretch holds the wait while what appeared with it is still listed', () => {
   // A Monitor that runs a command may be listed as type "shell", the same as a
   // dev server; it still wakes the session when it fires (independent review,
-  // round 4). The stretch remembers that one was started, through waits and
-  // continues, so the "user spoke, nothing done" stop does not end it.
+  // round 4). Its id is not marked, so what first appears at the Stop after
+  // the step that started it is held, and only while it is still listed
+  // (round 5): once it is gone, a dev server left alone ends keep-going again.
   const idle = { progressed: false, denied: false, errors: [], asked: false, goalMet: false };
-  const started = persistDecision({ rec: {}, scan: { ...idle, progressed: true, monitorStarted: true } });
+  const server = persistDecision({ rec: {}, scan: { ...idle, progressed: true }, waitingOn: 'srv' });
+  assert.equal(server.rec.lastOut, 'srv');
+  const started = persistDecision({ rec: server.rec, scan: { ...idle, progressed: true, monitorStarted: true }, waitingOn: 'm1,srv' });
   assert.equal(started.kind, 'continue');
-  assert.equal(started.rec.monitorSeen, true);
-  const wait = persistDecision({ rec: started.rec, scan: idle, outstanding: true, waitingOn: 'm1', commandsOnly: true });
+  assert.deepEqual(started.rec.monitorIds, ['m1'], 'only what appeared with the Monitor, not the server already out');
+  const wait = persistDecision({ rec: started.rec, scan: idle, outstanding: true, waitingOn: 'm1,srv', commandsOnly: true });
   assert.equal(wait.kind, 'wait');
-  assert.equal(wait.rec.monitorSeen, true, 'carried through a wait');
-  const asked = persistDecision({ rec: wait.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'm1', commandsOnly: true });
+  assert.deepEqual(wait.rec.monitorIds, ['m1'], 'carried through a wait');
+  const asked = persistDecision({ rec: wait.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'm1,srv', commandsOnly: true });
   assert.equal(asked.kind, 'wait', 'a status question while the Monitor runs keeps keep-going on');
-  // Without a Monitor in the stretch, the same step ends it as before.
-  const plain = persistDecision({ rec: { ...wait.rec, monitorSeen: false }, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'm1', commandsOnly: true });
-  assert.equal(plain.kind, 'stop');
+  // The Monitor ends; only the server is left.
+  const gone = persistDecision({ rec: asked.rec, scan: idle, outstanding: true, waitingOn: 'srv', commandsOnly: true });
+  assert.equal(gone.kind, 'wait');
+  assert.deepEqual(gone.rec.monitorIds, []);
+  const ended = persistDecision({ rec: gone.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'srv', commandsOnly: true });
+  assert.equal(ended.kind, 'stop', 'the server alone, the user spoke, nothing done: keep-going ends as before');
   // scanTurn reports the Monitor call.
   const used = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'm1', name: 'Monitor', input: { command: 'tail -f log' } }] } });
   assert.equal(scanTurn(used).monitorStarted, true);
@@ -432,24 +438,39 @@ test('a helper\'s own Stop (agent_id present) is silent even over a contradicted
 // A closing promise to wait or check back, with the Stop payload saying nothing
 // is out that could wake the session (lib/wait-claim.mjs, docs/pause.md).
 
-test('keep-going: a step that only promises to wait, with nothing out, hears the fact once, then ends', () => {
+test('keep-going: a step that only promises to wait, with nothing out, hears the fact once per stretch, then ends', () => {
   const idle = { progressed: false, denied: false, errors: [], asked: false, goalMet: false, waitClaim: true };
   const first = persistDecision({ rec: { steps: 2 }, scan: idle, idleKnown: true });
   assert.equal(first.kind, 'continue');
-  assert.match(first.why, /^orchestrate: your last message says this session will wait or check back; nothing is out that would wake this session/);
+  assert.match(first.why, /^orchestrate: your last message says this session will wait or check back; the Stop payload lists no helper, background command, Monitor or scheduled prompt that would wake this session\.$/);
   assert.equal(first.rec.waitTold, true);
   const second = persistDecision({ rec: first.rec, scan: idle, idleKnown: true });
   assert.equal(second.kind, 'stop');
   assert.match(second.why, /only waited, and nothing was running that would wake this session/);
-  // Work in between starts it over: a later wait on nothing hears the fact again.
-  const worked = persistDecision({ rec: first.rec, scan: { ...idle, progressed: true, waitClaim: false } });
-  assert.equal(worked.rec.waitTold, false);
-  assert.equal(persistDecision({ rec: worked.rec, scan: idle, idleKnown: true }).kind, 'continue');
+  // A step that polls and then promises again does not hear it a second time:
+  // the next idle promise ends keep-going (independent review, round 5).
+  const polled = persistDecision({ rec: first.rec, scan: { ...idle, progressed: true } });
+  assert.equal(polled.kind, 'continue');
+  assert.equal(polled.rec.waitTold, true);
+  assert.equal(persistDecision({ rec: polled.rec, scan: idle, idleKnown: true }).kind, 'stop');
+  // The size advice rides along, as on any continue: it is marked delivered.
+  assert.match(persistDecision({ rec: {}, scan: idle, idleKnown: true, contextNotice: '[orchestrate · context] size note' }).why, /size note$/);
   // Unknown lists, something out, or no promise: as before.
   assert.equal(persistDecision({ rec: {}, scan: idle, idleKnown: false }).kind, 'stop', 'an older host: the plain no-work stop');
   assert.match(persistDecision({ rec: {}, scan: idle, idleKnown: false }).why, /no visible work/);
   assert.equal(persistDecision({ rec: {}, scan: idle, outstanding: true }).kind, 'wait');
   assert.match(persistDecision({ rec: {}, scan: { ...idle, waitClaim: false }, idleKnown: true }).why, /no visible work/);
+});
+
+test('a step that called a scheduling tool is not read as promising a wait on nothing', () => {
+  const steps = [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 's1', name: 'mcp__claude-code-remote__send_later', input: {} }] } }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: "I'll check back on CI in 20 minutes." }] } }),
+  ].join('\n');
+  const scan = scanTurn(steps);
+  assert.equal(scan.scheduled, true);
+  assert.equal(scan.waitClaim, false);
+  assert.equal(scanTurn(steps.split('\n')[1]).waitClaim, true, 'the same words alone are a claim');
 });
 
 test('without keep-going: a closing promise to wait with nothing out is refused once with the fact', () => {
@@ -459,7 +480,7 @@ test('without keep-going: a closing promise to wait with nothing out is refused 
   assert.equal(r.status, 0);
   const out = JSON.parse(r.stdout);
   assert.equal(out.decision, 'block');
-  assert.match(out.reason, /^Your last message says this session will wait or check back; nothing is out that would wake this session/);
+  assert.match(out.reason, /^Your last message says this session will wait or check back; the Stop payload lists no helper, background command, Monitor or scheduled prompt that would wake this session\./);
   assert.match(out.reason, /A reply to this block becomes the report the user sees\.$/);
   assert.equal(stop().stdout.trim(), '', 'the same message is refused once');
 });
@@ -481,6 +502,19 @@ test('without keep-going: no refusal when something is out, the lists are unknow
     assert.equal(r.status, 0, name);
     assert.equal(r.stdout.trim(), '', name);
   }
+});
+
+test('without keep-going: a reminder set in the record means the promise may be kept, so nothing is said', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const transcript_path = join(home, 'transcript.jsonl');
+  writeFileSync(transcript_path, [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 's1', name: 'mcp__claude-code-remote__send_later', input: { delay_minutes: 20 } }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 's1', content: 'scheduled' }] } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: "I'll check back on CI in 20 minutes." }] } },
+  ].map(r => JSON.stringify(r)).join('\n') + '\n');
+  const r = run({ hook_event_name: 'Stop', session_id: 'sess-w3', stop_hook_active: false, transcript_path, last_assistant_message: "I'll check back on CI in 20 minutes.", background_tasks: [], session_crons: [] }, home);
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
 });
 
 test('no git repo at cwd is silent, whatever the transcript claims', () => {
