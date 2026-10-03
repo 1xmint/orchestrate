@@ -877,10 +877,12 @@ test('ledger: a return naming no task is matched to the one dispatch still out, 
   const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
   const at = new Date().toISOString();
   state.dispatches = [
-    { at, agent: 'orch-implementer', model: 'sonnet', task: '9-9-0001', run: repo.runId, toolUseId: 'toolu_first' },
+    { at, agent: 'orch-implementer', model: 'sonnet', task: '9-9-0001', run: repo.runId, toolUseId: 'toolu_first', agentId: 'h-first' },
     { at, agent: 'orch-implementer', model: 'sonnet', task: '9-9-0002', run: repo.runId, toolUseId: 'toolu_second' },
   ];
-  state.returned = [{ at, agent: 'implementer', agentId: 'h-first', toolUseId: 'toolu_first', task: '9-9-0001', status: 'DONE' }];
+  // Back by its helper id only: the case the old check (return time alone,
+  // or the call id) counted as still out.
+  state.returned = [{ at, agent: 'implementer', agentId: 'h-first', task: '9-9-0001', status: 'DONE' }];
   writeFileSync(sessionPath, JSON.stringify(state));
   const out = run('ledger.mjs', {
     hook_event_name: 'SubagentStop', session_id: 'open-row', cwd: repo.dir, agent_id: 'h-second',

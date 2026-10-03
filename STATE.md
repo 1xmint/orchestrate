@@ -246,12 +246,17 @@ release's section when it ships.
     turn-check and ledger, then one review of the fixes). Several hooks write
     the session file at once and each wrote its whole copy back: a helper's
     return row was lost in 11 of 40 measured races, taking the review hold
-    with it. A save now takes a short lock beside the file (a directory,
-    stale after two seconds, never waited on for more than a fifth of a
-    second), reads the file as it is and writes back only the keys it
-    changed; a hook that appends to a list (a dispatch row, a return row)
-    loads, adds and writes inside the lock (`updateSession`), since two
-    appends to one key would still lose one. Router: a run made by
+    with it. A save now takes a short lock beside the file (a directory; one
+    left stale is taken over, and a hook waits for it only briefly), reads
+    the file as it is and writes back only the keys it changed; a hook that
+    changes a list another hook appends to (the guard's dispatch row, the
+    ledger's return row, the mark on a dispatch row when its helper comes
+    back) loads, changes and writes inside the lock (`updateSession`), since
+    a merge by key keeps only one of two such changes. An independent
+    review of that fix raced the real hooks: 0 rows lost where the old code
+    lost 10 dispatch, 12 refusal and 6 return rows in ten rounds; it found
+    the dispatch-row mark still outside the lock (5 of 31 rows lost), now
+    moved in. Router: a run made by
     `run-init.mjs` and left unfilled armed 25 steps toward the template's
     own words, because a placeholder after a label or a list marker counted
     as written (one check now, `writtenLine`); a "continue" that arms
@@ -270,9 +275,14 @@ release's section when it ships.
     still there (`seenEpoch` in the loop's record) or the policy says a
     fresh conversation serves better: a step of five or more calls after
     each summary got past the old check, and the loop ran through four
-    summaries. The work a step did before a refused claim is carried to
-    the next Stop, so the reply in words is not judged a step that did
-    nothing.
+    summaries; back at the line by ordinary work after several summaries,
+    it stops saying that instead, since one more summary would help there
+    but drops detail. The work a step did before a refused claim, a
+    refused helper included, is carried to the next Stop, so the reply in
+    words is not judged a step that did nothing and a budget refusal still
+    ends the loop. The guard change (`guard-agent.mjs` saves through
+    `updateSession`) was reviewed: the same refusals and allows on crafted
+    payloads before and after.
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line

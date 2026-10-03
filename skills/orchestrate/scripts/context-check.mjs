@@ -26,7 +26,7 @@ import { homedir } from 'node:os';
 import { sampleContext, agentTranscriptPath, markAnnounced, storedAdvisedKey } from './lib/context-store.mjs';
 import { modeNote, modeOf } from './lib/modes.mjs';
 import { cappedNote, helperFiles, nativeAgent, roleMaxTurns, segmentTurns } from './lib/workers.mjs';
-import { loadSession, saveSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
+import { loadSession, saveSession, updateSession, routerSettings, findRepoRoot } from './lib/tier.mjs';
 import { loadPolicy, sizeBudget } from './lib/policy.mjs';
 import { leftoverNote, anyHelperRunning } from './lib/helper-leftovers.mjs';
 
@@ -237,7 +237,8 @@ function parseToolResponse(raw) {
 // which matches the `toolUseId` guard-agent.mjs stored on the dispatch row,
 // and its `tool_response` carries `agentId` and a `status` of "completed"
 // (a foreground helper already back) or "async_launched" (a background one,
-// still running). Marks the row in place; saves only when it changed.
+// still running). Marks the row in place and says whether it changed; the
+// caller writes it under the lock only then.
 function markDispatchReturn(state, input) {
   if (input.tool_name !== 'Agent' && input.tool_name !== 'Task') return false;
   const toolUseId = input.tool_use_id ? String(input.tool_use_id) : null;
@@ -288,6 +289,11 @@ export function check(input) {
   }
   if (!routerSettings().enabled) return '';
   const out = [];
+  // The dispatch row is marked inside the session file's lock: marked on the
+  // loaded copy and saved with the rest, the whole list went back and a row
+  // the dispatch guard added meanwhile was lost (independent review of the
+  // hook-fix batch, 2026-10-03: 5 of 31 rows in a measured race).
+  if (input.tool_name === 'Agent' || input.tool_name === 'Task') updateSession(session, s => markDispatchReturn(s, input));
   const state = loadSession(session);
   const prevWorkCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : 0;
   const workCalls = stepWorkCalls(prevWorkCalls, input.tool_name, input.tool_input);
@@ -334,7 +340,6 @@ export function check(input) {
     }
     if (workCallsChanged) state.workCalls = { count: workCalls };
     const workChanged = trackWork(state, input);
-    const returnChanged = markDispatchReturn(state, input);
     // Helper folders and branches left behind: once every helper of the session
     // has returned and something is left, said once, as a fact, while the lead
     // can still act on it. Nothing is removed.
@@ -353,7 +358,7 @@ export function check(input) {
         state.leftoverTold = true;
       }
     }
-    if (leftoverTold || streakTold || (state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged || returnChanged) { try { saveSession(state); } catch {} }
+    if (leftoverTold || streakTold || (state.mode || null) !== before || capped || longTold || workCallsChanged || workChanged) { try { saveSession(state); } catch {} }
   } else if (workCallsChanged) {
     try { saveSession({ v: 1, session_id: session, started: new Date().toISOString(), workCalls: { count: workCalls } }); } catch {}
   }

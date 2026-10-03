@@ -242,3 +242,23 @@ test('a prompt the host wrote (source "system") arms nothing and adds nothing', 
   assert.equal(r.stdout.trim(), '');
   assert.equal(armed(home, 's10'), false);
 });
+
+test('an explicit keep-going ask in a new session gets the full card, never the short one beside it', () => {
+  // Independent review of the hook-fix batch: "small" did not know the prompt
+  // armed keep-going, so the short card ("just do it yourself") went out with
+  // the full one.
+  const home = makeHome(); const repo = makeRepo(false);
+  const out = say(home, repo, 'keep going until the login page works', 's11');
+  assert.equal(armed(home, 's11'), true);
+  assert.match(out, FULL_CARD);
+  assert.doesNotMatch(out, /looks like a small, one-step task/);
+});
+
+test('the run page printed at a resume is not printed again with the card', () => {
+  const home = makeHome(); const repo = makeRepo(true);
+  const resumed = start(home, repo, 'resume', 's12');
+  assert.match(resumed, /\[orchestrate · resume\] run /);
+  const out = say(home, repo, 'Add a CSV export button to the reports page and make sure the existing tests still pass', 's12');
+  assert.match(out, FULL_CARD);
+  assert.doesNotMatch(out, /\[orchestrate · run /, 'the resume already showed it');
+});

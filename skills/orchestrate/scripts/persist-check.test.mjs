@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanTurn, persistDecision, shortGoal, errorKey, endMessage, workOut, outKey, QUOTA_FACT, PERSIST_STEP_CAP, afterSummaryFact } from './persist-check.mjs';
+import { scanTurn, persistDecision, shortGoal, errorKey, endMessage, workOut, outKey, QUOTA_FACT, PERSIST_STEP_CAP, afterSummaryFact, freshFact } from './persist-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'persist-check.mjs');
@@ -603,7 +603,10 @@ test('keep-going: still at the compact line after a summary ends the loop; befor
   assert.equal(after.why, afterSummaryFact(reading));
   assert.match(after.why, /measured ~150k \(the compact line is ~\d+k\) after 2 summaries; another will not bring it below the line\./);
   assert.equal(after.say, 'the conversation was still close to its size limit after a summary');
-  assert.equal(persistDecision({ rec: {}, scan: work, contextAdvice: { action: 'compact', fresh: true }, contextReading: reading, epoch: 'e1' }).kind, 'stop', 'summarised often enough already');
+  const fresh = persistDecision({ rec: {}, scan: work, contextAdvice: { action: 'compact', fresh: true }, contextReading: reading, epoch: 'e1' });
+  assert.equal(fresh.kind, 'stop', 'summarised often enough already');
+  assert.equal(fresh.why, freshFact(reading), 'not "another will not bring it below the line": here one would');
+  assert.equal(fresh.say, 'the conversation has been summarised 2 times and is near its size limit again');
   assert.equal(persistDecision({ rec: {}, scan: work, contextAdvice: compact, contextReading: reading, epoch: 'e1' }).rec.seenEpoch, 'e1', 'the first Stop only records its epoch');
 });
 
@@ -649,4 +652,26 @@ test('keep-going: the work a step did before a refused claim still counts at the
   const out = JSON.parse(second.stdout);
   assert.equal(out.decision, 'block', 'the step before the claim did work, so keep-going goes on');
   assert.doesNotMatch(out.reason, /gives 42/, 'the claim is not refused again');
+});
+
+test('keep-going: a helper refused (budget or credential) before a refused claim still ends the loop at the next Stop', () => {
+  // Independent review of the hook-fix batch: the carry kept the step's work
+  // and dropped its refusal, so keep-going went on past a budget refusal.
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const transcript_path = join(home, 'transcript.jsonl');
+  const claim = 'Done. All 42 tests pass.';
+  writeFileSync(transcript_path, [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: {} }, { type: 'tool_use', id: 'a1', name: 'Agent', input: {} }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'e1', content: 'ok' }, { type: 'tool_result', tool_use_id: 'a1', is_error: true, content: 'orchestrate budget: the run is at its cap' }] } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: claim }] } },
+  ].map(r => JSON.stringify(r)).join('\n') + '\n');
+  writeSession(home, 'sess-denied', { persist: { armed: true, armedAt: new Date().toISOString(), goal: 'finish the export', sizeAtArm: 0 } });
+  const first = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'sess-denied', transcript_path, last_assistant_message: claim, background_tasks: [], session_crons: [] }, home).stdout);
+  assert.equal(first.decision, 'block');
+  assert.match(first.reason, /gives 42 as a count/);
+  const reply = 'Correction: no test output in this session shows 42 passing.';
+  appendFileSync(transcript_path, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: reply }] } }) + '\n');
+  const out = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'sess-denied', stop_hook_active: true, transcript_path, last_assistant_message: reply, background_tasks: [], session_crons: [] }, home).stdout);
+  assert.equal(out.decision, undefined, 'not refused again');
+  assert.match(out.systemMessage, /^Keep-going stopped: a helper was refused \(budget or credential\)/);
 });

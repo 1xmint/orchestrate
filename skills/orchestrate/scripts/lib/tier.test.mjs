@@ -156,12 +156,15 @@ test('writtenLine refuses the run template\'s own lines and keeps real ones', ()
     '', '   ', '- <evidence that would prove it, one line each; a command, a file, a page state>',
     'Why it matters: <what the user gets when it is done>', '<~N fresh sessions>',
     'When it ends, met or dropped: say which and why', '{{GOAL}}', 'Goal: {{GOAL}}',
-    'Pickup confidence: high | medium | low', '- Status: open | done', 'Why it matters:',
+    'Pickup confidence: high | medium | low', 'Resume risk: none | mild | serious', 'Why it matters:',
+    'Why it matters: <What the user gets>', 'Done when: <TODO fill in>', 'Sessions: <N>',
   ]) assert.equal(writtenLine(t), false, JSON.stringify(t));
   for (const t of [
     '- `pytest -q` passes', 'Why it matters: notes stop piling up',
     'Run `rg TODO | wc -l` and get 0', 'The page renders <Header /> with the new logo',
     'Spec: <https://example.com/spec>', '1. the export button downloads a CSV',
     'Check: `a | b` prints ok', 'Either the build passes or we roll back | noted in STATE.md as the plan',
+    'Check: npm test | grep pass', 'Verify: ls dist | wc -l', 'Status: open | done',
+    'Shows: <Header />', 'Renders: <Button onClick={go}>',
   ]) assert.equal(writtenLine(t), true, JSON.stringify(t));
 });

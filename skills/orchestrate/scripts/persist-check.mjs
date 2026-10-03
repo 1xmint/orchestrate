@@ -260,12 +260,17 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   // path, a size); every other reason is already in plain words for both.
   const stop = (why, say) => ({ rec: out, kind: 'stop', why, ...(say ? { say } : {}) });
 
-  // Still near the size limit right after a summary, or past it again after
-  // several: another summary will not help, so the loop ends. The policy's
-  // `fresh` says this session has been summarised often enough that a fresh
-  // conversation serves better.
-  if (contextAdvice && (contextAdvice.action === 'investigate' || (contextAdvice.action === 'compact' && (afterSummary || contextAdvice.fresh)))) {
+  // Still near the size limit right after a summary: another summary will not
+  // help, so the loop ends. Back at the line by ordinary work after several
+  // (the policy's `fresh`): another would help but drops more detail, and the
+  // policy prefers a fresh conversation, so the loop ends there too, saying
+  // which of the two it was (independent review of the hook-fix batch).
+  if (contextAdvice && (contextAdvice.action === 'investigate' || (contextAdvice.action === 'compact' && afterSummary))) {
     return stop(afterSummaryFact(contextReading), 'the conversation was still close to its size limit after a summary');
+  }
+  if (contextAdvice && contextAdvice.action === 'compact' && contextAdvice.fresh) {
+    const n = Number(contextReading && contextReading.compactions) || 0;
+    return stop(freshFact(contextReading), `the conversation has been summarised ${n === 1 ? 'once' : `${n} times`} and is near its size limit again`);
   }
   if (scan.denied) return stop('a helper was refused (budget or credential)');
   // A refusal from one of this plugin's own checks names roles and helper
@@ -348,6 +353,17 @@ export function afterSummaryFact(reading) {
   const at = reading && reading.tokens != null ? thresholds(reading).compactAt : null;
   const n = Number(reading && reading.compactions) || 0;
   return `the conversation measured ${used}${at ? ` (the compact line is ${k(at)})` : ''} after ${n > 1 ? `${n} summaries` : 'a summary'}; another will not bring it below the line.`;
+}
+
+// At the compact line again after several summaries, by ordinary work: one
+// more summary would bring it below the line, and drop more detail. No claim
+// about a save point, which this does not check.
+export function freshFact(reading) {
+  const k = n => `~${Math.round(n / 1000)}k`;
+  const used = reading && reading.tokens != null ? k(reading.tokens) : 'an unknown size';
+  const at = reading && reading.tokens != null ? thresholds(reading).compactAt : null;
+  const n = Number(reading && reading.compactions) || 0;
+  return `the conversation measured ${used}${at ? ` (the compact line is ~${Math.round(at / 1000)}k)` : ''} after ${n === 1 ? 'a summary' : `${n} summaries`}; each summary drops detail, and after this many the size policy prefers a fresh conversation.`;
 }
 
 // "No checkpoint since <time>; context N of M." The size and the epoch start
@@ -567,7 +583,9 @@ export function check(input) {
       try { if (input.transcript_path) size = statSync(input.transcript_path).size; } catch {}
       const from = Math.min(Number(base.lastSize) || 0, size);
       const before = input.transcript_path && size > from ? scanTurn(readTail(input.transcript_path, Math.min(size - from, PERSIST_SCAN_CAP))) : null;
-      const carry = before ? { progressed: before.progressed, errors: before.errors, monitorStarted: before.monitorStarted, lastChange: before.lastChange, quotaRefused: before.quotaRefused } : null;
+      // Everything the step did, not what its last message says (asked, goal
+      // met, a promise to wait): the reply's own message decides those.
+      const carry = before ? { progressed: before.progressed, denied: before.denied, quotaRefused: before.quotaRefused, errors: before.errors, tools: before.tools, lastChange: before.lastChange, prompted: before.prompted, monitorStarted: before.monitorStarted, scheduled: before.scheduled } : null;
       store[key] = { ...base, lastBlock: 'claim', ...(size ? { lastSize: size } : {}), ...(carry ? { carry } : {}) };
       try { writeJsonAtomic(path, store); } catch {}
     }
@@ -618,10 +636,9 @@ export function check(input) {
   if (atCompact) { try { checkpointSaved = hasCheckpoint(input.session_id || null, ctx.reading, { runMd: bound, permissionMode: modeOf(input) }); } catch {} }
   const scan = scanTurn(tail);
   if (carry) {
-    scan.progressed = scan.progressed || Boolean(carry.progressed);
+    for (const k of ['progressed', 'denied', 'quotaRefused', 'prompted', 'monitorStarted', 'scheduled']) scan[k] = Boolean(scan[k] || carry[k]);
     scan.errors = [...(Array.isArray(carry.errors) ? carry.errors : []), ...scan.errors];
-    scan.monitorStarted = scan.monitorStarted || Boolean(carry.monitorStarted);
-    scan.quotaRefused = scan.quotaRefused || Boolean(carry.quotaRefused);
+    scan.tools = (Number(scan.tools) || 0) + (Number(carry.tools) || 0);
     if (!scan.lastChange && carry.lastChange) scan.lastChange = carry.lastChange;
   }
   const dec = persistDecision({ rec, scan, contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input), idleKnown: nothingOut(input), checkpointSaved, epoch: ctx && ctx.reading ? contextEpoch(ctx.reading) : null });

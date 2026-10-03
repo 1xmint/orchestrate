@@ -95,13 +95,14 @@ export function writtenLine(line) {
   const value = (label ? label[2] : v).trim();
   if (!value) return false;
   // The template's placeholders are prose in angle brackets ("<what the user
-  // gets ...>", "<~N fresh sessions>"); a component (<Header />) or a link
-  // (<https://...>) in a real line is not one.
-  if (/^<[^>]*>\W*$/.test(value) && !/^<(?:https?:\/\/|\/?[A-Z])/.test(value)) return false;
-  // The template's list of one- or two-word alternatives after its own label
-  // ("Pickup confidence: high | medium | low"); a shell pipe or prose with a
-  // bar in it is a real line (review of the hook fixes, 2026-10-03).
-  if (label && !/`/.test(value) && /^\s*[\w-]+(?:\s[\w-]+)?(?:\s*\|\s*[\w-]+(?:\s[\w-]+)?)+\s*$/.test(value)) return false;
+  // gets ...>", "<~N fresh sessions>", "<N>"); a component (<Header />,
+  // <Button onClick={go}>) or a link (<https://...>) in a real line is not one.
+  if (/^<[^>]*>\W*$/.test(value) && !/^<(?:https?:\/\/|\/?[A-Z][a-z]\w*(?:\s*\/?>|\s+[\w-]+=))/.test(value)) return false;
+  // The template's list of one-word alternatives after its own label
+  // ("Pickup confidence: high | medium | low"); a shell pipe ("npm test |
+  // grep pass") or prose with a bar in it is a real line (independent review
+  // of the hook-fix batch, 2026-10-03).
+  if (label && /^\s*\w+(?:\s*\|\s*\w+){2,}\s*$/.test(value)) return false;
   return true;
 }
 
@@ -175,7 +176,8 @@ export function sessionPath(sessionId) {
 // (a dispatch row, a return row): a merge by top-level key would keep only one
 // of two such appends (review of the hook fixes, 2026-10-03). `init` makes the
 // state when there is no file yet; without it nothing is written. `fn` must
-// not save the session itself. Returns what `fn` returns, or null.
+// not save the session itself, and returns false when it changed nothing (then
+// nothing is written). Returns what `fn` returns, or null.
 export function updateSession(sessionId, fn, init = null) {
   const path = sessionPath(sessionId);
   try {
@@ -186,6 +188,7 @@ export function updateSession(sessionId, fn, init = null) {
         s = init();
       }
       const r = fn(s);
+      if (r === false) return false;   // nothing changed: nothing written
       s.updated = new Date().toISOString();
       writeJsonAtomic(path, s);
       return r === undefined ? null : r;

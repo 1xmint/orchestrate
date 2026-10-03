@@ -65,19 +65,23 @@ test('updateSession: appends to one list from separate processes keep every row'
   const home = mkdtempSync(join(tmpdir(), 'orch-update-race-'));
   mkdirSync(dirname(sessionFile(home)), { recursive: true });
   writeFileSync(sessionFile(home), JSON.stringify({ v: 1, session_id: 's1', returned: [] }));
+  // Every writer waits for the same moment, so the three really collide; the
+  // locked steps take about 30 ms in all, well inside the lock's wait.
+  const go = Date.now() + 600;
   const body = i => `import { updateSession } from ${JSON.stringify(TIER)};
+    while (Date.now() < ${go}) {}
     updateSession('s1', s => {
-      const until = Date.now() + 15; while (Date.now() < until) {}   // a slow write
+      const until = Date.now() + 8; while (Date.now() < until) {}   // a slow write
       s.returned = Array.isArray(s.returned) ? s.returned : [];
       s.returned.push({ agentId: 'h${i}' });
     });`;
-  const writers = Array.from({ length: 4 }, (_, i) => new Promise(resolve => {
+  const writers = Array.from({ length: 3 }, (_, i) => new Promise(resolve => {
     const p = spawn(process.execPath, ['--input-type=module', '-e', body(i)], { env: { ...process.env, HOME: home, USERPROFILE: home }, stdio: 'ignore' });
     p.on('exit', resolve);
   }));
   await Promise.all(writers);
   const s = JSON.parse(readFileSync(sessionFile(home), 'utf8'));
-  assert.deepEqual(s.returned.map(r => r.agentId).sort(), ['h0', 'h1', 'h2', 'h3']);
+  assert.deepEqual(s.returned.map(r => r.agentId).sort(), ['h0', 'h1', 'h2']);
   assert.equal(existsSync(`${sessionFile(home)}.lock`), false, 'no lock is left behind');
 });
 
@@ -86,10 +90,11 @@ test('updateSession: no file and no starting state changes nothing; with one, th
   const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import { updateSession } from ${JSON.stringify(TIER)};
     const a = updateSession('s1', s => { s.x = 1; return 'ran'; });
     const b = updateSession('s1', s => { s.returned = [{ agentId: 'h1' }]; return 'ran'; }, () => ({ v: 1, session_id: 's1' }));
-    console.log(JSON.stringify([a, b]));`], { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
+    const c = updateSession('s1', s => { s.x = 2; return false; });
+    console.log(JSON.stringify([a, b, c]));`], { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout.trim()), [null, 'ran']);
+  assert.deepEqual(JSON.parse(r.stdout.trim()), [null, 'ran', false]);
   const s = JSON.parse(readFileSync(sessionFile(home), 'utf8'));
-  assert.equal(s.x, undefined, 'the first call had no file and no starting state');
+  assert.equal(s.x, undefined, 'the first call had no file and no starting state, and the third said it changed nothing');
   assert.deepEqual(s.returned, [{ agentId: 'h1' }]);
 });
