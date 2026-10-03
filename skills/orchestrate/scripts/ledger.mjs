@@ -24,7 +24,7 @@
 import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, openSync, readSync, closeSync, fstatSync, createHash, spawnSync } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
+import { DIR, sanitizeId, loadSession, updateSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole, advisorDollars } from './lib/prices.mjs';
 import { advisorTotals } from './lib/context-scan.mjs';
 import { roleMaxTurns, segmentTurns, runningExternal, nativeAgent, helperFiles } from './lib/workers.mjs';
@@ -449,8 +449,12 @@ function dispatchFor(input, task) {
     const native = input.agent_id && input.transcript_path ? nativeAgent(ds, helperFiles(input.transcript_path), input.agent_id) : null;
     if (native && native.dispatch) return native.dispatch;
     if (task) { const list = ds.filter(d => d && d.task === task); return list[list.length - 1] || null; }
-    const back = new Set((Array.isArray(state && state.returned) ? state.returned : []).map(r => r && r.toolUseId).filter(Boolean));
-    const open = ds.filter(d => d && !d.returnedAt && !(d.toolUseId && back.has(d.toolUseId)));
+    // A row is open while nothing says its helper came back: no returnedAt, and
+    // neither its helper id nor its call id among the returns (a background
+    // helper never gets returnedAt; its return carries its id).
+    const rs = Array.isArray(state && state.returned) ? state.returned : [];
+    const back = new Set(rs.flatMap(r => (r ? [r.toolUseId, r.agentId] : [])).filter(Boolean).map(String));
+    const open = ds.filter(d => d && !d.returnedAt && !(d.toolUseId && back.has(String(d.toolUseId))) && !(d.agentId && back.has(String(d.agentId))));
     return open.length === 1 ? open[0] : null;
   } catch { return null; }
 }
@@ -821,8 +825,10 @@ function main() {
   // What came back, against this session's dispatch records, so the router can
   // say which helpers never returned after a usage limit stopped them.
   try {
-    const state = input.session_id && loadSession(input.session_id);
-    if (state) {
+    // Loaded, changed and written under the session file's lock, so a return
+    // row filed while another hook saves is never dropped (review of the
+    // hook-fix batch, 2026-10-03).
+    if (input.session_id) updateSession(input.session_id, state => {
       state.returned = Array.isArray(state.returned) ? state.returned.slice(-199) : [];
       // toolUseId is the id of the Agent call that started this helper, the
       // same one guard-agent.mjs stored on the dispatch row, so the worker
@@ -832,8 +838,7 @@ function main() {
       // reads this to hold the lead's finish once, without re-reading the
       // packet or the return file.
       state.returned.push({ at: new Date().toISOString(), agent: normalizeRole(agentType), agentId: input.agent_id ? String(input.agent_id) : null, toolUseId: returnToolUseId(input, state.dispatches), task: r.task || null, status: r.status || null, ...(r.reviewOf ? { reviewOf: r.reviewOf } : {}), ...(shortened.long ? { longBytes: shortened.bytes } : {}), ...(r.verdict ? { verdict: r.verdict } : {}), ...(dispatch && dispatch.parent ? { parent: dispatch.parent } : {}), ...(cap.capped ? { capped: true, turns: usage.turns, cap: maxTurns, progress: dispatch && dispatch.progress ? dispatch.progress : null } : {}), ...(noEvidence.note ? { noEvidence: true } : {}), ...(review.note ? { reviewGated: true } : {}), ...(dirty.note ? { dirtyWorktree: true } : {}) });
-      saveSession(state);
-    }
+    });
   } catch {}
 
   // Deliberately silent. SubagentStop context is delivered into the helper that

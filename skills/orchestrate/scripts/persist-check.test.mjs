@@ -4,11 +4,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanTurn, persistDecision, shortGoal, errorKey, endMessage, workOut, outKey, QUOTA_FACT, PERSIST_STEP_CAP } from './persist-check.mjs';
+import { scanTurn, persistDecision, shortGoal, errorKey, endMessage, workOut, outKey, QUOTA_FACT, PERSIST_STEP_CAP, afterSummaryFact } from './persist-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'persist-check.mjs');
@@ -580,4 +580,73 @@ test('the user speaking is read the way the save point reads it: notes stuck to 
 test('a helper\'s report that quotes a budget or guard refusal is not a refusal of this call', () => {
   const quoted = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a1', content: 'Done; note that orchestrate guard: refused one command along the way.' }] } });
   assert.equal(scanTurn(quoted).denied, false);
+});
+
+test('keep-going: still at the compact line after a summary ends the loop; before one, a missing save point is said once per epoch', () => {
+  // Review of the hook fixes, 2026-10-03: a step of five or more calls after
+  // each summary got past "investigate", and the loop ran through four
+  // summaries.
+  const work = { progressed: true, denied: false, errors: [], asked: false, goalMet: false };
+  const reading = { tokens: 150000, capacity: 200000, compactions: 2 };
+  const compact = { action: 'compact' };
+  const same = persistDecision({ rec: { seenEpoch: 'e1' }, scan: work, contextAdvice: compact, contextReading: reading, epoch: 'e1' });
+  assert.equal(same.kind, 'continue', 'no summary yet in this stretch');
+  assert.match(same.why, /This Stop is refused once for it\.$/, 'no save point: said once');
+  assert.equal(same.rec.compactToldFor, 'e1');
+  const told = persistDecision({ rec: same.rec, scan: work, contextAdvice: compact, contextReading: reading, epoch: 'e1' });
+  assert.equal(told.kind, 'continue');
+  assert.doesNotMatch(told.why, /refused once for it/, 'not twice in one epoch');
+  const saved = persistDecision({ rec: { seenEpoch: 'e1' }, scan: work, contextAdvice: compact, contextReading: reading, epoch: 'e1', checkpointSaved: true });
+  assert.doesNotMatch(saved.why, /refused once for it/, 'a save point exists: nothing to say');
+  const after = persistDecision({ rec: told.rec, scan: work, contextAdvice: compact, contextReading: reading, epoch: 'e2' });
+  assert.equal(after.kind, 'stop');
+  assert.equal(after.why, afterSummaryFact(reading));
+  assert.match(after.why, /measured ~150k \(the compact line is ~\d+k\) after 2 summaries; another will not bring it below the line\./);
+  assert.equal(after.say, 'the conversation was still close to its size limit after a summary');
+  assert.equal(persistDecision({ rec: {}, scan: work, contextAdvice: { action: 'compact', fresh: true }, contextReading: reading, epoch: 'e1' }).kind, 'stop', 'summarised often enough already');
+  assert.equal(persistDecision({ rec: {}, scan: work, contextAdvice: compact, contextReading: reading, epoch: 'e1' }).rec.seenEpoch, 'e1', 'the first Stop only records its epoch');
+});
+
+test('every false claim in a closing message is said in one refusal, with the resend sentence once', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const { dir, startHead } = makeRepo();
+  writeFileSync(join(dir, 'c.txt'), 'three\n');
+  const msg = 'All committed. All 42 tests pass.';
+  const transcript_path = join(home, 'transcript.jsonl');
+  writeFileSync(transcript_path, [
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'b1', content: 'ℹ tests 37\nℹ pass 36\nℹ fail 1' }] } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: msg }] } },
+  ].map(r => JSON.stringify(r)).join('\n') + '\n');
+  writeSession(home, 'sess-both', { startHead });
+  const out = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'sess-both', cwd: dir, transcript_path, last_assistant_message: msg }, home).stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /Uncommitted: c\.txt\./);
+  assert.match(out.reason, /gives 42 as a count of passing tests/);
+  assert.equal(out.reason.split('A reply to this block becomes the report the user sees.').length - 1, 1);
+});
+
+test('keep-going: the work a step did before a refused claim still counts at the next Stop', () => {
+  // Review of the hook fixes, 2026-10-03: the reply to a claim refusal is
+  // words only, and judged alone it ended keep-going as a step that did no
+  // visible work.
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const transcript_path = join(home, 'transcript.jsonl');
+  const claim = 'Done. All 42 tests pass.';
+  writeFileSync(transcript_path, [
+    { type: 'assistant', message: { content: [{ type: 'tool_use', id: 't1', name: 'Edit', input: {} }] } },
+    { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ℹ tests 37\nℹ pass 36\nℹ fail 1' }] } },
+    { type: 'assistant', message: { content: [{ type: 'text', text: claim }] } },
+  ].map(r => JSON.stringify(r)).join('\n') + '\n');
+  const armedAt = new Date().toISOString();
+  writeSession(home, 'sess-carry', { persist: { armed: true, armedAt, goal: 'finish the export', sizeAtArm: 0 } });
+  const first = JSON.parse(run({ hook_event_name: 'Stop', session_id: 'sess-carry', transcript_path, last_assistant_message: claim, background_tasks: [], session_crons: [] }, home).stdout);
+  assert.equal(first.decision, 'block');
+  assert.match(first.reason, /gives 42 as a count/);
+  const reply = 'Correction: the run shows 36 passing and 1 failing; the failing one is the date filter.';
+  appendFileSync(transcript_path, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: reply }] } }) + '\n');
+  const second = run({ hook_event_name: 'Stop', session_id: 'sess-carry', stop_hook_active: true, transcript_path, last_assistant_message: reply, background_tasks: [], session_crons: [] }, home);
+  assert.equal(second.status, 0);
+  const out = JSON.parse(second.stdout);
+  assert.equal(out.decision, 'block', 'the step before the claim did work, so keep-going goes on');
+  assert.doesNotMatch(out.reason, /gives 42/, 'the claim is not refused again');
 });

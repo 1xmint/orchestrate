@@ -239,9 +239,40 @@ release's section when it ships.
     refusal, since the reply is not read again. The same-error line showed the
     user a blurred key with paths cut mid-word ("/hom<path>"); the user now
     reads "the same error came back twice", and paths are blurred from their
-    start. Left: the session file is read and written by several hooks with
-    no lock (a helper landing during a Stop could drop a row), and
-    `persist-checks.json` is never pruned; both predate this branch.
+    start. Left: `persist-checks.json` and `turn-checks.json` are never
+    pruned; both predate this branch.
+  - **The other hooks read whole, and the session file locked** (fresh
+    context, Opus, one read each of the router and of context-check,
+    turn-check and ledger, then one review of the fixes). Several hooks write
+    the session file at once and each wrote its whole copy back: a helper's
+    return row was lost in 11 of 40 measured races, taking the review hold
+    with it. A save now takes a short lock beside the file (a directory,
+    stale after two seconds, never waited on for more than a fifth of a
+    second), reads the file as it is and writes back only the keys it
+    changed; a hook that appends to a list (a dispatch row, a return row)
+    loads, adds and writes inside the lock (`updateSession`), since two
+    appends to one key would still lose one. Router: a run made by
+    `run-init.mjs` and left unfilled armed 25 steps toward the template's
+    own words, because a placeholder after a label or a list marker counted
+    as written (one check now, `writtenLine`); a "continue" that arms
+    keep-going sends the full card and the run page when the session has
+    not had them, and a resume no longer marks the card sent; the
+    keep-going line is said when it turns on or its goal changes; "persist
+    off" and "persist on" say what they did, and an ask held back by
+    "persist off" is said. The helper-leftover git look shares one 1.5 s
+    budget and is noted before it runs (a slow repository had the hook
+    after every tool call killed at its limit and looking again on every
+    call). A return is matched to its dispatch through the helper's launch
+    record, and a row counts as out only while neither its helper id nor
+    its call id is among the returns (a background helper's row never gets
+    a return time); a resumed helper keeps both return files. At the
+    compact line the loop now stops only when the Stop after a summary is
+    still there (`seenEpoch` in the loop's record) or the policy says a
+    fresh conversation serves better: a step of five or more calls after
+    each summary got past the old check, and the loop ran through four
+    summaries. The work a step did before a refused claim is carried to
+    the next Stop, so the reply in words is not judged a step that did
+    nothing.
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line

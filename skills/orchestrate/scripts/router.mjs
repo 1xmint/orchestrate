@@ -494,7 +494,10 @@ function handlePrompt(input) {
   // and the full card still arrives on the first request big enough to need it.
   // Not when an open run is already bound: picking up run work is never a
   // small, one-off ask, whatever the sentence looks like.
-  const small = substantive && !ctx.run && isSmallPrompt(trimmed);
+  // A prompt that arms keep-going is never small: it starts up to 25 steps, and
+  // the short card beside the full one said "just do it yourself" (review of
+  // the hook fixes, 2026-10-03).
+  const small = substantive && !ctx.run && !armedNow && isSmallPrompt(trimmed);
   const out = [];
   // Plugin settings cannot carry env vars, and this plugin never writes to
   // them without being asked. Offered once, on the first substantive prompt
@@ -530,9 +533,11 @@ function handlePrompt(input) {
     if (!input.agent_id && ctx.agentsExpected && ctx.agents < ctx.agentsExpected) {
       out.push(`Only ${ctx.agents} of the plugin's ${ctx.agentsExpected} helper roles are installed; type \`claude plugin install orchestrate@orchestrate\` to finish.`);
     }
-    if (ctx.run) {
+    // Not again when a resume or a summary already printed it this session.
+    if (ctx.run && state.runExcerptFor !== ctx.run.runMd) {
       const ex = resumeExcerpt(ctx.run.runMd);
       if (ex) out.push(`[orchestrate · run ${ctx.run.runMd}]\n${ex}`);
+      state.runExcerptFor = ctx.run.runMd;
     }
   };
 
@@ -759,6 +764,7 @@ function handleSessionStart(input) {
   if (ctx.run) {
     const ex = resumeExcerpt(ctx.run.runMd);
     out.push(`[orchestrate · ${word}] run ${ctx.run.runMd}${ex ? `\n${ex}` : ' — nothing written under Goal or Pickup yet'}`);
+    state.runExcerptFor = ctx.run.runMd;
   } else if (source === 'compact') {
     // Name the file, never inject its text: one line naming the path is the
     // whole context cost of a compaction; the lead reads the file when it

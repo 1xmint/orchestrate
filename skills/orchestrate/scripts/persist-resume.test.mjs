@@ -182,3 +182,63 @@ test('the Stop loop stops after three continues name the same open item, and a n
   assert.equal(moved.kind, 'continue', 'the item changed, so the run is not stuck');
   assert.equal(moved.rec.sameItem, 1);
 });
+
+function start(home, cwd, source, session = 's1') {
+  const r = spawnSync(process.execPath, [ROUTER], {
+    input: JSON.stringify({ hook_event_name: 'SessionStart', source, session_id: session, cwd }),
+    encoding: 'utf8', windowsHide: true,
+    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '', CLAUDE_EFFORT: '', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : '';
+}
+const FULL_CARD = /orchestrate is loaded\. The user owns what the product should do/;
+
+test('a "continue" that turns keep-going on brings the full card and the run page, once', () => {
+  // A short word that starts up to 25 unwatched steps gets the guidance a first
+  // request would (whole-file review of the router, 2026-10-03).
+  const home = makeHome(); const repo = makeRepo(true);
+  const first = say(home, repo, 'continue', 's5');
+  assert.equal(armed(home, 's5'), true);
+  assert.match(first, FULL_CARD);
+  assert.match(first, /\[orchestrate · run [^\]]*RUN\.md\]/);
+  assert.match(first, /auto-continue is on toward/);
+  const again = say(home, repo, 'keep going', 's5');
+  assert.doesNotMatch(again, FULL_CARD, 'the card is not sent twice');
+  assert.doesNotMatch(again, /\[orchestrate · run /, 'nor the run page');
+  assert.doesNotMatch(again, /auto-continue is on toward/, 'nor the keep-going line while nothing changed');
+});
+
+test('a resumed session still gets the card on its first real request; a summary does not repeat it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  start(home, repo, 'resume', 's6');
+  const out = say(home, repo, 'Add a CSV export button to the reports page and make sure the existing tests still pass', 's6');
+  assert.match(out, FULL_CARD, 'a resume prints no card, so it is still owed');
+  start(home, repo, 'compact', 's7');
+  const after = say(home, repo, 'Add a CSV export button to the reports page and make sure the existing tests still pass', 's7');
+  assert.doesNotMatch(after, FULL_CARD, 'a summary carries the card already');
+});
+
+test('"persist off" holds for the session and says so when a keep-going ask is held back; "persist on" lifts it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  assert.match(say(home, repo, 'persist off', 's9'), /keep-going is off for this session; "persist on" lets it turn on again/);
+  const held = say(home, repo, 'keep going until the login page works', 's9');
+  assert.equal(armed(home, 's9'), false);
+  assert.match(held, /keep-going is off for this session \(the user said "persist off"\)/);
+  assert.match(say(home, repo, 'persist on', 's9'), /keep-going can turn on again/);
+  const on = say(home, repo, 'keep going until the login page works', 's9');
+  assert.equal(armed(home, 's9'), true);
+  assert.doesNotMatch(on, /the user said "persist off"/);
+});
+
+test('a prompt the host wrote (source "system") arms nothing and adds nothing', () => {
+  const home = makeHome(); const repo = makeRepo(true);
+  const r = spawnSync(process.execPath, [ROUTER], {
+    input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 's10', prompt_id: 'p1', cwd: repo, permission_mode: 'auto', prompt: 'continue', source: 'system' }),
+    encoding: 'utf8', windowsHide: true,
+    env: { ...process.env, USERPROFILE: home, HOME: home, ANTHROPIC_API_KEY: '', CLAUDE_EFFORT: '', CLAUDE_CODE_AUTO_COMPACT_WINDOW: '' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.stdout.trim(), '');
+  assert.equal(armed(home, 's10'), false);
+});

@@ -856,6 +856,42 @@ test('ledger: a filename is unique per return and stable for one event', () => {
   assert.match(noId, /^orch-reviewer-[0-9a-f]{12}\.md$/);
 });
 
+test('ledger: a resumed helper\'s second return gets its own file', () => {
+  // Same helper id, a new hand-back: the name carries a hash of the text, so
+  // the second return does not overwrite the first (review of the hook-fix
+  // batch, 2026-10-03).
+  const first = returnFilename('orch-implementer', { session_id: 's', agent_id: 'agent_abc' }, 'STATUS: PARTIAL');
+  const second = returnFilename('orch-implementer', { session_id: 's', agent_id: 'agent_abc' }, 'STATUS: DONE');
+  assert.notEqual(first, second);
+  assert.match(first, /^orch-implementer-agent_abc-[0-9a-f]{6}\.md$/);
+});
+
+test('ledger: a return naming no task is matched to the one dispatch still out, not to one already back', () => {
+  // A background helper's row never gets returnedAt; its return carries its
+  // call id. Counting it as still out left two open rows, and the second
+  // helper's return was filed with no task.
+  const home = sandbox();
+  const repo = fixtureRepo();
+  bind(home, 'open-row', repo);
+  const sessionPath = join(home, '.claude', 'orchestrate', 'sessions', 'open-row.json');
+  const state = JSON.parse(readFileSync(sessionPath, 'utf8'));
+  const at = new Date().toISOString();
+  state.dispatches = [
+    { at, agent: 'orch-implementer', model: 'sonnet', task: '9-9-0001', run: repo.runId, toolUseId: 'toolu_first' },
+    { at, agent: 'orch-implementer', model: 'sonnet', task: '9-9-0002', run: repo.runId, toolUseId: 'toolu_second' },
+  ];
+  state.returned = [{ at, agent: 'implementer', agentId: 'h-first', toolUseId: 'toolu_first', task: '9-9-0001', status: 'DONE' }];
+  writeFileSync(sessionPath, JSON.stringify(state));
+  const out = run('ledger.mjs', {
+    hook_event_name: 'SubagentStop', session_id: 'open-row', cwd: repo.dir, agent_id: 'h-second',
+    agent_type: 'orch-implementer', last_assistant_message: 'STATUS: DONE\nEVIDENCE: pytest -q: 3 passed\n',
+  }, home);
+  assert.equal(out.status, 0);
+  const returned = JSON.parse(readFileSync(sessionPath, 'utf8')).returned;
+  assert.equal(returned.length, 2, 'the earlier return row is kept');
+  assert.equal(returned[1].task, '9-9-0002', 'filed against the dispatch still out');
+});
+
 test('ledger: two sessions on two runs cannot file into each other', () => {
   const home = sandbox();
   const a = fixtureRepo({ runId: '20260909-alpha' });

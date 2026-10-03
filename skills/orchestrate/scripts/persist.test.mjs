@@ -53,6 +53,12 @@ test('at the compact line keep-going carries on: once per summary epoch it says 
   const after = persistDecision({ scan, goal: 'g', contextAdvice: { action: 'investigate' }, contextReading: reading });
   assert.equal(after.kind, 'stop');
   assert.match(after.why, /~151k/);
+  assert.doesNotMatch(after.why, /No checkpoint/, 'it does not claim what it did not check');
+  // A step long enough to get past "investigate" still ends it: the first Stop
+  // in a new summary epoch that is still at the line (review of the hook fixes).
+  const later = persistDecision({ rec: again.rec, scan, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: { ...reading, compactions: 1 }, epoch: 'e2', checkpointSaved: true });
+  assert.equal(later.kind, 'stop');
+  assert.match(later.why, /after a summary/);
 });
 
 test('the armed line carries the goal verbatim and the ways out', () => {

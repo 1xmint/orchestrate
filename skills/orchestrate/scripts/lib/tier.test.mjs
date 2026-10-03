@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isWritten, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, seenRecently, recordSeen, trimLog, isUnderRoot } from './tier.mjs';
+import { isWritten, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, seenRecently, recordSeen, trimLog, isUnderRoot, writtenLine } from './tier.mjs';
 
 // ---- append-only seen-log (R4: dispatch-events.json under concurrent writers) --
 
@@ -145,4 +145,23 @@ test('dates are local, and ids are safe to use as filenames', () => {
   assert.equal(mapTier('MAX'), 'max5', 'unversioned max is assumed to be the smaller one');
   assert.equal(mapTier('anything else'), null);
   assert.equal(sanitizeId('a/b\\c:d'), 'a_b_c_d');
+});
+
+// ---- writtenLine: a line someone wrote, not the run template's own ----------
+
+test('writtenLine refuses the run template\'s own lines and keeps real ones', () => {
+  // The template's lines (review of the hook fixes, 2026-10-03): a "continue"
+  // armed toward these words when they counted as written.
+  for (const t of [
+    '', '   ', '- <evidence that would prove it, one line each; a command, a file, a page state>',
+    'Why it matters: <what the user gets when it is done>', '<~N fresh sessions>',
+    'When it ends, met or dropped: say which and why', '{{GOAL}}', 'Goal: {{GOAL}}',
+    'Pickup confidence: high | medium | low', '- Status: open | done', 'Why it matters:',
+  ]) assert.equal(writtenLine(t), false, JSON.stringify(t));
+  for (const t of [
+    '- `pytest -q` passes', 'Why it matters: notes stop piling up',
+    'Run `rg TODO | wc -l` and get 0', 'The page renders <Header /> with the new logo',
+    'Spec: <https://example.com/spec>', '1. the export button downloads a CSV',
+    'Check: `a | b` prints ok', 'Either the build passes or we roll back | noted in STATE.md as the plan',
+  ]) assert.equal(writtenLine(t), true, JSON.stringify(t));
 });

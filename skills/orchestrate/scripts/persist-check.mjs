@@ -248,15 +248,24 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   const waitTold = Boolean(rec.waitTold);
   const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null, waitSince: null, lastOut: listed.join(','), monitorIds, waitTold };
   delete out.monitorSeen;
+  // Which summary epoch the last Stop saw: a Stop in a new epoch that is still
+  // at the compact line means the summary did not bring the conversation
+  // below it (review of the hook fixes, 2026-10-03: a step of five or more
+  // calls after each summary got past "investigate", and the loop ran through
+  // four summaries).
+  const afterSummary = epoch != null && rec.seenEpoch != null && rec.seenEpoch !== epoch;
+  if (epoch != null) out.seenEpoch = epoch;
   const g = shortGoal(goal);
   // `say` is the user's line when `why` carries what only the lead can use (a
   // path, a size); every other reason is already in plain words for both.
   const stop = (why, say) => ({ rec: out, kind: 'stop', why, ...(say ? { say } : {}) });
 
-  // Still near the size limit right after a summary: another summary will not
-  // help, so the loop ends.
-  if (contextAdvice && contextAdvice.action === 'investigate') {
-    return stop(checkpointFact(contextReading), 'the conversation was still close to its size limit right after a summary');
+  // Still near the size limit right after a summary, or past it again after
+  // several: another summary will not help, so the loop ends. The policy's
+  // `fresh` says this session has been summarised often enough that a fresh
+  // conversation serves better.
+  if (contextAdvice && (contextAdvice.action === 'investigate' || (contextAdvice.action === 'compact' && (afterSummary || contextAdvice.fresh)))) {
+    return stop(afterSummaryFact(contextReading), 'the conversation was still close to its size limit after a summary');
   }
   if (scan.denied) return stop('a helper was refused (budget or credential)');
   // A refusal from one of this plugin's own checks names roles and helper
@@ -329,6 +338,16 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   let why = `orchestrate: ${parts.join(' · ')}`;
   if (contextNotice) why += ` ${contextNotice}`;
   return { rec: out, kind: 'continue', why };
+}
+
+// The size after a summary, for the lead: no claim about a save point, which
+// this does not check.
+export function afterSummaryFact(reading) {
+  const k = n => `~${Math.round(n / 1000)}k`;
+  const used = reading && reading.tokens != null ? k(reading.tokens) : 'an unknown size';
+  const at = reading && reading.tokens != null ? thresholds(reading).compactAt : null;
+  const n = Number(reading && reading.compactions) || 0;
+  return `the conversation measured ${used}${at ? ` (the compact line is ${k(at)})` : ''} after ${n > 1 ? `${n} summaries` : 'a summary'}; another will not bring it below the line.`;
 }
 
 // "No checkpoint since <time>; context N of M." The size and the epoch start
@@ -538,12 +557,18 @@ export function check(input) {
   // reply to it is not read again. Inside a stretch the loop's record moves to
   // here, so the next Stop is judged on the reply alone, not on the work that
   // came before the claim (whole-file review, 2026-10-03).
+  // The work the step did before the claim is carried to the next Stop, so a
+  // reply in words alone is not judged a step that did nothing (review of the
+  // hook fixes, 2026-10-03).
   const claimRefusal = why => {
     if (armedNow) {
-      const base = prev.armedAt === p.armedAt ? prev : { armedAt: p.armedAt };
+      const base = prev.armedAt === p.armedAt ? prev : { armedAt: p.armedAt, lastSize: Number(p.sizeAtArm) || 0 };
       let size = 0;
       try { if (input.transcript_path) size = statSync(input.transcript_path).size; } catch {}
-      store[key] = { ...base, lastBlock: 'claim', ...(size ? { lastSize: size } : {}) };
+      const from = Math.min(Number(base.lastSize) || 0, size);
+      const before = input.transcript_path && size > from ? scanTurn(readTail(input.transcript_path, Math.min(size - from, PERSIST_SCAN_CAP))) : null;
+      const carry = before ? { progressed: before.progressed, errors: before.errors, monitorStarted: before.monitorStarted, lastChange: before.lastChange, quotaRefused: before.quotaRefused } : null;
+      store[key] = { ...base, lastBlock: 'claim', ...(size ? { lastSize: size } : {}), ...(carry ? { carry } : {}) };
       try { writeJsonAtomic(path, store); } catch {}
     }
     return { kind: 'continue', why: `${why}${RESEND_NOTE}` };
@@ -575,6 +600,9 @@ export function check(input) {
   // A new arming starts a fresh count; the scan starts where the arming did.
   let rec = store[key] || {};
   if (rec.armedAt !== p.armedAt) rec = { armedAt: p.armedAt, lastSize: Number(p.sizeAtArm) || 0 };
+  // What the step before a claim refusal did, kept for this Stop (claimRefusal).
+  const carry = rec.carry || null;
+  if (carry) { rec = { ...rec }; delete rec.carry; }
 
   let size = 0;
   try { if (input.transcript_path) size = statSync(input.transcript_path).size; } catch {}
@@ -588,7 +616,15 @@ export function check(input) {
   const atCompact = Boolean(ctx && ctx.advice && ctx.advice.action === 'compact' && ctx.reading);
   let checkpointSaved = false;
   if (atCompact) { try { checkpointSaved = hasCheckpoint(input.session_id || null, ctx.reading, { runMd: bound, permissionMode: modeOf(input) }); } catch {} }
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input), idleKnown: nothingOut(input), checkpointSaved, epoch: atCompact ? contextEpoch(ctx.reading) : null });
+  const scan = scanTurn(tail);
+  if (carry) {
+    scan.progressed = scan.progressed || Boolean(carry.progressed);
+    scan.errors = [...(Array.isArray(carry.errors) ? carry.errors : []), ...scan.errors];
+    scan.monitorStarted = scan.monitorStarted || Boolean(carry.monitorStarted);
+    scan.quotaRefused = scan.quotaRefused || Boolean(carry.quotaRefused);
+    if (!scan.lastChange && carry.lastChange) scan.lastChange = carry.lastChange;
+  }
+  const dec = persistDecision({ rec, scan, contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input), idleKnown: nothingOut(input), checkpointSaved, epoch: ctx && ctx.reading ? contextEpoch(ctx.reading) : null });
   // Marked delivered only when the refusal carried it.
   if (dec.kind === 'continue' && ctx && ctx.notice && String(dec.why).includes(ctx.notice)) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 

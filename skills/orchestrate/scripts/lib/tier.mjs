@@ -93,7 +93,16 @@ export function writtenLine(line) {
   if (/\{\{[A-Z_]+\}\}/.test(v)) return false;
   const label = /^([A-Za-z][\w ,'()-]{0,40}):\s*(.*)$/.exec(v);
   const value = (label ? label[2] : v).trim();
-  return isWritten(value) && !/^<[^>]*>\W*$/.test(value);
+  if (!value) return false;
+  // The template's placeholders are prose in angle brackets ("<what the user
+  // gets ...>", "<~N fresh sessions>"); a component (<Header />) or a link
+  // (<https://...>) in a real line is not one.
+  if (/^<[^>]*>\W*$/.test(value) && !/^<(?:https?:\/\/|\/?[A-Z])/.test(value)) return false;
+  // The template's list of one- or two-word alternatives after its own label
+  // ("Pickup confidence: high | medium | low"); a shell pipe or prose with a
+  // bar in it is a real line (review of the hook fixes, 2026-10-03).
+  if (label && !/`/.test(value) && /^\s*[\w-]+(?:\s[\w-]+)?(?:\s*\|\s*[\w-]+(?:\s[\w-]+)?)+\s*$/.test(value)) return false;
+  return true;
 }
 
 // Per-key, TTL-pruned, size-bounded "have I seen this before" store — the
@@ -159,6 +168,29 @@ export function sanitizeId(s) {
 
 export function sessionPath(sessionId) {
   return join(SESSIONS_DIR, `${sanitizeId(sessionId)}.json`);
+}
+
+// Load, change and write the session file in one step under its lock, for a
+// change that appends to a list another hook may append to at the same moment
+// (a dispatch row, a return row): a merge by top-level key would keep only one
+// of two such appends (review of the hook fixes, 2026-10-03). `init` makes the
+// state when there is no file yet; without it nothing is written. `fn` must
+// not save the session itself. Returns what `fn` returns, or null.
+export function updateSession(sessionId, fn, init = null) {
+  const path = sessionPath(sessionId);
+  try {
+    return withFileLock(path, () => {
+      let s = readJson(path);
+      if (!s || typeof s !== 'object' || Array.isArray(s)) {
+        if (!init) return null;
+        s = init();
+      }
+      const r = fn(s);
+      s.updated = new Date().toISOString();
+      writeJsonAtomic(path, s);
+      return r === undefined ? null : r;
+    });
+  } catch { return null; }
 }
 
 // What a hook loaded, per top-level key, so its save writes back only what it

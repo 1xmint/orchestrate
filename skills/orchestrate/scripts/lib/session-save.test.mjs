@@ -57,3 +57,39 @@ test('hooks saving at the same moment from separate processes lose none of each 
   const s = JSON.parse(readFileSync(sessionFile(home), 'utf8'));
   for (let i = 0; i < 6; i++) assert.equal(s[`k${i}`], i, `writer ${i}'s key survives`);
 });
+
+test('updateSession: appends to one list from separate processes keep every row', async () => {
+  // Two hooks adding to the same list (a dispatch row and a return row, or two
+  // returns) each load, add and write under the lock, so neither drops the
+  // other's row, which a merge of changed keys alone cannot promise.
+  const home = mkdtempSync(join(tmpdir(), 'orch-update-race-'));
+  mkdirSync(dirname(sessionFile(home)), { recursive: true });
+  writeFileSync(sessionFile(home), JSON.stringify({ v: 1, session_id: 's1', returned: [] }));
+  const body = i => `import { updateSession } from ${JSON.stringify(TIER)};
+    updateSession('s1', s => {
+      const until = Date.now() + 15; while (Date.now() < until) {}   // a slow write
+      s.returned = Array.isArray(s.returned) ? s.returned : [];
+      s.returned.push({ agentId: 'h${i}' });
+    });`;
+  const writers = Array.from({ length: 4 }, (_, i) => new Promise(resolve => {
+    const p = spawn(process.execPath, ['--input-type=module', '-e', body(i)], { env: { ...process.env, HOME: home, USERPROFILE: home }, stdio: 'ignore' });
+    p.on('exit', resolve);
+  }));
+  await Promise.all(writers);
+  const s = JSON.parse(readFileSync(sessionFile(home), 'utf8'));
+  assert.deepEqual(s.returned.map(r => r.agentId).sort(), ['h0', 'h1', 'h2', 'h3']);
+  assert.equal(existsSync(`${sessionFile(home)}.lock`), false, 'no lock is left behind');
+});
+
+test('updateSession: no file and no starting state changes nothing; with one, the file is made', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-update-new-'));
+  const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import { updateSession } from ${JSON.stringify(TIER)};
+    const a = updateSession('s1', s => { s.x = 1; return 'ran'; });
+    const b = updateSession('s1', s => { s.returned = [{ agentId: 'h1' }]; return 'ran'; }, () => ({ v: 1, session_id: 's1' }));
+    console.log(JSON.stringify([a, b]));`], { env: { ...process.env, HOME: home, USERPROFILE: home }, encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(r.stdout.trim()), [null, 'ran']);
+  const s = JSON.parse(readFileSync(sessionFile(home), 'utf8'));
+  assert.equal(s.x, undefined, 'the first call had no file and no starting state');
+  assert.deepEqual(s.returned, [{ agentId: 'h1' }]);
+});

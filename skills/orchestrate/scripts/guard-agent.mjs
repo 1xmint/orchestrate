@@ -21,7 +21,7 @@
 import { readFileSync, openSync, writeSync, closeSync, mkdirSync, createHash } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, sanitizeId, findRepoRoot, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
+import { DIR, readJson, sanitizeId, findRepoRoot, loadSession, updateSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';
 import { loadPolicy } from './lib/policy.mjs';
 import { reviewOfIn } from './lib/review-of.mjs';
 import { roleModel, helperFiles, runningNative, runningExternal, freshCodexOk, providerStatePath, exhaustedFor, WORKERS_DIR } from './lib/workers.mjs';
@@ -646,13 +646,13 @@ function main() {
   if (tag) emit({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: `orchestrate guard: ${tag}` } });
 }
 
+// Loaded, changed and written under the session file's lock: two helpers sent
+// at once each append a dispatch row, and neither may lose the other's.
 function withSession(input, fn) {
   try {
     const id = input.session_id;
     if (!id) return;
-    const state = loadSession(id) || { v: 1, session_id: id, cwd: input.cwd || '', started: new Date().toISOString(), prompts: 0, cardSent: false, muted: false, limits: [] };
-    fn(state);
-    saveSession(state);
+    updateSession(id, state => { fn(state); }, () => ({ v: 1, session_id: id, cwd: input.cwd || '', started: new Date().toISOString(), prompts: 0, cardSent: false, muted: false, limits: [] }));
   } catch {}
 }
 
