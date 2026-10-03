@@ -39,9 +39,7 @@
 // Never blocks twice in one Stop, never exits non-zero, never fails the Stop on
 // its own errors.
 
-import { readFileSync, statSync } from './lib/node.mjs';
-import { spawnSync } from './lib/node.mjs';
-import { createHash } from './lib/node.mjs';
+import { readFileSync, statSync, spawnSync, createHash } from './lib/node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
@@ -55,6 +53,7 @@ import { readProject } from './lib/project.mjs';
 import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
 import { classifyClaim, lastAssistantText, contradicts, countedPaths, namesAllPaths } from './lib/commit-claim.mjs';
+import { claimsWait, nothingOut, WAIT_FACT } from './lib/wait-claim.mjs';
 
 // Blunt caps, because no published diminishing-returns rule exists
 // (docs/research/0004 (b)). The check-in is a line for the human to glance at,
@@ -178,7 +177,10 @@ export function scanTurn(tail) {
   const asked = /\?$/.test(tailText);
   const goalMet = /\b(goal (is )?(met|complete|completed|achieved|reached)|all (the )?(steps|tasks|todos|items) (are )?(done|complete|finished)|nothing (left|more) to do|everything (is|in the plan is) (done|complete|finished))\b/i.test(lastText);
   const monitorStarted = tools.includes('Monitor');
-  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange, prompted, monitorStarted };
+  // A promise to wait or check back, unless the message ends on a question:
+  // then it is the user who is waited on.
+  const waitClaim = !asked && claimsWait(lastText);
+  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange, prompted, monitorStarted, waitClaim };
 }
 
 // Whether the Stop payload says the host will wake this session later: a helper
@@ -223,7 +225,7 @@ export const QUOTA_FACT = "helpers are refused while the plan's usage is past th
 // read files. `outstanding` is true when the Stop payload lists work that will
 // wake the session (see workOut); a step that did nothing then is a wait, not
 // a stop.
-export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '', commandsOnly = false }) {
+export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '', commandsOnly = false, idleKnown = false }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -233,7 +235,10 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   // (type "shell") and still wake the session when it fires, so it is
   // remembered until keep-going is switched off or on again.
   const monitorSeen = Boolean(rec.monitorSeen || scan.monitorStarted);
-  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null, monitorSeen };
+  // Whether this stretch was already told that nothing would wake it; work
+  // since then starts that over.
+  const waitTold = scan.progressed ? false : Boolean(rec.waitTold);
+  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null, monitorSeen, waitTold };
   const g = shortGoal(goal);
   // `say` is the user's line when `why` carries what only the lead can use (a
   // path, a size); every other reason is already in plain words for both.
@@ -255,6 +260,15 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   }
   if (steps > PERSIST_STEP_CAP) return stop(`keep-going reached its limit of ${PERSIST_STEP_CAP} steps in a row`);
   if (!scan.progressed) {
+    // The last message promises to wait or check back, and the payload says
+    // nothing is out that could wake the session (lib/wait-claim.mjs). Said
+    // once, as a fact: the lead may start something that will wake it (a
+    // Monitor, a background command) or tell the user it cannot watch. An idle
+    // step after that ends keep-going as any idle step does.
+    if (!outstanding && idleKnown && scan.waitClaim) {
+      if (!rec.waitTold) return { rec: { ...out, waitTold: true }, kind: 'continue', why: `orchestrate: your last message says this session will wait or check back; ${WAIT_FACT}.` };
+      return stop('the last step only waited, and nothing was running that would wake this session');
+    }
     // A helper or background command is still out, or a prompt is scheduled: the
     // host wakes this session when it lands, and a stop here would have turned
     // keep-going off before that. The Stop passes unblocked and the loop stays
@@ -378,6 +392,25 @@ function checkCommitClaim(input, state) {
   return commitClaimReason(claim, git, commitsSinceStart);
 }
 
+// The same fact for a session with keep-going off: a closing promise to wait
+// or check back while the payload lists nothing out. Once per message, never
+// on a Stop a hook already refused, never when the message ends on a question,
+// and not while keep-going is on (persistDecision says it there, counted with
+// the loop's steps).
+function checkWaitClaim(input, state) {
+  if (input.stop_hook_active || !nothingOut(input)) return null;
+  if (state && state.persist && state.persist.armed) return null;
+  let text = typeof input.last_assistant_message === 'string' ? input.last_assistant_message.trim() : '';
+  if (!text) text = lastAssistantText(input.transcript_path ? readTail(input.transcript_path, PERSIST_SCAN_CAP) : '');
+  if (!text || /\?$/.test(text.trim().replace(/[\s*_`)\]]+$/, '')) || !claimsWait(text)) return null;
+  const claimHash = createHash('sha256').update(text).digest('hex').slice(0, 16);
+  if (state && state.waitClaimBlocked === claimHash) return null;
+  const st = state || { session_id: input.session_id };
+  st.waitClaimBlocked = claimHash;
+  try { saveSession(st); } catch {}
+  return `Your last message says this session will wait or check back; ${WAIT_FACT}.${RESEND_NOTE}`;
+}
+
 function emitBlock(reason) {
   process.stdout.write(JSON.stringify({ decision: 'block', reason }));
 }
@@ -437,6 +470,8 @@ export function check(input) {
   // with nothing armed gets this too.
   const commitClaimReasonText = checkCommitClaim(input, state);
   if (commitClaimReasonText) return { kind: 'continue', why: commitClaimReasonText };
+  const waitClaimReasonText = checkWaitClaim(input, state);
+  if (waitClaimReasonText) return { kind: 'continue', why: waitClaimReasonText };
   // This is deliberately outside auto-continue: reaching the compaction line
   // is unsafe even for an ordinary Stop. A block is once per epoch, and an
   // active Stop hook must not block itself again.
@@ -466,7 +501,7 @@ export function check(input) {
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
   const workCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : null;
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input) });
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input), idleKnown: nothingOut(input) });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };

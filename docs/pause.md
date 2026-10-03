@@ -1,6 +1,6 @@
 # When a session pauses
 
-Four things can leave a session waiting. For each, on each screen: who writes
+Five things can leave a session waiting. For each, on each screen: who writes
 the pause record, what wakes the session, what the band shows, and how many
 times the host may wake it. Written before the code (0010 master plan, step 2b).
 "Unchecked" means the pages named under "Facts" do not say. The band is the
@@ -14,6 +14,7 @@ been seen.
 | **Helper out of turns** | **Record:** none; `ledger.mjs` files the helper's return.<br>**Wakes:** nothing is asleep; the return reaches the lead.<br>**Band:** nothing.<br>**Host wakes:** not applicable. | Same as Terminal. | Same as Terminal. |
 | **Background command still running** | **Record:** none. `persist-check.mjs` reads the Stop payload's `background_tasks` and `session_crons`; if either lists something, the "no visible work" stop does not fire, the Stop passes and keep-going stays armed. It waits again each time that work wakes the session (a helper landing, a Monitor line, a scheduled prompt); it ends keep-going only when nothing but background commands is out, no Monitor was started since keep-going was switched on (one that runs a command may be listed as a background command), the user spoke since, and the step still did nothing, as with a dev server that never reports.<br>**Wakes:** the background work finishing, or the scheduled prompt firing.<br>**Band:** "Working on: waiting on a helper or background command" while keep-going is armed (`docs/band.md`); the draw is unseen.<br>**Host wakes:** unchecked. | Same as Terminal. | Same as Terminal. |
 | **A summary (compaction)** | **Record:** none; the session file keeps keep-going armed and `router.mjs` re-sends the goal at the `compact` session start.<br>**Wakes:** nothing is asleep; unchecked whether the host wakes anything.<br>**Band:** nothing.<br>**Host wakes:** unchecked. | Same as Terminal. | Same as Terminal. |
+| **Waiting on nothing** | **Record:** none. The closing message promises to wait or check back ("I'll let you know when CI finishes") and the Stop payload's `background_tasks` and `session_crons` are both present and empty (`lib/wait-claim.mjs`). `persist-check.mjs` refuses that Stop once with the fact that nothing is out that would wake the session; with keep-going on it is one continue, and an idle step after it ends keep-going ("the last step only waited, and nothing was running that would wake this session"). Waiting on the user's own reply, a message that ends on a question, a Stop a hook already refused, and a payload without the two lists are left alone. Without keep-going, the same message is refused once.<br>**Wakes:** nothing; that is the failure. CI on GitHub, a deploy elsewhere or "a few minutes" wake no session.<br>**Band:** "Working on" while the refused Stop's turn goes on, then nothing.<br>**Host wakes:** not applicable. | Same as Terminal. | Same as Terminal; a headless run ends at its last Stop either way. |
 
 ## The pause record
 

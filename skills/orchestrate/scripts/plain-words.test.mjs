@@ -61,6 +61,8 @@ test('every keep-going stop line is in plain words', () => {
     'the same step still open': persistDecision({ rec: { lastItem: 'Add search to the notes page', sameItem: 3 }, scan: scan(), next: { state: 'open', source: 'project', text: 'Add search to the notes page' } }),
     'the step limit': persistDecision({ rec: { steps: 25 }, scan: scan() }),
     'no visible work': persistDecision({ scan: scan({ progressed: false }) }),
+    'the user spoke and nothing was done': persistDecision({ rec: { waitingOn: 'srv' }, scan: scan({ progressed: false, prompted: true }), outstanding: true, waitingOn: 'srv', commandsOnly: true }),
+    'only waited, nothing out': persistDecision({ rec: { waitTold: true }, scan: scan({ progressed: false, waitClaim: true }), idleKnown: true }),
   };
   for (const [label, dec] of Object.entries(lines)) check(label, stopLine(dec));
 });

@@ -428,6 +428,61 @@ test('a helper\'s own Stop (agent_id present) is silent even over a contradicted
   assert.equal(r.stdout.trim(), '');
 });
 
+// ---- waiting on nothing ---------------------------------------------------------
+// A closing promise to wait or check back, with the Stop payload saying nothing
+// is out that could wake the session (lib/wait-claim.mjs, docs/pause.md).
+
+test('keep-going: a step that only promises to wait, with nothing out, hears the fact once, then ends', () => {
+  const idle = { progressed: false, denied: false, errors: [], asked: false, goalMet: false, waitClaim: true };
+  const first = persistDecision({ rec: { steps: 2 }, scan: idle, idleKnown: true });
+  assert.equal(first.kind, 'continue');
+  assert.match(first.why, /^orchestrate: your last message says this session will wait or check back; nothing is out that would wake this session/);
+  assert.equal(first.rec.waitTold, true);
+  const second = persistDecision({ rec: first.rec, scan: idle, idleKnown: true });
+  assert.equal(second.kind, 'stop');
+  assert.match(second.why, /only waited, and nothing was running that would wake this session/);
+  // Work in between starts it over: a later wait on nothing hears the fact again.
+  const worked = persistDecision({ rec: first.rec, scan: { ...idle, progressed: true, waitClaim: false } });
+  assert.equal(worked.rec.waitTold, false);
+  assert.equal(persistDecision({ rec: worked.rec, scan: idle, idleKnown: true }).kind, 'continue');
+  // Unknown lists, something out, or no promise: as before.
+  assert.equal(persistDecision({ rec: {}, scan: idle, idleKnown: false }).kind, 'stop', 'an older host: the plain no-work stop');
+  assert.match(persistDecision({ rec: {}, scan: idle, idleKnown: false }).why, /no visible work/);
+  assert.equal(persistDecision({ rec: {}, scan: idle, outstanding: true }).kind, 'wait');
+  assert.match(persistDecision({ rec: {}, scan: { ...idle, waitClaim: false }, idleKnown: true }).why, /no visible work/);
+});
+
+test('without keep-going: a closing promise to wait with nothing out is refused once with the fact', () => {
+  const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+  const stop = (extra = {}) => run({ hook_event_name: 'Stop', session_id: 'sess-w1', stop_hook_active: false, last_assistant_message: "Pushed the fix. I'll let you know when CI finishes.", background_tasks: [], session_crons: [], ...extra }, home);
+  const r = stop();
+  assert.equal(r.status, 0);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /^Your last message says this session will wait or check back; nothing is out that would wake this session/);
+  assert.match(out.reason, /A reply to this block becomes the report the user sees\.$/);
+  assert.equal(stop().stdout.trim(), '', 'the same message is refused once');
+});
+
+test('without keep-going: no refusal when something is out, the lists are unknown, a hook already refused, or the user is the one waited on', () => {
+  const msg = "Pushed the fix. I'll let you know when CI finishes.";
+  const cases = [
+    ['a helper out', { background_tasks: [{ id: 'a1', type: 'subagent', status: 'running', description: 'review' }], session_crons: [] }],
+    ['a scheduled prompt', { background_tasks: [], session_crons: [{ id: 'c1', recurring: false }] }],
+    ['an older host', {}],
+    ['a hook already refused this Stop', { background_tasks: [], session_crons: [], stop_hook_active: true }],
+    ['waiting on the user', { background_tasks: [], session_crons: [], last_assistant_message: "I'll wait for your go-ahead before deleting the old table." }],
+    ['ends on a question', { background_tasks: [], session_crons: [], last_assistant_message: "CI is running. I'll check back when it finishes, or would you rather merge now?" }],
+    ['no promise at all', { background_tasks: [], session_crons: [], last_assistant_message: 'The header is in and the tests pass.' }],
+  ];
+  for (const [name, extra] of cases) {
+    const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
+    const r = run({ hook_event_name: 'Stop', session_id: 'sess-w2', stop_hook_active: false, last_assistant_message: msg, ...extra }, home);
+    assert.equal(r.status, 0, name);
+    assert.equal(r.stdout.trim(), '', name);
+  }
+});
+
 test('no git repo at cwd is silent, whatever the transcript claims', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-persist-home-'));
   const notARepo = mkdtempSync(join(tmpdir(), 'orch-persist-norepo-'));

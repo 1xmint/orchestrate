@@ -358,6 +358,26 @@ test('woken by the work that is still out, an idle step waits again, even after 
   }
 });
 
+// A wait on nothing: the message promises to check back, and the payload lists
+// nothing out. One refusal with the fact, then an idle step ends keep-going.
+test('a step that only promises to check back, with nothing out, hears the fact once and then ends keep-going', () => {
+  const home = sandbox(); const dir = cwdDir();
+  arm(home, 'n1');
+  const none = { background_tasks: [], session_crons: [] };
+  const first = [used('Bash', 'b1'), result('b1', 'pushed'), said("Pushed. I'll check back when CI finishes.")];
+  const t = transcript(dir, ...first);
+  // The push was work: an ordinary continue.
+  assert.match(run(HOOK, stopPayload('n1', dir, t, none), home).json.reason, /^orchestrate: /);
+  writeFileSync(t, lines(...first, said("CI is running. I'll check back when it finishes.")));
+  const told = run(HOOK, stopPayload('n1', dir, t, { ...none, stop_hook_active: true }), home);
+  assert.match(told.json.reason, /your last message says this session will wait or check back; nothing is out that would wake this session/);
+  assert.equal(session(home, 'n1').persist.armed, true);
+  writeFileSync(t, lines(...first, said("CI is running. I'll check back when it finishes."), said("Still waiting for CI; I'll check back.")));
+  const ended = run(HOOK, stopPayload('n1', dir, t, { ...none, stop_hook_active: true }), home);
+  assert.match(ended.json.systemMessage, /^Keep-going stopped: the last step only waited, and nothing was running that would wake this session/);
+  assert.equal(session(home, 'n1').persist.armed, false);
+});
+
 test('a wait does not use up a step: the count after the helper lands is where it was', () => {
   const home = sandbox(); const dir = cwdDir();
   arm(home, 'b3');

@@ -117,6 +117,17 @@ release's section when it ships.
     2026-10-03 on Linux, Node 22, 50 runs each (bare Node starts in about
     21 ms): the hook after every tool call 65 to 47 ms, the shell-command check
     68 to 45, the prompt hook 72 to 48, the Stop hook 69 to 47.
+  - **Waiting on nothing** (`docs/pause.md`, `lib/wait-claim.mjs`): a closing
+    message that promises to wait or check back ("I'll let you know when CI
+    finishes") while the Stop payload lists nothing out is sent back once with
+    that fact; with keep-going on it is one continue, and an idle step after it
+    ends keep-going in plain words. Idea C's "waits that could never wake"
+    (about four hours on a check that never reported back) is the failure; the
+    host wakes a session only for what the payload lists (2.1.288 type file:
+    "Empty array when nothing is in flight"). Not measured; it rides the
+    candidate bundle. Cost: one extra turn when it fires, never when a helper,
+    command, Monitor or scheduled prompt is out or the user is the one waited
+    on.
   - **Not done, and why.** Step 0 and step 3 need the owner's machine and
     records; step 2a (which hook notes Claude never acts on) needs the session
     records too. Left for the owner, each with the audit's evidence in PR #52:
