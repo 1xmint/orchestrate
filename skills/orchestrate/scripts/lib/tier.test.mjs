@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isWritten, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, seenRecently, recordSeen, trimLog, isUnderRoot, writtenLine } from './tier.mjs';
+import { isWritten, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, seenRecently, recordSeen, trimLog, isUnderRoot, writtenLine, putEntry } from './tier.mjs';
 
 // ---- append-only seen-log (R4: dispatch-events.json under concurrent writers) --
 
@@ -167,4 +167,19 @@ test('writtenLine refuses the run template\'s own lines and keeps real ones', ()
     'Check: npm test | grep pass', 'Verify: ls dist | wc -l', 'Status: open | done',
     'Shows: <Header />', 'Renders: <Button onClick={go}>',
   ]) assert.equal(writtenLine(t), true, JSON.stringify(t));
+});
+
+// ---- putEntry: one session's entry in a file shared by every session -------
+
+test('putEntry sets one entry, keeps the others, and keeps only the newest when the file is full', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-store-'));
+  const path = join(dir, 'persist-checks.json');
+  writeFileSync(path, JSON.stringify({ old: { steps: 1, checkedAt: '2026-01-01T00:00:00.000Z' }, older: { steps: 2 }, mid: { steps: 3, t: Date.now() - 1000 } }));
+  putEntry(path, 'mine', { steps: 4 }, 3);
+  const s = JSON.parse(readFileSync(path, 'utf8'));
+  assert.deepEqual(Object.keys(s).sort(), ['mid', 'mine', 'old'], 'the entry with no time at all goes first');
+  assert.equal(s.mine.steps, 4);
+  assert.ok(Number.isFinite(s.mine.t), 'stamped, so it is kept over older entries');
+  putEntry(path, 'mid', { steps: 5 }, 3);
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).mid.steps, 5, 'an existing entry is replaced in place');
 });

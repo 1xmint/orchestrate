@@ -23,7 +23,7 @@
 import { readFileSync, existsSync, execFileSync, createHash } from './lib/node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail, findRepoRoot } from './lib/tier.mjs';
+import { DIR, readJson, putEntry, sanitizeId, sessionRun, loadSession, readTail, findRepoRoot } from './lib/tier.mjs';
 import { fileChange } from './lib/file-change.mjs';
 import { projectPath } from './lib/project.mjs';
 import { pickupSection, pickupWritten } from './lib/runs.mjs';
@@ -244,7 +244,7 @@ function checkProject(input, quiet) {
   const d = projectCount({ prev: (store[key] || {}).count, paths, root, ignored: p => gitIgnored(root, p) });
   const say = d.block && !quiet;
   store[key] = { count: d.block && quiet ? PROJECT_TURNS - 1 : d.count };
-  try { writeJsonAtomic(path, store); } catch {}
+  try { putEntry(path, key, store[key]); } catch {}
   return say ? `orchestrate: ${d.turns} turns changed project files and .orchestrator/PROJECT.md did not change; Where it stands / Next may be stale.` : null;
 }
 
@@ -310,7 +310,7 @@ function checkHeartbeat(input) {
     updated = { ...hb.rec, checkedAt: new Date().toISOString() };
     if (hb.kind) {
       store[key] = updated;
-      try { writeJsonAtomic(path, store); } catch {}
+      try { putEntry(path, key, store[key]); } catch {}
       return emitBlock(`orchestrate: ${hb.why}`);
     }
   }
@@ -329,7 +329,7 @@ function checkHeartbeat(input) {
   if (rh.block) {
     updated.reviewBlockedFor = rh.blockedFor;
     store[key] = updated;
-    try { writeJsonAtomic(path, store); } catch {}
+    try { putEntry(path, key, store[key]); } catch {}
     // What clears the hold, stated as a fact: without it the lead guesses.
     // SKIP_EXPLAINED needs "skipped" and "review" in one sentence.
     const clears = `It clears on a passing orch-reviewer with REVIEW OF: ${rh.task}, or a closing line saying why the review was skipped.`;
@@ -344,12 +344,12 @@ function checkHeartbeat(input) {
   // to the lead on its next tool call (context-check.mjs), so a closing message
   // is never followed by an error notice.
 
-  if (!bound) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
+  if (!bound) { store[key] = updated; try { putEntry(path, key, store[key]); } catch {} return; }
 
   // Then Pickup honesty, only after a dispatch, only for the run this session
   // drives, exactly as before.
   const lastDispatchAt = state.lastDispatchAt || null;
-  if (!lastDispatchAt) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
+  if (!lastDispatchAt) { store[key] = updated; try { putEntry(path, key, store[key]); } catch {} return; }
 
   const text = readFileSync(run.runMd, 'utf8');
   const hash = pickupHash(text);
@@ -357,11 +357,11 @@ function checkHeartbeat(input) {
   const d = shouldBlock({ pickupHash: hash, section, lastDispatchAt, prev: rec });
   updated = { ...updated, hash };
 
-  if (!d.block) { store[key] = updated; try { writeJsonAtomic(path, store); } catch {} return; }
+  if (!d.block) { store[key] = updated; try { putEntry(path, key, store[key]); } catch {} return; }
 
   updated.blockedFor = hash;
   store[key] = updated;
-  try { writeJsonAtomic(path, store); } catch {}
+  try { putEntry(path, key, store[key]); } catch {}
 
   emitBlock(`orchestrate: ${d.why}. The Pickup section of ${run.runMd} (one sentence that continues from here, its confidence, the resume risk) is the only thing the next session reads first.`);
 }

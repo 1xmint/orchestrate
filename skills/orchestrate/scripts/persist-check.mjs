@@ -42,7 +42,7 @@
 import { readFileSync, statSync, spawnSync, createHash } from './lib/node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
+import { DIR, readJson, putEntry, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
 import { pauseRoot, pauseRecord, writePause, clearPause } from './lib/pause.mjs';
 import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
 import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
@@ -587,7 +587,7 @@ export function check(input) {
       // met, a promise to wait): the reply's own message decides those.
       const carry = before ? { progressed: before.progressed, denied: before.denied, quotaRefused: before.quotaRefused, errors: before.errors, tools: before.tools, lastChange: before.lastChange, prompted: before.prompted, monitorStarted: before.monitorStarted, scheduled: before.scheduled } : null;
       store[key] = { ...base, lastBlock: 'claim', ...(size ? { lastSize: size } : {}), ...(carry ? { carry } : {}) };
-      try { writeJsonAtomic(path, store); } catch {}
+      try { putEntry(path, key, store[key]); } catch {}
     }
     return { kind: 'continue', why: `${why}${RESEND_NOTE}` };
   };
@@ -606,7 +606,7 @@ export function check(input) {
     const checkpoint = hasCheckpoint(input.session_id || null, ctx.reading, { runMd: bound, permissionMode: modeOf(input) });
     if (ctx.reading.tokens >= at && !checkpoint && rec.contextBlockedFor !== epoch) {
       store[key] = { ...rec, contextBlockedFor: epoch, checkedAt: new Date().toISOString() };
-      try { writeJsonAtomic(path, store); } catch {}
+      try { putEntry(path, key, store[key]); } catch {}
       return { rec: store[key], kind: 'continue', why: `orchestrate: ${checkpointFact({ ...ctx.reading, session: ctx.reading.session || input.session_id || null })} This Stop is refused once for it.` };
     }
   }
@@ -646,7 +646,7 @@ export function check(input) {
   if (dec.kind === 'continue' && ctx && ctx.notice && String(dec.why).includes(ctx.notice)) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString(), lastBlock: dec.kind === 'continue' ? 'loop' : null };
-  try { writeJsonAtomic(path, store); } catch {}
+  try { putEntry(path, key, store[key]); } catch {}
 
   if (dec.kind === 'stop') {
     state.persist = { ...p, armed: false, endedAt: new Date().toISOString(), endReason: dec.why };

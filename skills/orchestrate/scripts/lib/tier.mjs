@@ -196,6 +196,27 @@ export function updateSession(sessionId, fn, init = null) {
   } catch { return null; }
 }
 
+// One session's entry in a file that keeps an entry for every session (the
+// Stop hooks' loop and turn records). Each Stop read the whole file and wrote
+// it back, so two sessions stopping at once lost one's entry (the loop's step
+// count, the "said once" marks), and with one entry per session it grew on
+// every session and was read whole at every Stop. A write takes the file's
+// lock, re-reads it, sets this entry and keeps the `max` newest.
+export const STORE_MAX = 200;
+export function putEntry(path, key, value, max = STORE_MAX) {
+  withFileLock(path, () => {
+    const read = readJson(path);
+    const store = read && typeof read === 'object' && !Array.isArray(read) ? read : {};
+    store[key] = { ...value, t: Date.now() };
+    const keys = Object.keys(store);
+    if (keys.length > max) {
+      const at = k => Number(store[k] && store[k].t) || Date.parse(store[k] && store[k].checkedAt) || 0;
+      for (const k of keys.sort((a, b) => at(b) - at(a)).slice(max)) delete store[k];
+    }
+    writeJsonAtomic(path, store);
+  });
+}
+
 // What a hook loaded, per top-level key, so its save writes back only what it
 // changed (saveSession).
 const LOADED = new WeakMap();

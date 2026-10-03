@@ -239,8 +239,12 @@ release's section when it ships.
     refusal, since the reply is not read again. The same-error line showed the
     user a blurred key with paths cut mid-word ("/hom<path>"); the user now
     reads "the same error came back twice", and paths are blurred from their
-    start. Left: `persist-checks.json` and `turn-checks.json` are never
-    pruned; both predate this branch.
+    start. The two Stop hooks' shared records (`persist-checks.json`,
+    `turn-checks.json`, one entry per session) were read and written whole:
+    two sessions stopping at the same moment lost one's entry (the loop's
+    step count and its said-once marks), and the files grew by an entry per
+    session for good. Each Stop now sets its own entry under the file's
+    lock and keeps the newest `STORE_MAX` (`putEntry`).
   - **The other hooks read whole, and the session file locked** (fresh
     context, Opus, one read each of the router and of context-check,
     turn-check and ledger, then one review of the fixes). Several hooks write

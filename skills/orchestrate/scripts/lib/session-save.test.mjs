@@ -98,3 +98,22 @@ test('updateSession: no file and no starting state changes nothing; with one, th
   assert.equal(s.x, undefined, 'the first call had no file and no starting state, and the third said it changed nothing');
   assert.deepEqual(s.returned, [{ agentId: 'h1' }]);
 });
+
+test('putEntry: sessions stopping at the same moment keep each other\'s entries', async () => {
+  // The Stop hooks' shared records were written whole, so a second session's
+  // Stop dropped the first's loop record.
+  const home = mkdtempSync(join(tmpdir(), 'orch-store-race-'));
+  const path = join(home, 'persist-checks.json');
+  writeFileSync(path, JSON.stringify({ earlier: { steps: 7 } }));
+  const go = Date.now() + 600;
+  const writers = Array.from({ length: 3 }, (_, i) => new Promise(resolve => {
+    const p = spawn(process.execPath, ['--input-type=module', '-e', `import { putEntry } from ${JSON.stringify(TIER)};
+      while (Date.now() < ${go}) {}
+      putEntry(${JSON.stringify(path)}, 's${i}', { steps: ${i} });`], { env: { ...process.env, HOME: home, USERPROFILE: home }, stdio: 'ignore' });
+    p.on('exit', resolve);
+  }));
+  await Promise.all(writers);
+  const s = JSON.parse(readFileSync(path, 'utf8'));
+  assert.deepEqual(Object.keys(s).sort(), ['earlier', 's0', 's1', 's2']);
+  assert.equal(existsSync(`${path}.lock`), false);
+});
