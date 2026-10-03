@@ -30,6 +30,75 @@ release's section when it ships.
   comparison on a written prediction, the two held-back tasks, release on the
   owner's go.
 
+- 2026-10-03, overnight (branch `night/0010-free-steps`, draft PR #52 into
+  `phase/0009-bench`): the plan's free steps are built, each with tests, all
+  green on GitHub CI. Nothing paid ran; step 4 waits on step 0's looks on the
+  owner's machine.
+  - **Step 1.** `bench/RULE.md` has the dated outcome table and the bundle as
+    kind "addition"; `verdict` names the row it lands on. A missing or empty
+    work folder is a failed run, not a note. `evalRootOf` treated the
+    filesystem root as an eval root, so on Linux, with the eval's temp folder
+    gone, the scorer graded the first folder under `/home`: the likely reason
+    pilot part 1 read one valid run and no successes. A scorer crash now fails
+    the bench job after the leak scan and the upload. The scenario suite passes
+    `--compact-after 1`. `bench/hook-bytes.mjs` counts Stop blocks from the
+    host's "Stop hook feedback:" record (read in the 2.1.42 and 2.1.288
+    programs); the zero in `docs/research/0009-hook-bytes.md` was blind.
+  - **Step 2b, the pause** (`docs/pause.md`). The 90% stop is gone. A helper
+    refused for usage is a fact on the next continue, not a stop, and a step
+    whose only work was such sends is no work. `persist-check.mjs` is also on
+    `StopFailure` (a second named exception in `hooks-registered-once`), where
+    it only writes `.orchestrator/pause.json`, and only where that folder
+    exists. A Stop with a helper, background command or scheduled prompt out
+    waits instead of stopping, and the same work still out after a wait with
+    nothing done since ends keep-going (a dev server would otherwise hold it
+    forever). Checked 2026-10-03: code.claude.com/docs/en/hooks-guide
+    (StopFailure output is ignored; a Stop hook is overridden after eight
+    blocks in a row without progress) and the 2.1.288 type file (`error`,
+    `background_tasks`, `session_crons`).
+  - **Step 2c.** The card carries decision 2c; the router states, from the
+    second time, that the same question went out unanswered, quoting the
+    replies (`lib/asked.mjs`). The card stays at 2,187 characters.
+  - **Step 2d.** `plain-words.test.mjs` produces every line the user sees
+    directly (keep-going's stop line for each reason, the band, the pause text,
+    the status line) and fails on the eval's machinery list plus paths and
+    terms of art. It caught "Auto-continue stopped", "a dispatch was denied",
+    a checkpoint path and token count in a user line, "the done-when", "ctx"
+    and task ids; all are in plain words now, and the lead keeps the details.
+  - **Step 2e, the per-run read: 27,278 to 13,481 bytes (51% less).** SKILL.md
+    19,994 to 7,625; the Plain style 5,094 to 3,669; the card 2,190 to 2,187.
+    The profile line the skill loads with, not counted before, 991 to 384.
+    Where each rule went is in commit `e014f77`'s message; the auto-merge rule
+    came back after the review. The prompting-guidance page was not re-read
+    tonight (fetching it needed the owner's approval); these wording choices
+    rest on the 2026-09-21 reading in AGENTS.md, and step 5 is the run that
+    judges them.
+  - **The band** (section 4, `docs/band.md`): `hooks/band.mjs` under `modules`
+    in `hooks/hooks.json`. Read in the shipped programs: 2.1.286 and 2.1.250
+    know the key, and 2.1.200 drops an unknown key, so the command hooks load
+    either way. CI's new `validate` job runs `claude plugin validate` on
+    2.1.286 with no sign-in. The band starts no timer where nothing draws.
+  - **Independent review** (fresh context, Opus): FAIL, seven should-fix, no
+    blocker; all fixed in `11a3675`. This entry is its sixth.
+  - **Also:** builders and debuggers check that their folder starts from the
+    packet's base (Claude Code starts a helper folder from the remote's default
+    branch unless `worktree.baseRef` is "head", code.claude.com/docs/en/
+    worktrees; three of tonight's own helpers started from main); the
+    coordinator grades every task it sent, a missing return as BLOCKED; cut
+    `smoke.mjs`, `profile.example.json` and `references/execution.md` (no
+    caller); turn-check walks folders instead of starting git each Stop; the
+    router reads the plugin listings once per session.
+  - **Not done, and why.** Step 0 and step 3 need the owner's machine and
+    records; step 2a (which hook notes Claude never acts on) needs the session
+    records too. Left for the owner, each with the audit's evidence in PR #52:
+    setting `worktree.baseRef` to "head"; a smaller worktree-removal reader in
+    `guard-bash.mjs` (a guard change: independent review first); whether the
+    Codex lane, live usage, the coordinator, `map.mjs`, `batch.mjs` and
+    `suggest.mjs` earn their upkeep. Checked in the shipped program: 2.1.200
+    already lists `StopFailure` among its hook events and fires it with an
+    `error` field, so the new key is known from 2.1.200 on; builds before that
+    were not read.
+
 - The bench (`bench/`, `bench-hidden/`, `evals/grade-kept.mjs`,
   `.github/workflows/bench.yml`) fits "nothing that bills an outside service
   or needs its own API key": it is for developing this plugin only and is not
