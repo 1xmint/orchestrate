@@ -293,7 +293,7 @@ test('openItem names the run\'s next task, else the project page\'s next step, e
   mkdirSync(runDir, { recursive: true });
   const file = join(runDir, 'RUN.md');
   writeFileSync(file, runMd([row('10-3-0001', '✅ done', 'first'), row('10-3-0002', '🔨 running', 'second')]));
-  assert.equal(openItem({ run: { root: repo, runMd: file } }, repo), '10-3-0002 second');
+  assert.equal(openItem({ run: { root: repo, runMd: file } }, repo), 'second', 'the task by its words, without the ledger id');
   writeFileSync(file, runMd([row('10-3-0001', '✅ done', 'first')]));
   assert.equal(openItem({ run: { root: repo, runMd: file } }, repo), '', 'every task done: nothing open to name');
 });
