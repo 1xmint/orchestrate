@@ -17,10 +17,11 @@
 export function lastQuestion(text) {
   const t = String(text || '').trim().replace(/[\s*_`)\]]+$/, '');
   if (!t.endsWith('?')) return null;
-  // Split at sentence ends and lines, not at a colon: "Which list should search
-  // use: the title or the full list?" is one question (whole-file review of
-  // the router, 2026-10-03).
-  const parts = t.split(/\n+|(?<=[.!])\s+/).map(s => s.trim()).filter(Boolean);
+  // Split at sentence ends, lines, and a colon only where a new sentence starts
+  // after it ("Still open: Do you want...?"): "Which list should search use:
+  // the title or the full list?" is one question (whole-file review of the
+  // router, 2026-10-03).
+  const parts = t.split(/\n+|(?<=[.!])\s+|(?<=:)\s+(?=[A-Z])/).map(s => s.trim()).filter(Boolean);
   // Markdown that opens the sentence ("**Do you want…?**") is not its words.
   const q = (parts.length ? parts[parts.length - 1] : t).replace(/^[\s*_`>#-]+/, '');
   return q.length > 300 ? q.slice(-300) : q;
