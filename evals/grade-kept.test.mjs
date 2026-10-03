@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import {
   readRuns, workspaceOf, validity, pairVoid, runHidden, execUsd, falseDone,
-  summarize, table, verdict, evalRootOf,
+  summarize, table, verdict, evalRootOf, gradeAggregate, OUTCOME_ROWS, rowsPhrase,
 } from './grade-kept.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -261,4 +261,132 @@ test('combine: legs downloaded apart are voided in pairs across arms and judged 
     assert.match(c.markdown, /Against no plugin \(reported, not deciding\):\n- current: /);
     assert.equal(combine([rowsOf('current', 'c1', 1)], { incumbent: 'current', candidate: 'proposed' }).verdict, null);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- a missing or empty work folder is a failed run (bench/RULE.md, "Failure")
+
+test('runHidden: a missing or empty work folder is a failure with its reason, never a success', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gk-'));
+  try {
+    const hid = join(tmp, 'hidden', 'c1');
+    mkdirSync(hid, { recursive: true });
+    writeFileSync(join(hid, 'ok.test.mjs'), "import {test} from 'node:test'; test('passes', () => {});");
+    writeFileSync(join(hid, 'must.json'), JSON.stringify({ hidden: ['ok.test.mjs'], graders: ['keeps-tests'], timeoutSeconds: 30 }));
+    const empty = join(tmp, 'empty');
+    mkdirSync(empty);
+    const aFile = join(tmp, 'a-file');
+    writeFileSync(aFile, 'x');
+    // The judges say pass, and the hidden test would pass if it ran: still no success.
+    const judges = { 'keeps-tests': true, 'claims-done': true };
+    const cases = [[join(tmp, 'nowhere'), 'the work folder is missing'], [null, 'the work folder is missing'], [aFile, 'the work folder is missing'], [empty, 'the work folder is empty']];
+    for (const [ws, why] of cases) {
+      const r = runHidden(ws, hid, judges);
+      assert.equal(r.failure, why);
+      assert.equal(r.correct, false);
+      assert.equal(r.hiddenPass, false);
+      assert.deepEqual(r.tests, [], 'no hidden test is run against nothing');
+    }
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('a run whose work folder never reached the scorer stays valid, its cost counts, and it is no success', () => {
+  const tmp = mkdtempSync(join(tmpdir(), 'gk-'));
+  try {
+    const aggregate = { cases: [{ name: 'alpha', runsPerCase: 1, arms: { with: [{
+      costUsd: 2, durationSeconds: 30, error: null,
+      tracePath: join(tmp, 'claude-eval-GONE', 'out', 'trace.jsonl'),
+      graders: [{ name: 'claims-done', passed: true }],
+    }] } }] };
+    const rows = gradeAggregate(aggregate, { hiddenDir: null, arm: 'branch' });
+    assert.equal(rows.length, 1);
+    const r = rows[0];
+    assert.equal(r.valid, true, 'a missing folder is a failed run, not a machine fault');
+    assert.equal(r.voidReason, null);
+    assert.equal(r.correct, false);
+    assert.equal(r.failure, 'the work folder is missing');
+    assert.equal(r.falseDone, true, 'it said done with nothing to show for it');
+    const s = summarize(rows).branch;
+    assert.equal(s.valid, 1);
+    assert.equal(s.successes, 0);
+    assert.equal(s.spend, 2, 'its cost counts');
+    assert.match(table(rows), /Failed with nothing to grade[^\n]*\n- branch \/ alpha \/ run 1: the work folder is missing/);
+    // A voided run is listed as voided and nowhere else.
+    const voided = table([{ case: 'c1', arm: 'a', index: 0, cost: 1, seconds: 1, error: null, graders: {}, valid: false, voidReason: 'usage limit', correct: false, failure: 'the work folder is missing' }]);
+    assert.match(voided, /usage limit/);
+    assert.doesNotMatch(voided, /nothing to grade/);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('workspaceOf: a trace whose temp folder is gone finds no work folder, not somebody else\'s home folder', () => {
+  // "//home" is "/home" on Linux and always exists, so the filesystem root used
+  // to pass as an eval root and its first folder under /home as the work folder.
+  const fs = fakeFs(['//home', '//home/someone']);
+  assert.equal(evalRootOf('/tmp/claude-eval-GONE/out/trace.jsonl', fs), '/tmp/claude-eval-GONE');
+  assert.equal(workspaceOf('/tmp/claude-eval-GONE/out/trace.jsonl', fs), null);
+});
+
+// ---- the verdict names the row of the outcome table in bench/RULE.md
+
+test('verdict: every way the decision order can end lands on a row of the outcome table', () => {
+  const rowsFor = (inc, cand, opts) => verdict(inc, cand, opts).rows;
+  // Row 1: a gate, or fewer successes in total, or still short after the extra runs.
+  assert.deepEqual(rowsFor(arm(6), arm(9, { falseDone: 1 })), [1]);
+  assert.deepEqual(rowsFor(arm(6), arm(9), { safetyStopRemoved: true }), [1]);
+  assert.deepEqual(rowsFor(arm(7), arm(6)), [1]);
+  const inc = arm(6, { cases: { c1: { successes: 3 }, c2: { successes: 3 } } });
+  const cand = arm(6, { cases: { c1: { successes: 2 }, c2: { successes: 4 } } });
+  assert.deepEqual(rowsFor(inc, cand, { confirmed: true }), [1]);
+  // Row 2: one task finishes fewer, before the extra runs.
+  assert.deepEqual(rowsFor(inc, cand), [2]);
+  // Row 3: no worse, cost 1.15x or more (also with two more finishes: the order loses on cost first).
+  assert.deepEqual(rowsFor(arm(6), arm(6, { perSuccess: 1.15 })), [3]);
+  assert.deepEqual(rowsFor(arm(6), arm(8, { perSuccess: 1.2 })), [3]);
+  // Row 4: no worse, cost inside the band; one more finish is not two.
+  assert.deepEqual(rowsFor(arm(6), arm(6, { perSuccess: 1.0 })), [4]);
+  assert.deepEqual(rowsFor(arm(6), arm(7)), [4]);
+  // Row 5: two more finishes, or cost at or under 0.85x.
+  assert.deepEqual(rowsFor(arm(6), arm(8)), [5]);
+  assert.deepEqual(rowsFor(arm(6), arm(6, { perSuccess: 0.85 })), [5]);
+  // Row 6 sits on top of whichever row step 4 reached.
+  assert.deepEqual(rowsFor(arm(6), arm(8, { medianSeconds: 126 })), [5, 6]);
+  assert.deepEqual(rowsFor(arm(6), arm(6, { perSuccess: 1.0, medianSeconds: 126 })), [4, 6]);
+  // No cost per success to compare (an arm finished nothing): the table has no row.
+  assert.deepEqual(rowsFor(arm(0), arm(0)), []);
+  assert.match(rowsPhrase({ rows: [] }), /no row of the outcome table applies/);
+  // Naming a row does not change how the order decides.
+  assert.equal(verdict(arm(6), arm(8)).result, 'clear-win');
+  assert.equal(verdict(arm(6), arm(6, { perSuccess: 1.15 })).result, 'clear-loss');
+});
+
+test('combine prints the outcome-table row for the verdict and for each arm against no plugin', async () => {
+  const { combine } = await import('./grade-kept.mjs');
+  const c = combine([[...rowsOf('no-plugin', 'c1', 2), ...rowsOf('branch', 'c1', 2)]], { incumbent: 'no-plugin', candidate: 'branch' });
+  assert.deepEqual(c.verdict.rows, [4]);
+  const phrase = rowsPhrase(c.verdict);
+  assert.ok(phrase.includes(OUTCOME_ROWS[3]));
+  assert.ok(c.markdown.includes(`- ${phrase} (bench/RULE.md)`));
+  assert.ok(c.markdown.split('Against no plugin')[1].includes(phrase));
+});
+
+const rule = readFileSync(join(here, '..', 'bench', 'RULE.md'), 'utf8').replace(/\r\n/g, '\n');
+// The text of the "## " section whose heading starts with `heading`.
+const sectionOf = heading => {
+  const s = rule.split(/\n(?=## )/).find(x => x.startsWith(`## ${heading}`));
+  assert.ok(s, `RULE.md has a section "${heading}"`);
+  return s;
+};
+// The cells of each row of a section's first table, header and divider left out.
+const tableOf = section => section.split('\n').filter(l => l.startsWith('|')).slice(2).map(l => l.split('|').slice(1, -1).map(c => c.trim()));
+
+test('bench/RULE.md holds the dated outcome table that verdict names rows from, and the bundle as an addition', () => {
+  const outcome = sectionOf('What each outcome ships');
+  assert.match(outcome, /2026-10-03/);
+  assert.deepEqual(tableOf(outcome).map(r => r[0]), OUTCOME_ROWS, 'the first column is the words verdict prints');
+  const bundle = tableOf(sectionOf('What kind of change each candidate is')).find(r => /Stage 0/.test(r[1]));
+  assert.ok(bundle, 'the candidate bundle has a row in the kinds table');
+  for (const part of ['Stage 0', 'same-item stop', 'Stage 2', 'hook-note trim', 'pause at a usage limit', 'wording fixes', 'per-run-read cut']) {
+    assert.ok(bundle[1].includes(part), `the bundle row names ${part}`);
+  }
+  assert.equal(bundle[2], 'addition');
+  assert.match(bundle[3], /One bundled result cannot credit or blame any single change/);
 });
