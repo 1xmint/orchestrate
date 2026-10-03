@@ -341,7 +341,11 @@ function handlePrompt(input) {
   // USER INPUT]" or "<task-notification>". Nothing in it is the user's words,
   // so it must not arm a loop, pin a goal, grant a model or spend the card.
   // Seen live: a finished helper's notice became the persist goal.
-  if (syntheticPrompt(trimmed)) { saveSession(state); return; }
+  // Claude Code 2.1.288's prompt schema also has a `source` field ("system"
+  // for a notice or a message from another session); it is not sent yet, so it
+  // is read beside the text, to take effect when the host turns it on. A
+  // prompt that is nothing but the host's own tags is the host's too.
+  if (syntheticPrompt(trimmed) || input.source === 'system' || (!trimmed && text.trim())) { saveSession(state); return; }
 
   // A fresh session reading this record later (findPreviousSession) needs to
   // know this one is still recent, on every real prompt, not only the first.
@@ -395,6 +399,10 @@ function handlePrompt(input) {
     state.persistMuted = off;
     if (off && state.persist) state.persist = { ...state.persist, armed: false, endedAt: new Date().toISOString(), endReason: 'the user said persist off' };
     saveSession(state);
+    // Said, so neither the lead nor a later "why did it stop?" has to guess.
+    emit('UserPromptSubmit', off
+      ? '[orchestrate · persist] keep-going is off for this session; "persist on" lets it turn on again.'
+      : '[orchestrate · persist] keep-going can turn on again: on an explicit "keep going until …", or on "continue" with an open run.');
     return;
   }
 
@@ -422,10 +430,17 @@ function handlePrompt(input) {
   // Armed before the mute check: "router off" silences the card, not a loop
   // the user asked for by name.
   let armedNow = false;
+  const wasOn = Boolean(state.persist && state.persist.armed);
+  const goalBefore = state.persist ? state.persist.goal : undefined;
   let ctx = null;
   const getCtx = () => ctx || (ctx = gatherContext(input, state));
-  const intent = state.persistMuted ? null : promptIntent(trimmed);
-  const explicit = !state.persistMuted && intent !== 'status' && persistIntent(trimmed);
+  // "persist off" holds for the session, explicit asks included; one held back
+  // is said, so the lead can tell the user why nothing keeps going (whole-file
+  // review of the router, 2026-10-03: it was ignored without a word).
+  const wordIntent = promptIntent(trimmed);
+  const intent = state.persistMuted ? null : wordIntent;
+  const explicit = !state.persistMuted && wordIntent !== 'status' && persistIntent(trimmed);
+  const heldBack = state.persistMuted && wordIntent !== 'status' && persistIntent(trimmed);
   if (explicit) {
     // A bare "keep going" or "continue until complete" names no goal; it means
     // the one already pinned or the open run's, never the phrase itself.
@@ -501,7 +516,7 @@ function handlePrompt(input) {
     let question = null;
     try { question = input.transcript_path ? lastQuestion(lastAssistantText(readTail(input.transcript_path, 131072))) : null; } catch {}
     // "go ahead" answers the question; "continue" nudges past it.
-    state.asked = nextAsked(state.asked, { question, reply: trimmed, nudge: (Boolean(intent) && !approves(trimmed)) || Boolean(explicit) });
+    state.asked = nextAsked(state.asked, { question, reply: trimmed, nudge: (Boolean(wordIntent) && !approves(trimmed)) || Boolean(explicit) });
     const asked = askedLine(state.asked);
     if (asked) out.push(asked);
   }
@@ -555,6 +570,18 @@ function handlePrompt(input) {
     state.lastStateHash = hash;
     state.lastActionable = changed;
   }
+  // A short word that arms keep-going ("continue", "go ahead") starts up to 25
+  // steps the user may not watch: the full card and the run's page go with it,
+  // as with a first request (whole-file review of the router, 2026-10-03).
+  if (armedNow && state.cardSent !== true) {
+    const opening = actionableLine(ctx);
+    out.push(opening ? `[orchestrate] ${opening}` : '[orchestrate]');
+    out.push(cardBody());
+    sendFullCardExtras();
+    state.cardSent = true;
+    state.lastStateHash = stateHash(ctx);
+    state.lastActionable = opening;
+  }
 
   // A brand-new session's first prompt naming no goal of its own — "continue"
   // is one word and never trips the substantive gate above, so this checks
@@ -563,7 +590,7 @@ function handlePrompt(input) {
   // it does the previous session's own words stand in.
   if (freshSession && !state.handoffShown && continueIntent(trimmed)) {
     const page = projectNote(ctx.repoRoot, input.cwd);
-    if (page) { out.push(page); state.projectShown = true; markShown(state, substantive ? 1 : 0); }
+    if (page) { if (!state.projectShown) { out.push(page); state.projectShown = true; markShown(state, substantive ? 1 : 0); } }
     else {
       const prev = findPreviousSession({ sessionsDir: SESSIONS_DIR, cwd: input.cwd, exceptId: input.session_id, now: Date.now() });
       if (prev) out.push(handoffLine(prev, ctx));
@@ -637,12 +664,18 @@ function handlePrompt(input) {
 
   if (runGrant) out.push(runGrant);
 
-  if (armedNow) {
+  // Said when keep-going turns on or its goal changes, not again on every
+  // "keep going" while it is on (whole-file review of the router, 2026-10-03).
+  if (armedNow && (!wasOn || state.persist.goal !== goalBefore)) {
     out.push(`[orchestrate · persist] ${persistLine(state.persist)}`);
-    // The existing budget and readiness machinery only engages for a run. Point
-    // at it once, for work big enough to deserve it, rather than rebuild it.
-    if (!ctx.run) out.push('If this goal is several separable tracks, or will outlive this session, open a run first (run-init.mjs) so readiness is tracked; for direct work, just start.');
+    // The budget and readiness tracking engage only for a run: said once a
+    // session, as a fact.
+    if (!ctx.run && !state.runHintShown) {
+      out.push('No run is open, so readiness and budget are not tracked for this goal; run-init.mjs opens one.');
+      state.runHintShown = true;
+    }
   }
+  if (heldBack) out.push('[orchestrate · persist] keep-going is off for this session (the user said "persist off"); "persist on" lets it turn on again.');
 
   // The goal, as one fact, on every tenth prompt since it was last shown; on the
   // others nothing is added. Compaction and resume show it in handleSessionStart.
@@ -767,7 +800,10 @@ function handleSessionStart(input) {
   const mode = modeNote(state, input);
   if (mode) out.push(mode);
 
-  state.cardSent = true;
+  // Only a compaction prints the card here; after a resume it is still owed to
+  // the first request that earns it (whole-file review of the router,
+  // 2026-10-03: a resumed session never got it).
+  if (source === 'compact' && !state.muted) state.cardSent = true;
   state.lastStateHash = stateHash(ctx);
   state.lastActionable = actionableLine(ctx);
   saveSession(state);

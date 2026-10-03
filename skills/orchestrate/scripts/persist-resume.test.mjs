@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,6 +100,28 @@ test('"try again" restores keep-going that was on before, and never creates it',
   say(home, repo, 'try again', 's2');
   assert.equal(armed(home, 's2'), true, 'restored');
   assert.match(persistOf(home, 's2').goal, /login page/, 'with the goal it had');
+});
+
+test('the run template\'s own lines are no finish line: a run made by run-init and left unfilled does not arm', () => {
+  // Whole-file review of the router, 2026-10-03: "Why it matters: <...>",
+  // "- <evidence ...>" and the template's fixed "When it ends" line passed as
+  // written, and "continue" armed 25 steps toward the template's words.
+  const home = makeHome(); const repo = mkdtempSync(join(tmpdir(), 'orch-repo-'));
+  spawnSync('git', ['init', '-q'], { cwd: repo });
+  const init = spawnSync(process.execPath, [join(dirname(ROUTER), 'run-init.mjs'), 'tidy', '--repo', repo, '--goal', 'Finish the tidy command', '--session-id', 's8'], {
+    encoding: 'utf8', env: { ...process.env, USERPROFILE: home, HOME: home },
+  });
+  assert.equal(init.status, 0, init.stderr);
+  const runsDir = join(repo, '.orchestrator', 'runs');
+  const runMd = join(runsDir, readdirSync(runsDir)[0], 'RUN.md');
+  // One real task, so only the finish line is missing.
+  writeFileSync(runMd, readFileSync(runMd, 'utf8').replace(/\| <globs this task owns> \| <role · model> \| <replace this placeholder row> \|/, '| src/** | implementer · sonnet | add the --since flag |'));
+  say(home, repo, 'continue', 's8');
+  assert.equal(armed(home, 's8'), false, 'no finish line written');
+  writeFileSync(runMd, readFileSync(runMd, 'utf8').replace('- <evidence that would prove it, one line each; a command, a file, a page state>', '- `node --test` passes and `tidy --since 7d` lists only last week\'s notes'));
+  say(home, repo, 'continue', 's8');
+  assert.equal(armed(home, 's8'), true, 'a written finish line arms it');
+  assert.doesNotMatch(persistOf(home, 's8').goal, /</, 'the goal carries none of the template\'s placeholders');
 });
 
 test('a resume or a retry while keep-going is on leaves it as it is', () => {

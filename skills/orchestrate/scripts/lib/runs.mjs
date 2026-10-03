@@ -7,7 +7,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSy
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { nextSteps } from './project.mjs';
-import { readJson, writeJsonAtomic, isWritten, isUnderRoot, findRepoRoot, loadSession, saveSession } from './tier.mjs';
+import { readJson, writeJsonAtomic, isWritten, writtenLine, isUnderRoot, findRepoRoot, loadSession, saveSession } from './tier.mjs';
 
 export const OPEN_GLYPHS = /📋|🔨|🔍|◐|⛔/;
 
@@ -367,7 +367,7 @@ export function resolveRun(sessionId, cwd, { forWrite = false } = {}) {
 // ---- what is open in a run --------------------------------------------------
 // One read of a RUN.md's task rows and Done when, for the two callers that need
 // to know whether keep-going has anything real to keep going toward.
-const filledLine = l => l.trim() && !/^<.*>$/.test(l.trim());
+const filledLine = writtenLine;
 const sectionBody = (text, name) => {
   const m = new RegExp(`## ${name}\\s*\\n([\\s\\S]*?)(?:\\n## |\\s*$)`).exec(String(text || ''));
   return m ? m[1].split('\n').filter(filledLine).join('\n').trim() : '';

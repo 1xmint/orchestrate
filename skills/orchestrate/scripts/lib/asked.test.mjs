@@ -10,6 +10,7 @@ test('the question is the last sentence, and only when the message ends on one',
   assert.equal(lastQuestion('Done.\n\n**Do you want email or SMS for the reminders?**'), 'Do you want email or SMS for the reminders?');
   assert.equal(lastQuestion('Should I use email? I picked email for now.'), null, 'a message that moved on asked nothing');
   assert.equal(lastQuestion(''), null);
+  assert.equal(lastQuestion('Search is in. Which list should search use: the title or the full ingredient list?'), 'Which list should search use: the title or the full ingredient list?', 'a colon does not cut the question');
 });
 
 test('the same words with other spacing, case, punctuation or numbers are the same question', () => {

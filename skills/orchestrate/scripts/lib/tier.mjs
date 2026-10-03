@@ -76,6 +76,26 @@ export function isWritten(value) {
   return true;
 }
 
+// A section line someone filled in, as opposed to the template's own (assets/
+// RUN.md): not blank, not an angle-bracket placeholder on its own, after a list
+// marker or after a "Label:" ("Why it matters: <...>", "- <evidence ...>"), not
+// the template's list of alternatives, not a {{TOKEN}} nobody replaced, and not
+// the template's fixed instruction line. A line that was only checked for being
+// wholly "<...>" let an untouched run pass as having a finish line, and a
+// one-word "continue" armed 25 steps toward the template's own words
+// (whole-file review of the router, 2026-10-03).
+const TEMPLATE_FIXED = [/^When it ends, met or dropped:/i];
+export function writtenLine(line) {
+  let v = String(line == null ? '' : line).trim();
+  if (!v) return false;
+  v = v.replace(/^(?:[-*]|\d+\.)\s+/, '');
+  if (TEMPLATE_FIXED.some(re => re.test(v))) return false;
+  if (/\{\{[A-Z_]+\}\}/.test(v)) return false;
+  const label = /^([A-Za-z][\w ,'()-]{0,40}):\s*(.*)$/.exec(v);
+  const value = (label ? label[2] : v).trim();
+  return isWritten(value) && !/^<[^>]*>\W*$/.test(value);
+}
+
 // Per-key, TTL-pruned, size-bounded "have I seen this before" store — the
 // shape both the dispatch guard and the return ledger need for their own
 // dedupe. One global {sig, ts} slot used to serve this job in each hook; two
