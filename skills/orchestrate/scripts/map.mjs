@@ -22,8 +22,7 @@
 // macros, reflection and re-exports through a package name are missed. Grep is
 // still the tool for text; a language server, when loaded, for exact references.
 
-import { spawnSync } from './lib/node.mjs';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from './lib/node.mjs';
+import { spawnSync, existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { posix } from 'node:path';
 import { fileURLToPath } from 'node:url';

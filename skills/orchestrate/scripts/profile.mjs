@@ -16,8 +16,7 @@
 //   node profile.mjs --clear          remove the override
 //   node profile.mjs --autocompact <tokens|Nk|off> [--dry-run]
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from './lib/node.mjs';
-import { spawnSync } from './lib/node.mjs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, spawnSync } from './lib/node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

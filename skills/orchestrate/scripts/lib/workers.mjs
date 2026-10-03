@@ -19,10 +19,9 @@
 // also the lock on its worktree: no native helper is sent into a worktree a
 // live Codex process holds.
 
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync } from './node.mjs';
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync, createHash } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, basename, resolve } from 'node:path';
-import { createHash } from './node.mjs';
 import { fileURLToPath } from 'node:url';
 import { loadPolicy } from './policy.mjs';
 import { normalizeRole } from './prices.mjs';

@@ -22,12 +22,10 @@
 // See docs/safety-guard.md for what is stopped, how a user allows a specific
 // command going forward, and how to add a new pattern.
 
-import { readFileSync, existsSync } from './lib/node.mjs';
-import { spawnSync } from './lib/node.mjs';
+import { readFileSync, existsSync, spawnSync, createHash } from './lib/node.mjs';
 import { resolve as resolvePath, basename, isAbsolute } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { createHash } from './lib/node.mjs';
 import { readJson, writeJsonAtomic, findRepoRoot, DIR, sanitizeId, loadSession } from './lib/tier.mjs';
 import { mentionsMerge, mergeRefusal, ghView, REVIEW_PATHS } from './lib/merge-bar.mjs';
 import { paymentLine, withoutFileText } from './lib/shell-run.mjs';

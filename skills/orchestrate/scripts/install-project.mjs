@@ -21,8 +21,7 @@
 // The skill, the role agents and the global hooks stay at user level, so a
 // second machine needs `node scripts/install.mjs` once and nothing per repo.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from './lib/node.mjs';
-import { spawnSync } from './lib/node.mjs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, spawnSync } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { detect, block } from './gate.mjs';

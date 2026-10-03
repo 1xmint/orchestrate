@@ -21,11 +21,9 @@
 //
 // It never blocks and never fails a stop.
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, openSync, readSync, closeSync, fstatSync } from './lib/node.mjs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync, openSync, readSync, closeSync, fstatSync, createHash, spawnSync } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from './lib/node.mjs';
-import { spawnSync } from './lib/node.mjs';
 import { DIR, sanitizeId, loadSession, saveSession, resolveRun, runsUnder, findRepoRoot, seenRecently, recordSeen, trimLog } from './lib/tier.mjs';
 import { dollars, family, normalizeRole, advisorDollars } from './lib/prices.mjs';
 import { advisorTotals } from './lib/context-scan.mjs';

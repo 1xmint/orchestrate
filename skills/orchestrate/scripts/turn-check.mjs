@@ -20,9 +20,7 @@
 // set-shaped recommendations) fired on two failed fetches as readily as on two
 // real sources.
 
-import { readFileSync, existsSync } from './lib/node.mjs';
-import { execFileSync } from './lib/node.mjs';
-import { createHash } from './lib/node.mjs';
+import { readFileSync, existsSync, execFileSync, createHash } from './lib/node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail, findRepoRoot } from './lib/tier.mjs';
