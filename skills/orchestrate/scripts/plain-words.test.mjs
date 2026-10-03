@@ -23,7 +23,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { persistDecision, endMessage } from './persist-check.mjs';
-import { bandLine } from './lib/band-line.mjs';
+import { bandLine, WAITING_TEXT } from './lib/band-line.mjs';
 import { pauseRecord } from './lib/pause.mjs';
 import { footer } from './statusline.mjs';
 
@@ -83,6 +83,7 @@ test('every band line and pause text is in plain words', () => {
     'needs you': bandLine({ band: { session: 's', kind: 'needs', text: 'Email or text message for the reminders?', at }, session: 's', now }),
     'working on': bandLine({ band: { session: 's', kind: 'working', text: 'Add search to the notes page', at }, session: 's', now }),
     'another session': bandLine({ band: { session: 'other', kind: 'working', text: 'Add search to the notes page', at }, session: 's', now }),
+    'a long wait': bandLine({ band: { session: 's', kind: 'working', text: WAITING_TEXT, at }, session: 's', now: now + 250 * 60000 }),
   };
   for (const [label, line] of Object.entries(lines)) check(label, line);
 });

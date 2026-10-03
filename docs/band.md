@@ -34,7 +34,11 @@ end to 100 characters (with three dots). It is the first of these that exists:
    the router pinned, else (at a prompt only) the prompt itself when it is a
    request;
 2. at a Stop that passed on a wait: the fixed words "waiting on a helper or
-   background command";
+   background command", and from its first minute how long the wait has gone
+   on (", 12 min so far", ", 4 h 10 min so far"), worked out on every look
+   from the record's time, so "is it stuck?" has an answer without typing.
+   During a turn the session was woken for, the time still counts from the
+   wait's Stop until the next Stop or prompt rewrites the record;
 3. at a Stop that ends on a question: the question, the sentence the message
    closes on.
 

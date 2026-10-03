@@ -12,7 +12,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   BAND_KINDS, BAND_TEXT_CAP, OTHER_SESSION_MS, OTHER_SESSION_TAG, WAITING_TEXT,
-  bandClip, bandRecord, parseBand, parsePauseText, bandLine, bandAtStop,
+  bandClip, bandRecord, parseBand, parsePauseText, bandLine, bandAtStop, waitedFor,
 } from './band-line.mjs';
 import { BAND_REL, bandPath, readBand, writeBand, recordBand, openItem, sessionGoal, stopQuestion } from './band.mjs';
 import { pauseRecord, writePause, clearPause, readPause, pausePath } from './pause.mjs';
@@ -206,6 +206,21 @@ test('bandAtStop: a wait is working on the wait, anything else is idle', () => {
   assert.deepEqual(bandAtStop({}), { kind: 'idle', text: '' });
   assert.deepEqual(bandAtStop(), { kind: 'idle', text: '' });
   assert.deepEqual(bandAtStop({ open: 'x', goal: 'y' }), { kind: 'idle', text: '' }, 'an item and a goal alone do not make a finished turn busy');
+});
+
+test('a wait says how long it has gone on, from its first minute; other work lines carry no clock', () => {
+  const at = '2026-10-03T10:00:00.000Z';
+  const t = Date.parse(at);
+  const wait = m => bandLine({ band: { session: 's1', kind: 'working', text: WAITING_TEXT, at }, session: 's1', now: t + m * 60000 });
+  assert.equal(wait(0), `Working on: ${WAITING_TEXT}`);
+  assert.equal(wait(0.9), `Working on: ${WAITING_TEXT}`, 'nothing under a minute');
+  assert.equal(wait(1), `Working on: ${WAITING_TEXT}, 1 min so far`);
+  assert.equal(wait(59), `Working on: ${WAITING_TEXT}, 59 min so far`);
+  assert.equal(wait(60), `Working on: ${WAITING_TEXT}, 1 h so far`);
+  assert.equal(wait(250), `Working on: ${WAITING_TEXT}, 4 h 10 min so far`);
+  assert.equal(bandLine({ band: { session: 's1', kind: 'working', text: 'Add search', at }, session: 's1', now: t + 3600000 }), 'Working on: Add search');
+  assert.equal(waitedFor('not a time', t), '');
+  assert.equal(waitedFor(at, t - 120000), '', 'a clock behind the record says nothing');
 });
 
 // ---- the file --------------------------------------------------------------------------

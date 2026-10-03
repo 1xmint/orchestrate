@@ -97,8 +97,27 @@ export function bandLine({ pause = null, band = null, session = null, now = Date
   const said = bandClip(band.text);
   if (!said) return '';
   if (band.kind === 'needs') return `${b}Needs you: ${said}`;
-  if (band.kind === 'working') return `${b}Working on: ${said}`;
+  if (band.kind === 'working') {
+    const waited = said === WAITING_TEXT ? waitedFor(band.at, now) : '';
+    return `${b}Working on: ${said}${waited ? `, ${waited} so far` : ''}`;
+  }
   return '';
+}
+
+// How long a wait has gone on since the Stop that started it: the answer to
+// "is it stuck?" without typing (about four hours on a check that never
+// reported back is in the owner's record). Nothing under a minute, whole
+// minutes after that, hours from sixty minutes. The record is rewritten at the
+// next Stop or prompt; during a turn the session was woken for, the time still
+// counts from the wait's Stop (docs/band.md).
+export function waitedFor(at, now) {
+  const ms = Number(now) - Date.parse(at);
+  if (!Number.isFinite(ms) || ms < 60000) return '';
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  return r ? `${h} h ${r} min` : `${h} h`;
 }
 
 // What a Stop leaves for the band, from facts the hook already has. Pure.
