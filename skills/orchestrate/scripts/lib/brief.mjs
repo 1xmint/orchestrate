@@ -170,7 +170,7 @@ export function briefNote(ctx, state, { force = false, store = BRIEF_MISSING_STO
     // depends on whether the repo is public (references/brief.md), and a
     // tracked CLAUDE.md in a public repo would be published on the next push
     // (prompt review, 2026-10-03).
-    return `[orchestrate · brief] This project has no "What this is for" section (what it is for, who it serves, which documents decide). brief.md in the skill's references says which file it goes in; a public repo keeps it in an untracked CLAUDE.local.md.`;
+    return `[orchestrate · brief] This project has no "What this is for" section (what it is for, who it serves, which documents decide). The skill's brief.md says which file it goes in (untracked in a public repo).`;
   }
   if (b.kind === 'kept') { state.briefSentFor = null; return ''; }
   if (!force && state.briefSentFor === b.file) return '';
