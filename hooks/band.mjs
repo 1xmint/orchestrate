@@ -98,13 +98,23 @@ async function look($) {
   }
 }
 
-// Starts the poll once, and only where something draws.
+// Starts the poll once, and only where something draws. `starting` is set
+// before the first wait, so two attaches in quick succession start one poll;
+// a first look that fails (a network folder) still starts it, so a later look
+// can recover after a folder move.
+let starting = false
 async function begin($) {
-  if (timer || !(await drawsHere($))) return
-  await look($)
-  timer = $.clock.every(EVERY_MS, async () => {
-    try { await look($) } catch { /* the next look tries again */ }
-  })
+  if (timer || starting) return
+  starting = true
+  try {
+    if (!(await drawsHere($))) return
+    try { await look($) } catch { /* the poll tries again */ }
+    timer = $.clock.every(EVERY_MS, async () => {
+      try { await look($) } catch { /* the next look tries again */ }
+    })
+  } finally {
+    starting = false
+  }
 }
 
 export function register(on) {
@@ -112,6 +122,7 @@ export function register(on) {
     // A reload runs this again with the old timers dropped; a second start in
     // the same environment must not stack a second timer.
     if (timer) { timer.cancel(); timer = null }
+    starting = false
     try { await begin($) } catch { /* the band shows nothing rather than fail the start */ }
     return next(e)
   })

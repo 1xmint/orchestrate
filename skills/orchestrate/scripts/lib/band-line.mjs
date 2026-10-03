@@ -27,7 +27,10 @@ export function bandClip(text, cap = BAND_TEXT_CAP) {
 // A run's task ids (9-8-0001) are the ledger's, not the user's: a line they see
 // names the task by its words. Every full id is taken out, and the spaces closed.
 export function withoutTaskIds(text) {
-  return String(text == null ? '' : text).replace(/\b\d{1,2}-\d{1,2}-\d{4}\b:?/g, ' ').replace(/\s+/g, ' ').trim();
+  return String(text == null ? '' : text)
+    // "(blocked on 10-3-0001)" names only ids: say what it means instead.
+    .replace(/\(blocked on [\d\s,\-–and]+\)/gi, '(waiting on another step)')
+    .replace(/\b\d{1,2}-\d{1,2}-\d{4}\b:?/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
 const idOf = s => (s == null || s === '' ? null : String(s));

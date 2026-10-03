@@ -1,7 +1,7 @@
 // band-mod.test.mjs — the band's mod (hooks/band.mjs) only reads and draws, and
 // this holds it to that. Three kinds of check, none of which needs Claude Code:
 //   1. the source is scanned for every `$.<namespace>.<method>` it calls, against
-//      a list of read-only calls, and for the two events it registers;
+//      a list of read-only calls, and for the events it registers;
 //   2. hooks/hooks.json names it once, under "modules", beside the command hooks;
 //   3. the mod is run against a fake `$` that records what it asks for, to see it
 //      stand down where nothing draws, read a file only when its time moved, and

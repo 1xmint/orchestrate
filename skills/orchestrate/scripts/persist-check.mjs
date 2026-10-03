@@ -25,7 +25,8 @@
 //   stop when: a helper was refused by the budget or the credential check · the
 //   same error came back twice · the last message asks a question · the
 //   last message says the goal is met · the same open item named three continues
-//   in a row · the step cap · a step that did no work while nothing is out.
+//   in a row · the step cap · a step that did no work while nothing is out, or
+//   with the same work still out after the user spoke.
 //
 // A usage limit is not a stop. The plugin's own 90% five-hour stop is gone (it
 // turned the loop off just before the host's resume), and a helper refused for
@@ -48,6 +49,7 @@ import { pauseRoot, pauseRecord, writePause, clearPause } from './lib/pause.mjs'
 import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
 import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
 import { recordBand, bandAtStop, openItem, sessionGoal, stopQuestion, withoutTaskIds } from './lib/band.mjs';
+import { syntheticPrompt } from './lib/persist-words.mjs';
 import { readProject } from './lib/project.mjs';
 import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
@@ -119,12 +121,22 @@ export function scanTurn(tail) {
   let quotaRefused = false;
   let lastText = '';
   let lastChange = null;
+  let prompted = false;
   for (const line of String(tail || '').split('\n')) {
     if (!line.trim()) continue;
     let rec;
     try { rec = JSON.parse(line); } catch { continue; }
     const msg = rec && rec.message;
     const content = msg && Array.isArray(msg.content) ? msg.content : null;
+    // Did the user say something in this slice? Their own words only: not a
+    // tool result, not the host's notice that a helper or a Monitor reported
+    // (those wake the session on purpose), not this hook's own block text.
+    if (rec.type === 'user' && msg && !rec.isMeta) {
+      const said = typeof msg.content === 'string' ? msg.content
+        : content ? content.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n') : '';
+      // A message that opens with a tag is the host's, whatever the tag.
+      if (said.trim() && !syntheticPrompt(said) && !/^\s*Stop hook feedback:/.test(said) && !/^\s*<[a-z][\w-]*[\s>]/i.test(said)) prompted = true;
+    }
     if (rec.type === 'assistant' && content) {
       for (const b of content) {
         if (b && b.type === 'tool_use' && b.name) {
@@ -139,7 +151,9 @@ export function scanTurn(tail) {
         if (!b || b.type !== 'tool_result') continue;
         const t = textOf(b.content);
         if (/orchestrate (budget|guard):/.test(t)) denied = true;
-        const usageRefusal = /orchestrate quota:/.test(t);
+        // Anchored to a refusal the guard returned for this very call, so a
+        // helper's report that only quotes one is still that helper's work.
+        const usageRefusal = Boolean(b.is_error) && /^\s*orchestrate quota:/.test(t);
         if (usageRefusal) { quotaRefused = true; if (b.tool_use_id) usageRefused.add(b.tool_use_id); }
         if (b.is_error && !usageRefusal) { const k = errorKey(t); if (k) errors.push(k); }
       }
@@ -149,7 +163,7 @@ export function scanTurn(tail) {
   const tailText = lastText.trim().replace(/[\s*_`)\]]+$/, '');
   const asked = /\?$/.test(tailText);
   const goalMet = /\b(goal (is )?(met|complete|completed|achieved|reached)|all (the )?(steps|tasks|todos|items) (are )?(done|complete|finished)|nothing (left|more) to do|everything (is|in the plan is) (done|complete|finished))\b/i.test(lastText);
-  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange };
+  return { progressed, denied, quotaRefused, errors, asked, goalMet, tools: tools.length, lastChange, prompted };
 }
 
 // Whether the Stop payload says the host will wake this session later: a helper
@@ -214,9 +228,13 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     // keep-going off before that. The Stop passes unblocked and the loop stays
     // armed. It is neither a continue (an idle turn re-reads the whole
     // conversation for nothing) nor a step, so the counters stand as they were.
-    // The same work still out after a wait with nothing done since is not a
-    // wait any more: what is running has not woken the session, and will not.
-    if (outstanding && !(rec.waitingOn != null && rec.waitingOn === waitingOn)) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn }, kind: 'wait', why: 'a helper or background command is still out' };
+    // A Monitor or a recurring scheduled prompt stays listed and wakes the
+    // session again and again, so the same work still out is a wait each time
+    // it is what woke the session. It ends keep-going only when the user spoke
+    // since the last Stop and the step still did nothing: the session was not
+    // woken by what is running (a dev server never reports), and nothing else
+    // will wake it (independent review, 2026-10-03, rounds 1 and 2).
+    if (outstanding && !(scan.prompted && rec.waitingOn != null && rec.waitingOn === waitingOn)) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn }, kind: 'wait', why: 'a helper or background command is still out' };
     if (outstanding) return stop('two steps in a row did no visible work while the same thing kept running in the background');
     return stop('the last step did no visible work (no edit, command or helper)');
   }

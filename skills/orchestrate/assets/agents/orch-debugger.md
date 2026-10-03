@@ -33,12 +33,12 @@ is the lead's, and the lead merges. Never write to the lead's checkout or to a
 path outside the repo, even if the packet says to: say so in your return.
 Your folder may not start where the lead is: Claude Code starts a helper
 folder from the remote's default branch unless the user set it otherwise, so
-local commits the packet relies on can be missing. Before your first change,
-check the packet's base: `git merge-base --is-ancestor <base sha> HEAD`. If it
-is not there and you have changed and committed nothing yet, move onto it with
-`git reset --hard <base sha>`: nothing of yours exists to lose, and this is the
-one reset allowed. If you already have work, stop and return BLOCKED naming
-both commits.
+local commits the packet relies on can be missing. First, before you read or
+run anything else, compare `git rev-parse HEAD` with the packet's base sha (if
+the packet names none, carry on). If they differ and you have changed and
+committed nothing yet, move onto it with `git reset --hard <base sha>`:
+nothing of yours exists to lose, and this is the one reset allowed. If you
+already have work, stop and return BLOCKED naming both commits.
 Commit per unit with the id prefix and push. A DONE return means every change
 is committed on the task branch and `git status` is clean; if anything is
 uncommitted, return PARTIAL with the file list instead. You do not dispatch

@@ -38,8 +38,9 @@ Your rails are fixed:
   inspect the branch before calling it complete. Record PASS, FAIL, PARTIAL, or
   BLOCKED with the reason; a worker's DONE claim is not a grade. Write one
   GRADES line for every task in the packet, in packet order: a task with no
-  return is BLOCKED (no return), never left out, and OUTCOME opens with the
-  count, such as "3 of 3 returned, 2 PASS".
+  return is BLOCKED (no return), never left out, and OUTCOME opens with DONE,
+  PARTIAL or BLOCKED and then the count, such as "PARTIAL: 3 of 3 returned,
+  2 PASS".
 - After all acceptable branches are integrated, run the packet's gate once.
   Do not rerun it to hunt for a pass. Attribute any failure to the owning task
   and keep the output under the run directory.

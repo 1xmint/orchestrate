@@ -76,13 +76,22 @@ test('--brief prints the codex line in each shape from the cache', () => {
 test('the brief line carries only what the lead can act on', () => {
   // It runs on every skill load and is read on every later turn (plan 0010
   // step 2e): no skills-on-disk list (the host lists them), no providers, no
-  // auto-compact or live-usage hint, and no prices or paid-skills line while
-  // they say nothing beyond the skill.
+  // auto-compact hint, and no prices or paid-skills line while they say nothing
+  // beyond the skill. Live usage stays where it can be fixed: in a terminal
+  // with no reading, the line names the one-time install (independent review,
+  // round 2); the desktop app runs no status line, so it is not said there.
   const home = sandbox();
   const r = profile(home, ['--brief']);
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /^orchestrate: tier /m);
   assert.match(r.stdout, /^this plan includes: /m);
-  assert.doesNotMatch(r.stdout, /skills on disk|^providers:|auto-compact|live usage|prices measured here: none|skills that call a paid/m);
-  assert.ok(Buffer.byteLength(r.stdout) < 500, `the brief is ${Buffer.byteLength(r.stdout)} bytes`);
+  assert.doesNotMatch(r.stdout, /skills on disk|^providers:|auto-compact|prices measured here: none|skills that call a paid/m);
+  assert.match(r.stdout, /^live usage: off, so no usage check can see the limit\. With the user's yes, once: node ".*statusline\.mjs" --install$/m);
+  assert.ok(Buffer.byteLength(r.stdout) < 800, `the brief is ${Buffer.byteLength(r.stdout)} bytes`);
+  const desk = spawnSync(process.execPath, [PROFILE, '--brief'], {
+    cwd: home, encoding: 'utf8', timeout: 30000,
+    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' },
+  });
+  assert.equal(desk.status, 0, desk.stderr);
+  assert.doesNotMatch(desk.stdout, /live usage/, 'nothing to offer where no status line runs');
 });

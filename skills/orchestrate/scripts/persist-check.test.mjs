@@ -169,7 +169,11 @@ test('the same work out after a wait with nothing done since is a stop; other wo
   const first = persistDecision({ rec: {}, scan: idle, outstanding: true, waitingOn: 'srv' });
   assert.equal(first.kind, 'wait');
   assert.equal(first.rec.waitingOn, 'srv');
-  const again = persistDecision({ rec: first.rec, scan: idle, outstanding: true, waitingOn: 'srv' });
+  // Woken by what is running (a Monitor line, a recurring prompt): a wait again.
+  const woken = persistDecision({ rec: first.rec, scan: idle, outstanding: true, waitingOn: 'srv' });
+  assert.equal(woken.kind, 'wait', 'the same work woke the session; it is still a wait');
+  // The user spoke and the step still did nothing: what runs will not wake it.
+  const again = persistDecision({ rec: first.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'srv' });
   assert.equal(again.kind, 'stop');
   assert.match(again.why, /two steps in a row did no visible work/);
   assert.equal(persistDecision({ rec: first.rec, scan: idle, outstanding: true, waitingOn: 'r2' }).kind, 'wait', 'something landed, something else is out');
@@ -192,6 +196,20 @@ test('a helper send refused for usage is not work; a send that went out, or any 
   assert.equal(scanTurn([use('Agent', 'a1'), res('a1', refused), use('Edit', 'e1')].join('\n')).progressed, true);
   assert.equal(scanTurn([use('Agent', 'a1'), res('a1', refused), use('Agent', 'a2')].join('\n')).progressed, true, 'the second send was not refused');
   assert.equal(scanTurn(use('Agent', 'a1')).progressed, true, 'a send with no refusal is work');
+  // A helper's report that only quotes a refusal is that helper's work.
+  const quoted = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a1', content: 'Done. Two children were refused: orchestrate quota: the week is at 91%.' }] } });
+  assert.equal(scanTurn([use('Agent', 'a1'), quoted].join('\n')).progressed, true);
+});
+
+test('only the user\'s own words in a slice count as the user speaking', () => {
+  const user = content => JSON.stringify({ type: 'user', message: { role: 'user', content } });
+  assert.equal(scanTurn(user('is the site up?')).prompted, true);
+  assert.equal(scanTurn(user([{ type: 'text', text: 'carry on' }])).prompted, true);
+  assert.equal(scanTurn(user('<task-notification>\nthe monitor printed a line\n</task-notification>')).prompted, false, 'a helper or Monitor waking the session');
+  assert.equal(scanTurn(user('<monitor-event>lint passed</monitor-event>')).prompted, false, 'any host tag');
+  assert.equal(scanTurn(user('Stop hook feedback:\norchestrate: next step')).prompted, false, 'this hook\'s own block');
+  assert.equal(scanTurn(JSON.stringify({ type: 'user', isMeta: true, message: { content: 'host text' } })).prompted, false);
+  assert.equal(scanTurn(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x', content: 'ok' }] } })).prompted, false);
 });
 
 // ---- shortGoal / errorKey / endMessage -----------------------------------------

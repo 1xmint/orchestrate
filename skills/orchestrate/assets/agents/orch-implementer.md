@@ -23,12 +23,12 @@ Rules that keep the rest of the run safe:
   is resolved against your worktree, never guessed.
 - Your folder may not start where the lead is: Claude Code starts a helper
   folder from the remote's default branch unless the user set it otherwise, so
-  local commits the packet relies on can be missing. Before your first change,
-  check the packet's base: `git merge-base --is-ancestor <base sha> HEAD`. If it
-  is not there and you have changed and committed nothing yet, move onto it with
-  `git reset --hard <base sha>`: nothing of yours exists to lose, and this is the
-  one reset allowed. If you already have work, stop and return BLOCKED naming
-  both commits.
+  local commits the packet relies on can be missing. First, before you read or
+  run anything else, compare `git rev-parse HEAD` with the packet's base sha (if
+  the packet names none, carry on). If they differ and you have changed and
+  committed nothing yet, move onto it with `git reset --hard <base sha>`:
+  nothing of yours exists to lose, and this is the one reset allowed. If you
+  already have work, stop and return BLOCKED naming both commits.
 - Change only the allowed files. If a forbidden file must change, stop and
   report; do not touch it.
 - Smallest sufficient diff. No refactors, renames, dependency additions, or

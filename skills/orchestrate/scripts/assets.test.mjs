@@ -76,7 +76,7 @@ test('every role pins a quota-first effort and a step cap', () => {
   }
 });
 
-test('the coordinator owns one bounded wave and one graded return', () => {
+test('the coordinator owns one bounded wave and one graded return', async () => {
   const text = readFileSync(join(AGENTS, 'orch-coordinator.md'), 'utf8').replace(/\s+/g, ' ');
   assert.match(text, /^--- name: orch-coordinator .* model: opus effort: medium /);
   assert.match(text, /depth 1 and may dispatch capped workers only one level down/);
@@ -92,6 +92,12 @@ test('the coordinator owns one bounded wave and one graded return', () => {
   // docs/audits/2026-09-29-scoresheet-r11.md).
   assert.match(text, /one GRADES line for every task in the packet/);
   assert.match(text, /a task with no return is BLOCKED \(no return\), never left out/);
+  // The status word stays first: ledger.mjs files a return's status from
+  // "OUTCOME: DONE|PARTIAL|BLOCKED", so a count in front of it filed none.
+  assert.match(text, /OUTCOME opens with DONE, PARTIAL or BLOCKED and then the count, such as "PARTIAL: 3 of 3 returned, 2 PASS"/);
+  const example = /such as "([^"]+)"/.exec(text.slice(text.indexOf('OUTCOME opens with DONE')))[1];
+  const { parseReturn } = await import('./ledger.mjs');
+  assert.equal(parseReturn(`OUTCOME: ${example}`).status, 'PARTIAL', 'the ledger files the example with its status');
   assert.match(text, /integrate their branches in dependency order/);
   assert.match(text, /run the packet's gate once/);
   assert.match(text, /Full report, one summary, not one message per child/);
@@ -758,7 +764,7 @@ test('both worktree roles check that their folder starts from the packet\'s base
   for (const f of ['orch-implementer.md', 'orch-debugger.md']) {
     const role = flat(readFileSync(join(AGENTS, f), 'utf8'));
     assert.match(role, /starts a helper folder from the remote's default branch/, f);
-    assert.match(role, /`git merge-base --is-ancestor <base sha> HEAD`/, f);
+    assert.match(role, /First, before you read or run anything else, compare `git rev-parse HEAD` with the packet's base sha/, f);
     assert.match(role, /If you already have work, stop and return BLOCKED naming both commits\./, f);
   }
   const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');

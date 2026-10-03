@@ -79,7 +79,14 @@ release's section when it ships.
     either way. CI's new `validate` job runs `claude plugin validate` on
     2.1.286 with no sign-in. The band starts no timer where nothing draws.
   - **Independent review** (fresh context, Opus): FAIL, seven should-fix, no
-    blocker; all fixed in `11a3675`. This entry is its sixth.
+    blocker; all fixed in `11a3675`. This entry is its sixth. A second round
+    (a new reviewer) failed the fixes on four: the wait rule ended keep-going
+    while a Monitor or a recurring prompt was still waking the session (now it
+    ends only when the user spoke and the step still did nothing); the
+    coordinator's count went before the status word the ledger reads; the
+    base check came after a debugger's reproduction; the profile cut dropped
+    the only line that says live usage is off and how to turn it on (back, in
+    a terminal only). All fixed, with its nits, in the commit after this one.
   - **Also:** builders and debuggers check that their folder starts from the
     packet's base (Claude Code starts a helper folder from the remote's default
     branch unless `worktree.baseRef` is "head", code.claude.com/docs/en/

@@ -83,7 +83,7 @@ later write replaces it.
 
 ## The mod
 
-`hooks/band.mjs` registers three events and nothing else:
+`hooks/band.mjs` registers these events and nothing else:
 
 - `session.start`: starts a poll every two seconds, but only when
   `$.session.surfaces()` includes `terminal` or `desktop`. In a plain `claude -p`

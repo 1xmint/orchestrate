@@ -320,7 +320,9 @@ test('the same work still out after a wait with nothing done since ends the loop
   const server = { background_tasks: [{ id: 'srv', type: 'shell', status: 'running', description: 'npm run dev' }] };
   const t = transcript(dir, said('The site is up at localhost:3000.'));
   assert.equal(run(HOOK, stopPayload('b4', dir, t, server), home).stdout.trim(), '', 'the first idle Stop with work out is a wait');
-  writeFileSync(t, lines(said('The site is up at localhost:3000.'), said('Still waiting.')));
+  // Nothing the server does wakes the session; the user asks, and the step
+  // still does nothing.
+  writeFileSync(t, lines(said('The site is up at localhost:3000.'), JSON.stringify({ type: 'user', message: { role: 'user', content: 'is it done?' } }), said('Still waiting.')));
   const second = run(HOOK, stopPayload('b4', dir, t, server), home);
   assert.match(second.json.systemMessage, /^Keep-going stopped: two steps in a row did no visible work while the same thing kept running/);
   assert.equal(session(home, 'b4').persist.armed, false);
@@ -332,6 +334,20 @@ test('the same work still out after a wait with nothing done since ends the loop
   writeFileSync(t2, lines(said('Two reviews are out.'), said('One landed; waiting on the other.')));
   assert.equal(run(HOOK, stopPayload('b5', dir2, t2, { background_tasks: [{ id: 'r2', type: 'subagent' }] }), home2).stdout.trim(), '', 'one landed, the other is still out: a wait again');
   assert.equal(session(home2, 'b5').persist.armed, true);
+});
+
+// Independent review round 2, 2026-10-03: a Monitor on CI stays listed and wakes
+// the session once per line; a step that only notes the line must not end
+// keep-going while CI still runs.
+test('woken by the work that is still out, an idle step waits again', () => {
+  const home = sandbox(); const dir = cwdDir();
+  arm(home, 'b6');
+  const monitor = { background_tasks: [{ id: 'm1', type: 'monitor', status: 'running', description: 'watch CI' }] };
+  const t = transcript(dir, said('Pushed; watching CI.'));
+  assert.equal(run(HOOK, stopPayload('b6', dir, t, monitor), home).stdout.trim(), '');
+  writeFileSync(t, lines(said('Pushed; watching CI.'), JSON.stringify({ type: 'user', message: { role: 'user', content: '<task-notification>\nlint passed\n</task-notification>' } }), said('Lint passed; waiting on the tests.')));
+  assert.equal(run(HOOK, stopPayload('b6', dir, t, monitor), home).stdout.trim(), '', 'a wait again, not a stop');
+  assert.equal(session(home, 'b6').persist.armed, true);
 });
 
 test('a wait does not use up a step: the count after the helper lands is where it was', () => {
