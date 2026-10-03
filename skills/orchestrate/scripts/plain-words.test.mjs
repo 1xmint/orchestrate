@@ -48,7 +48,7 @@ const stopLine = dec => {
 
 test('every keep-going stop line is in plain words', () => {
   const lines = {
-    'near the size limit': persistDecision({ scan: scan(), contextAdvice: { action: 'compact' }, contextReading: { tokens: 150000, session: 'sess-1', compactions: 1 } }),
+    'still near the size limit after a summary': persistDecision({ scan: scan(), contextAdvice: { action: 'investigate' }, contextReading: { tokens: 150000, session: 'sess-1', compactions: 1 } }),
     'a helper refused': persistDecision({ scan: scan({ denied: true }) }),
     'the same error twice': persistDecision({ rec: { errors: ['Error: the build failed'] }, scan: scan({ errors: ['Error: the build failed'] }) }),
     // A refusal from the plugin's own checks, as errorKey keeps it.
@@ -68,7 +68,7 @@ test('every keep-going stop line is in plain words', () => {
 });
 
 test('the size-limit stop keeps its path and size for the lead, and shows the user neither', () => {
-  const dec = persistDecision({ scan: scan(), contextAdvice: { action: 'compact' }, contextReading: { tokens: 150000, session: 'sess-1', compactions: 1 } });
+  const dec = persistDecision({ scan: scan(), contextAdvice: { action: 'investigate' }, contextReading: { tokens: 150000, session: 'sess-1', compactions: 1 } });
   assert.match(dec.why, /checkpoint/i, 'the record and the lead still get the fact with its path');
   assert.doesNotMatch(endMessage(dec.say || dec.why), /checkpoint|~\d+k/i);
 });

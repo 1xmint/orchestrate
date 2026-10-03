@@ -224,6 +224,24 @@ release's section when it ships.
     counts it vouches for from 85 of 90 to 32. The style's "finish the step in
     hand" could read as leave to take the very action asked about: it now
     stops short of it (style cap 3,800 to 3,850, dated in its test).
+  - **The Stop hook read whole** (fresh context, Opus, real hook runs on
+    sixteen situations): FAIL on one blocker and four should-fix, all fixed.
+    With keep-going on, reaching the compact line ended the loop whether or
+    not a save point existed, and the user line written today said "no save
+    point yet" even when there was one; the host summarises by itself at that
+    line and step 2b keeps keep-going on through a summary, so it now carries
+    on, saying once per summary epoch when no save point exists (only a
+    conversation still near the line right after a summary ends it). "Keep
+    going" said while keep-going was on re-armed it and reset its record (the
+    round-8 guard covered only "continue"). A claim refusal inside a stretch
+    left the loop judging the reply on the work before it; the record now
+    moves to the refusal. Several false claims in one message are said in one
+    refusal, since the reply is not read again. The same-error line showed the
+    user a blurred key with paths cut mid-word ("/hom<path>"); the user now
+    reads "the same error came back twice", and paths are blurred from their
+    start. Left: the session file is read and written by several hooks with
+    no lock (a helper landing during a Stop could drop a row), and
+    `persist-checks.json` is never pruned; both predate this branch.
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line

@@ -103,7 +103,7 @@ const REFUSAL = kinds => (REFUSALS[kinds] ||= new RegExp(`^\\s*(?:\\[?PreToolUse
 
 // The first line of an error, with numbers and paths blurred, so "the same
 // error" survives a changed line number or temp directory.
-export const errorKey = s => String(s || '').split('\n').map(l => l.trim()).find(Boolean)?.replace(/\d+/g, '#').replace(/[A-Za-z]:?[\\/][^\s'"]+/g, '<path>').slice(0, 160) || '';
+export const errorKey = s => String(s || '').split('\n').map(l => l.trim()).find(Boolean)?.replace(/\d+/g, '#').replace(/(^|[\s'"(=])(?:[A-Za-z]:)?[\\/][^\s'"]*/g, '$1<path>').slice(0, 160) || '';
 
 // What the transcript slice since the last Stop shows. Parses JSONL records and
 // skips anything that does not parse (the slice can start mid-line). Only the
@@ -229,7 +229,7 @@ export const QUOTA_FACT = "helpers are refused while the plan's usage is past th
 // read files. `outstanding` is true when the Stop payload lists work that will
 // wake the session (see workOut); a step that did nothing then is a wait, not
 // a stop.
-export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '', commandsOnly = false, idleKnown = false, now = new Date() }) {
+export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '', commandsOnly = false, idleKnown = false, now = new Date(), checkpointSaved = false, epoch = null }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -253,13 +253,15 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   // path, a size); every other reason is already in plain words for both.
   const stop = (why, say) => ({ rec: out, kind: 'stop', why, ...(say ? { say } : {}) });
 
-  if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate')) {
-    return stop(checkpointFact(contextReading), 'the conversation is close to its size limit and has no save point yet');
+  // Still near the size limit right after a summary: another summary will not
+  // help, so the loop ends.
+  if (contextAdvice && contextAdvice.action === 'investigate') {
+    return stop(checkpointFact(contextReading), 'the conversation was still close to its size limit right after a summary');
   }
   if (scan.denied) return stop('a helper was refused (budget or credential)');
   // A refusal from one of this plugin's own checks names roles and helper
   // terms the lead needs; the user's line says what happened in their words.
-  if (repeat) return stop(`the same error came back twice: ${repeat}`, /^orchestrate [\w-]+:/.test(repeat) ? 'the same refusal came back twice' : '');
+  if (repeat) return stop(`the same error came back twice: ${repeat}`, /^orchestrate [\w-]+:/.test(repeat) ? 'the same refusal came back twice' : 'the same error came back twice');
   if (scan.asked) return stop('the last message asks a question');
   if (scan.goalMet) return stop('the last message says the goal is met');
   if (next && next.state === 'all-done') return stop(ALL_DONE_TEXT);
@@ -268,6 +270,15 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     return stop(`${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open: ${clip(item)}`, `${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open: ${clip(withoutTaskIds(item))}`);
   }
   if (steps > PERSIST_STEP_CAP) return stop(`keep-going reached its limit of ${PERSIST_STEP_CAP} steps in a row`);
+  // At the compact line Claude Code summarises the conversation by itself, and
+  // keep-going stays on through the summary (plan 0010 step 2b); ending the
+  // loop here turned it off just before the host carried on, and told the user
+  // there was no save point even when there was (whole-file review,
+  // 2026-10-03). Without a save point, one continue per summary epoch states
+  // where it goes, as an ordinary Stop is refused once for it.
+  if (contextAdvice && contextAdvice.action === 'compact' && !checkpointSaved && epoch != null && rec.compactToldFor !== epoch) {
+    return { rec: { ...out, compactToldFor: epoch }, kind: 'continue', why: `orchestrate: ${checkpointFact(contextReading)} This Stop is refused once for it.` };
+  }
   if (!scan.progressed) {
     // The last message promises to wait or check back, and the payload says
     // nothing is out that could wake the session (lib/wait-claim.mjs). Said
@@ -331,7 +342,7 @@ export function checkpointFact(reading, now = Date.now()) {
   const path = checkpointPath(reading && reading.session, reading);
   const n = Number(reading && reading.compactions) || 0;
   const compacted = n ? ` Compacted ${n} time${n === 1 ? "" : "s"} already; each summary drops detail.` : "";
-  return `No checkpoint since ${since}; context ${used}${at ? ` of ${k(at)}` : ''}. Checkpoints for this conversation are saved at ${path}.${compacted}`;
+  return `No checkpoint since ${since}; context ${used}${at ? ` (the compact line is ${k(at)})` : ''}. Checkpoints for this conversation are saved at ${path}.${compacted}`;
 }
 
 const STORE = () => join(DIR, 'persist-checks.json');
@@ -372,10 +383,10 @@ const RESEND_NOTE = ' A reply to this block becomes the report the user sees.';
 function commitClaimReason(claim, git, commitsSinceStart) {
   if (claim === 'not-committed') {
     const commitNote = commitsSinceStart ? ` and ${commitsSinceStart} commit${commitsSinceStart === 1 ? '' : 's'} since this session started` : '';
-    return `Your last message says nothing is committed; git status shows a clean tree${commitNote}.${RESEND_NOTE}`;
+    return `Your last message says nothing is committed; git status shows a clean tree${commitNote}.`;
   }
   const names = git.files.length ? `${git.files.join(', ')}${git.count > git.files.length ? ` and ${git.count - git.files.length} more` : ''}` : `${git.count} file${git.count === 1 ? '' : 's'}`;
-  return `Your last message says the work is committed. Uncommitted: ${names}.${RESEND_NOTE}`;
+  return `Your last message says the work is committed. Uncommitted: ${names}.`;
 }
 
 // Checks the closing message's claim about `git commit` against what the
@@ -433,7 +444,7 @@ function checkProofClaim(input, state, open = !input.stop_hook_active) {
   st.proofClaimBlocked = claimHash;
   try { saveSession(st); } catch {}
   const list = unseen.length === 1 ? unseen[0] : `${unseen.slice(0, -1).join(', ')} and ${unseen[unseen.length - 1]}`;
-  return `Your last message gives ${list} as a count of passing tests or checks; no command output, helper report or message in this session's recent record shows that number.${RESEND_NOTE}`;
+  return `Your last message gives ${list} as a count of passing tests or checks; no command output, helper report or message in this session's recent record shows that number.`;
 }
 
 // The same fact for a session with keep-going off: a closing promise to wait
@@ -456,7 +467,7 @@ function checkWaitClaim(input, state) {
   const st = state || { session_id: input.session_id };
   st.waitClaimBlocked = claimHash;
   try { saveSession(st); } catch {}
-  return `Your last message says this session will wait or check back; ${WAIT_FACT}.${RESEND_NOTE}`;
+  return `Your last message says this session will wait or check back; ${WAIT_FACT}.`;
 }
 
 function emitBlock(reason) {
@@ -523,14 +534,25 @@ export function check(input) {
   const prev = store[key] || {};
   const armedNow = Boolean(p && p.armed);
   const claimsOpen = !input.stop_hook_active || (armedNow && prev.armedAt === p.armedAt && prev.lastBlock === 'loop');
+  // Every false claim in the closing message is said in one refusal, since the
+  // reply to it is not read again. Inside a stretch the loop's record moves to
+  // here, so the next Stop is judged on the reply alone, not on the work that
+  // came before the claim (whole-file review, 2026-10-03).
   const claimRefusal = why => {
-    if (armedNow) { store[key] = { ...prev, lastBlock: 'claim' }; try { writeJsonAtomic(path, store); } catch {} }
-    return { kind: 'continue', why };
+    if (armedNow) {
+      const base = prev.armedAt === p.armedAt ? prev : { armedAt: p.armedAt };
+      let size = 0;
+      try { if (input.transcript_path) size = statSync(input.transcript_path).size; } catch {}
+      store[key] = { ...base, lastBlock: 'claim', ...(size ? { lastSize: size } : {}) };
+      try { writeJsonAtomic(path, store); } catch {}
+    }
+    return { kind: 'continue', why: `${why}${RESEND_NOTE}` };
   };
-  const commitClaimReasonText = checkCommitClaim(input, state, claimsOpen);
-  if (commitClaimReasonText) return claimRefusal(commitClaimReasonText);
-  const proofClaimReasonText = checkProofClaim(input, state, claimsOpen);
-  if (proofClaimReasonText) return claimRefusal(proofClaimReasonText);
+  const claims = [checkCommitClaim(input, state, claimsOpen), checkProofClaim(input, state, claimsOpen)].filter(Boolean);
+  if (claims.length) {
+    if (!armedNow) { const w = checkWaitClaim(input, state); if (w) claims.push(w); }
+    return claimRefusal(claims.join(' '));
+  }
   // This is deliberately outside auto-continue: reaching the compaction line
   // is unsafe even for an ordinary Stop. A block is once per epoch, and an
   // active Stop hook must not block itself again.
@@ -548,7 +570,7 @@ export function check(input) {
   // After the size block, which is the more urgent of the two (round 5).
   if (!p || !p.armed) {
     const waitClaimReasonText = checkWaitClaim(input, state);
-    return waitClaimReasonText ? { kind: 'continue', why: waitClaimReasonText } : null;
+    return waitClaimReasonText ? { kind: 'continue', why: `${waitClaimReasonText}${RESEND_NOTE}` } : null;
   }
   // A new arming starts a fresh count; the scan starts where the arming did.
   let rec = store[key] || {};
@@ -563,8 +585,12 @@ export function check(input) {
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
   const workCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : null;
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input), idleKnown: nothingOut(input) });
-  if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
+  const atCompact = Boolean(ctx && ctx.advice && ctx.advice.action === 'compact' && ctx.reading);
+  let checkpointSaved = false;
+  if (atCompact) { try { checkpointSaved = hasCheckpoint(input.session_id || null, ctx.reading, { runMd: bound, permissionMode: modeOf(input) }); } catch {} }
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input), idleKnown: nothingOut(input), checkpointSaved, epoch: atCompact ? contextEpoch(ctx.reading) : null });
+  // Marked delivered only when the refusal carried it.
+  if (dec.kind === 'continue' && ctx && ctx.notice && String(dec.why).includes(ctx.notice)) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString(), lastBlock: dec.kind === 'continue' ? 'loop' : null };
   try { writeJsonAtomic(path, store); } catch {}

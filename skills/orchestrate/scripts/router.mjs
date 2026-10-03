@@ -437,7 +437,11 @@ function handlePrompt(input) {
       else if (g && g.source === 'ledger') { goal = g.text; goalSource = 'ledger'; }
       else { goal = ''; goalSource = 'none'; }
     }
-    state.persist = { armed: true, goal, goalSource, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
+    // Already on: the goal may change, but the stretch goes on, so the loop's
+    // record (its count, the wait's clock, a Monitor it holds for) is kept
+    // (whole-file review, 2026-10-03).
+    const on = state.persist && state.persist.armed && state.persist.armedAt;
+    state.persist = { armed: true, goal, goalSource, armedAt: on ? state.persist.armedAt : new Date().toISOString(), sizeAtArm: on ? state.persist.sizeAtArm : transcriptSize(input.transcript_path) };
     armedNow = true;
   } else if (intent === 'resume' && !(state.persist && state.persist.armed)) {
     // Already on: left as it is. A new arming would reset the loop's record,

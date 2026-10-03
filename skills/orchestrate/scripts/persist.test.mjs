@@ -32,11 +32,27 @@ test('arms on an explicit ask to keep going, never on a question or a one-off', 
   }
 });
 
-test('context compact advice stops an armed loop before its did-work check', () => {
-  const d = persistDecision({ scan: { progressed: true, denied: false, errors: [], asked: false, goalMet: false }, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: { session: 's', tokens: 151000, compaction: null } });
-  assert.equal(d.kind, 'stop');
-  assert.match(d.why, /~151k/);
-  assert.match(d.why, /checkpoint/);
+test('at the compact line keep-going carries on: once per summary epoch it says there is no save point', () => {
+  // Claude Code summarises the conversation by itself at the compact line and
+  // keep-going stays on through it (plan 0010 step 2b). Ending the loop there
+  // turned it off just before the host carried on (whole-file review,
+  // 2026-10-03).
+  const scan = { progressed: true, denied: false, errors: [], asked: false, goalMet: false };
+  const reading = { session: 's', tokens: 151000, compaction: null };
+  const first = persistDecision({ scan, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: reading, epoch: 'e1' });
+  assert.equal(first.kind, 'continue');
+  assert.match(first.why, /~151k/);
+  assert.match(first.why, /checkpoint/i);
+  assert.equal(first.rec.compactToldFor, 'e1');
+  const again = persistDecision({ rec: first.rec, scan, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: reading, epoch: 'e1' });
+  assert.equal(again.kind, 'continue');
+  assert.doesNotMatch(again.why, /checkpoint/i, 'said once per epoch; an ordinary continue after');
+  const saved = persistDecision({ scan, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: reading, epoch: 'e1', checkpointSaved: true });
+  assert.doesNotMatch(saved.why, /No checkpoint/, 'with a save point there is nothing to say');
+  // Still near the limit right after a summary: another one will not help.
+  const after = persistDecision({ scan, goal: 'g', contextAdvice: { action: 'investigate' }, contextReading: reading });
+  assert.equal(after.kind, 'stop');
+  assert.match(after.why, /~151k/);
 });
 
 test('the armed line carries the goal verbatim and the ways out', () => {
