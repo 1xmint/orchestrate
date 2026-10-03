@@ -24,6 +24,12 @@ export function bandClip(text, cap = BAND_TEXT_CAP) {
   return t.length > cap ? `${t.slice(0, cap - 3).trimEnd()}...` : t;
 }
 
+// A run's task ids (9-8-0001) are the ledger's, not the user's: a line they see
+// names the task by its words. Every full id is taken out, and the spaces closed.
+export function withoutTaskIds(text) {
+  return String(text == null ? '' : text).replace(/\b\d{1,2}-\d{1,2}-\d{4}\b:?/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 const idOf = s => (s == null || s === '' ? null : String(s));
 
 // The record for one state. Pure. An unknown kind is idle, and an idle record

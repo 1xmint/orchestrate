@@ -10,11 +10,12 @@
 // it draws on, run a timer and ask for a redraw. A test (band-mod.test.mjs) holds
 // it to that list: it calls nothing that writes a file, sends a prompt or a
 // message, runs a command or a tool, calls a model, a helper, the network or an
-// MCP server, and it registers only session.start and ui.render. It carries no
-// `$.state`, so there is nothing to write while drawing.
+// MCP server, and it registers only session.start, session.attach and
+// ui.render. It carries no `$.state`, so there is nothing to write while drawing.
 //
-// With nothing drawing (a plain `claude -p`, the bench) the timer finds
-// `$.session.surfaces()` empty and does nothing else: no file is read.
+// With nothing drawing (a plain `claude -p`, the bench) no timer is started at
+// all, so nothing of the band's can keep a headless run alive or read a file; a
+// screen that attaches later (session.attach) starts it then.
 
 import { bandLine, parseBand, parsePauseText } from '../skills/orchestrate/scripts/lib/band-line.mjs'
 
@@ -26,7 +27,7 @@ const CLOSE_MARK = 2
 let shown = ''
 let timer = null
 // What the last look found. A file is read again only when its modified time moved.
-const seen = { cwd: '', root: '', bandAt: null, pauseAt: null, band: null, pause: null }
+const seen = { cwd: '', root: '', bandAt: undefined, pauseAt: undefined, band: null, pause: null }
 
 // The folder the hooks write in: the git root of the session's folder, or the
 // folder itself outside a repository (lib/pause.mjs `pauseRoot`). Re-walked only
@@ -42,10 +43,15 @@ async function projectRoot($) {
     if (!up || up === dir) break
     dir = up
   }
+  // A new folder starts from nothing: undefined is not any modified time, so
+  // the next look reads (or clears) both records instead of keeping the old
+  // project's line up when the new one has no record at all.
   seen.cwd = start
   seen.root = root
-  seen.bandAt = null
-  seen.pauseAt = null
+  seen.bandAt = undefined
+  seen.pauseAt = undefined
+  seen.band = null
+  seen.pause = null
   return root
 }
 
@@ -56,9 +62,13 @@ async function modified($, path) {
 // Looks at the two files, reads the one whose modified time moved, and asks for
 // a redraw only when the line changed. The line is worked out on every look from
 // what was read, since a record from another session stops showing with time.
-async function look($) {
+async function drawsHere($) {
   const surfaces = await $.session.surfaces()
-  if (!surfaces.includes('terminal') && !surfaces.includes('desktop')) return
+  return surfaces.includes('terminal') || surfaces.includes('desktop')
+}
+
+async function look($) {
+  if (!(await drawsHere($))) return
 
   const root = await projectRoot($)
   const bandFile = root + '/.orchestrator/band.json'
@@ -88,15 +98,28 @@ async function look($) {
   }
 }
 
+// Starts the poll once, and only where something draws.
+async function begin($) {
+  if (timer || !(await drawsHere($))) return
+  await look($)
+  timer = $.clock.every(EVERY_MS, async () => {
+    try { await look($) } catch { /* the next look tries again */ }
+  })
+}
+
 export function register(on) {
   on('session.start', async ($, e, next) => {
     // A reload runs this again with the old timers dropped; a second start in
     // the same environment must not stack a second timer.
-    if (timer) timer.cancel()
-    try { await look($) } catch { /* the band shows nothing rather than fail the start */ }
-    timer = $.clock.every(EVERY_MS, async () => {
-      try { await look($) } catch { /* the next look tries again */ }
-    })
+    if (timer) { timer.cancel(); timer = null }
+    try { await begin($) } catch { /* the band shows nothing rather than fail the start */ }
+    return next(e)
+  })
+
+  // A screen joining a session that started with none (the Desktop app picking
+  // up a session) is when the poll starts there.
+  on('session.attach', async ($, e, next) => {
+    try { await begin($) } catch { /* nothing drawn rather than a failed attach */ }
     return next(e)
   })
 

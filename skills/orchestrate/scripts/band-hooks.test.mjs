@@ -318,7 +318,7 @@ test('the next step on the project page comes before the prompt\'s words, and a 
 
   addRun(dir);
   prompt(home, 'r2', dir, 'and now the list command too, please');
-  assert.equal(bandRec(dir).text, '9-8-0001 add --since');
+  assert.equal(bandRec(dir).text, 'add --since', 'the task by its words, without the ledger id');
 });
 
 test('a short reply after a request keeps the session\'s goal on the line', () => {

@@ -35,7 +35,7 @@ const READ_ONLY = {
   clock: ['now', 'every'],               // the time, and the poll
   ui: ['invalidate', 'resolve'],         // ask for a redraw, get the components to draw with
 };
-const EVENTS = ['session.start', 'ui.render'];
+const EVENTS = ['session.start', 'session.attach', 'ui.render'];
 
 // The comments cut out, so a call named in a comment is not a call and a call
 // hidden after a comment mark is not missed. Only whole-line `//` comments, `//`
@@ -113,7 +113,7 @@ test('the scan itself catches what it is there for', () => {
   assert.deepEqual(usesOf(`async function look($) { return await $.session.surfaces() }\nlook($)\non('x', async ($, e, next) => next(e))`).strange, [], 'the mod\'s own shapes are not flagged');
 });
 
-test('the mod registers session.start and ui.render, and nothing else', () => {
+test('the mod registers session.start, session.attach and ui.render, and nothing else', () => {
   const events = [...code(source).matchAll(/\bon\(\s*(['"`])([^'"`]+)\1/g)].map(m => m[2]);
   assert.deepEqual(events, EVENTS);
   assert.equal([...code(source).matchAll(/\bon\(/g)].length, EVENTS.length, 'every registration names its event as a string');
@@ -169,7 +169,7 @@ async function load() {
   const mod = await import(`${pathToFileURL(MOD).href}?copy=${++fresh}`);
   const registered = [];
   mod.register((event, a, b) => registered.push(typeof a === 'function' ? { event, opts: null, fn: a } : { event, opts: a, fn: b }));
-  return { registered, start: registered.find(r => r.event === 'session.start').fn, render: registered.find(r => r.event === 'ui.render').fn };
+  return { registered, start: registered.find(r => r.event === 'session.start').fn, attach: registered.find(r => r.event === 'session.attach').fn, render: registered.find(r => r.event === 'ui.render').fn };
 }
 
 // A world the fake `$` looks at: files with a modified time and text, a clock,
@@ -213,11 +213,12 @@ const next = () => NEXT;
 const props = (extra = {}) => ({ props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 80, ...extra } });
 const tick = async w => { for (const t of [...w.timers]) if (!t.cancelled) await t.fn(); };
 
-test('the mod registers its two events, the render one for the line above the prompt only', async () => {
+test('the mod registers its three events, the render one for the line above the prompt only', async () => {
   const { registered } = await load();
   assert.deepEqual(registered.map(r => r.event), EVENTS);
   assert.equal(registered[0].opts, null);
-  assert.deepEqual(registered[1].opts, { component: 'AbovePrompt' });
+  assert.equal(registered[1].opts, null);
+  assert.deepEqual(registered[2].opts, { component: 'AbovePrompt' });
 });
 
 test('where nothing draws (a plain -p run, the bench) it reads nothing and asks for nothing', async () => {
@@ -227,7 +228,7 @@ test('where nothing draws (a plain -p run, the bench) it reads nothing and asks 
     const { start, render } = await load();
     const out = await start(w.$, {}, next);
     assert.equal(out, NEXT, 'the start event passes on');
-    assert.equal(w.timers.length, 1, 'one poll is running');
+    assert.equal(w.timers.length, 0, 'no poll is started, so nothing can hold a headless run open');
     await tick(w); await tick(w);
     assert.equal(w.calls.length, 0, `${JSON.stringify(surfaces)}: not a file was looked at`);
     assert.equal(w.invalidated, 0);
@@ -420,4 +421,30 @@ test('a file that cannot be read, or a host that errors on a look, is a quiet sk
   const m2 = await load();
   await m2.start(unreadable.$, {}, next);
   assert.equal(await m2.render(unreadable.$, props(), next), NEXT);
+});
+
+test('a screen that attaches to a session started with none starts the poll then, once', async () => {
+  const w = world({ surfaces: [] });
+  w.put(BAND, bandText('working', 'Fix the date parser'), 1);
+  const { start, attach, render } = await load();
+  await start(w.$, {}, next);
+  assert.equal(w.timers.length, 0);
+  w.surfaces = ['desktop'];
+  assert.equal(await attach(w.$, { clientId: 'c1' }, next), NEXT, 'the attach event passes on');
+  assert.equal(w.timers.length, 1, 'the poll starts when a screen joins');
+  assert.deepEqual((await render(w.$, props(), next)).Text.children, 'Working on: Fix the date parser');
+  await attach(w.$, { clientId: 'c2' }, next);
+  assert.equal(w.timers.length, 1, 'a second screen does not stack a second poll');
+});
+
+test('when the session moves to a folder with no record, the old project\'s line goes', async () => {
+  const w = world();
+  w.put(BAND, bandText('working', 'Fix the date parser'), 1);
+  const { start, render } = await load();
+  await start(w.$, {}, next);
+  assert.deepEqual((await render(w.$, props(), next)).Text.children, 'Working on: Fix the date parser');
+  w.root = '/elsewhere/other';
+  w.dirs.add('/elsewhere/other/.git');
+  await tick(w);
+  assert.equal(await render(w.$, props(), next), NEXT, 'nothing is drawn for a folder with no record');
 });

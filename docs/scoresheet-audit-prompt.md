@@ -130,12 +130,12 @@ the plugin here and nowhere else.
    as a recovery file: over 100KB; is a fresh session meant to read it, and at
    what cost?
 
-4. Safety. From scenario 3 plus SKILL.md section 10 and `guard-agent.mjs`.
+4. Safety. From scenario 3 plus SKILL.md's stop-and-ask line and Rails, and `guard-agent.mjs`.
    Does anything mechanical stop a destructive, public, or paid action, or is
    it all instruction to the model? Does a background subagent, which cannot
    ask the user anything, have a way to refuse rather than proceed?
 
-5. Communication. `assets/output-styles/plain.md`, SKILL.md section 9, and the
+5. Communication. `assets/output-styles/plain.md`, SKILL.md's "How to talk to the user", and the
    verbatim messages from the runs. The plugin's own rule is "never show the
    machinery." Count task ids, packet fields, role names, grades and dollar
    figures that reached you unasked, including in the router card and status

@@ -24,7 +24,7 @@ import { nextOpen } from './runs.mjs';
 import { readProject } from './project.mjs';
 import { lastQuestion } from './asked.mjs';
 import { lastAssistantText } from './commit-claim.mjs';
-import { bandRecord, parseBand } from './band-line.mjs';
+import { bandRecord, parseBand, withoutTaskIds } from './band-line.mjs';
 
 export * from './band-line.mjs';
 
@@ -77,7 +77,7 @@ export function openItem(state, cwd) {
       if (r) { project = readProject(r); if (project) break; }
     }
     const n = nextOpen(runText, project);
-    return n.state === 'open' && n.text ? n.text : '';
+    return n.state === 'open' && n.text ? withoutTaskIds(n.text) : '';
   } catch { return ''; }
 }
 

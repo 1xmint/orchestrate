@@ -61,8 +61,9 @@ covers only those; rows 3 and 4 ship nothing else, so the rest of the bundle wai
 
 Three readings, so nothing is argued afterwards. Two or more finishes more with a cost per
 finished task of 1.15x or more is row 3, not row 5, because the decision order loses on cost before
-it looks for a win. When an arm finished nothing there is no cost per finished task, no row from 3
-to 5 applies, and the Inconclusive rule above decides. For time, `verdict` takes the middle time
+it looks for a win. When either arm finished nothing there is no cost ratio, so rows 3 and 4 cannot
+apply: two or more finishes more is still row 5 (a win on finishes alone, as the decision order
+says), and anything else is left to the Inconclusive rule above. For time, `verdict` takes the middle time
 over an arm's valid runs, not only the finished ones.
 
 ## Stop-loss per batch

@@ -45,7 +45,7 @@ import { helperJustCompacted } from './lib/helper-compaction.mjs';
 import { readGoal, goalLine, goalDue, markShown } from './lib/goal.mjs';
 import { modeNote } from './lib/modes.mjs';
 import { cappedNote } from './lib/workers.mjs';
-import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport } from './lib/listing.mjs';
+import { LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, pluginFitReport, pluginFit } from './lib/listing.mjs';
 import { readQuota, resetClock, CAUTION_FIVE_HOUR, HELPER_STOP_FIVE_HOUR, limitsFromTail, scanLimits } from './lib/quota.mjs';
 import { autocompactOffer, applyAutocompact, removeAutocompact, parseAutocompact } from './lib/settings.mjs';
 import { loadPolicy } from './lib/policy.mjs';
@@ -606,8 +606,12 @@ function handlePrompt(input) {
   // Which installed plugins fit, when the set is first seen or grows; the lead's
   // own per-step size; and a lead setting above quota-first.
   if (substantive) {
-    const line = pluginFitReport(input.transcript_path);
-    if (line) out.push(`[orchestrate · plugins] ${line}`);
+    // Read once the listings are found: they do not change within a session.
+    if (!state.pluginsRead) {
+      const fit = pluginFit(input.transcript_path);
+      if (fit.found) state.pluginsRead = true;
+      if (fit.line) out.push(`[orchestrate · plugins] ${fit.line}`);
+    }
     const note = contextLine(input);
     if (note) out.push(note);
     const lead = leadNote(ctx.self, ctx.tier);

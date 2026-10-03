@@ -83,11 +83,14 @@ later write replaces it.
 
 ## The mod
 
-`hooks/band.mjs` registers two events and nothing else:
+`hooks/band.mjs` registers three events and nothing else:
 
-- `session.start`: starts a poll every two seconds that stands down unless
+- `session.start`: starts a poll every two seconds, but only when
   `$.session.surfaces()` includes `terminal` or `desktop`. In a plain `claude -p`
-  run, the bench included, the surfaces list is empty and no file is read.
+  run, the bench included, the list is empty and no timer is started, so nothing
+  of the band's can hold a headless run open or read a file.
+- `session.attach`: a screen joining a session that started with none (the
+  Desktop app picking it up) starts the poll then, once.
 - `ui.render` for `AbovePrompt`: draws one dim `Text` line, truncated, two cells
   short of the width it is given; or passes on (`next(e)`) when there is nothing
   to say or when the feedback survey has the spot (`e.props.hasSurvey`).
@@ -105,8 +108,8 @@ prompt or a message, runs a command or a tool, calls a model, a helper, the
 network or an MCP server, and it has no `$.state`. `band-mod.test.mjs` scans the
 source for every `$.<namespace>.<method>` against that list and for the two
 events, so a new call fails the test and gets looked at. The host reads the same
-source before it loads the module, and `claude plugin validate` prints the
-result:
+source before it loads the module, and `claude plugin validate` printed this
+before `session.attach` was added (CI's validate job checks the current file):
 
 ```
 ./band.mjs hooks: session.start, ui.render{component=AbovePrompt}
@@ -274,3 +277,10 @@ unchecked (plan step 0), and the mod is held to calls that write nothing.
 - That the rollout switch is on for a given user. It defaults to on in 2.1.286
   and the host can serve it off.
 - What `claude plugin test` does with this plugin (see "Checks").
+
+## Folders the band cannot read
+
+A project on a network share (a UNC path or a mapped network drive on Windows)
+may refuse `$.fs` reads; the band then stays blank there. When the session moves
+to another folder (a worktree, `/cd`), the old project's line is dropped at the
+next look, and the new folder's record, if it has one, is read fresh.

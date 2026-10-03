@@ -887,7 +887,7 @@ skills/orchestrate/
   scripts/              router, guard, ledger, turn-check, persist-check,
                         context-check, context, codex-worker, gate, profile, run-init,
                         measure, diagnose, map, install-agents, install-project, batch,
-                        smoke, statusline
+                        statusline
   scripts/lib/          context (the one context reader), policy, workers, modes, host,
                         quota, tier, settings, prices, listing, template
   assets/               RUN.md template, packet template, worker report schema, eight role

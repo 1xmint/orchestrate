@@ -75,6 +75,7 @@ test('a helper refused at 80% does not disarm keep-going; the continue reason sa
     used('Agent', 'a1'), result('a1', REFUSAL, true),
     used('Agent', 'a2'), result('a2', REFUSAL, true),
     used('Agent', 'a3'), result('a3', REFUSAL, true),
+    used('Edit', 'e1'), result('e1', 'ok'),
     said('Carrying on without them.'));
   const r = run(HOOK, stopPayload('q1', dir, t), home);
   assert.equal(r.status, 0);
@@ -92,11 +93,27 @@ test('a helper refused at 80% does not disarm keep-going; the continue reason sa
 test('a helper refused for the week is the same: keep-going stays on', () => {
   const home = sandbox(); const dir = cwdDir();
   arm(home, 'q2');
-  const t = transcript(dir, used('Agent', 'a1'), result('a1', 'orchestrate quota: the weekly limit is at 93%, so no new helper starts; work in this conversation still runs.', true), said('Doing the step myself.'));
+  const t = transcript(dir, used('Agent', 'a1'), result('a1', 'orchestrate quota: the weekly limit is at 93%, so no new helper starts; work in this conversation still runs.', true), used('Bash', 'b1'), result('b1', 'ok'), said('Doing the step myself.'));
   const r = run(HOOK, stopPayload('q2', dir, t), home);
   assert.equal(r.json.decision, 'block');
   assert.match(r.json.reason, /helpers are refused/);
   assert.equal(session(home, 'q2').persist.armed, true);
+});
+
+// Independent review, 2026-10-03: a refused send counted as work, so a lead that
+// kept re-sending helpers at the limit was kept going for up to 25 idle turns,
+// each re-reading the whole conversation, when usage was scarcest.
+test('a step whose only work was helper sends refused for usage did no work: the loop ends', () => {
+  const home = sandbox(); const dir = cwdDir();
+  arm(home, 'q3');
+  const t = transcript(dir,
+    used('Agent', 'a1'), result('a1', REFUSAL, true),
+    used('Agent', 'a2'), result('a2', REFUSAL, true),
+    said('Trying the helpers again.'));
+  const r = run(HOOK, stopPayload('q3', dir, t), home);
+  assert.equal(r.json.decision, undefined, 'the Stop is not refused');
+  assert.match(r.json.systemMessage, /^Keep-going stopped: the last step did no visible work/);
+  assert.equal(session(home, 'q3').persist.armed, false);
 });
 
 // ---- a budget or credential refusal still stops --------------------------------
@@ -292,6 +309,29 @@ test('with nothing out, or nothing said about it, a step that did no work still 
     assert.match(r.json.systemMessage, /^Keep-going stopped: the last step did no visible work/, name);
     assert.equal(session(home, 'b2').persist.armed, false, name);
   }
+});
+
+// Independent review, 2026-10-03: a dev server or monitor started in the
+// background, or a recurring scheduled prompt, stays listed for the whole
+// session, so "work is out" alone would wait on it forever.
+test('the same work still out after a wait with nothing done since ends the loop; new work out waits again', () => {
+  const home = sandbox(); const dir = cwdDir();
+  arm(home, 'b4');
+  const server = { background_tasks: [{ id: 'srv', type: 'shell', status: 'running', description: 'npm run dev' }] };
+  const t = transcript(dir, said('The site is up at localhost:3000.'));
+  assert.equal(run(HOOK, stopPayload('b4', dir, t, server), home).stdout.trim(), '', 'the first idle Stop with work out is a wait');
+  writeFileSync(t, lines(said('The site is up at localhost:3000.'), said('Still waiting.')));
+  const second = run(HOOK, stopPayload('b4', dir, t, server), home);
+  assert.match(second.json.systemMessage, /^Keep-going stopped: two steps in a row did no visible work while the same thing kept running/);
+  assert.equal(session(home, 'b4').persist.armed, false);
+
+  const home2 = sandbox(); const dir2 = cwdDir();
+  arm(home2, 'b5');
+  const t2 = transcript(dir2, said('Two reviews are out.'));
+  assert.equal(run(HOOK, stopPayload('b5', dir2, t2, { background_tasks: [{ id: 'r1', type: 'subagent' }, { id: 'r2', type: 'subagent' }] }), home2).stdout.trim(), '');
+  writeFileSync(t2, lines(said('Two reviews are out.'), said('One landed; waiting on the other.')));
+  assert.equal(run(HOOK, stopPayload('b5', dir2, t2, { background_tasks: [{ id: 'r2', type: 'subagent' }] }), home2).stdout.trim(), '', 'one landed, the other is still out: a wait again');
+  assert.equal(session(home2, 'b5').persist.armed, true);
 });
 
 test('a wait does not use up a step: the count after the helper lands is where it was', () => {

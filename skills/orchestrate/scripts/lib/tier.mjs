@@ -24,7 +24,10 @@ export function writeJsonAtomic(path, obj) {
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(obj, null, 2) + '\n');
-  renameSync(tmp, path);
+  // On Windows a rename can fail while another process holds the target open
+  // (a reader, an antivirus scan): the error still reaches the caller, but the
+  // temporary file does not stay behind.
+  try { renameSync(tmp, path); } catch (e) { try { unlinkSync(tmp); } catch {} throw e; }
 }
 
 export function today(d = new Date()) {

@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { scanTurn, persistDecision, shortGoal, errorKey, endMessage, workOut, QUOTA_FACT, PERSIST_STEP_CAP } from './persist-check.mjs';
+import { scanTurn, persistDecision, shortGoal, errorKey, endMessage, workOut, outKey, QUOTA_FACT, PERSIST_STEP_CAP } from './persist-check.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'persist-check.mjs');
@@ -162,6 +162,36 @@ test('a step that did no work while something is out is a wait: not a stop, not 
   assert.equal(persistDecision({ rec, scan: { ...idle, denied: true }, outstanding: true }).kind, 'stop');
   // And a step that did work while work is out is an ordinary continue.
   assert.equal(persistDecision({ rec, scan: { ...idle, progressed: true }, outstanding: true }).kind, 'continue');
+});
+
+test('the same work out after a wait with nothing done since is a stop; other work out is another wait', () => {
+  const idle = { progressed: false, denied: false, errors: [], asked: false, goalMet: false };
+  const first = persistDecision({ rec: {}, scan: idle, outstanding: true, waitingOn: 'srv' });
+  assert.equal(first.kind, 'wait');
+  assert.equal(first.rec.waitingOn, 'srv');
+  const again = persistDecision({ rec: first.rec, scan: idle, outstanding: true, waitingOn: 'srv' });
+  assert.equal(again.kind, 'stop');
+  assert.match(again.why, /two steps in a row did no visible work/);
+  assert.equal(persistDecision({ rec: first.rec, scan: idle, outstanding: true, waitingOn: 'r2' }).kind, 'wait', 'something landed, something else is out');
+  const worked = persistDecision({ rec: first.rec, scan: { ...idle, progressed: true }, outstanding: true, waitingOn: 'srv' });
+  assert.equal(worked.kind, 'continue');
+  assert.equal(worked.rec.waitingOn, null, 'work in between starts the wait over');
+});
+
+test('outKey names what is out, in a stable order; nothing out is an empty key', () => {
+  assert.equal(outKey({ background_tasks: [{ id: 'b2' }, { id: 'b1' }], session_crons: [{ id: 'c1' }] }), 'b1,b2,c1');
+  assert.equal(outKey({}), '');
+  assert.equal(outKey(null), '');
+});
+
+test('a helper send refused for usage is not work; a send that went out, or any other work, is', () => {
+  const use = (name, id) => JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id, name, input: {} }] } });
+  const res = (id, text) => JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: id, content: text, is_error: true }] } });
+  const refused = 'orchestrate quota: the 5-hour usage window is at 82%.';
+  assert.equal(scanTurn([use('Agent', 'a1'), res('a1', refused)].join('\n')).progressed, false);
+  assert.equal(scanTurn([use('Agent', 'a1'), res('a1', refused), use('Edit', 'e1')].join('\n')).progressed, true);
+  assert.equal(scanTurn([use('Agent', 'a1'), res('a1', refused), use('Agent', 'a2')].join('\n')).progressed, true, 'the second send was not refused');
+  assert.equal(scanTurn(use('Agent', 'a1')).progressed, true, 'a send with no refusal is work');
 });
 
 // ---- shortGoal / errorKey / endMessage -----------------------------------------

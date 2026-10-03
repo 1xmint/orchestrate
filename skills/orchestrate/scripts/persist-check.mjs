@@ -47,7 +47,7 @@ import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, r
 import { pauseRoot, pauseRecord, writePause, clearPause } from './lib/pause.mjs';
 import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
 import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
-import { recordBand, bandAtStop, openItem, sessionGoal, stopQuestion } from './lib/band.mjs';
+import { recordBand, bandAtStop, openItem, sessionGoal, stopQuestion, withoutTaskIds } from './lib/band.mjs';
 import { readProject } from './lib/project.mjs';
 import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
@@ -73,6 +73,7 @@ const WORK_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'Bash'
 // The subset of WORK_TOOLS whose file is named in the tool call itself, so
 // "what the last step changed" can be said without opening anything.
 const FILE_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit']);
+const HELPER_TOOLS = new Set(['Agent', 'Task']);
 
 export const shortGoal = g => { const s = String(g || '').replace(/\s+/g, ' ').trim(); return s.length > 80 ? `${s.slice(0, 77)}...` : s; };
 
@@ -105,9 +106,14 @@ export const errorKey = s => String(s || '').split('\n').map(l => l.trim()).find
 // stop. One refused for usage ("orchestrate quota:") is `quotaRefused` instead:
 // the lead can still work without a helper, so it is a fact to state, not a stop.
 // It is also kept out of `errors`: three helpers sent in one step and all
-// refused would otherwise read as "the same error twice".
+// refused would otherwise read as "the same error twice". A helper send refused
+// for usage is not work either: a step whose only "work" was refused sends would
+// otherwise keep the loop going, turn after idle turn, at the very moment usage
+// is scarcest (independent review, 2026-10-03).
 export function scanTurn(tail) {
   const tools = [];
+  const sends = [];
+  const usageRefused = new Set();
   const errors = [];
   let denied = false;
   let quotaRefused = false;
@@ -123,6 +129,7 @@ export function scanTurn(tail) {
       for (const b of content) {
         if (b && b.type === 'tool_use' && b.name) {
           tools.push(b.name);
+          if (HELPER_TOOLS.has(b.name)) sends.push(b.id || null);
           if (FILE_TOOLS.has(b.name) && b.input && typeof b.input.file_path === 'string') lastChange = b.input.file_path;
         }
         if (b && b.type === 'text' && b.text && b.text.trim()) lastText = b.text;
@@ -133,12 +140,12 @@ export function scanTurn(tail) {
         const t = textOf(b.content);
         if (/orchestrate (budget|guard):/.test(t)) denied = true;
         const usageRefusal = /orchestrate quota:/.test(t);
-        if (usageRefusal) quotaRefused = true;
+        if (usageRefusal) { quotaRefused = true; if (b.tool_use_id) usageRefused.add(b.tool_use_id); }
         if (b.is_error && !usageRefusal) { const k = errorKey(t); if (k) errors.push(k); }
       }
     }
   }
-  const progressed = tools.some(n => WORK_TOOLS.has(n));
+  const progressed = tools.some(n => WORK_TOOLS.has(n) && !HELPER_TOOLS.has(n)) || sends.some(id => !id || !usageRefused.has(id));
   const tailText = lastText.trim().replace(/[\s*_`)\]]+$/, '');
   const asked = /\?$/.test(tailText);
   const goalMet = /\b(goal (is )?(met|complete|completed|achieved|reached)|all (the )?(steps|tasks|todos|items) (are )?(done|complete|finished)|nothing (left|more) to do|everything (is|in the plan is) (done|complete|finished))\b/i.test(lastText);
@@ -154,6 +161,16 @@ export function workOut(input) {
   return Boolean(input) && (listed(input.background_tasks) || listed(input.session_crons));
 }
 
+// Which work is out, as one string, so a wait can tell "the same things are
+// still running" from "something landed and something else is out". A dev server
+// or a monitor started in the background, or a recurring scheduled prompt, stays
+// in these lists for the whole session; without this a step that did nothing
+// would wait on them forever and keep-going would never stop.
+export function outKey(input) {
+  const ids = v => (Array.isArray(v) ? v : []).map(x => String((x && x.id) || '')).filter(Boolean);
+  return [...ids(input && input.background_tasks), ...ids(input && input.session_crons)].sort().join(',');
+}
+
 // Said on the continue that follows a helper refused for usage. Both limits are
 // named because the one refusal covers either (guard-agent.mjs).
 export const QUOTA_FACT = "helpers are refused while the plan's usage is past the helper line (the 5-hour window or the week); this session can still work";
@@ -164,13 +181,13 @@ export const QUOTA_FACT = "helpers are refused while the plan's usage is past th
 // read files. `outstanding` is true when the Stop payload lists work that will
 // wake the session (see workOut); a step that did nothing then is a wait, not
 // a stop.
-export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false }) {
+export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '' }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
   const item = next && next.state === 'open' && next.text ? next.text : null;
   const sameItem = item && rec.lastItem === item ? (Number(rec.sameItem) || 0) + 1 : (item ? 1 : 0);
-  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem };
+  const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem, waitingOn: null };
   const g = shortGoal(goal);
   // `say` is the user's line when `why` carries what only the lead can use (a
   // path, a size); every other reason is already in plain words for both.
@@ -180,11 +197,16 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     return stop(checkpointFact(contextReading), 'the conversation is close to its size limit and has no save point yet');
   }
   if (scan.denied) return stop('a helper was refused (budget or credential)');
-  if (repeat) return stop(`the same error came back twice: ${repeat}`);
+  // A refusal from one of this plugin's own checks names roles and helper
+  // terms the lead needs; the user's line says what happened in their words.
+  if (repeat) return stop(`the same error came back twice: ${repeat}`, /^orchestrate [\w-]+:/.test(repeat) ? 'the same refusal came back twice' : '');
   if (scan.asked) return stop('the last message asks a question');
   if (scan.goalMet) return stop('the last message says the goal is met');
   if (next && next.state === 'all-done') return stop(ALL_DONE_TEXT);
-  if (sameItem > PERSIST_SAME_ITEM_CAP) return stop(`${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open: ${item.length > 120 ? `${item.slice(0, 117)}...` : item}`);
+  if (sameItem > PERSIST_SAME_ITEM_CAP) {
+    const clip = t => (t.length > 120 ? `${t.slice(0, 117)}...` : t);
+    return stop(`${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open: ${clip(item)}`, `${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open: ${clip(withoutTaskIds(item))}`);
+  }
   if (steps > PERSIST_STEP_CAP) return stop(`keep-going reached its limit of ${PERSIST_STEP_CAP} steps in a row`);
   if (!scan.progressed) {
     // A helper or background command is still out, or a prompt is scheduled: the
@@ -192,7 +214,10 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     // keep-going off before that. The Stop passes unblocked and the loop stays
     // armed. It is neither a continue (an idle turn re-reads the whole
     // conversation for nothing) nor a step, so the counters stand as they were.
-    if (outstanding) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0 }, kind: 'wait', why: 'a helper or background command is still out' };
+    // The same work still out after a wait with nothing done since is not a
+    // wait any more: what is running has not woken the session, and will not.
+    if (outstanding && !(rec.waitingOn != null && rec.waitingOn === waitingOn)) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn }, kind: 'wait', why: 'a helper or background command is still out' };
+    if (outstanding) return stop('two steps in a row did no visible work while the same thing kept running in the background');
     return stop('the last step did no visible work (no edit, command or helper)');
   }
 
@@ -387,7 +412,7 @@ export function check(input) {
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
   const workCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : null;
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input) });
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input) });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };

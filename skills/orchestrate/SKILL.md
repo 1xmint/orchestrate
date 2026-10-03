@@ -120,7 +120,8 @@ Copy each number, and each claim that a check ran, from a proof line; say what
 was not run as not run. Two closing messages carried figures that did not exist.
 Local durability is not publication: push so work survives; merging, releasing
 and deploying follow the user's authorisation, which stands for the run once
-given. End the turn on the step you are taking, not a menu. A session's cost:
+given. Where a repo merges by itself once checks pass, marking a pull request
+ready is the merge: yours, never a helper's, after reading the diff. End the turn on the step you are taking, not a menu. A session's cost:
 `scripts/measure.mjs <transcript> --tree`; a problem report: `scripts/diagnose.mjs`.
 
 ## How to talk to the user

@@ -134,23 +134,34 @@ export const LISTING_REPORT_MIN_TOKENS = 4000;
 // setup gets no full check. The stamp is written only once the listings were
 // actually read, so a session whose listings are not in the transcript yet tries
 // again on its next prompt.
-export function pluginFitReport(transcriptPath, { path = LISTING_REPORT_PATH, profilePath = PROFILE_PATH, now = Date.now() } = {}) {
+export function pluginFitReport(transcriptPath, opts = {}) {
+  return pluginFit(transcriptPath, opts).line;
+}
+
+// The same, and whether the listings were found at all. The listings sit at the
+// head of a session's transcript and do not change within it, so once they have
+// been read the router need not read that head (up to 600 KB) again on every
+// later prompt of the session.
+export function pluginFit(transcriptPath, { path = LISTING_REPORT_PATH, profilePath = PROFILE_PATH, now = Date.now() } = {}) {
   try {
-    if (!transcriptPath) return '';
+    if (!transcriptPath) return { found: false, line: '' };
     const l = parseListing(readHead(transcriptPath));
-    if (!l.found) return '';
+    if (!l.found) return { found: false, line: '' };
     const stamp = readJson(path);
     const known = stamp && Array.isArray(stamp.plugins) ? stamp.plugins : null;
     const names = pluginNames(l);
-    if (known && names.length === known.length && names.every(p => known.includes(p))) return '';
+    if (known && names.length === known.length && names.every(p => known.includes(p))) return { found: true, line: '' };
     writeJsonAtomic(path, { at: now, plugins: names });
-    if (!known && tokens(l.skillChars + l.toolChars + l.serverChars) < LISTING_REPORT_MIN_TOKENS) return '';
+    if (!known && tokens(l.skillChars + l.toolChars + l.serverChars) < LISTING_REPORT_MIN_TOKENS) return { found: true, line: '' };
     const profile = readJson(profilePath) || {};
-    return pluginFitLine(l, {
-      known,
-      paidMode: profile.paidServices || 'ask',
-      paidAllowed: Array.isArray(profile.paidAllowed) ? profile.paidAllowed : [],
-      profileScript: join(SKILL_DIR, 'scripts', 'profile.mjs'),
-    });
-  } catch { return ''; }
+    return {
+      found: true,
+      line: pluginFitLine(l, {
+        known,
+        paidMode: profile.paidServices || 'ask',
+        paidAllowed: Array.isArray(profile.paidAllowed) ? profile.paidAllowed : [],
+        profileScript: join(SKILL_DIR, 'scripts', 'profile.mjs'),
+      }),
+    };
+  } catch { return { found: false, line: '' }; }
 }

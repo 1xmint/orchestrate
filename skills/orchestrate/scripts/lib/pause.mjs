@@ -82,7 +82,9 @@ export function readPause(root, { session } = {}) {
 // .orchestrator out of git only for a ledger, and a project page alone does not.
 // So a small .gitignore beside them names them. One the user wrote is left as it
 // is; ours is recognised by its first line and topped up with any name it lacks.
-export const STATE_FILES = ['band.json', 'pause.json', '*.tmp'];
+// It names itself too, so in a project whose .orchestrator folder git can see,
+// the plugin's own bookkeeping never shows as a file to commit.
+export const STATE_FILES = ['.gitignore', 'band.json', 'pause.json', '*.tmp'];
 const IGNORE_HEAD = "# Written by the orchestrate plugin's hooks: this computer's state, not project files.";
 export function ignoreStateFiles(root) {
   if (!root) return false;

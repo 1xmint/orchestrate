@@ -25,7 +25,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail } from './lib/tier.mjs';
+import { DIR, readJson, writeJsonAtomic, sanitizeId, sessionRun, loadSession, readTail, findRepoRoot } from './lib/tier.mjs';
 import { fileChange } from './lib/file-change.mjs';
 import { projectPath } from './lib/project.mjs';
 
@@ -310,9 +310,6 @@ export function projectCount({ prev, paths, root, ignored = () => false }) {
   return count >= PROJECT_TURNS ? { count: 0, block: true, turns: count } : { count, block: false };
 }
 
-function gitRoot(cwd) {
-  try { return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; }
-}
 function gitIgnored(root, p) {
   try { execFileSync('git', ['check-ignore', '-q', '--', p], { cwd: root, timeout: 5000, stdio: 'ignore' }); return true; } catch { return false; }
 }
@@ -321,7 +318,10 @@ function gitIgnored(root, p) {
 // another pulse already spoke this Stop (`quiet`), the note waits one Stop.
 function checkProject(input, quiet) {
   if (!input.cwd || !input.transcript_path) return null;
-  const root = gitRoot(input.cwd);
+  // A walk up the folders, not a `git` process: this runs at every Stop of
+  // every session, and only a project with a page goes further. Starting git
+  // there cost a process launch each turn (tens of milliseconds on Windows).
+  const root = findRepoRoot(input.cwd);
   if (!root || !existsSync(projectPath(root))) return null;
   const { paths } = turnEdits(readTail(input.transcript_path, 1048576));
   const path = STORE();

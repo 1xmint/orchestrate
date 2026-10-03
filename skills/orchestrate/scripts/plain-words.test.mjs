@@ -51,6 +51,10 @@ test('every keep-going stop line is in plain words', () => {
     'near the size limit': persistDecision({ scan: scan(), contextAdvice: { action: 'compact' }, contextReading: { tokens: 150000, session: 'sess-1', compactions: 1 } }),
     'a helper refused': persistDecision({ scan: scan({ denied: true }) }),
     'the same error twice': persistDecision({ rec: { errors: ['Error: the build failed'] }, scan: scan({ errors: ['Error: the build failed'] }) }),
+    // A refusal from the plugin's own checks, as errorKey keeps it.
+    'the same refusal twice': persistDecision({ rec: { errors: ['orchestrate model: implementer on opus before a cheaper attempt at task #-#-#'] }, scan: scan({ errors: ['orchestrate model: implementer on opus before a cheaper attempt at task #-#-#'] }) }),
+    // An open item as a run's task table gives it, ledger id first.
+    'the same task still open': persistDecision({ rec: { lastItem: '9-8-0002 add the --since flag', sameItem: 3 }, scan: scan(), next: { state: 'open', source: 'task', text: '9-8-0002 add the --since flag' } }),
     'a question': persistDecision({ scan: scan({ asked: true }) }),
     'goal met': persistDecision({ scan: scan({ goalMet: true }) }),
     'every step marked done': persistDecision({ scan: scan(), next: { state: 'all-done', source: 'task', text: 'x' } }),
@@ -79,6 +83,15 @@ test('every band line and pause text is in plain words', () => {
     'another session': bandLine({ band: { session: 'other', kind: 'working', text: 'Add search to the notes page', at }, session: 's', now }),
   };
   for (const [label, line] of Object.entries(lines)) check(label, line);
+});
+
+test('the band names a run\'s task by its words, never its ledger id', async () => {
+  const { withoutTaskIds } = await import('./lib/band-line.mjs');
+  const now = Date.parse('2026-10-03T09:00:00.000Z');
+  for (const raw of ['9-8-0001 add --since', 'Pickup prompt: send 9-8-0002 once the first lands']) {
+    const line = bandLine({ band: { session: 's', kind: 'working', text: withoutTaskIds(raw), at: new Date(now).toISOString() }, session: 's', now });
+    check(`working on ${raw}`, line);
+  }
 });
 
 test('the status line footer is in plain words', () => {
