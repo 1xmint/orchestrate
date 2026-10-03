@@ -1,6 +1,6 @@
 // profile.test.mjs — the Codex side of the profile: the plan is asked once and
-// stored, and `--brief` says what Codex can do from a cache it never refreshes
-// itself, in one of five shapes.
+// stored, and `--brief` says what Codex can do from a fresh cache it never
+// refreshes itself, in one of four shapes, and nothing without one.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -26,7 +26,7 @@ function profile(home, args) {
 function codexLine(home) {
   const r = profile(home, ['--brief']);
   assert.equal(r.status, 0, r.stderr);
-  return r.stdout.split('\n').find(l => l.startsWith('codex:'));
+  return r.stdout.split('\n').find(l => l.startsWith('codex:')) ?? null;
 }
 function cache(home, value, at = new Date().toISOString()) {
   writeFileSync(join(home, '.claude', 'orchestrate', 'workers', 'codex-status.json'), JSON.stringify({ at, ...value }));
@@ -56,11 +56,13 @@ test('--autocompact off removes the setting and leaves the opt-out marker', () =
   assert.match(r.stdout, /remove/);
 });
 
-test('--brief prints the codex line in each shape from the cache', () => {
+test('--brief prints the codex line in each shape from a fresh cache, and nothing without one', () => {
+  // Nothing in the plugin writes the cache today, so a line for "not checked"
+  // was the same on every skill load and changed nothing (2026-10-03).
   const home = sandbox();
-  assert.match(codexLine(home), /^codex: not checked in the last hour/);
+  assert.equal(codexLine(home), null, 'no reading: no line');
   cache(home, { status: 'ok', model: 'gpt-5.6-terra' }, new Date(Date.now() - 2 * 3600000).toISOString());
-  assert.match(codexLine(home), /^codex: not checked in the last hour/, 'an old probe is not trusted');
+  assert.equal(codexLine(home), null, 'an old probe is not trusted');
   cache(home, { status: 'not-installed' });
   assert.equal(codexLine(home), 'codex: not installed');
   cache(home, { status: 'not-signed-in' });

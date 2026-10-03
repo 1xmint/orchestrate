@@ -120,7 +120,7 @@ export function stepWork(work, launchRoot, path) {
 // Distinct from lib/context-scan.mjs's EDIT_TOOLS, which counts only file edits for
 // the "tool calls since your last edit" line — this counts reading and
 // searching too, because a long solo stretch of Read/Grep/Glob is the same
-// failure as a long stretch of Edit/Bash (challenge.md D1).
+// failure as a long stretch of Edit/Bash.
 export const WORK_CALL_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell', 'Read', 'Grep', 'Glob']);
 
 // The real settings.json, for the one figure that has to reflect what the

@@ -138,6 +138,32 @@ release's section when it ships.
     array when nothing is in flight"). Not measured; it rides the candidate
     bundle. Cost: one extra turn when it fires, never when something is out,
     the user is the one waited on, or the record shows a reminder was set.
+  - **A read of the always-on text as the lead reads it** (fresh context,
+    Opus, against the prompting guide and the Opus 5.5 page, 2026-10-03), and
+    an inventory of every hook line (Sonnet). Fixed: the style said "ask once"
+    while the card's rule 2c needs a question to go unanswered twice (the
+    style now asks for all such questions together, in the message carrying
+    the next step); the missing-brief line told the lead to write CLAUDE.md or
+    AGENTS.md where `references/brief.md` keeps a public repo's brief
+    untracked (now a fact and a pointer); the card's "the brief wins" read as
+    overruling the user's own ask (now: check your proposal against the brief,
+    not the file just read); SKILL.md's "wait on a helper with `Monitor`" read
+    as polling a helper that wakes the session by itself; "second opinion
+    before committing" read as before every git commit; routing.md's Codex
+    lane had no condition. The stop-and-ask list was in both the style and the
+    card: the style keeps it, with the home-wifi example the card carried.
+    Nothing writes the Codex status cache (only the tests do), so the profile
+    line always read "codex: not checked in the last hour (run profile.mjs)"
+    and running it changed nothing; the line now shows only a fresh reading.
+    The keep-going line went from 467 to about 330 bytes. Per-run read now
+    13,199 bytes (skill 7,458, style 3,782, card 1,959). Not changed, and
+    why: the "helper size" note on every dispatch (about 80 bytes, pinned by
+    eight hook tests, and a guard change needs its own review); the skill's
+    "How to talk to the user" section (pinned; only serves hosts without the
+    style); the Plan-mode notes (orders with no failure named, but the guard
+    teaches the same at the refusal: a candidate for step 2a). Commit
+    `e014f77`'s message says `execution.md` keeps the Plan-mode rules; that
+    file was cut later (`11a3675`), and the guard (`workflow.mjs`) holds them.
   - **Step 5's prediction, from bytes and the 0.20.0 dollars: it cannot be
     settled yet, and pilot part 2 settles it.** 0.20.0 read 28,276 bytes
     per run (skill 19,995, Plain style 5,094, card about 2,196, profile line

@@ -358,7 +358,8 @@ function commitsSince(cwd, startHead) {
   } catch { return null; }
 }
 
-// Appended to every block reason: the block replaces nothing the lead has
+// Appended to the closing-message blocks (the commit claim, the wait claim):
+// the block replaces nothing the lead has
 // already said, but a headless caller's `result` is whatever the lead sends
 // next, so a one-line reply to this block silently becomes the report the
 // user gets (round-9 audit finding 2, live run 1). Under 60 B added.

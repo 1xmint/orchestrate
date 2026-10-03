@@ -76,5 +76,9 @@ export function persistLine(persist) {
   if (!persist || !persist.armed) return '';
   const g = String(persist.goal || '').replace(/\s+/g, ' ').trim();
   const lead = g ? `auto-continue is on toward: "${g.length > GOAL_CAP ? `${g.slice(0, GOAL_CAP - 3)}...` : g}"` : 'auto-continue is on; no goal is recorded (the prompt named none and no open run has one)';
-  return `${lead}. A Stop is refused while each step does real work; it ends when you say the goal is met, ask the user something, a helper is refused by the budget or the credential check, the same error repeats, a step does nothing (a helper refused for usage is not work), the user spoke and the next step still did nothing while only a background command was out, three continues on the same open item, or after 25 steps. A usage limit does not end it. "persist off" turns it off.`;
+  // Said at arming and after each resume or summary while armed. What the hook
+  // weighs inside "no work" (a helper refused for usage, a background command
+  // out) is the hook's to judge, not the lead's to act on, so it is not spelled
+  // out here (prompt review, 2026-10-03: 467 bytes to about 330).
+  return `${lead}. A Stop is refused while each step does real work. It ends when you say the goal is met or ask the user something, or on a helper refused by the budget or the credential check, the same error twice, a step that does no work while nothing is out, three continues on the same open item, or 25 steps. A usage limit does not end it. "persist off" turns it off.`;
 }

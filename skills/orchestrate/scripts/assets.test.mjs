@@ -404,7 +404,7 @@ test('no shipped file turns a price into a share of a subscription week', () => 
 test('the plan the user sees is the project page, and closing numbers come from proof', () => {
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
   assert.match(skill, /run `scripts\/project\.mjs init <repo>`, then fill What this is for, Where it stands and Next \(each step ending with what the user will see\)/);
-  assert.match(skill, /Decisions go under Decisions with the date, why and the cost if wrong/);
+  assert.match(skill, /Decisions that change the approach go under Decisions with the date, why and the cost if wrong/);
   assert.doesNotMatch(skill, /three plain lines|goal\.md/, 'the retired rules are gone');
   assert.match(skill, /Copy each number, and each claim that a check ran, from a proof line/);
   assert.match(skill, /say what was not run as not run/);
@@ -734,7 +734,7 @@ test('SKILL.md buys one second opinion: the built-in advisor when present', () =
   // With /advisor on, the host's advisor tool and orch-advisor both answer
   // "is this the right direction"; asking both pays twice for one check.
   const skill = flat(readFileSync(join(SKILL, 'SKILL.md'), 'utf8'));
-  assert.match(skill, /One second opinion per check\. The built-in `advisor` tool, if present, is it/);
+  assert.match(skill, /At most one second opinion per decision\. The built-in `advisor` tool, if present, is it/);
 });
 
 test('SKILL.md says the built-in advisor is not an independent review', () => {
@@ -752,7 +752,11 @@ test('SKILL.md and the plain style make data exposure and unasked scope the owne
   assert.match(skill, /who can see or change their data \(a public page, or anyone else on their wifi\)/);
   assert.match(skill, /offer it in a line, don't build it/);
   const plain = flat(readFileSync(join(SKILL, 'assets', 'output-styles', 'plain.md'), 'utf8'));
-  assert.match(plain, /who can see their data/);
+  // The one home of the stop-and-ask list: the style is in every request and
+  // needs no re-send after a summary; the card no longer repeats it (prompt
+  // review, 2026-10-03).
+  assert.match(plain, /who can see or change their data \(a public page, anyone else on their wifi\), credentials/);
+  assert.match(plain, /recommendation first, all together, in the message that carries your next step/);
 });
 
 // Claude Code starts a helper's own folder from the remote's default branch

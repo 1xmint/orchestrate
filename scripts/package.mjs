@@ -60,8 +60,8 @@ export function toSpec(text) {
   // Nothing enforces the rules here, so say so plainly instead of promising
   // hooks the host will never run.
   body = body.replace(
-    /Hooks\s+run\s+around\s+you:[\s\S]*?never\s+by\s+ending\s+the\s+turn\./,
-    'This host runs none of the skill\'s hooks, so nothing keeps credentials out\nof a packet, saves a return under the run, or holds the Pickup line for you.\nHold them yourself. Nothing mechanical ever decided what a task deserves, so\nthe rest reads the same here.'
+    /Hooks\s+run\s+around\s+you:[\s\S]*?wakes\s+you\s+when\s+it\s+returns\./,
+    'This host runs none of the skill\'s hooks, so nothing keeps credentials out\nof a packet, saves a return under the run, or holds the Pickup line for you.\nHold them yourself.'
   );
   body = body.replace(/^Tier `unknown` above:/m, 'Start by running `profile.mjs` in the skill folder. Tier `unknown`:');
   body = body.replace(/The ledger hook saves and indexes the return; you set the row,\nbecause you are the one who read it\./, 'Save the return under the run folder and set the row yourself.');
