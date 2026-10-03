@@ -21,6 +21,14 @@ Rules that keep the rest of the run safe:
   repo, even if the packet says to work in the shared checkout: say so in your
   return instead. A path spelled for another shell (`/tmp/...` on Windows)
   is resolved against your worktree, never guessed.
+- Your folder may not start where the lead is: Claude Code starts a helper
+  folder from the remote's default branch unless the user set it otherwise, so
+  local commits the packet relies on can be missing. Before your first change,
+  check the packet's base: `git merge-base --is-ancestor <base sha> HEAD`. If it
+  is not there and you have changed and committed nothing yet, move onto it with
+  `git reset --hard <base sha>`: nothing of yours exists to lose, and this is the
+  one reset allowed. If you already have work, stop and return BLOCKED naming
+  both commits.
 - Change only the allowed files. If a forbidden file must change, stop and
   report; do not touch it.
 - Smallest sufficient diff. No refactors, renames, dependency additions, or
@@ -50,8 +58,8 @@ Rules that keep the rest of the run safe:
 - A DONE return means every change is committed on the task branch and
   `git status` is clean; if anything is uncommitted, return PARTIAL with the
   file list instead.
-- Never rewrite history, never reset or clean, never touch work you did not
-  make.
+- Never rewrite history, never reset or clean (apart from the base check
+  above, before any work of yours exists), never touch work you did not make.
 - If the same failure happens twice, stop and report it with the exact error.
 - Every step re-reads everything so far, so steps are the cost. Put independent
   reads and commands in one step, read line ranges rather than whole files, and

@@ -87,6 +87,11 @@ test('the coordinator owns one bounded wave and one graded return', () => {
   assert.doesNotMatch(text, /only after Codex reports exhaustion/);
   assert.match(text, /Write and Edit only files inside the run directory/);
   assert.match(text, /Grade every return against that task's DONE WHEN/);
+  // A helper that returns nothing must show as missing, not vanish from the
+  // summary (record: "the five smallest helpers returned nothing at all",
+  // docs/audits/2026-09-29-scoresheet-r11.md).
+  assert.match(text, /one GRADES line for every task in the packet/);
+  assert.match(text, /a task with no return is BLOCKED \(no return\), never left out/);
   assert.match(text, /integrate their branches in dependency order/);
   assert.match(text, /run the packet's gate once/);
   assert.match(text, /Full report, one summary, not one message per child/);
@@ -742,4 +747,20 @@ test('SKILL.md and the plain style make data exposure and unasked scope the owne
   assert.match(skill, /offer it in a line, don't build it/);
   const plain = flat(readFileSync(join(SKILL, 'assets', 'output-styles', 'plain.md'), 'utf8'));
   assert.match(plain, /who can see their data/);
+});
+
+// Claude Code starts a helper's own folder from the remote's default branch
+// unless worktree.baseRef is "head" (code.claude.com/docs/en/worktrees, "Choose
+// the base branch", checked 2026-10-03). A builder sent from a branch with local
+// commits then builds without them; three helpers on 2026-10-03 started from
+// main this way. Both worktree roles check the packet's base before any work.
+test('both worktree roles check that their folder starts from the packet\'s base', () => {
+  for (const f of ['orch-implementer.md', 'orch-debugger.md']) {
+    const role = flat(readFileSync(join(AGENTS, f), 'utf8'));
+    assert.match(role, /starts a helper folder from the remote's default branch/, f);
+    assert.match(role, /`git merge-base --is-ancestor <base sha> HEAD`/, f);
+    assert.match(role, /If you already have work, stop and return BLOCKED naming both commits\./, f);
+  }
+  const packet = readFileSync(join(SKILL, 'assets', 'packet.md'), 'utf8');
+  assert.match(packet, /WHERE: repo <path>\s+base <branch @ sha>/, 'the packet names the base the roles check');
 });

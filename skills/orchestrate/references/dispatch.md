@@ -20,6 +20,14 @@ child, and only the bounded roles the guard allows. Other role agents cannot
 dispatch. Built-in `general-purpose` has no turn cap, so while the role
 agents are installed the guard sends you to the capped role instead.
 
+A helper's own folder starts from the remote's default branch, not from the
+branch you are on, unless the user's `worktree.baseRef` setting is `"head"`
+(code.claude.com/docs/en/worktrees, checked 2026-10-03). So the packet's WHERE
+names the base as `branch @ sha` from `git rev-parse HEAD`, and the builder
+and debugger move onto it before their first change. Changing that setting is
+the user's call: it is in their settings, and it changes every worktree they
+make.
+
 ## The FOR line and the top of a return
 
 Every author packet carries `FOR:`, what the whole job is for and what done
