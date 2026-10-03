@@ -7,7 +7,7 @@
 // that usage stood still.
 
 import { join } from 'node:path';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync } from './node.mjs';
 import { DIR, readJson, currentAccount, readTail } from './tier.mjs';
 
 export const QUOTA_PATH = join(DIR, 'quota.json');

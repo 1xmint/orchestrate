@@ -9,7 +9,7 @@
 // lib/context-scan.mjs and lib/context-advice.mjs; this file only adds the
 // reading/writing of records.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, readdirSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { loadPolicy } from './policy.mjs';

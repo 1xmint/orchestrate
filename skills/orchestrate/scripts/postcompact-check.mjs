@@ -22,7 +22,7 @@
 //
 // It never fails the compaction on its own errors; exit 0 always.
 
-import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync, mkdirSync, existsSync } from './lib/node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sanitizeId, sessionRun } from './lib/tier.mjs';

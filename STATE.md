@@ -108,6 +108,15 @@ release's section when it ships.
     `smoke.mjs`, `profile.example.json` and `references/execution.md` (no
     caller); turn-check walks folders instead of starting git each Stop; the
     router reads the plugin listings once per session.
+  - **Faster hooks.** Every hook is a new Node process, and most of its start
+    went on parts of Node it never used: importing `node:fs` as an ES module
+    loads the promise and stream halves of fs, and `node:crypto` and
+    `node:child_process` are large. Every script now takes them from
+    `lib/node.mjs`, which uses `require` for fs and loads crypto and
+    child_process on first use; `lib/node.test.mjs` holds both. Measured
+    2026-10-03 on Linux, Node 22, 50 runs each (bare Node starts in about
+    21 ms): the hook after every tool call 65 to 47 ms, the shell-command check
+    68 to 45, the prompt hook 72 to 48, the Stop hook 69 to 47.
   - **Not done, and why.** Step 0 and step 3 need the owner's machine and
     records; step 2a (which hook notes Claude never acts on) needs the session
     records too. Left for the owner, each with the audit's evidence in PR #52:

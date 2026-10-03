@@ -3,7 +3,7 @@
 // plugin cache). No network, no child processes, never throws to a caller
 // (returns null instead).
 
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from './node.mjs';
 import { join } from 'node:path';
 import { HOME, DIR, PROFILE_PATH, TIERS, readJson } from './tier.mjs';
 

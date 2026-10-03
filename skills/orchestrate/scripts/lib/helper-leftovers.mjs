@@ -7,16 +7,11 @@
 // imports on every call. turn-check.mjs re-exports everything here, so its own
 // importers (and its tests) are unchanged.
 
-import { existsSync, realpathSync } from 'node:fs';
-import { createRequire } from 'node:module';
+// child_process is loaded on first use (lib/node.mjs): git is asked only once
+// per helper return, and this file is imported by a hook that runs on every
+// tool call.
+import { existsSync, realpathSync, execFileSync } from './node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
-
-// child_process is loaded on first use, not at import: loading it costs about
-// 5 ms on a slow machine, git is asked only once per helper return, and this
-// file is imported by a hook that runs on every tool call. createRequire keeps
-// the call synchronous.
-let childProcess = null;
-const execFileSync = (...args) => (childProcess ||= createRequire(import.meta.url)('node:child_process')).execFileSync(...args);
 
 // A dispatch of this session with no return yet, sent within the last six
 // hours (an older one is a helper that died without a return, not one working).

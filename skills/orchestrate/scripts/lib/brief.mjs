@@ -4,7 +4,7 @@
 // because locating and reading that one section is a self-contained job
 // nothing else in router.mjs needs to know the shape of.
 
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from './node.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { sectionExcerpt } from './resume.mjs';
 import { DIR, readJson, writeJsonAtomic } from './tier.mjs';

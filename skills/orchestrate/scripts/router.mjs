@@ -27,9 +27,9 @@
 //   node router.mjs --cost <transcript.jsonl>     what the router cost that session
 //   node router.mjs --prune                       delete session state older than 7 days
 
-import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync } from './lib/node.mjs';
+import { createHash } from './lib/node.mjs';
+import { spawnSync } from './lib/node.mjs';
 import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {

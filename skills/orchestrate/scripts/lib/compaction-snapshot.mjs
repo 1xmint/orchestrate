@@ -18,7 +18,7 @@
 // returns null and writes nothing, so a hook that calls this can never fail
 // on its account.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, copyFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, copyFileSync } from './node.mjs';
 import { dirname, join, basename } from 'node:path';
 import { CONTEXT_DIR, isBoundary } from './context-scan.mjs';
 import { checkpointPath } from './context-advice.mjs';

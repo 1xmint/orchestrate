@@ -29,7 +29,7 @@
 // also writes each packet to <run dir>/batch/<slug>/<id>.md so a long batch
 // does not have to be re-typed if the session is interrupted mid-wave.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from './lib/node.mjs';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

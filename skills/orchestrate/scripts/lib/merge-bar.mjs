@@ -16,7 +16,7 @@
 // node -e, a gh alias, a GraphQL query read from a file, and merging branches
 // without a pull request.
 
-import { spawnSync } from 'node:child_process';
+import { spawnSync } from './node.mjs';
 
 // The plugin's own safety checks: a change to any of these can switch a check
 // off, so it merges only after an independent reviewer passed it. Full repo

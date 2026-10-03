@@ -13,7 +13,7 @@
 // transcript (`skill_listing`, `deferred_tools_delta`, `mcp_instructions_delta`).
 // Read-only, no model calls, and any failure reads as "nothing known".
 
-import { openSync, readSync, closeSync, statSync } from 'node:fs';
+import { openSync, readSync, closeSync, statSync } from './node.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, PROFILE_PATH } from './tier.mjs';

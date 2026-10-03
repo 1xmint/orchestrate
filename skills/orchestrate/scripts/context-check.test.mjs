@@ -89,7 +89,8 @@ test('the every-tool-call hook does not load turn-check.mjs or child_process at 
   // turn-check.mjs is the Stop hook. lib/resume.mjs once imported two small
   // readers from it, which loaded all of it, and child_process with it, on
   // every tool call. git is asked once per helper return, inside
-  // lib/helper-leftovers.mjs, which loads child_process only then.
+  // lib/helper-leftovers.mjs, which loads child_process only then (through
+  // lib/node.mjs; lib/node.test.mjs checks what the running hook loads).
   const graph = staticGraph(join(HERE, 'context-check.mjs'));
   assert.ok(graph.size > 10, 'the walk followed the imports');
   const viaTurnCheck = [...graph].filter(([, deps]) => deps.some(d => d.endsWith('turn-check.mjs'))).map(([f]) => relative(HERE, f));

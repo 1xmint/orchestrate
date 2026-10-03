@@ -6,7 +6,7 @@
 // write anything, and it does not know about the per-session store; that is
 // lib/context-store.mjs, which imports from here.
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, relative } from 'node:path';
 import { loadPolicy } from './policy.mjs';

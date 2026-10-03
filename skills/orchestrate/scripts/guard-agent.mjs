@@ -18,8 +18,8 @@
 // Reads the hook payload on stdin, prints one JSON object or nothing, always
 // exits 0.
 
-import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { readFileSync, openSync, writeSync, closeSync, mkdirSync } from './lib/node.mjs';
+import { createHash } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, sanitizeId, findRepoRoot, loadSession, saveSession, detectTier, sessionRun, seenRecently, recordSeen, trimLog, FAMILY_ORDER, lastContextTokens, agentsInstalled } from './lib/tier.mjs';

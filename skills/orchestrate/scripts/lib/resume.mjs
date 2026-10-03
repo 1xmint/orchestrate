@@ -4,7 +4,7 @@
 // to show one. Split out because all of it answers the same question: what
 // was this session doing, and how much of it is safe to hand back.
 
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from './node.mjs';
 import { join } from 'node:path';
 import { CONTEXT_DIR } from './context-scan.mjs';
 import { sanitizeId } from './tier.mjs';

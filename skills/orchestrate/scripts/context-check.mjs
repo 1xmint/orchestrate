@@ -19,7 +19,7 @@
 // Most calls read one small file, see too little growth, and exit. Never
 // blocks, never exits non-zero, never fails the tool call.
 
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from './lib/node.mjs';
 import { resolve as resolvePath, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';

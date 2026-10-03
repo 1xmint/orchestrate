@@ -11,7 +11,7 @@
 //
 // Nothing here throws. Only ensureProject writes, and only that one file.
 
-import { readFileSync, existsSync, mkdirSync, copyFileSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, copyFileSync } from './node.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 

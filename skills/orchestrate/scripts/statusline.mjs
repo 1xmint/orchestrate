@@ -19,8 +19,8 @@
 // Status line mode never fails and never prints an error: a broken footer is
 // worse than a missing number.
 
-import { readFileSync, existsSync, mkdirSync, unlinkSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { readFileSync, existsSync, mkdirSync, unlinkSync } from './lib/node.mjs';
+import { spawnSync } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { HOME, DIR, readJson, writeJsonAtomic, currentAccount } from './lib/tier.mjs';

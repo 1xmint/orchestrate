@@ -39,9 +39,9 @@
 // Never blocks twice in one Stop, never exits non-zero, never fails the Stop on
 // its own errors.
 
-import { readFileSync, statSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { readFileSync, statSync } from './lib/node.mjs';
+import { spawnSync } from './lib/node.mjs';
+import { createHash } from './lib/node.mjs';
 import { join, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR, readJson, writeJsonAtomic, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';

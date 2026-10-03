@@ -16,8 +16,8 @@
 // rather than against whichever run on the machine is newest. Without it the
 // run is still created, and an unbound session can claim it later with --bind.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, utimesSync, readdirSync, statSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, utimesSync, readdirSync, statSync } from './lib/node.mjs';
+import { spawnSync } from './lib/node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';

@@ -5,7 +5,7 @@
 // so every existing importer keeps working unchanged.
 // No network, no child processes, never throws to a caller (returns null instead).
 
-import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, renameSync, readdirSync, statSync, unlinkSync, openSync, readSync, closeSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { lastMeasuredTokens } from './context-scan.mjs';

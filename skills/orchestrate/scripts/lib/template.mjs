@@ -3,7 +3,7 @@
 // repo copy stays machine-independent; the installed copy carries a real
 // absolute path with forward slashes, which works on all three platforms.
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, statSync } from './node.mjs';
 import { join } from 'node:path';
 
 // One token, understood by both install paths. As a Claude Code plugin,

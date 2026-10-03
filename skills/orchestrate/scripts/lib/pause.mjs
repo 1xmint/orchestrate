@@ -13,7 +13,7 @@
 // thing nobody has checked is whether a subscription limit reaches StopFailure
 // as `rate_limit`; a deleted file would take the answer with it.
 
-import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from './node.mjs';
 import { join } from 'node:path';
 import { findRepoRoot, writeJsonAtomic } from './tier.mjs';
 

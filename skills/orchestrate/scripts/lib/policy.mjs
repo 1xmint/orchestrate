@@ -9,7 +9,7 @@
 // Self-contained (no import from tier.mjs), so the context modules can use it and
 // tier.mjs can use lib/context-store.mjs without a cycle.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 

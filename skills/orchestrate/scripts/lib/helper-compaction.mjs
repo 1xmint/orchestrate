@@ -14,7 +14,7 @@
 // When unsure it says "not a helper": a helper seeing a stray card is today's
 // cost, the lead losing its card after a real compaction is worse.
 
-import { readdirSync, statSync, readFileSync } from 'node:fs';
+import { readdirSync, statSync, readFileSync } from './node.mjs';
 import { join, dirname } from 'node:path';
 
 export const HELPER_COMPACT_WINDOW_MS = 10000;

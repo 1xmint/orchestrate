@@ -123,7 +123,7 @@ that imports anything but its own files by relative path and `claude-code`:
 modules../band.mjs: cannot import "node:fs" (from hooks/band.mjs): a hooks module imports its own files by relative path and "claude-code", nothing else
 ```
 
-So the mod cannot import `lib/pause.mjs` (it reads with `node:fs`), and
+So the mod cannot import `lib/pause.mjs` (it reads files through Node's `fs`), and
 `lib/band-line.mjs` carries `parsePauseText`, which reads a pause record the same
 way; a test holds the two readers to the same answer for every state the file can
 be in. The one file the mod imports must itself import nothing, and a test says so.

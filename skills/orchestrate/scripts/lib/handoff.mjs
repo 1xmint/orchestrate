@@ -3,7 +3,7 @@
 // Pure and read-only: no writes, never throws, so a call site can use it on
 // every prompt without a try/catch of its own.
 
-import { readdirSync, readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from './node.mjs';
 import { join } from 'node:path';
 
 // win32 paths differ by case and by slash direction between a session opened

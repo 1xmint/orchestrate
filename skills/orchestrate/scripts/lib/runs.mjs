@@ -3,7 +3,7 @@
 // writes through, and the machine-wide "last run opened" pointer.
 // No network, no child processes, never throws to a caller (returns null instead).
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { nextSteps } from './project.mjs';

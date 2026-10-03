@@ -12,7 +12,7 @@
 // Pure functions, so the unit test can run the whole merge on a copy of a real
 // settings.json without touching the machine.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, copyFileSync, readdirSync, unlinkSync } from './node.mjs';
 import { join, dirname, basename } from 'node:path';
 
 export const OUR_SCRIPTS = ['router.mjs', 'guard-agent.mjs', 'guard-bash.mjs', 'ledger.mjs', 'turn-check.mjs', 'precompact-check.mjs', 'postcompact-check.mjs', 'persist-check.mjs', 'context-check.mjs'];

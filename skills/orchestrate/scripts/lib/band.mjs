@@ -16,7 +16,7 @@
 // The pure half (the line, the record's shape, what a Stop leaves) is in
 // lib/band-line.mjs, which imports nothing so the mod can import it too.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from './node.mjs';
 import { join } from 'node:path';
 import { writeJsonAtomic, readTail } from './tier.mjs';
 import { pauseRoot, ignoreStateFiles } from './pause.mjs';

@@ -27,7 +27,7 @@
 // does not touch the on-disk store (lib/context-store.mjs) or advice
 // (lib/context-advice.mjs); those import from here, not the other way round.
 
-import { readFileSync, writeFileSync, mkdirSync, renameSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, statSync, openSync, readSync, closeSync } from './node.mjs';
 import { fileChange, isShellTool } from './file-change.mjs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
