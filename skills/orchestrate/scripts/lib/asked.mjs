@@ -18,7 +18,8 @@ export function lastQuestion(text) {
   const t = String(text || '').trim().replace(/[\s*_`)\]]+$/, '');
   if (!t.endsWith('?')) return null;
   const parts = t.split(/\n+|(?<=[.!:])\s+/).map(s => s.trim()).filter(Boolean);
-  const q = parts.length ? parts[parts.length - 1] : t;
+  // Markdown that opens the sentence ("**Do you want…?**") is not its words.
+  const q = (parts.length ? parts[parts.length - 1] : t).replace(/^[\s*_`>#-]+/, '');
   return q.length > 300 ? q.slice(-300) : q;
 }
 
@@ -26,7 +27,8 @@ export function questionKey(q) {
   return String(q || '').toLowerCase().replace(/\d+/g, '#').replace(/[^a-z# ]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
-// Handing the choice back is an answer: it settles the question.
+// Handing the choice back is an answer: it settles the question. Said as a
+// question ("what would you pick?") it is asking back, so it leaves it open.
 const DELEGATE = /\b(you decide|your call|up to you|you pick|you choose|whatever you think|your choice)\b/i;
 
 // Whether a reply leaves the question open: a nudge to carry on ("continue",
@@ -36,9 +38,10 @@ const DELEGATE = /\b(you decide|your call|up to you|you pick|you choose|whatever
 export function leavesOpen(reply, { nudge = false } = {}) {
   const r = String(reply || '').trim();
   if (!r) return true;
-  if (DELEGATE.test(r)) return false;
+  const asksBack = /\?\s*$/.test(r);
+  if (DELEGATE.test(r) && !asksBack) return false;
   if (nudge) return true;
-  return /\?\s*$/.test(r);
+  return asksBack;
 }
 
 // The next record from the last one. `question` is lastQuestion of the lead's

@@ -24,7 +24,8 @@ test('a nudge or a question back leaves it open; an answer, a yes or "you decide
   assert.equal(leavesOpen('email please'), false);
   assert.equal(leavesOpen('yes'), false, 'a yes answers a yes-or-no question');
   assert.equal(leavesOpen('you decide', { nudge: true }), false, 'handing the choice back settles it');
-  assert.equal(leavesOpen('your call?'), false);
+  assert.equal(leavesOpen('your call'), false);
+  assert.equal(leavesOpen('which would you pick?'), true, 'naming the lead in a question is still asking back');
 });
 
 test('the count rises only for the same question left open, and is said from the second time', () => {
