@@ -257,7 +257,7 @@ test('an explicit keep-going ask in a new session gets the full card, never the 
 test('the run page printed at a resume is not printed again with the card', () => {
   const home = makeHome(); const repo = makeRepo(true);
   const resumed = start(home, repo, 'resume', 's12');
-  assert.match(resumed, /\[orchestrate · resume\] run /);
+  assert.match(resumed, /\[orchestrate · resumed\] run /);
   const out = say(home, repo, 'Add a CSV export button to the reports page and make sure the existing tests still pass', 's12');
   assert.match(out, FULL_CARD);
   assert.doesNotMatch(out, /\[orchestrate · run /, 'the resume already showed it');
