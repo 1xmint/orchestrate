@@ -1,9 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { runSteps } from '../skills/orchestrate/scripts/gate.mjs';
+import { parseCli } from '../bench/scenarios/resume.mjs';
 
 // Text checks on the bench workflow: it is public, runs on a subscription
 // sign-in, and must never put the token in an upload. No yaml dependency.
@@ -77,4 +80,68 @@ test('the token appears only as env on the run step', () => {
   assert.match(runStep, /env:\n(?:          [A-Z_]+: .*\n)*          CLAUDE_CODE_OAUTH_TOKEN: \$\{\{ secrets\.CLAUDE_CODE_OAUTH_TOKEN \}\}/);
   for (const s of steps) if (s !== runStep) assert.ok(!/CLAUDE_CODE_OAUTH_TOKEN/.test(s));
   assert.ok(!/^env:/m.test(code), 'no workflow-level env');
+});
+
+// A step's `run: |` text with its indent taken off. Steps keep `run:` at eight
+// spaces and the shell under it at ten.
+const runBody = step => {
+  const at = step.split('\n');
+  const i = at.findIndex(l => /^ {8}run: \|\s*$/.test(l));
+  assert.ok(i >= 0, 'the step has a run block');
+  const body = [];
+  for (const l of at.slice(i + 1)) {
+    if (l.trim() && !l.startsWith(' '.repeat(10))) break;
+    body.push(l.slice(10));
+  }
+  return body.join('\n');
+};
+
+test('a scorer crash is recorded, not swallowed, and does not stop the leak scan or the upload', () => {
+  const gradeLine = runStep.split('\n').find(l => /node evals\/grade-kept\.mjs/.test(l));
+  assert.ok(gradeLine, 'the run step calls the scorer');
+  // The old `|| echo "grade-kept failed"` let the job finish green. Now a crash
+  // leaves a marker, and the step carries on (the files help to debug it).
+  assert.match(gradeLine, /\|\| \{[^}]*> "\$RUNNER_TEMP\/grade-crash"; \}/);
+  assert.doesNotMatch(gradeLine, /\$STAGE|\/upload/, 'the marker is not staged for upload');
+  assert.ok(runStep.indexOf('grade-crash') < runStep.indexOf('grep -rlF'), 'recorded before the leak scan, which still runs');
+  // A leak still fails the run step, and a failed run step still withholds the upload.
+  assert.match(uploadStep, /if: success\(\)/);
+});
+
+test('the last step fails the job on a recorded crash, after the upload', () => {
+  const last = steps[steps.length - 1];
+  assert.match(last, /name: Fail the job if the scorer crashed/);
+  assert.ok(steps.indexOf(last) > steps.indexOf(uploadStep), 'after the upload');
+  // Also when an earlier step failed, so the crash is named then too.
+  assert.match(last, /if: \$\{\{ !cancelled\(\) \}\}/);
+  assert.match(last, /::error::grade-kept crashed/);
+});
+
+const hasBash = spawnSync('bash', ['-c', 'true']).status === 0;
+test('that step passes with no marker and fails with an error naming the crash when there is one', { skip: hasBash ? false : 'bash is not installed' }, () => {
+  const body = runBody(steps[steps.length - 1]);
+  const tmp = mkdtempSync(join(tmpdir(), 'bench-wf-'));
+  try {
+    const go = () => spawnSync('bash', ['-c', body], { env: { ...process.env, RUNNER_TEMP: tmp }, encoding: 'utf8' });
+    const clean = go();
+    assert.equal(clean.status, 0);
+    assert.equal(clean.stdout, '');
+    writeFileSync(join(tmp, 'grade-crash'), 'exit 1\n');
+    const crashed = go();
+    assert.equal(crashed.status, 1);
+    assert.match(crashed.stdout, /^::error::grade-kept crashed \(exit 1\)/m);
+  } finally { rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('the scenario call asks for a summary after the cut-off turn, in words the script itself accepts', () => {
+  const calls = code.split('\n').filter(l => /bench\/scenarios\/resume\.mjs/.test(l));
+  assert.equal(calls.length, 1);
+  // The words the shell passes, with each variable given a value. The script's
+  // own parser reads them, so a renamed or misspelt switch fails here.
+  const values = { '"${PLUG[@]}"': '--no-plugin', '"$LABEL"': 'arm', '"$RUNS"': '1', '"$CAP"': '1', '"$OUT/scenario"': 'out' };
+  const argv = calls[0].trim().split(/\s+/).slice(2).map(w => (w in values ? values[w] : w));
+  assert.ok(!argv.some(w => w.includes('$')), `give every shell variable a value here: ${argv.join(' ')}`);
+  const opts = parseCli(argv);
+  // 1 is straight after the cut-off turn, before the first "continue".
+  assert.equal(opts.compactAfter, 1);
 });
