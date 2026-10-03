@@ -29,17 +29,43 @@ test('overCeiling rounds to cents and treats a missing already-spent as zero', (
 
 // ---- budgetDecision: the gate as a whole -----------------------------------
 
-test('budgetDecision is null when the dispatch names no model', () => {
-  assert.equal(budgetDecision({}, { subagent_type: 'orch-implementer' }, { budget: { ceiling: 1 }, spend: 0 }), null);
+test('budgetDecision prices a role that names no model on its own agent file\'s model', () => {
+  // A run with a $2 ceiling and $1.90 spent refused a builder that named
+  // sonnet and let the same builder through when it named nothing, though it
+  // runs on its file's Sonnet either way; a coordinator (Opus) too.
+  const run = { runId: 'r1', budget: { ceiling: 2 }, spend: 1.9 };
+  const named = budgetDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet' }, run, []);
+  const unnamed = budgetDecision({}, { subagent_type: 'orch-implementer' }, run, []);
+  assert.ok(named, 'named: refused');
+  assert.deepEqual(unnamed, named, 'unnamed: refused the same way');
+  assert.equal(unnamed.model, 'sonnet');
+  assert.equal(unnamed.est, 1.5);
+  const coordinator = budgetDecision({}, { subagent_type: 'orchestrate:orch-coordinator' }, run, []);
+  assert.equal(coordinator && coordinator.model, 'opus');
+  assert.equal(budgetDecision({}, { subagent_type: 'Explore', model: 'haiku' }, run, []), null, 'a dispatch that fits under the ceiling passes');
+});
+
+test('budgetDecision refuses a dispatch nobody can price only once the run has reached its ceiling', () => {
+  const over = { runId: 'r2', budget: { ceiling: 2 }, spend: 2.5 };
+  const under = { runId: 'r3', budget: { ceiling: 2 }, spend: 0.5 };
+  for (const ti of [{ subagent_type: 'claude-code-guide', model: 'haiku' }, { subagent_type: 'general-purpose' }]) {
+    const d = budgetDecision({}, ti, over, []);
+    assert.ok(d, ti.subagent_type);
+    assert.equal(d.est, null);
+    assert.equal(budgetDecision({}, ti, under, []), null, `${ti.subagent_type} under the ceiling`);
+  }
+  assert.ok(budgetDecision({}, { subagent_type: 'orch-implementer' }, over, []), 'a priced role over the ceiling, with no model named');
+  assert.ok(budgetDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet' }, over, []), 'and with one named');
 });
 
 test('budgetDecision is null when the run has no budget ceiling set', () => {
   const run = { runId: 'r1', spend: 0, budget: null };
-  assert.equal(budgetDecision({}, { subagent_type: 'orch-implementer', model: 'claude-sonnet-4-5' }, run), null);
+  assert.equal(budgetDecision({}, { subagent_type: 'orch-implementer', model: 'claude-sonnet-4-5' }, run, []), null);
+  assert.equal(budgetDecision({}, { subagent_type: 'orch-implementer' }, run, []), null);
 });
 
 test('budgetDecision is null when there is no run resolved at all', () => {
-  assert.equal(budgetDecision({}, { subagent_type: 'orch-implementer', model: 'claude-sonnet-4-5' }, null), null);
+  assert.equal(budgetDecision({}, { subagent_type: 'orch-implementer', model: 'claude-sonnet-4-5' }, null, []), null);
 });
 
 // ---- runFor: which run a packet bills against ------------------------------

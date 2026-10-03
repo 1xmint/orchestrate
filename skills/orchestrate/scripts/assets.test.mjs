@@ -155,6 +155,28 @@ test('every description also names when the built-in agent or doing it yourself 
   }
 });
 
+test('no description sends the lead to a helper the dispatch guard refuses', () => {
+  // The researcher's and the advisor's "Not for" clauses pointed a one-page
+  // lookup at the built-in general-purpose agent, which the guard refuses while
+  // orch-implementer is installed: a refused dispatch, a turn spent. Explore on
+  // haiku, the finder the card names, is what they point at now.
+  for (const f of readdirSync(AGENTS).filter(f => f.endsWith('.md'))) {
+    const d = (/^description: "(.+)"$/m.exec(frontmatter(readFileSync(join(AGENTS, f), 'utf8'))) || [])[1];
+    assert.doesNotMatch(d, /general-purpose/, f);
+  }
+  for (const f of ['orch-researcher.md', 'orch-advisor.md']) {
+    const d = (/^description: "(.+)"$/m.exec(frontmatter(readFileSync(join(AGENTS, f), 'utf8'))) || [])[1];
+    assert.match(d, /Explore on haiku/, f);
+  }
+});
+
+test('SKILL.md says, where the lead picks a helper, that a model the user names for one task needs a numeric TASK line', () => {
+  // The guard binds a one-task grant to the packet's numeric TASK id; a lead
+  // that did not know was refused once per such dispatch.
+  const skill = readFileSync(join(SKILL, 'SKILL.md'), 'utf8').replace(/\s+/g, ' ');
+  assert.match(skill, /Use the helper or model the user names \(for one task, its packet needs a numeric `TASK:` line\)/);
+});
+
 test('the advisor only reads, and may say it cannot tell', () => {
   // Its value is a fresh view of the direction; a tool that changes anything
   // would make it a second author with no review.

@@ -112,8 +112,9 @@ in plain words, so a wrong read of the job is corrected before money is spent.
 
 The guard prints a price tag on every dispatch that names a model: list-price
 dollars, either measured from this machine's own past runs or labelled as
-reasoned. A dispatch that names no model gets no tag, because nothing knows what
-it will run on.
+reasoned. A role helper that names no model is priced on its own agent file's
+model, and so is a budget ceiling's check; a built-in agent that names none
+gets no tag, because nothing knows what it will run on.
 
 **List price is not what a subscription is billed.** It is the unit `/usage`
 already shows the user for a session, and it is the only unit a dispatch can be

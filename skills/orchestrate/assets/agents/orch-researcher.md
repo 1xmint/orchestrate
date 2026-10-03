@@ -1,6 +1,6 @@
 ---
 name: orch-researcher
-description: "Reach for this when the answer lives outside the code — a vendor's terms, an API's behaviour, a licence question, prior art. Returns findings with sources. Not for a one-page lookup — the built-in general-purpose agent does that."
+description: "Reach for this when the answer lives outside the code — a vendor's terms, an API's behaviour, a licence question, prior art. Returns findings with sources. Not for a one-page lookup — Explore on haiku does that."
 model: sonnet
 effort: medium
 disallowedTools: Agent, SendMessage, Artifact, Monitor, NotebookEdit

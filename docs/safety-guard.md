@@ -444,14 +444,54 @@ owed is the lead's judgment, written into the packet; a word in the objective
 no longer decides it (live notes Q and V, 2026-09-30: a docs lookup about
 permission rules and two markdown files were flagged).
 
+## What the dispatch guard reads as the packet
+
+The packet is read as the helper will read it: the prompt, then the files it
+names (the path after the word "packet", and other `.md` or `.txt` paths with a
+folder in them, up to three). Every check reads that one text: the TASK id the
+model check and the grant bind to, and the TASK, PROGRESS, REVIEW and RUN lines
+the dispatch record keeps. A line the prompt itself carries comes first, so it
+wins. What this does not catch, and what it costs: a brief that names some
+other file holding packet lines, such as the packet template, is read as
+carrying them, so a `REVIEW: yes` in such a file holds that task's DONE for a
+review.
+
 ## The dispatch guard's model check: what it does not catch
 
-`guard-agent.mjs` refuses a builder, finder or browser helper above Sonnet
+`guard-agent.mjs` refuses a builder, researcher or browser helper above Sonnet
 until there is a grant or an earlier attempt at the same task. The earlier
 attempt is read from this session's dispatch record: the same role and the same
 task key, on Sonnet, Haiku, or an inherited model (counted as Sonnet even when
-the lead runs on Opus). The guard does not read whether that attempt failed.
+the lead runs on Opus). The task key is the numeric TASK id, or without one the
+first line of the task's own text: the FOR line, the packet template's other
+header lines and its bare section headings are skipped, since every task of
+one job shares them. The guard does not read whether that attempt failed.
 The refusal text says the stronger model "passes after a Sonnet attempt at this
 task fails its check"; that the attempt failed is the lead's judgment, not
 something the guard holds. Found by the independent review of the 0009
 refusal wording, 2026-10-01.
+
+A built-in finder (`Explore`, or `general-purpose` where it is allowed) must
+name its model, and above Sonnet it passes only on the user's own grant: a
+model they named for every helper, or for one task with a numeric `TASK:` line,
+the same grant the builder check reads. An earlier attempt does not lift it.
+
+## The dispatch guard's spend and project-page checks
+
+A run with a dollar ceiling refuses a helper whose estimate would cross it,
+priced on the model the helper will run on: the one named, or its own agent
+file's model when none is named. A helper nobody can price (a role or model
+with no figure) is refused only once the run's spend has reached the ceiling,
+since any helper then crosses it. The refusal is recorded with the others.
+
+The first helper that builds in a repo (the builder, the fault-finder, the
+coordinator, `general-purpose`, `claude` or a fork) waits until
+`.orchestrator/PROJECT.md` has a step under Next, unless the session is bound
+to a run. Helpers that only read, Claude Code's own agents (such as
+`statusline-setup` or `claude-code-guide`) and agents the user wrote
+themselves are not held: nothing here knows what those do, and holding them
+asked for a file the user never asked for.
+
+Inside a helper (the payload carries `agent_id`) the dispatch guard still
+refuses what it refuses everywhere, but adds no note: the only hook text a
+helper's context receives is the context check's size fact.
