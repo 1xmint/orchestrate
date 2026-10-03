@@ -155,7 +155,7 @@ test('a not-committed claim over a clean tree is blocked with a plain reason', (
   assert.equal(r.status, 0);
   const out = JSON.parse(r.stdout);
   assert.equal(out.decision, 'block');
-  assert.match(out.reason, /nothing is committed, but git status shows a clean tree and 1 commit since this session started/);
+  assert.match(out.reason, /says nothing is committed; git status shows a clean tree and 1 commit since this session started/);
 });
 
 test('the same not-committed claim over a dirty tree is not blocked', () => {
@@ -179,7 +179,7 @@ test('a committed claim over a dirty tree is blocked and names the files', () =>
   assert.equal(r.status, 0);
   const out = JSON.parse(r.stdout);
   assert.equal(out.decision, 'block');
-  assert.match(out.reason, /shows 1 file not committed \(c\.txt\)/);
+  assert.match(out.reason, /Uncommitted: c\.txt\./);
 });
 
 test('a committed claim over a dirty tree names the resend sentence in the reason', () => {
@@ -190,7 +190,7 @@ test('a committed claim over a dirty tree names the resend sentence in the reaso
   writeSession(home, 'sess-3r', { startHead });
   const r = run({ hook_event_name: 'Stop', session_id: 'sess-3r', cwd: dir, transcript_path }, home);
   const out = JSON.parse(r.stdout);
-  assert.match(out.reason, /Resend the whole report; it becomes what the user sees\./);
+  assert.match(out.reason, /A reply to this block becomes the report the user sees\./);
 });
 
 // Round-9 audit finding 2: the lead's message named the untracked file, but
@@ -239,7 +239,7 @@ test('a committed claim in last_assistant_message is checked without a transcrip
   assert.equal(r.status, 0);
   const out = JSON.parse(r.stdout);
   assert.equal(out.decision, 'block');
-  assert.match(out.reason, /shows 1 file not committed \(c\.txt\)/);
+  assert.match(out.reason, /Uncommitted: c\.txt\./);
 });
 
 test("a committed claim is not blocked when only the plugin's own folders are untracked", () => {

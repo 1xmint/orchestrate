@@ -1,0 +1,1 @@
+I need a little command line tool for text jobs: count the words, turn a CSV file into JSON, and remove repeated lines. The README says how each one should work. Please build it, with tests, and tell me when it's ready. I'm away until then, so make the calls yourself.

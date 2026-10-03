@@ -136,9 +136,18 @@ test('a repo with no manifest gets its gate from the CI workflow: node --test an
   assert.match(block(g), /node --test .*\.github\/workflows\/ci\.yml/);
 });
 
+test('a workflow started only by hand is not read as the merge gate', () => {
+  const g = detect(tree({
+    '.github/workflows/a-manual.yml': "on:\n  workflow_dispatch:\njobs:\n  b:\n    steps:\n      - run: npm i -g some-tool@1.0.0\n      - run: node -e \"list.push(1)\"\n",
+    '.github/workflows/ci.yml': "on: [push, pull_request]\njobs:\n  t:\n    steps:\n      - run: node scripts/package.mjs --both\n",
+  }));
+  assert.equal(pick(g, 'build'), 'node scripts/package.mjs --both');
+  assert.ok(!g.candidates.some(c => c.source.endsWith('a-manual.yml')), 'the manual-only file adds nothing');
+});
+
 test('this repo\'s own gate is found from its ci.yml', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
   const g = detect(root);
-  assert.equal(pick(g, 'test'), "node --test $(find skills -name '*.test.mjs')");
+  assert.equal(pick(g, 'test'), 'node scripts/test.mjs');
   assert.equal(pick(g, 'build'), 'node scripts/package.mjs --both');
 });

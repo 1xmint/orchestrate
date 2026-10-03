@@ -37,11 +37,11 @@ function makeRepo(withRun, opts = {}) {
   return repo;
 }
 
-test('lib/resume.mjs exports exactly the nine names this concern owns', async () => {
+test('lib/resume.mjs exports exactly the ten names this concern owns', async () => {
   const mod = await import('./resume.mjs');
   assert.deepEqual(Object.keys(mod).sort(), [
     'RESUME_CAP', 'boundaryCut', 'sectionExcerpt', 'resumeExcerpt', 'checkpointExcerpt',
-    'latestCheckpointFor', 'handoffLine', 'continueIntent', 'CONTINUE_WORD',
+    'latestCheckpointFor', 'handoffLine', 'continueIntent', 'CONTINUE_WORD', 'NEW_GOAL_VERB',
   ].sort());
 });
 
@@ -155,5 +155,5 @@ test('handoffLine names a written Pickup section over plain git status', () => {
 
 test('handoffLine falls back to git status when there is no run or checkpoint', () => {
   const line = handoffLine({ goal: 'ship the login page', session_id: 'no-such-session', lastSeen: new Date(Date.now() - 60000).toISOString() }, { run: null });
-  assert.match(line, /run `git status`/);
+  assert.match(line, /`git status` lists them/);
 });

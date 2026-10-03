@@ -307,7 +307,7 @@ export function check(input) {
     for (const r of Array.isArray(state.returned) ? state.returned : []) {
       const id = r && r.longBytes ? String(r.agentId || r.toolUseId || r.at || '') : '';
       if (!id || told.includes(id)) continue;
-      out.push(`[orchestrate · context] the last hand-back was ${r.longBytes} bytes against 600; in the next brief, ask for five lines and a file for the rest.`);
+      out.push(`[orchestrate · context] last hand-back ${r.longBytes} bytes against 600; it is re-read every later turn.`);
       state.longTold = [...told, id].slice(-50);
       longTold = true;
       break;
@@ -336,7 +336,7 @@ export function check(input) {
       leftoverTold = true;
       const left = leftoverNote({ cwd: state.cwd || input.cwd, returned: state.returned, dispatches: state.dispatches });
       if (left) {
-        out.push(`[orchestrate · context] ${left.text}; remove them or tell the user they are there before you finish.`);
+        out.push(`[orchestrate · context] ${left.text}; nothing has removed them.`);
         state.leftoverTold = true;
       }
     }

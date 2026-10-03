@@ -2,6 +2,80 @@
 
 Resume point for building the `orchestrate` skill.
 
+**In progress: 0009 — measure against plain Claude before changing,
+2026-10-01.** Plan: `docs/research/0010-master-plan.md` (revision 4, approved
+2026-10-03; it builds on `docs/research/0009-plan.md` revision 2 and wins
+where they differ). Work branch `phase/0009-bench`. This becomes the next
+release's section when it ships.
+
+- 2026-10-03: the owner approved the master plan and said yes to all five of
+  its decisions (section 6): plain Claude is the only yardstick, two arms, the
+  1.15x bar held, a plain-arm scout first, the pilot cap $10 to $14;
+  keep-going stays armed through a usage limit, "you decide" is an allowed
+  answer on a product question, and Claude takes its own recommendation after
+  "you decide" once or the same question twice unanswered; the work branch goes
+  on the owner's machine before the paid run, and Stage 0, the same-item stop,
+  the pause at a limit and the wording fixes ship on their payload tests and
+  the record even when the bench reads level, as a dated exception to
+  `bench/RULE.md` (to be written there in step 1); the mod's tests may run
+  where Claude Code is signed in if `claude plugin test` turns out to need
+  that; usage numbers through the mod wait for a later release. Why the plan
+  changed: the pilot's first run was green and scored nothing, the 0.20.0
+  result (level at about 1.36x) already predicts a loss under the 1.15x rule,
+  and the owner's own records show about sixteen hand restarts whose causes
+  Stage 0 mostly fixes, so the plan buys no run that confirms a known answer
+  and cuts where the cost is (the per-run read, 27,284 bytes). Order: free
+  looks at the app, the outcome table and scorer fixes, the free fixes with
+  tests, the records and the owner's next build, pilot parts 2 and 3, the
+  comparison on a written prediction, the two held-back tasks, release on the
+  owner's go.
+
+- The bench (`bench/`, `bench-hidden/`, `evals/grade-kept.mjs`,
+  `.github/workflows/bench.yml`) fits "nothing that bills an outside service
+  or needs its own API key": it is for developing this plugin only and is not
+  installed; the owner starts it by hand; it signs in with the owner's own
+  subscription token, never an API key; GitHub Actions minutes are free on a
+  public repository. Each batch has a `--max-cost-usd` stop-loss written in
+  `bench/RULE.md` before it runs.
+- The rule that decides a comparison is in `bench/RULE.md`, written before any
+  run: gates, then successes, then cost per success, then time.
+- Every case's hidden checks are proven to pass a known-right solution and
+  fail a known-wrong one (`bench/grader-check.test.mjs`), so a hard case is
+  never mistaken for a broken one.
+- `gate.mjs` reads the merge gate only from a workflow that runs on push or
+  pull request, so the hand-started bench job is never taken as a project's
+  gate.
+- Plan revision 2 turned the guard's Sonnet-first refusal into an allow. That
+  part is dropped; Stage 2 is wording only, and the refusal and its grant code
+  stay. Three reasons: AGENTS.md says a hook refuses a helper on the wrong
+  model; the record (`guard-agent.mjs`, the comment above the refusal) shows
+  56 of 58 builders ran on Opus while the rule was only written; and
+  `bench/RULE.md` keeps a removed capability when a result is inconclusive.
+  Removing it would need its own comparison (current against current without
+  the refusal) and an AGENTS.md change in the same pull request.
+- Hook notes now state facts (Stage 0), and so do the refusals in
+  `guard-agent.mjs` and `lib/workers.mjs`: each keeps what was blocked and the
+  way through that passes the code. One independent review (Opus) found the
+  Fable text promised the approval line alone passes, while a builder on Fable
+  still meets the Sonnet-first rule and a finder is refused as a sweep; the
+  text now names both and a test pins it. The old text had the same gap.
+  Three `guard-bash.mjs` texts still give an order (the ask tail, the
+  worktree-remove and branch-delete refusals); they are safety stops and are
+  left until a guard change has its own reason. The review also found the
+  Sonnet-first check does not read whether the earlier attempt failed; that
+  is written in `docs/safety-guard.md`. Refusal wording checked 2026-10-01
+  against Anthropic's prompting best practices page (give the reason, say what
+  to do rather than only what not to, no forceful words) and the Prompting
+  Claude Opus 5.5 page, which adds nothing on refusal text.
+- The keep-going loop stops when three continues in a row have named the same
+  open item and it is still open. Before, a stuck run was nudged up to the
+  25-step cap, the costliest way the loop fails. "Prompting Claude Opus 5.5",
+  Unattended agentic runs (checked 2026-10-01), says to stop after two or
+  three automatic continuations on the same task. A new arming (the user's
+  "continue" or "try again") starts the count again. README, `lanes.md` and the
+  line printed on arming state both limits; `docs-drift.test.mjs` pins them to
+  the code, which it did not do for the 25-step limit before.
+
 ## v0.21.0 — judgment: no test that teaches nothing, no review loop, 2026-10-01
 
 From the owner's correction after 0.20.1: the session had spent $10 on a test

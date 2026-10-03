@@ -162,7 +162,7 @@ test('the two verdict roles hold a floor at Opus: weaker is refused, Opus and Fa
       const d = modelDecision({ subagent_type: role, model, prompt: 'TASK: 9-21-0001\nreview it' }, pro);
       assert.equal(d && d.prefix, 'model', `${role} on ${model} is refused`);
       assert.match(d.reason, /model: "opus"/, 'says what to resend with');
-      assert.match(d.reason, /hold the merge/, 'says what to do if Opus is out');
+      assert.match(d.reason, /the merge waits for one/, 'says what to do if Opus is out');
     }
     for (const model of ['opus', 'fable', 'claude-opus-5']) {
       assert.equal(modelDecision({ subagent_type: role, model, prompt: 'x' }, { tier: 'max5' }), null, `${role} on ${model} passes`);
@@ -209,10 +209,10 @@ test('a grant needs a numeric TASK id in the packet; no id, no unlock', () => {
   // A live lead whose user had named the model got "resend with sonnet" first,
   // which would have overridden the user's own words; the missing TASK line,
   // the only thing wrong, was the last clause. The fix leads now.
-  assert.match(d.reason, /^the user named opus; add a TASK: line with a number/);
-  assert.doesNotMatch(d.reason, /resend with model: "sonnet"/);
+  assert.match(d.reason, /^the user named opus, and the packet has no TASK: line with a number/);
+  assert.doesNotMatch(d.reason, /model: "sonnet" passes/);
   // Without a grant the old advice stands.
-  assert.match(modelDecision(ti, pro).reason, /resend with model: "sonnet"/);
+  assert.match(modelDecision(ti, pro).reason, /A dispatch with model: "sonnet" passes/);
 });
 
 test('a grant for the whole run allows every task on that family, with or without an id, and leaves a one-task grant for another family alone', () => {
@@ -327,6 +327,17 @@ test('Fable needs the plan or the user\'s yes', () => {
   assert.equal(modelDecision(ti, pro).prefix, 'model');
   assert.equal(modelDecision(ti, { tier: 'max20' }), null);
   assert.equal(modelDecision({ ...ti, prompt: 'TASK: 1-1-0001\nAPPROVED BY USER: fable' }, pro), null);
+});
+
+test('the Fable refusal names what a builder or a finder on Fable still needs after the yes', () => {
+  // The approval line clears only the plan check, so the refusal must not
+  // promise a builder or a finder that it alone gets through.
+  const build = { subagent_type: 'orch-implementer', model: 'fable', prompt: 'TASK: 1-1-0001\nx' };
+  assert.match(modelDecision(build, pro).reason, /also needs a grant .* or an earlier Sonnet attempt/);
+  assert.equal(modelDecision({ ...build, prompt: `${build.prompt}\nAPPROVED BY USER: fable` }, pro).prefix, 'model', 'the line alone does not pass a builder');
+  const find = { subagent_type: 'Explore', model: 'fable', prompt: 'x' };
+  assert.match(modelDecision(find, pro).reason, /model: "sonnet" or "haiku" passes/);
+  assert.doesNotMatch(modelDecision({ subagent_type: 'orch-reviewer', model: 'fable', prompt: 'x' }, pro).reason, /also needs|sweep/);
 });
 
 test('near the plan limit no helper starts, whatever its model', () => {

@@ -52,7 +52,8 @@ import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
   stillRunningNative, unreturned, unreturnedNote, STALE_SEEN_PATH, staleNote, compactionFact,
 } from './lib/recover.mjs';
-import { PERSIST_INTENT, syntheticPrompt, persistIntent, GOAL_CAP, persistLine } from './lib/persist-words.mjs';
+import { PERSIST_INTENT, syntheticPrompt, persistIntent, promptIntent, barePersistPhrase, GOAL_CAP, persistLine } from './lib/persist-words.mjs';
+import { runOpenWork } from './lib/runs.mjs';
 import {
   stateLine, statusReply, actionableLine, contextBand, contextPhrase, quotaPhrase, quotaBand,
   READY_SHOWN, readyPhrase, ungradedPhrase, budgetPhrase, progressPhrase, edgesPhrase, runPhrase,
@@ -73,7 +74,7 @@ export { RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt, handoffLi
 export { BRIEF_CAP, briefState, briefNote };
 export { cappedNote };
 export { unreturned, unreturnedNote, STALE_SEEN_PATH, staleNote, compactionFact };
-export { PERSIST_INTENT, syntheticPrompt, persistIntent, GOAL_CAP, persistLine };
+export { PERSIST_INTENT, syntheticPrompt, persistIntent, promptIntent, barePersistPhrase, GOAL_CAP, persistLine };
 export { limitsFromTail, LISTING_REPORT_PATH, LISTING_REPORT_MIN_TOKENS, PROFILE_PATH, pluginFitReport };
 
 const SKILL_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -107,7 +108,7 @@ export function leadNote(self, tier, now = Date.now(), path = LEAD_NOTE_PATH) {
   const seen = readJson(path) || {};
   if (seen[key] && now - Number(seen[key]) < 7 * 86400000) return '';
   try { writeJsonAtomic(path, { ...seen, [key]: now }); } catch {}
-  return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. For quota-first work, high or medium is the better default. Mention it to the user once: it takes effect in a new session, because switching mid-session re-reads everything uncached.`;
+  return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. A change takes effect in a new session; switching mid-session re-reads everything uncached.`;
 }
 
 // The id of the newest compaction boundary this hook can see in the transcript.
@@ -387,11 +388,39 @@ function handlePrompt(input) {
   // Armed before the mute check: "router off" silences the card, not a loop
   // the user asked for by name.
   let armedNow = false;
-  if (!state.persistMuted && persistIntent(trimmed)) {
-    // A bare "keep going" names no goal; it means the one already pinned.
+  let ctx = null;
+  const getCtx = () => ctx || (ctx = gatherContext(input, state));
+  const intent = state.persistMuted ? null : promptIntent(trimmed);
+  const explicit = !state.persistMuted && intent !== 'status' && persistIntent(trimmed);
+  if (explicit) {
+    // A bare "keep going" or "continue until complete" names no goal; it means
+    // the one already pinned or the open run's, never the phrase itself.
     const prior = state.persist && state.persist.goal;
-    const goal = prior && trimmed.split(/\s+/).length < 4 ? prior : trimmed.slice(0, 4000);
-    state.persist = { armed: true, goal, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
+    const g = readGoal({ cwd: input.cwd, root: getCtx().repoRoot, session: input.session_id, runMd: getCtx().run && getCtx().run.runMd, state });
+    let goal = trimmed.slice(0, 4000), goalSource = 'prompt';
+    if (barePersistPhrase(trimmed) || (prior && trimmed.split(/\s+/).length < 4)) {
+      if (prior) { goal = prior; goalSource = state.persist.goalSource || 'prompt'; }
+      else if (g && g.source === 'ledger') { goal = g.text; goalSource = 'ledger'; }
+      else { goal = ''; goalSource = 'none'; }
+    }
+    state.persist = { armed: true, goal, goalSource, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
+    armedNow = true;
+  } else if (intent === 'resume') {
+    // The gate: the goal comes from an open run's ledger, that run says what
+    // done looks like, and a task is not done. A project page's purpose is not
+    // a finish line, so it never arms this.
+    const run = getCtx().run;
+    const g = run && readGoal({ cwd: input.cwd, root: getCtx().repoRoot, session: input.session_id, runMd: run.runMd, state });
+    let work = null;
+    if (g && g.source === 'ledger') { try { work = runOpenWork(readFileSync(run.runMd, 'utf8')); } catch { work = null; } }
+    if (work && work.doneWhen && work.notDone > 0) {
+      state.persist = { armed: true, goal: g.text, goalSource: 'ledger', armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
+      armedNow = true;
+    }
+  } else if (intent === 'retry' && state.persist && state.persist.armedAt) {
+    // Restores keep-going that was on before the stop; never starts it.
+    const { endedAt, endReason, ...rest } = state.persist;
+    state.persist = { ...rest, armed: true, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
     armedNow = true;
   }
   if (state.muted) { saveSession(state); return; }
@@ -406,9 +435,9 @@ function handlePrompt(input) {
 
   // What this session is for, recorded once so a later session in the same
   // folder can answer "continue what?" for itself.
-  if (substantive && !state.goal) state.goal = trimmed.replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (substantive && !state.goal && !barePersistPhrase(trimmed)) state.goal = trimmed.replace(/\s+/g, ' ').trim().slice(0, 300);
 
-  const ctx = gatherContext(input, state);
+  getCtx();
   // A substantive prompt that is still just a single short sentence with no
   // build word in it ("fix the typo in the README") is not worth five
   // paragraphs of behaviour rules on its first turn: the short card covers it,
@@ -527,8 +556,8 @@ function handlePrompt(input) {
   if (band !== (state.quotaBand || 'none') && (band === 'caution' || band === 'stop')) {
     const h = ctx.quota.fiveHour;
     out.push(band === 'stop'
-      ? `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}% (resets ${resetClock(h.resetsAt)}). No new helpers will start. Finish what is in flight here, keep steps few, and tell the user where things stand if the work will not fit.`
-      : `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}%. Work serially, on the cheapest model that can do each step, and do small things yourself rather than starting helpers.`);
+      ? `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}% (resets ${resetClock(h.resetsAt)}). No new helpers will start.`
+      : `[orchestrate · usage] the 5-hour window is at ${Math.round(h.pct)}%; new helpers stop starting at ${HELPER_STOP_FIVE_HOUR}%.`);
   }
   state.quotaBand = band;
 

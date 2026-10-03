@@ -356,3 +356,15 @@ independent review when its packet says `REVIEW: yes`. Whether a review is
 owed is the lead's judgment, written into the packet; a word in the objective
 no longer decides it (live notes Q and V, 2026-09-30: a docs lookup about
 permission rules and two markdown files were flagged).
+
+## The dispatch guard's model check: what it does not catch
+
+`guard-agent.mjs` refuses a builder, finder or browser helper above Sonnet
+until there is a grant or an earlier attempt at the same task. The earlier
+attempt is read from this session's dispatch record: the same role and the same
+task key, on Sonnet, Haiku, or an inherited model (counted as Sonnet even when
+the lead runs on Opus). The guard does not read whether that attempt failed.
+The refusal text says the stronger model "passes after a Sonnet attempt at this
+task fails its check"; that the attempt failed is the lead's judgment, not
+something the guard holds. Found by the independent review of the 0009
+refusal wording, 2026-10-01.

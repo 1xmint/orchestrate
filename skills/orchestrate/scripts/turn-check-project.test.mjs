@@ -64,7 +64,7 @@ test('Stop: holds once on the third edit turn without a PROJECT.md edit, not bef
   const stop = (edits, n) => run({ hook_event_name: 'Stop', session_id: 'proj-s', cwd: repo, transcript_path: turnTranscript(home, edits, n) }, home);
   assert.equal(stop([src], 1), '');
   assert.equal(stop([src], 2), '');
-  assert.match(JSON.parse(stop([src], 3)).reason, /3 turns changed project files and \.orchestrator\/PROJECT\.md did not change; update Where it stands \/ Next if they moved\./);
+  assert.match(JSON.parse(stop([src], 3)).reason, /3 turns changed project files and \.orchestrator\/PROJECT\.md did not change; Where it stands \/ Next may be stale\./);
   assert.equal(stop([src], 4), '');
   assert.equal(stop([src, join(repo, '.orchestrator', 'PROJECT.md')], 5), '');
   assert.equal(stop([src], 6), '');
