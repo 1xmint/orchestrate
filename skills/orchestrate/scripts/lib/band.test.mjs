@@ -226,7 +226,8 @@ test('writeBand writes only where the .orchestrator folder already is, and makes
   const rec = band('needs', 'which one?');
   assert.equal(writeBand(dir, rec), true);
   assert.deepEqual(readBand(dir), rec);
-  assert.deepEqual(readdirSync(join(dir, '.orchestrator')), ['band.json'], 'no temporary file left behind');
+  // The .gitignore beside it keeps this computer's state out of commits (lib/pause.mjs).
+  assert.deepEqual(readdirSync(join(dir, '.orchestrator')).sort(), ['.gitignore', 'band.json'], 'no temporary file left behind');
 
   const made = tmp();
   assert.equal(writeBand(made, rec, { create: true }), true, 'an explicit create is allowed');

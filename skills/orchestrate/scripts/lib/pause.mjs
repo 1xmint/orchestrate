@@ -13,7 +13,7 @@
 // thing nobody has checked is whether a subscription limit reaches StopFailure
 // as `rate_limit`; a deleted file would take the answer with it.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findRepoRoot, writeJsonAtomic } from './tier.mjs';
 
@@ -76,9 +76,40 @@ export function readPause(root, { session } = {}) {
   return rec;
 }
 
-export function writePause(root, rec) {
+// The hooks write state files (this record, and the band's in lib/band.mjs) into
+// the project's .orchestrator folder. They are this computer's state, not the
+// project's, and `git add -A` would otherwise commit them: run-init.mjs keeps
+// .orchestrator out of git only for a ledger, and a project page alone does not.
+// So a small .gitignore beside them names them. One the user wrote is left as it
+// is; ours is recognised by its first line and topped up with any name it lacks.
+export const STATE_FILES = ['band.json', 'pause.json', '*.tmp'];
+const IGNORE_HEAD = "# Written by the orchestrate plugin's hooks: this computer's state, not project files.";
+export function ignoreStateFiles(root) {
+  if (!root) return false;
+  const p = join(String(root), '.orchestrator', '.gitignore');
+  try {
+    if (!existsSync(p)) { writeFileSync(p, [IGNORE_HEAD, ...STATE_FILES, ''].join('\n')); return true; }
+    const text = readFileSync(p, 'utf8');
+    if (!text.startsWith(IGNORE_HEAD)) return false;
+    const have = new Set(text.split(/\r?\n/).map(l => l.trim()));
+    const missing = STATE_FILES.filter(n => !have.has(n));
+    if (missing.length) appendFileSync(p, (text.endsWith('\n') ? '' : '\n') + missing.join('\n') + '\n');
+    return true;
+  } catch { return false; }
+}
+
+// With `create` false (the StopFailure hook's choice) it writes only where the
+// project's .orchestrator folder already exists, as the band does: the hook runs
+// in every folder a session opens, and a project the plugin has done nothing in
+// must not get a folder for one API error.
+export function writePause(root, rec, { create = true } = {}) {
   if (!root || !rec) return false;
-  try { writeJsonAtomic(pausePath(root), rec); return true; } catch { return false; }
+  try {
+    if (!create && !existsSync(join(String(root), '.orchestrator'))) return false;
+    writeJsonAtomic(pausePath(root), rec);
+    ignoreStateFiles(root);
+    return true;
+  } catch { return false; }
 }
 
 // Marks this session's record cleared. `by` says which end of the pause it was

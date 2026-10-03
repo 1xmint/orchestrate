@@ -32,7 +32,10 @@ function sandbox() {
   mkdirSync(join(home, '.claude', 'orchestrate', 'sessions'), { recursive: true });
   return home;
 }
-const cwdDir = () => mkdtempSync(join(tmpdir(), 'orch-pause-cwd-'));
+// A project the plugin already works in: its .orchestrator folder exists. The
+// pause record is written only there (a project the plugin never touched gets
+// nothing; the last tests below hold that).
+const cwdDir = () => { const d = mkdtempSync(join(tmpdir(), 'orch-pause-cwd-')); mkdirSync(join(d, '.orchestrator')); return d; };
 function run(script, payload, home) {
   const r = spawnSync(process.execPath, [script], {
     input: JSON.stringify(payload),
@@ -195,7 +198,7 @@ test('StopFailure inside a helper writes nothing', () => {
   const r = run(HOOK, failurePayload('f4', dir, { agent_id: 'helper-1', agent_type: 'orch-implementer' }), home);
   assert.equal(r.status, 0);
   assert.equal(r.stdout.trim(), '');
-  assert.equal(existsSync(join(dir, '.orchestrator')), false, 'no record, and no folder made for one');
+  assert.equal(existsSync(pauseFile(dir)), false, 'no record');
   assert.equal(session(home, 'f4').persist.armed, true);
 });
 
@@ -302,4 +305,21 @@ test('a wait does not use up a step: the count after the helper lands is where i
   assert.equal(run(HOOK, stopPayload('b3', dir, t, out), home).stdout.trim(), '', 'idle with a command out: a wait');
   writeFileSync(t, lines(used('Edit', 'e1'), result('e1', 'ok'), said('Started the tests.'), said('Waiting on the tests.'), used('Edit', 'e2'), result('e2', 'ok'), said('Fixed what the tests found.')));
   assert.match(run(HOOK, stopPayload('b3', dir, t), home).json.reason, new RegExp(`step 2 of ${PERSIST_STEP_CAP}`), 'the wait was not a step');
+});
+
+test('a project the plugin never touched gets no folder and no record from an API error', () => {
+  const home = sandbox();
+  const bare = mkdtempSync(join(tmpdir(), 'orch-pause-bare-'));
+  arm(home, 'f9');
+  const r = run(HOOK, failurePayload('f9', bare), home);
+  assert.equal(r.status, 0);
+  assert.equal(existsSync(join(bare, '.orchestrator')), false, 'the hook runs in every folder a session opens, so it makes none');
+  assert.equal(session(home, 'f9').persist.armed, true, 'and keep-going is untouched');
+});
+
+test('the pause record is kept out of commits by a .gitignore beside it', () => {
+  const home = sandbox(); const dir = cwdDir();
+  run(HOOK, failurePayload('f10', dir), home);
+  const ignore = readFileSync(join(dir, '.orchestrator', '.gitignore'), 'utf8').split('\n');
+  assert.ok(ignore.includes('pause.json') && ignore.includes('band.json'), 'both state files are named');
 });

@@ -411,7 +411,7 @@ export function recordStopFailure(input, now = new Date()) {
   const state = loadSession(input.session_id);
   const armed = Boolean(state && state.persist && state.persist.armed);
   const rec = pauseRecord({ error: input.error, session: input.session_id, now, armed });
-  return writePause(root, rec) ? rec : null;
+  return writePause(root, rec, { create: false }) ? rec : null;
 }
 
 // What this Stop leaves for the band (lib/band.mjs, docs/band.md): work, a

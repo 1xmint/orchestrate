@@ -19,7 +19,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeJsonAtomic, readTail } from './tier.mjs';
-import { pauseRoot } from './pause.mjs';
+import { pauseRoot, ignoreStateFiles } from './pause.mjs';
 import { nextOpen } from './runs.mjs';
 import { readProject } from './project.mjs';
 import { lastQuestion } from './asked.mjs';
@@ -45,6 +45,7 @@ export function writeBand(root, rec, { create = false } = {}) {
   try {
     if (!create && !existsSync(join(root, '.orchestrator'))) return false;
     writeJsonAtomic(bandPath(root), rec);
+    ignoreStateFiles(root);
     return true;
   } catch { return false; }
 }

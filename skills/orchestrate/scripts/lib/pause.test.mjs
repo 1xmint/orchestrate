@@ -135,3 +135,30 @@ test('docs/pause.md names the file, the kinds and every field the record carries
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
   assert.ok(readme.includes('docs/pause.md'), 'the README points at the page');
 });
+
+// The hooks' state files are this computer's, not the project's: a .gitignore
+// beside them names them, so `git add -A` in a project with a page but no
+// ledger (run-init's exclude) does not commit them.
+test('writing a record names the state files in a .gitignore, and leaves a user\'s own alone', async () => {
+  const { ignoreStateFiles, STATE_FILES } = await import('./pause.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'orch-ignore-'));
+  assert.equal(writePause(dir, pauseRecord({ error: 'rate_limit', now: NOW })), true);
+  const ours = readFileSync(join(dir, '.orchestrator', '.gitignore'), 'utf8');
+  for (const n of STATE_FILES) assert.ok(ours.split('\n').includes(n), `names ${n}`);
+  assert.equal(ignoreStateFiles(dir), true, 'calling it again changes nothing and is fine');
+  assert.equal(readFileSync(join(dir, '.orchestrator', '.gitignore'), 'utf8'), ours);
+
+  const theirs = mkdtempSync(join(tmpdir(), 'orch-ignore-theirs-'));
+  mkdirSync(join(theirs, '.orchestrator'));
+  writeFileSync(join(theirs, '.orchestrator', '.gitignore'), 'notes.md\n');
+  assert.equal(ignoreStateFiles(theirs), false);
+  assert.equal(readFileSync(join(theirs, '.orchestrator', '.gitignore'), 'utf8'), 'notes.md\n', 'a file the user wrote is not edited');
+});
+
+test('with create off, a record is written only where the .orchestrator folder already is', () => {
+  const bare = mkdtempSync(join(tmpdir(), 'orch-nocreate-'));
+  assert.equal(writePause(bare, pauseRecord({ error: 'rate_limit', now: NOW }), { create: false }), false);
+  assert.equal(existsSync(join(bare, '.orchestrator')), false);
+  mkdirSync(join(bare, '.orchestrator'));
+  assert.equal(writePause(bare, pauseRecord({ error: 'rate_limit', now: NOW }), { create: false }), true);
+});
