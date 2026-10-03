@@ -389,7 +389,9 @@ export function runOpenWork(runText) {
   return { doneWhen: sectionBody(runText, 'Done when'), notDone: t.notDone, total: t.tasks.length };
 }
 
-export const ALL_DONE_TEXT = 'all tasks done; the done-when has not been checked';
+// Shown to the user when keep-going stops on it, so in their words: "done when"
+// is the ledger's heading, said here as the finish line.
+export const ALL_DONE_TEXT = 'every step is marked done, and nobody has checked the finish line yet';
 const ISO_AT = /\b(\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2})?)?)/g;
 const latestStamp = text => {
   let best = null;

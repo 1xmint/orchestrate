@@ -120,13 +120,14 @@ test('"continue until complete" is never saved as the goal', () => {
 
 test('the Stop decision names the next open item, and stops when every task is done', async () => {
   const { persistDecision } = await import('./persist-check.mjs');
+  const { ALL_DONE_TEXT } = await import('./lib/runs.mjs');
   const scan = { progressed: true, denied: false, errors: [], asked: false, goalMet: false };
   const open = persistDecision({ scan, goal: 'g', next: { state: 'open', source: 'task', text: '9-8-0002 do 9-8-0002' } });
   assert.equal(open.kind, 'continue');
   assert.match(open.why, /next open item: 9-8-0002 do 9-8-0002/);
-  const done = persistDecision({ scan, goal: 'g', next: { state: 'all-done', source: 'task', text: 'all tasks done; the done-when has not been checked' } });
+  const done = persistDecision({ scan, goal: 'g', next: { state: 'all-done', source: 'task', text: ALL_DONE_TEXT } });
   assert.equal(done.kind, 'stop');
-  assert.match(done.why, /all tasks done; the done-when has not been checked/);
+  assert.equal(done.why, ALL_DONE_TEXT);
 });
 
 test('the Stop loop stops after three continues name the same open item, and a new item starts the count again', async () => {
@@ -141,7 +142,7 @@ test('the Stop loop stops after three continues name the same open item, and a n
   }
   const fourth = persistDecision({ rec, scan, goal: 'g', next: stuck });
   assert.equal(fourth.kind, 'stop');
-  assert.match(fourth.why, /3 continues in a row named the same open item, and it is still open: 9-8-0002/);
+  assert.match(fourth.why, /3 steps in a row ended with the same step still open: 9-8-0002/);
   const moved = persistDecision({ rec, scan, goal: 'g', next: { ...stuck, text: '9-8-0003 next' } });
   assert.equal(moved.kind, 'continue', 'the item changed, so the run is not stuck');
   assert.equal(moved.rec.sameItem, 1);

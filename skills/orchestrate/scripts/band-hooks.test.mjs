@@ -198,7 +198,7 @@ test('a keep-going loop that ends on a step with no visible work leaves idle', (
   const home = sandbox(); const dir = project();
   arm(home, 'i2');
   const r = stop(home, 'i2', dir, transcript(dir, said('The header is in.')));
-  assert.match(r.json.systemMessage, /^Auto-continue stopped/);
+  assert.match(r.json.systemMessage, /^Keep-going stopped/);
   assert.equal(bandRec(dir).kind, 'idle');
 });
 

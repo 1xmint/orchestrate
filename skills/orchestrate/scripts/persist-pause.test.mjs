@@ -108,10 +108,10 @@ test('a budget or guard refusal still stops: keep-going is turned off and the us
     const t = transcript(dir, used('Agent', 'a1'), result('a1', `orchestrate ${prefix}: this dispatch cannot go ahead`, true), said('Stopping here.'));
     const r = run(HOOK, stopPayload(id, dir, t), home);
     assert.equal(r.json.decision, undefined, `${prefix}: a Stop that ends the loop never blocks`);
-    assert.match(r.json.systemMessage, /^Auto-continue stopped: a dispatch was denied \(budget or credential\)/, prefix);
+    assert.match(r.json.systemMessage, /^Keep-going stopped: a helper was refused \(budget or credential\)/, prefix);
     const s = session(home, id);
     assert.equal(s.persist.armed, false, prefix);
-    assert.match(s.persist.endReason, /a dispatch was denied/, prefix);
+    assert.match(s.persist.endReason, /a helper was refused/, prefix);
   }
 });
 
@@ -276,7 +276,7 @@ test('background work out: no "did no visible work" stop; the Stop passes and ke
     const t = transcript(dir, said('Waiting for the reviewer to report.'));
     const r = run(HOOK, stopPayload('b1', dir, t, extra), home);
     assert.equal(r.status, 0, name);
-    assert.equal(r.stdout.trim(), '', `${name}: no block and no "Auto-continue stopped" line`);
+    assert.equal(r.stdout.trim(), '', `${name}: no block and no "Keep-going stopped" line`);
     const s = session(home, 'b1');
     assert.equal(s.persist.armed, true, name);
     assert.equal(s.persist.endReason, undefined, name);
@@ -289,7 +289,7 @@ test('with nothing out, or nothing said about it, a step that did no work still 
     arm(home, 'b2');
     const t = transcript(dir, said('The header and footer are in; CI is still running.'));
     const r = run(HOOK, stopPayload('b2', dir, t, extra), home);
-    assert.match(r.json.systemMessage, /^Auto-continue stopped: the last step did no visible work/, name);
+    assert.match(r.json.systemMessage, /^Keep-going stopped: the last step did no visible work/, name);
     assert.equal(session(home, 'b2').persist.armed, false, name);
   }
 });

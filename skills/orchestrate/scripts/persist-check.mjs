@@ -22,8 +22,8 @@
 // (docs/research/0003, 0004). Parallelism is not the point; the quota waste is
 // the idle turn re-reading the whole conversation, not the work.
 //
-//   stop when: a dispatch was denied by the budget or the credential check · the
-//   same error came back twice · the last message asks the user something · the
+//   stop when: a helper was refused by the budget or the credential check · the
+//   same error came back twice · the last message asks a question · the
 //   last message says the goal is met · the same open item named three continues
 //   in a row · the step cap · a step that did no work while nothing is out.
 //
@@ -172,18 +172,20 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   const sameItem = item && rec.lastItem === item ? (Number(rec.sameItem) || 0) + 1 : (item ? 1 : 0);
   const out = { ...rec, steps, errors: [...new Set([...(rec.errors || []), ...scan.errors])].slice(-20), lastItem: item, sameItem };
   const g = shortGoal(goal);
-  const stop = why => ({ rec: out, kind: 'stop', why });
+  // `say` is the user's line when `why` carries what only the lead can use (a
+  // path, a size); every other reason is already in plain words for both.
+  const stop = (why, say) => ({ rec: out, kind: 'stop', why, ...(say ? { say } : {}) });
 
   if (contextAdvice && (contextAdvice.action === 'compact' || contextAdvice.action === 'investigate')) {
-    return stop(checkpointFact(contextReading));
+    return stop(checkpointFact(contextReading), 'the conversation is close to its size limit and has no save point yet');
   }
-  if (scan.denied) return stop('a dispatch was denied (budget or credential)');
+  if (scan.denied) return stop('a helper was refused (budget or credential)');
   if (repeat) return stop(`the same error came back twice: ${repeat}`);
-  if (scan.asked) return stop('the last message asks the user something');
+  if (scan.asked) return stop('the last message asks a question');
   if (scan.goalMet) return stop('the last message says the goal is met');
   if (next && next.state === 'all-done') return stop(ALL_DONE_TEXT);
-  if (sameItem > PERSIST_SAME_ITEM_CAP) return stop(`${PERSIST_SAME_ITEM_CAP} continues in a row named the same open item, and it is still open: ${item.length > 120 ? `${item.slice(0, 117)}...` : item}`);
-  if (steps > PERSIST_STEP_CAP) return stop(`reached the limit of ${PERSIST_STEP_CAP} auto-continued steps in a row`);
+  if (sameItem > PERSIST_SAME_ITEM_CAP) return stop(`${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open: ${item.length > 120 ? `${item.slice(0, 117)}...` : item}`);
+  if (steps > PERSIST_STEP_CAP) return stop(`keep-going reached its limit of ${PERSIST_STEP_CAP} steps in a row`);
   if (!scan.progressed) {
     // A helper or background command is still out, or a prompt is scheduled: the
     // host wakes this session when it lands, and a stop here would have turned
@@ -191,7 +193,7 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     // armed. It is neither a continue (an idle turn re-reads the whole
     // conversation for nothing) nor a step, so the counters stand as they were.
     if (outstanding) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0 }, kind: 'wait', why: 'a helper or background command is still out' };
-    return stop('the last step did no visible work (no edit, command or dispatch)');
+    return stop('the last step did no visible work (no edit, command or helper)');
   }
 
   const parts = [];
@@ -303,7 +305,7 @@ function emitBlock(reason) {
 
 // Shown to the user, never blocks: the loop is over, and why, in one line.
 export function endMessage(why) {
-  return `Auto-continue stopped: ${why}. Say "keep going" to start it again.`;
+  return `Keep-going stopped: ${why}. Say "keep going" to start it again.`;
 }
 
 function emitSystemMessage(message) {
@@ -451,7 +453,7 @@ function main() {
   // step cap and the no-work stop are what end it.
   const dec = check(input);
   if (dec && dec.kind === 'continue') emitBlock(dec.why);
-  else if (dec && dec.kind === 'stop' && dec.why) emitSystemMessage(endMessage(dec.why));
+  else if (dec && dec.kind === 'stop' && dec.why) emitSystemMessage(endMessage(dec.say || dec.why));
   recordBandAtStop(input, dec);
 }
 

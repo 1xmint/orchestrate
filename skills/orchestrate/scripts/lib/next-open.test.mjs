@@ -49,7 +49,7 @@ test('with no tasks, the first item of the project page Next is next', () => {
 test('every task done is its own state, not filler', () => {
   const n = runs.nextOpen(runText({ rows: [row('9-1-0001', '✅ done', 'a'), row('9-1-0002', '✅ done', 'b')] }), PROJECT);
   assert.equal(n.state, 'all-done');
-  assert.equal(n.text, 'all tasks done; the done-when has not been checked');
+  assert.equal(n.text, runs.ALL_DONE_TEXT);
   assert.equal(runs.nextOpen('', '').state, 'none');
 });
 

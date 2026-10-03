@@ -36,7 +36,7 @@ const pct = w => (w ? `${Math.round(w.pct)}%` : null);
 export function footer(snap) {
   const parts = [];
   if (snap.model) parts.push(snap.model);
-  if (snap.contextPct != null) parts.push(`ctx ${Math.round(snap.contextPct)}%`);
+  if (snap.contextPct != null) parts.push(`context ${Math.round(snap.contextPct)}%`);
   if (snap.fiveHour) parts.push(`5h ${pct(snap.fiveHour)}${snap.fiveHour.resetsAt ? ` (resets ${resetClock(snap.fiveHour.resetsAt)})` : ''}`);
   if (snap.week) parts.push(`wk ${pct(snap.week)}`);
   return parts.join(' · ');

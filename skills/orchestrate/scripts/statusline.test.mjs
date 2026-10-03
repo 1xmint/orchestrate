@@ -28,7 +28,7 @@ const node = (home, args, input) => spawnSync(process.execPath, [join(HERE, 'sta
 
 test('the footer is short and says only what it was given', () => {
   const line = footer(snapshotFrom(SAMPLE));
-  assert.match(line, /^Opus 5 · ctx 34% · 5h 24% \(resets .+\) · wk 41%$/);
+  assert.match(line, /^Opus 5 · context 34% · 5h 24% \(resets .+\) · wk 41%$/);
   assert.equal(footer(snapshotFrom({ model: { display_name: 'Sonnet 5' } })), 'Sonnet 5', 'an API-key session has no windows and shows none');
 });
 

@@ -131,7 +131,7 @@ cloud with no session open. A Bash sleep loop spends a turn per check and is nev
 When the user asks in plain words to keep going toward a goal ("keep coding until the site is
 done", "execute the plan"), the router pins that goal and `persist-check.mjs` refuses a Stop while
 each step does real work (an edit, a command, a dispatch). It needs no run ledger. It ends, and
-disarms, on the first of: you say the goal is met; your last message asks the user something; a
+disarms, on the first of: you say the goal is met; your last message asks a question; a
 dispatch is denied by the budget or the credential check; the same error comes back twice; a
 step does no work while no helper or background command is out; three continues on the same open
 item; 25 steps. A usage limit is not on that list: the host waits and resumes, and a helper

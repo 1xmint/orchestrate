@@ -187,7 +187,7 @@ test('replay: the stall — no ledger, a step with work, then a step that only t
   appendFileSync(transcript, tail(said('The header and footer are in; CI is still running.')));
   const ended = run('persist-check.mjs', { ...stop, stop_hook_active: true }, home);
   assert.equal(ended.json.decision, undefined, 'a Stop that ends the loop never blocks');
-  assert.match(ended.json.systemMessage, /^Auto-continue stopped: the last step did no visible work/);
+  assert.match(ended.json.systemMessage, /^Keep-going stopped: the last step did no visible work/);
   assert.match(ended.json.systemMessage, /keep going/i);
   const s = session(home, 'p1');
   assert.equal(s.persist.armed, false);
@@ -210,7 +210,7 @@ test('replay: stuck on one open item, the loop stops; "try again" starts the cou
   for (let i = 1; i <= 3; i++) assert.equal(step().decision, 'block', `continue ${i}: each step did work`);
   const ended = step();
   assert.equal(ended.decision, undefined);
-  assert.match(ended.systemMessage, /3 continues in a row named the same open item, and it is still open: Fix the date parser/);
+  assert.match(ended.systemMessage, /3 steps in a row ended with the same step still open: Fix the date parser/);
   assert.equal(session(home, 'p2').persist.armed, false);
 
   appendFileSync(transcript, tail(userSays('try again')));
