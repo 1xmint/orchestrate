@@ -15,25 +15,54 @@ draws.
 
 ## What it shows
 
+The band answers one question: what is Claude doing right now, and does it need
+me?
+
 | Line | When | Where it comes from |
 |---|---|---|
-| `Paused for the usage limit; keep-going stays on.` (or `Stopped on an API error (<kind>); ...`) | a turn ended on an API error and the same session has not stopped or been prompted since | the pause record, `.orchestrator/pause.json` (`docs/pause.md`); its own text, word for word |
+| `Paused for the usage limit; keep-going stays on.` (or `Stopped: <what happened, in plain words>.`) | a turn of this session ended on an API error, and the session has not stopped or been prompted since | the pause record, `.orchestrator/pause.json` (`docs/pause.md`); its own text, word for word |
 | `Needs you: <question>` | the turn's last message ends on a question | `persist-check.mjs` at Stop, from the Stop payload's `last_assistant_message` (the transcript's last message when the payload has none), whether or not keep-going is on |
-| `Working on: <text>` | a real prompt arrived, or a Stop was refused so the turn goes on, or a Stop passed because a helper or background command is still out | `router.mjs` at the prompt and `persist-check.mjs` at Stop; the text is the next open item, else the goal |
-| nothing | the turn is finished, or nothing has been written | an `idle` record, no record, or a record from another session that has aged out |
+| `Working on: <text>` | while a turn runs: a real prompt arrived, or a Stop was refused so the turn goes on; between turns: a Stop passed because a helper or background command is still out | `router.mjs` at the prompt, `persist-check.mjs` and `turn-check.mjs` at Stop; the text is below |
+| `(another session) ` and one of the lines above | this session has nothing of its own to say, and another session in the same folder wrote a pause or a line in the last 30 minutes | the same two files; another session's pause is shown without its keep-going promise, which holds only for the session that wrote it |
+| nothing | the turn is finished, the prompt named nothing, a turn stopped with Esc, or nothing has been written | an `idle` record, a `working` record with no text, a `working` record while no turn runs, no record, or another session's record that has aged out |
 
-The order is fixed: a pause, then a question, then the work. A pause wins over a
-question because nothing the session says next arrives until it wakes.
+The order is fixed: this session's own pause, then its own line (a question,
+then the work), and only when this session has nothing of its own to say,
+another session's pause and then its line. A pause of this session wins over its
+question because nothing the session says next arrives until it wakes. Another
+session's pause never covers this session's own line: one record per project
+means a second session in the same folder (or this one after `/clear`, which
+gives it a new id) would otherwise show a pause it cannot clear.
+
+A "Working on" line of this session shows only while a turn of it is running:
+the band's slot says so (`isWorking`, see "The mod"). Stop does not fire when the
+user presses Esc, so the line a prompt wrote would otherwise stay up for good. A
+wait is written at a Stop, between turns, and shows either way; so do a question
+and a pause. A host that does not say whether a turn runs gets the line as written.
 
 The text is the user's own words where there are any, never reworded, cut at the
-end to 100 characters (with three dots). It is the first of these that exists:
+end to 100 characters (with three dots). Which text:
 
-1. at a prompt and at a refused Stop: the next open task of the run this session
-   is bound to, else the first numbered step under Next on the project page
-   (`.orchestrator/PROJECT.md`), else the keep-going goal, else the first request
-   the router pinned, else (at a prompt only) the prompt itself when it is a
-   request;
-2. at a Stop that passed on a wait: the fixed words "waiting on a helper or
+1. at a prompt (`bandAtPrompt` in `lib/band-line.mjs`):
+   - a prompt that asks for something names itself, whatever is stored: a new
+     request, a question ("what does the export button do?"), or keep-going
+     with a goal of its own ("keep going until the login page works");
+   - a prompt that only resumes ("continue", "keep going", "go ahead", "try
+     again", or one that newly arms keep-going on a goal already pinned) names
+     the next open task of the run this session is bound to, else the first
+     numbered step under Next on the project page (`.orchestrator/PROJECT.md`),
+     else the keep-going goal, else the first request the router pinned. A run
+     closed (or stale) for this binding names none of its tasks (`boundRun` in
+     `lib/runs.mjs`, the check the turn checks use), and the run's Pickup is
+     not used: it is the lead's note to itself, so the task is named by its row;
+   - anything else (a thank-you, an "ok", "where are we?") names nothing, so a
+     finished or older item is never claimed as what Claude is on now. The
+     record is still written, so a question that was up goes;
+2. at a refused Stop, the turn goes on: with keep-going on, the next open item,
+   else the goal, read again at each step; with it off, the text the turn's own
+   prompt put on the band (kept in the session as `bandText`), which is nothing
+   when that prompt named nothing (`turnText` in `lib/band.mjs`);
+3. at a Stop that passed on a wait: the fixed words "waiting on a helper or
    background command", and from its first minute how long the wait has gone
    on (", 12 min so far", ", 4 h 10 min so far"), worked out on every look
    from the record's `since`, so "is it stuck?" has an answer without typing.
@@ -41,21 +70,39 @@ end to 100 characters (with three dots). It is the first of these that exists:
    two helpers landing) keeps the clock; during a turn the session was woken
    for, the time still counts until the next Stop or prompt rewrites the
    record;
-3. at a Stop that ends on a question: the question, the sentence the message
+4. at a Stop that ends on a question: the question, the sentence the message
    closes on.
+
+A closing courtesy offer ("Anything else?", "Want me to add tests too?") shows as
+`Needs you`. The plugin has one reading of a closing question: `lastQuestion`
+in `lib/asked.mjs`, and the keep-going loop's own "the last message asks a
+question", which ends keep-going on that same message. Neither tells an offer
+from a real question, and a second reading for the band alone would show
+nothing while keep-going stops for that very message. The turn is over and the
+session waits for the user either way.
 
 Who writes what:
 
 - `router.mjs`, on a real user prompt: `working`. Not in a helper (`agent_id`),
   not a notice the host submits as a prompt (a finished helper's notice, a
   system reminder), not a slash command, not a repeat of the same prompt id. It
-  writes for a muted router too, since the band is not model-facing. It writes
-  nothing when the router is off in its settings.
+  writes for a muted router too, and for a router turned off in its settings,
+  since the band is not model-facing: a Stop writes the band either way, and a
+  prompt that wrote nothing left an answered question up through the whole next
+  turn. Turned off, it still says nothing and arms nothing, and it saves the
+  text beside the session file only when there is one.
 - `persist-check.mjs`, at Stop, not in a helper: a refused Stop writes `working`;
   a Stop passed on a wait writes `working` with the waiting words; a closing
   question writes `needs`; anything else, `idle`. A question comes before a wait.
   At `StopFailure` it writes the pause record only, and the band record is left
   as it was.
+- `turn-check.mjs`, at a Stop it refuses (not in a helper): `working`, on the
+  same text as a refused Stop above, with a `hold` naming that Stop. The two
+  Stop hooks are one group in `hooks/hooks.json`, and the host runs a group's
+  commands at once, so either may write first. Both write under the record's
+  lock, and `persist-check.mjs` leaves a `working` record that holds the same
+  Stop (`recordStopBand` in `lib/band.mjs`): a turn turn-check refused shows
+  "Working on" in either order, never the question it was refused after.
 
 A session that never armed keep-going has no `waiting` state: with a helper out
 it still shows `idle` after a turn that ends without a question, because only the
@@ -77,6 +124,11 @@ later write replaces it.
 - A wait's record also carries `since`, when the waiting began: a Stop that
   waits right after this session's own wait keeps it, so "so far" counts from
   the first of them, while `at` is always the time of the write.
+- A Stop that `turn-check.mjs` refused also carries `hold`, a short hash of the
+  Stop payload (session, transcript, closing message, whether a hook already
+  refused this turn: `stopKey`). The other Stop hook leaves such a record when
+  it is for the same Stop and at most 30 seconds old; the next Stop is a
+  different one, even on the same closing words.
 - `session` is the id the host gave the hook, or null when it gave none.
 - It is written only where the plugin's `.orchestrator` folder already exists, so
   a hook that runs in every folder a session opens leaves no folder behind in a
@@ -85,10 +137,14 @@ later write replaces it.
   uncommitted work, as for `pause.json`.
 - Writing is a temporary file renamed over the old one, wrapped so that nothing
   throws: a failed write is a silent skip, and no hook's output or decision
-  changes. The cost is one small file write per prompt and per Stop, and a
-  second small read when the Stop payload carries no closing message.
-- The pure half (the line, the record's shape, what a Stop leaves) is
-  `lib/band-line.mjs`, which imports nothing; the file helpers are `lib/band.mjs`.
+  changes. At a Stop the write is under a short lock beside the file
+  (`band.json.lock`, a folder, gone when the write is done). The cost is one
+  small file write per prompt and per Stop, a second small read when the Stop
+  payload carries no closing message, and one more write when turn-check
+  refuses.
+- The pure half (the line, the record's shape, what a prompt and a Stop leave)
+  is `lib/band-line.mjs`, which imports nothing; the file helpers are
+  `lib/band.mjs`.
 
 ## The mod
 
@@ -102,13 +158,21 @@ later write replaces it.
   Desktop app picking it up) starts the poll then, once.
 - `ui.render` for `AbovePrompt`: draws one dim `Text` line, truncated, two cells
   short of the width it is given; or passes on (`next(e)`) when there is nothing
-  to say or when the feedback survey has the spot (`e.props.hasSurvey`).
+  to say or when the feedback survey has the spot (`e.props.hasSurvey`). Which
+  line it draws follows `e.props.isWorking`, "true while a model turn is
+  running" in the type file that ships with Claude Code 2.1.288's
+  plugin-authoring skill: false hides this session's own "Working on" line;
+  absent (a host that does not say), the line is drawn as the record has it.
 
 At each poll it stats `band.json` and `pause.json` under the session's root
 (walking up from `$.session.root()` to the git root, as the hooks do), re-reads a
 file only when its modified time moved, works the line out with a function that
-takes no `$`, and calls `$.ui.invalidate('ui.render')` only when the line
-changed.
+takes no `$` (twice: for a turn running and for none), and calls
+`$.ui.invalidate('ui.render')` only when either changed. A modified time is
+kept only once a read of it gave whole JSON: a read that throws (a file busy in
+the hooks' rename on Windows, a network folder) or catches the file half written
+is tried again at the next poll, and a read that throws after a good one keeps
+the line it had.
 
 It only reads and draws. It calls `$.session.root`, `.id` and `.surfaces`,
 `$.fs.exists`, `.stat` and `.read`, `$.clock.now` and `.every`, and
@@ -152,7 +216,9 @@ same string. So the line is shown in three cases:
   folder.
 
 A pause from another session is treated the same way (a pause is one record per
-project, so it can belong to a session that is not this one). A clock that
+project, so it can belong to a session that is not this one), with two limits:
+it shows only when this session has nothing of its own to say, and without its
+keep-going promise, which is true only of the session that wrote it. A clock that
 disagrees by up to a minute still counts as recent; a time that is not a time
 never shows. The choice is the cost of not knowing: if the ids are the same string
 the tag never appears; if they are not, the worst case is a tag on a true line.
@@ -238,15 +304,20 @@ load only from a plugin's `hooks.json`.
 ## Checks
 
 - `lib/band.test.mjs`: the line, the record, the clip, the session rules, the
-  file helpers, and that the pause reader agrees with `lib/pause.mjs`.
-- `band-hooks.test.mjs`: the exact hook JSON through `router.mjs` and
-  `persist-check.mjs` in a fake home: what each prompt and Stop writes, that a
-  helper's Stop and prompt write nothing, that a pause wins over a question, and
-  that the hooks print and decide the same with and without the band's folder.
+  order at a prompt, the hold between the two Stop hooks, the file helpers, and
+  that the pause reader agrees with `lib/pause.mjs`.
+- `band-hooks.test.mjs`: the exact hook JSON through `router.mjs`,
+  `persist-check.mjs` and `turn-check.mjs` in a fake home: what each prompt and
+  Stop writes (a new request, a resume, a thank-you; a Stop each hook refuses,
+  in either order), that a helper's Stop and prompt write nothing, that a pause
+  of this session wins over its question and another session's does not, that
+  a closed run names no task, that a router turned off still writes, and that
+  the hooks print and decide the same with and without the band's folder.
 - `band-mod.test.mjs`: the mod's source against the read-only list, its two
   events, `hooks.json`, and the mod run against a fake `$` (it stands down where
-  nothing draws, reads a file only when its time moved, asks for a redraw only
-  when the line changed).
+  nothing draws, reads a file only when its time moved and again after a read
+  that failed, asks for a redraw only when a line changed, hides its own
+  "Working on" while no turn runs).
 - CI job `validate`: installs Claude Code at the bench's pin and runs
   `claude plugin validate` on the plugin and the marketplace. It reads the mod's
   source for the rules the host holds a module to, needs no sign-in and sends
@@ -276,6 +347,12 @@ unchecked (plan step 0), and the mod is held to calls that write nothing.
   that `$.clock.now()` is a number of milliseconds, and the form of
   `$.session.root()` (a path, with `/` or `\`). The mod's walk to the git root
   follows `findRepoRoot` but joins with `/`; on Windows it is unseen.
+- That `e.props.isWorking` is there on the builds the plugin runs on (it is in
+  2.1.288's type file; 2.1.286's was not read for it), and that the host draws
+  the band again when it changes. If it does not, a "Working on" line after Esc
+  stays until the band is next drawn for another reason.
+- Whether a prompt typed while a turn runs (a queued message) reaches the router
+  as a prompt; if not, the line stays on the turn's own prompt until its Stop.
 - A session that moves into another repository or a worktree writes where the mod
   does not read: the hooks resolve the root from each payload's `cwd`, the mod
   from the session's root.

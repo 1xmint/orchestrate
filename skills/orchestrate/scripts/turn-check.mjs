@@ -14,6 +14,9 @@
 //   3. pickup — a run whose Pickup is older than the last dispatch cannot be
 //      resumed, so the next session would start blind.
 //
+// A Stop it refuses also leaves the band's record (the line above the prompt,
+// docs/band.md) saying the turn goes on, after the refusal is printed.
+//
 // It never asks for more research, more testing or a better answer: a Stop hook
 // that demands improvement after the work is finished is a loop with no exit
 // condition, and the one that used to live here (a source-count floor under
@@ -366,7 +369,22 @@ function checkHeartbeat(input) {
   emitBlock(`orchestrate: ${d.why}. The Pickup section of ${run.runMd} (one sentence that continues from here, its confidence, the resume risk) is the only thing the next session reads first.`);
 }
 
-function main() {
+// A refused Stop means the turn goes on, so the band says so (docs/band.md):
+// `working`, on what the turn is about, held for this Stop so persist-check.mjs,
+// which runs beside this hook and may already have written "Needs you" or
+// nothing for it, does not leave or put that line up (lib/band.mjs
+// `recordStopBand`). After the block is printed, so it changes nothing this hook
+// prints or decides; loaded only on a block, so an ordinary Stop pays nothing
+// for it. Never throws.
+async function holdBand(input) {
+  try {
+    const { recordStopBand, turnText, stopKey } = await import('./lib/band.mjs');
+    const key = stopKey(input);
+    recordStopBand({ cwd: input.cwd, session: input.session_id, kind: 'working', text: turnText(loadSession(input.session_id), input.cwd), hold: key, key });
+  } catch {}
+}
+
+async function main() {
   let payload = '';
   try { payload = readFileSync(0, 'utf8'); } catch {}
   let input = null;
@@ -377,13 +395,17 @@ function main() {
   // silent inside a helper).
   if (input.agent_id) return;
 
-  checkHeartbeat(input);
-  const note = checkProject(input, emitted);
-  if (note) emitBlock(note);
+  try {
+    checkHeartbeat(input);
+    const note = checkProject(input, emitted);
+    if (note) emitBlock(note);
+  } finally {
+    if (emitted) await holdBand(input);
+  }
 }
 
 // Only when run as a hook, not when a test imports the pure functions above.
 if (process.argv[1] && resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { main(); } catch {}
+  try { await main(); } catch {}
   process.exit(0);
 }

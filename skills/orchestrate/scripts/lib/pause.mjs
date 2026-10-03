@@ -16,6 +16,7 @@
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from './node.mjs';
 import { join } from 'node:path';
 import { findRepoRoot, writeJsonAtomic } from './tier.mjs';
+import { KEEP_GOING_CLAUSE } from './band-line.mjs';
 
 export const PAUSE_REL = join('.orchestrator', 'pause.json');
 export const PAUSE_KINDS = ['usage_limit', 'api_error'];
@@ -38,18 +39,39 @@ export function errorKind(raw) {
   return s ? s.slice(0, 64) : 'unknown';
 }
 
-// The record for one failure. Pure. "keep-going stays on" is said only when it
-// is true: a session that never armed it gets the same sentence without it.
+// What each error kind the host sends at StopFailure means, in the user's words
+// (the kinds are the SDK type's and the hooks page's, docs/pause.md "Facts").
+// The band shows the record's text as it is, so the host's own name for an
+// error never reaches the user. A kind not listed here, `unknown` among them,
+// is said as an error and nothing more.
+export const ERROR_WORDS = {
+  overloaded: 'Stopped: Claude was too busy to answer',
+  server_error: 'Stopped on an error on Claude\'s side',
+  authentication_failed: 'Stopped: signing in to Claude failed',
+  oauth_org_not_allowed: 'Stopped: this Claude account is not allowed here',
+  account_on_hold: 'Stopped: this Claude account is on hold',
+  verification_required: 'Stopped: this Claude account needs to be verified',
+  billing_error: 'Stopped on a billing problem with this Claude account',
+  invalid_request: 'Stopped: Claude refused the request as it was sent',
+  model_not_found: 'Stopped: the chosen model is not available',
+  max_output_tokens: 'Stopped: the reply ran past its length limit',
+  cloud_credential_error: 'Stopped: signing in to the cloud provider failed',
+};
+
+// The record for one failure. Pure. "keep-going stays on" is said only where it
+// is true: for the usage limit, which the host waits out and carries on from
+// (docs/pause.md), and only in a session that armed it. After any other error
+// nothing is known to carry the turn on by itself (and after a sign-in or a
+// billing problem nothing can until the user acts), so no promise is made.
 export function pauseRecord({ error, session = null, now = new Date(), armed = true } = {}) {
   const e = errorKind(error);
   const limit = e === 'rate_limit';
-  const keep = armed ? '; keep-going stays on' : '';
   return {
     kind: limit ? 'usage_limit' : 'api_error',
     error: e,
     at: new Date(now).toISOString(),
     session: session == null || session === '' ? null : String(session),
-    text: limit ? `Paused for the usage limit${keep}.` : `Stopped on an API error (${e})${keep}.`,
+    text: limit ? `Paused for the usage limit${armed ? KEEP_GOING_CLAUSE : ''}.` : `${Object.hasOwn(ERROR_WORDS, e) ? ERROR_WORDS[e] : 'Stopped on an error'}.`,
   };
 }
 

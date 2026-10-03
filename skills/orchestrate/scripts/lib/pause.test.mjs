@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pauseRecord, parsePause, readPause, writePause, clearPause, pausePath, pauseRoot, errorKind, PAUSE_REL, PAUSE_KINDS } from './pause.mjs';
+import { pauseRecord, parsePause, readPause, writePause, clearPause, pausePath, pauseRoot, errorKind, PAUSE_REL, PAUSE_KINDS, ERROR_WORDS } from './pause.mjs';
 
 const NOW = new Date('2026-10-03T09:00:00.000Z');
 const tmp = () => mkdtempSync(join(tmpdir(), 'orch-pause-lib-'));
@@ -24,19 +24,39 @@ test('a rate_limit is a usage_limit record with the spec wording', () => {
   });
 });
 
-test('every other kind is an api_error record that names the kind', () => {
+test('every other kind is an api_error record that keeps the host\'s kind and says it in plain words', () => {
   assert.deepEqual(pauseRecord({ error: 'overloaded', session: 's1', now: NOW }), {
     kind: 'api_error',
     error: 'overloaded',
     at: '2026-10-03T09:00:00.000Z',
     session: 's1',
-    text: 'Stopped on an API error (overloaded); keep-going stays on.',
+    text: 'Stopped: Claude was too busy to answer.',
   });
+});
+
+// The text showed the host's own name for the error ("oauth_org_not_allowed")
+// and promised keep-going after errors nothing resumes from, a sign-in or a
+// billing problem (whole-file review). The kinds are the SDK type's
+// (docs/pause.md "Facts").
+const HOST_KINDS = ['rate_limit', 'overloaded', 'authentication_failed', 'oauth_org_not_allowed', 'account_on_hold', 'verification_required', 'billing_error', 'invalid_request', 'model_not_found', 'server_error', 'max_output_tokens', 'cloud_credential_error', 'unknown'];
+test('every error kind the host sends is said in plain words, and only the usage limit promises keep-going', () => {
+  for (const error of HOST_KINDS) {
+    for (const armed of [true, false]) {
+      const { text } = pauseRecord({ error, now: NOW, armed });
+      assert.ok(!text.includes(error) && !/_/.test(text), `${error}: the host's own name is not shown: "${text}"`);
+      assert.match(text, /^(Paused|Stopped)\b.*\.$/, `${error}: one sentence`);
+      assert.equal(text.includes('keep-going'), error === 'rate_limit' && armed, `${error}, armed ${armed}: "${text}"`);
+    }
+  }
+  assert.equal(pauseRecord({ error: 'billing_error', now: NOW }).text, 'Stopped on a billing problem with this Claude account.');
+  assert.equal(pauseRecord({ error: 'oauth_org_not_allowed', now: NOW }).text, 'Stopped: this Claude account is not allowed here.');
+  assert.equal(pauseRecord({ error: 'a_kind_nobody_has_seen', now: NOW }).text, 'Stopped on an error.');
+  assert.equal(pauseRecord({ error: 'toString', now: NOW }).text, 'Stopped on an error.', 'a name an object has is not a kind');
 });
 
 test('keep-going is said to stay on only when it is armed', () => {
   assert.equal(pauseRecord({ error: 'rate_limit', now: NOW, armed: false }).text, 'Paused for the usage limit.');
-  assert.equal(pauseRecord({ error: 'server_error', now: NOW, armed: false }).text, 'Stopped on an API error (server_error).');
+  assert.equal(pauseRecord({ error: 'server_error', now: NOW, armed: false }).text, 'Stopped on an error on Claude\'s side.');
 });
 
 test('an error the payload did not give, or gave in a shape nobody documented, is unknown, never guessed', () => {
@@ -132,6 +152,11 @@ test('docs/pause.md names the file, the kinds and every field the record carries
   for (const kind of PAUSE_KINDS) assert.ok(doc.includes(kind), `the doc names the ${kind} kind`);
   for (const key of Object.keys(pauseRecord({ error: 'rate_limit', now: NOW }))) assert.ok(doc.includes(`"${key}"`), `the doc's sample record shows ${key}`);
   assert.ok(doc.includes('StopFailure'), 'the doc says which host moment writes it');
+  for (const error of [...Object.keys(ERROR_WORDS), 'rate_limit']) {
+    const { text } = pauseRecord({ error, now: NOW });
+    assert.ok(doc.includes(`| \`${error}\` | ${text} |`), `the doc's table gives ${error} as the record says it: "${text}"`);
+  }
+  assert.ok(doc.includes(`| anything else, \`unknown\` included | ${pauseRecord({ error: 'unknown', now: NOW }).text} |`));
   const readme = readFileSync(join(root, 'README.md'), 'utf8');
   assert.ok(readme.includes('docs/pause.md'), 'the README points at the page');
 });

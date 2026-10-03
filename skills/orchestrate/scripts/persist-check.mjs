@@ -45,8 +45,8 @@ import { fileURLToPath } from 'node:url';
 import { DIR, readJson, putEntry, sanitizeId, loadSession, saveSession, readTail } from './lib/tier.mjs';
 import { pauseRoot, pauseRecord, writePause, clearPause } from './lib/pause.mjs';
 import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresholds } from './lib/context-advice.mjs';
-import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
-import { recordBand, bandAtStop, openItem, sessionGoal, stopQuestion, withoutTaskIds, WAITING_TEXT } from './lib/band.mjs';
+import { nextOpen, boundRun, ALL_DONE_TEXT } from './lib/runs.mjs';
+import { recordStopBand, bandAtStop, turnText, stopKey, stopQuestion, withoutTaskIds, WAITING_TEXT } from './lib/band.mjs';
 import { syntheticPrompt } from './lib/persist-words.mjs';
 import { ownerTextOf } from './lib/compaction-snapshot.mjs';
 import { readProject } from './lib/project.mjs';
@@ -281,7 +281,10 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
   if (next && next.state === 'all-done') return stop(ALL_DONE_TEXT);
   if (sameItem > PERSIST_SAME_ITEM_CAP) {
     const clip = t => (t.length > 120 ? `${t.slice(0, 117)}...` : t);
-    return stop(`${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open: ${clip(item)}`, `${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open: ${clip(withoutTaskIds(item))}`);
+    const said = `${PERSIST_SAME_ITEM_CAP} steps in a row ended with the same step still open`;
+    // A run's Pickup is the lead's note to itself (role names, folders, task
+    // numbers), so the user's line names no item when that is where it came from.
+    return stop(`${said}: ${clip(item)}`, next.source === 'pickup' ? said : `${said}: ${clip(withoutTaskIds(item))}`);
   }
   if (steps > PERSIST_STEP_CAP) return stop(`keep-going reached its limit of ${PERSIST_STEP_CAP} steps in a row`);
   // At the compact line Claude Code summarises the conversation by itself, and
@@ -528,13 +531,16 @@ export function persistGoal(p, bound) {
 }
 
 // What is open next, from the bound run and the project page; null when
-// neither can be read.
+// neither can be read. A binding that no longer holds (the run closed, or
+// stale: `boundRun`, the check every reader of a bound run uses) names nothing
+// from that run.
 function nextFor(state, input) {
   try {
-    const run = state && state.run;
+    const binding = state && state.run;
+    const run = boundRun(binding);
     let runText = '';
-    if (run && run.runMd) { try { runText = readFileSync(run.runMd, 'utf8'); } catch {} }
-    const root = (run && run.root) || input.cwd || null;
+    if (run) { try { runText = readFileSync(run.runMd, 'utf8'); } catch {} }
+    const root = (binding && binding.root) || input.cwd || null;
     const n = nextOpen(runText, root ? readProject(root) : null);
     return n.state === 'none' ? null : n;
   } catch { return null; }
@@ -675,10 +681,12 @@ export function recordStopFailure(input, now = new Date()) {
 // question waiting for the user, or nothing. Run after the hook has printed what
 // it prints and decided what it decided, from `dec` as `check` returned it, so it
 // can change neither. A helper's own Stop writes nothing. Never throws.
-//   a Stop that was refused (the turn goes on)         working: the next open item, else the goal
+//   a Stop that was refused (the turn goes on)         working: what the turn is on (`turnText`)
 //   a question the closing message ends on             needs: that question, armed or not
 //   a Stop passed because a helper or command is out   working: waiting on it
 //   anything else                                      idle
+// turn-check.mjs runs beside this hook and may refuse the same Stop; its line
+// then stands, whichever of the two wrote first (`recordStopBand`).
 export function recordBandAtStop(input, dec, now = new Date()) {
   try {
     if (!input || input.agent_id) return null;
@@ -688,14 +696,13 @@ export function recordBandAtStop(input, dec, now = new Date()) {
       continued,
       question: continued ? null : stopQuestion(input),
       waiting: Boolean(dec) && dec.kind === 'wait',
-      open: continued ? openItem(state, input.cwd) : '',
-      goal: continued ? sessionGoal(state) : '',
+      turn: continued ? turnText(state, input.cwd) : '',
     });
     // A wait carries when its run of waits began (the loop's `waitSince`), so
     // "so far" does not restart at a wake after which the session still only
     // waits, nor after the user asks how it is going (rounds 6 and 7).
     const since = note.kind === 'working' && note.text === WAITING_TEXT && dec && dec.rec && dec.rec.waitSince ? dec.rec.waitSince : null;
-    return recordBand({ cwd: input.cwd, session: input.session_id, kind: note.kind, text: note.text, now, since });
+    return recordStopBand({ cwd: input.cwd, session: input.session_id, kind: note.kind, text: note.text, now, since, key: stopKey(input) });
   } catch { return null; }
 }
 

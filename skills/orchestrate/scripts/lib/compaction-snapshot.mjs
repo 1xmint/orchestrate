@@ -7,18 +7,32 @@
 // transcript file, though — verified on a real transcript this session
 // (12,743 lines, 70 `system/compact_boundary` records, every turn before the
 // first boundary still in the file) — so the plugin can write the checkpoint
-// itself, from the turns just before the newest boundary, into the exact path
-// `newestCheckpoint()` (lib/context-advice.mjs) already checks. No new hook
-// event, no unconfirmed input, no time window.
+// itself, from the transcript, into the path `newestCheckpoint()`
+// (lib/context-advice.mjs) checks. No new hook event, no unconfirmed input.
 //
-// Idempotent: a file already at `checkpointPath` — the lead's own, or the
-// other hook that calls this — is left alone. Reuses lib/context-scan.mjs's
-// `isBoundary` and lib/context-advice.mjs's `checkpointPath`; does not add a
-// second way to detect a boundary record. Never throws: any error here
-// returns null and writes nothing, so a hook that calls this can never fail
-// on its account.
+// Two callers, at two moments of the same summary:
+//   - the compaction hooks (postcompact-check.mjs on the lead side, router.mjs
+//     at SessionStart:compact), with `pending`. The host runs them before it
+//     writes this summary's boundary record (lib/helper-compaction.mjs; the
+//     PostCompact call comes before the marker is built), so the stretch just
+//     summarised is everything after the newest boundary on file, and this is
+//     compaction (boundaries on file + 1). It is written at the path of the
+//     epoch that just ended, where the lead's own checkpoint before a summary
+//     goes, so the compacted line can name it at once;
+//   - the first context reading that sees the new boundary (context-store.mjs),
+//     without `pending`: the stretch before the newest boundary, at the new
+//     epoch's path, which is what the post-compaction ask looks for.
+//
+// Idempotent: a file already at the path — the lead's own, or one the other
+// caller wrote for the same compaction — is left alone. A pending write
+// replaces only the plugin's own file for an earlier compaction (the copy the
+// reading wrote when this epoch began, about the stretch before it). Reuses
+// lib/context-scan.mjs's `isBoundary` and lib/context-advice.mjs's
+// `checkpointPath`; does not add a second way to detect a boundary record.
+// Never throws: any error here returns null and writes nothing, so a hook that
+// calls this can never fail on its account.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, copyFileSync } from './node.mjs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, copyFileSync, openSync, readSync, closeSync } from './node.mjs';
 import { dirname, join, basename } from 'node:path';
 import { CONTEXT_DIR, isBoundary } from './context-scan.mjs';
 import { checkpointPath } from './context-advice.mjs';
@@ -123,11 +137,13 @@ export function tidyPaths(paths, cwd) {
 
 const TEST_LINE = /(\bTests?:\s*\d+|\bpassed?\b[:=]?\s*\d+|\bfailed?\b[:=]?\s*\d+|✔|✖|✓|✗|\bPASS\b|\bFAIL\b)/i;
 
-// One forward pass of the transcript: the newest boundary, a running count of
-// boundaries seen, and the state of "turns since the previous boundary" —
-// reset each time a boundary is crossed, so by the last line it holds only
-// what happened before the newest one. `firstUserText` is never reset: it is
-// the session's own first user prompt, used only when no run is bound.
+// One forward pass of the transcript: a running count of boundaries, and the
+// state of "turns since the previous boundary" — reset each time a boundary is
+// crossed. `before` is the stretch that ended at the newest boundary (null with
+// none on file); `after` is the stretch since it, up to the end of the file.
+// `firstUserText` is never reset: it is the session's own first user prompt,
+// used only when no run is bound. The summary the host files after a boundary
+// is not the user's message.
 function scanTranscript(text) {
   let boundaryCount = 0;
   let lastBoundary = null;
@@ -169,7 +185,7 @@ function scanTranscript(text) {
       continue;
     }
     if (rec.type === 'user' && rec.message) {
-      const t = rec.isMeta === true ? '' : userTextOf(rec.message.content);
+      const t = rec.isMeta === true || rec.isCompactSummary === true ? '' : userTextOf(rec.message.content);
       if (t.trim()) {
         if (firstUserText == null) firstUserText = t;
         lastUserText = t;
@@ -196,15 +212,30 @@ function scanTranscript(text) {
       }
     }
   }
-  if (!lastBoundary) return null;
   return {
-    n: lastBoundary.n, trigger: lastBoundary.trigger,
-    firstUserText, cwd,
-    lastUserText: lastBoundary.lastUserText,
-    lastAssistantText: lastBoundary.lastAssistantText,
-    testLine: lastBoundary.testLine,
-    paths: lastBoundary.paths,
+    count: boundaryCount, firstUserText, cwd,
+    before: lastBoundary,
+    after: { n: boundaryCount + 1, trigger: null, lastUserText, lastAssistantText, testLine, paths: paths.slice(-8) },
   };
+}
+
+// The first line of a checkpoint the plugin wrote; a lead's own file does not
+// start with it.
+const OWN_HEAD = 'This is a checkpoint the plugin wrote from the transcript at compaction ';
+
+// The compaction number on the plugin's own checkpoint at `path`, or null for a
+// file the lead wrote (or one that cannot be read).
+function ownCompaction(path) {
+  try {
+    const fd = openSync(path, 'r');
+    const buf = Buffer.alloc(200);
+    let n = 0;
+    try { n = readSync(fd, buf, 0, buf.length, 0); } finally { closeSync(fd); }
+    const head = buf.toString('utf8', 0, n);
+    if (!head.startsWith(OWN_HEAD)) return null;
+    const k = Number(/^\d+/.exec(head.slice(OWN_HEAD.length)));
+    return Number.isFinite(k) && k > 0 ? k : null;
+  } catch { return null; }
 }
 
 // Helpers dispatched this session with no return on record yet, one plain
@@ -220,7 +251,7 @@ function helpersInFlight(session) {
 
 function buildBody({ n, trigger, goal, lastUser, lastAssistant, paths, testLine, helpers }) {
   const L = [];
-  L.push(`This is a checkpoint the plugin wrote from the transcript at compaction ${n}${trigger ? ` (${trigger})` : ''}, not the lead's own judgment.`);
+  L.push(`${OWN_HEAD}${n}${trigger ? ` (${trigger})` : ''}, not the lead's own judgment.`);
   L.push('');
   L.push(`Goal: ${goal || 'not seen in the transcript'}`);
   L.push('');
@@ -240,18 +271,30 @@ function buildBody({ n, trigger, goal, lastUser, lastAssistant, paths, testLine,
 // names the bound run's RUN.md, whose Goal section wins over the session's
 // own first prompt; `runDir` is the run folder a copy lands under, at
 // `<runDir>/checkpoints/<same name>`, because that is what "pick it up
-// tomorrow" reads.
-export function writeCompactionSnapshot({ session, reading, transcriptPath, ctx = {} } = {}) {
+// tomorrow" reads. `pending` (the compaction hooks) and `trigger` (PostCompact's
+// `manual` or `auto`) are described at the top of this file.
+export function writeCompactionSnapshot({ session, reading, transcriptPath, ctx = {}, pending = false, trigger = null } = {}) {
   try {
-    if (!reading || !reading.compaction) return null;
+    if (!reading || (!pending && !reading.compaction)) return null;
     const dir = ctx.dir || CONTEXT_DIR;
     const path = checkpointPath(session, reading, dir);
-    if (existsSync(path)) return path;
+    if (!pending && existsSync(path)) return path;
     if (!transcriptPath) return null;
     let text = '';
     try { text = readFileSync(transcriptPath, 'utf8'); } catch { return null; }
-    const found = scanTranscript(text);
+    const scanned = scanTranscript(text);
+    const found = pending ? scanned.after : scanned.before;
     if (!found) return null;
+    if (pending) {
+      if (typeof trigger === 'string' && /^\w{1,16}$/.test(trigger)) found.trigger = trigger;
+      if (existsSync(path)) {
+        const k = ownCompaction(path);
+        if (k == null || k >= found.n) return path;
+      }
+      if (!found.lastUserText && !found.lastAssistantText && !found.paths.length && !found.testLine) return null;
+    }
+    found.firstUserText = scanned.firstUserText;
+    found.cwd = scanned.cwd;
 
     // The open run's Goal or the lead's goal note, in the user's words, before
     // the session's first user text. The lead-side hook passes no cwd, so the

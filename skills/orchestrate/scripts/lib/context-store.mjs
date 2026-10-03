@@ -115,10 +115,12 @@ export function sampleContext({ transcriptPath, session = null, agent = null, po
     : 0;
 
   // The host runs the compaction hooks before it appends the boundary record,
-  // so they cannot write the note for the summary they follow. This is the
-  // first read that sees the boundary: write it here. The writer returns on an
-  // existing file before it reads the transcript, so later calls cost one
-  // existence check. Lead only; never throws.
+  // so they write the note of the stretch just summarised under the epoch that
+  // ended (lib/compaction-snapshot.mjs, `pending`). The new epoch's copy, the
+  // one the post-compaction ask looks for, is written here, at the first read
+  // that sees the boundary. The writer returns on an existing file before it
+  // reads the transcript, so later calls cost one existence check. Lead only;
+  // never throws.
   if (!agent && reading.compaction && transcriptPath) {
     try {
       writeCompactionSnapshot({

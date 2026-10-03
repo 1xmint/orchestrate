@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { bandRecord, bandLine, OTHER_SESSION_TAG } from './lib/band-line.mjs';
+import { bandRecord, bandLine, OTHER_SESSION_TAG, WAITING_TEXT } from './lib/band-line.mjs';
 import { BAND_REL } from './lib/band.mjs';
 import { PAUSE_REL } from './lib/pause.mjs';
 
@@ -210,7 +210,9 @@ const PAUSE = '/work/proj/.orchestrator/pause.json';
 const bandText = (kind, text, session = 's1', at = NOW) => JSON.stringify(bandRecord({ session, kind, text, now: new Date(at) }));
 const NEXT = { next: true };
 const next = () => NEXT;
-const props = (extra = {}) => ({ props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 80, ...extra } });
+// A turn running, the time a "Working on" line is for; the tests of the line
+// between turns say `isWorking: false` themselves.
+const props = (extra = {}) => ({ props: { hasSurvey: false, isWorking: true, maxRows: 6, bodyColumns: 80, ...extra } });
 const tick = async w => { for (const t of [...w.timers]) if (!t.cancelled) await t.fn(); };
 
 test('the mod registers its three events, the render one for the line above the prompt only', async () => {
@@ -421,6 +423,83 @@ test('a file that cannot be read, or a host that errors on a look, is a quiet sk
   const m2 = await load();
   await m2.start(unreadable.$, {}, next);
   assert.equal(await m2.render(unreadable.$, props(), next), NEXT);
+});
+
+// Esc ends a turn with no Stop to rewrite the prompt's "Working on", which then
+// stayed up for hours (whole-file review). The band's slot says whether a turn
+// is running (`isWorking`, in the host's type file for AbovePrompt).
+test('this session\'s own "Working on" shows only while a turn is running; a wait, a question and a pause show either way', async () => {
+  const w = world();
+  w.put(BAND, bandText('working', 'Fix the date parser'), 1);
+  const { start, render } = await load();
+  await start(w.$, {}, next);
+  assert.equal((await render(w.$, props({ isWorking: true }), next)).Text.children, 'Working on: Fix the date parser');
+  assert.equal(await render(w.$, props({ isWorking: false }), next), NEXT, 'between turns: nothing');
+  assert.equal((await render(w.$, { props: { hasSurvey: false, bodyColumns: 80 } }, next)).Text.children, 'Working on: Fix the date parser', 'a host that does not say: as before');
+
+  for (const [rec, said] of [
+    [bandText('working', WAITING_TEXT), `Working on: ${WAITING_TEXT}`],
+    [bandText('needs', 'Postgres or SQLite?'), 'Needs you: Postgres or SQLite?'],
+    [bandText('working', 'Fix the date parser', 'other-session'), `${OTHER_SESSION_TAG}Working on: Fix the date parser`],
+  ]) {
+    w.put(BAND, rec, w.files[BAND].mtime + 1);
+    await tick(w);
+    assert.equal((await render(w.$, props({ isWorking: false }), next)).Text.children, said);
+  }
+  w.put(BAND, bandText('working', 'Fix the date parser'), w.files[BAND].mtime + 1);
+  w.put(PAUSE, JSON.stringify({ kind: 'usage_limit', error: 'rate_limit', at: new Date(NOW).toISOString(), session: 's1', text: 'Paused for the usage limit.' }), 1);
+  await tick(w);
+  assert.equal((await render(w.$, props({ isWorking: false }), next)).Text.children, 'Paused for the usage limit.');
+});
+
+test('a redraw is asked for when only the line between turns changed', async () => {
+  const w = world();
+  w.put(BAND, bandText('working', 'Fix the date parser'), 1);
+  const { start, render } = await load();
+  await start(w.$, {}, next);
+  assert.equal(w.invalidated, 1);
+  // Another session's pause: under this session's own line during a turn, and
+  // the line between turns.
+  w.put(PAUSE, JSON.stringify({ kind: 'usage_limit', error: 'rate_limit', at: new Date(NOW).toISOString(), session: 'other', text: 'Paused for the usage limit; keep-going stays on.' }), 1);
+  await tick(w);
+  assert.equal(w.invalidated, 2);
+  assert.equal((await render(w.$, props({ isWorking: true }), next)).Text.children, 'Working on: Fix the date parser');
+  assert.equal((await render(w.$, props({ isWorking: false }), next)).Text.children, `${OTHER_SESSION_TAG}Paused for the usage limit.`);
+});
+
+// The modified time was kept before the read, so a read that failed (a file
+// busy in the hooks' rename on Windows, a network folder) left the band blank
+// until the file changed again (whole-file review).
+test('a read that fails, or catches the file half written, is tried again at the next look, with no change to the file', async () => {
+  const w = world();
+  w.put(BAND, bandText('needs', 'Postgres or SQLite?'), 7);
+  const realRead = w.$.fs.read;
+  let fail = true;
+  w.$.fs.read = async p => { if (fail && p === BAND) { w.calls.push(['read', p]); throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' }); } return realRead(p); };
+  const { start, render } = await load();
+  await start(w.$, {}, next);
+  assert.equal(await render(w.$, props(), next), NEXT, 'nothing read yet');
+  fail = false;
+  await tick(w);
+  assert.equal((await render(w.$, props(), next)).Text.children, 'Needs you: Postgres or SQLite?', 'the same modified time, read again and shown');
+  const reads = w.reads(BAND);
+  await tick(w);
+  assert.equal(w.reads(BAND), reads, 'once read, it is not read again until it changes');
+
+  // A refusal after a good read keeps the line up rather than blanking it.
+  w.put(BAND, bandText('needs', 'Postgres or SQLite?'), 8);
+  fail = true;
+  await tick(w);
+  assert.equal((await render(w.$, props(), next)).Text.children, 'Needs you: Postgres or SQLite?');
+
+  const half = world();
+  half.put(BAND, '{"session":"s1","kind":"needs","te', 3);
+  const m = await load();
+  await m.start(half.$, {}, next);
+  assert.equal(await m.render(half.$, props(), next), NEXT);
+  half.files[BAND].text = bandText('needs', 'Postgres or SQLite?');
+  await tick(half);
+  assert.equal((await m.render(half.$, props(), next)).Text.children, 'Needs you: Postgres or SQLite?', 'the whole file, same modified time, is read');
 });
 
 test('a screen that attaches to a session started with none starts the poll then, once', async () => {

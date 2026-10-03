@@ -81,30 +81,86 @@ test('a helper payload for a session with no bound run is silent (nothing to fil
 
 // ---- lead-side snapshot: lib/compaction-snapshot.mjs -----------------------
 
-test('a lead-side payload with a compaction boundary in its transcript writes the plugin checkpoint and exits 0', () => {
+// The host calls this hook before it writes the summary's own boundary record
+// (lib/helper-compaction.mjs; the PostCompact call comes before the marker is
+// built). The old test wrote the boundary first, so it passed while, in the real
+// order, the first summary got no checkpoint and the second got one of the
+// stretch before the first (whole-file review). Here each hook runs, then its
+// boundary is written.
+test('a lead-side payload writes a checkpoint of the stretch just summarised, in the order the host runs it', () => {
   const home = mkdtempSync(join(tmpdir(), 'orch-postcompact-home-'));
+  const tdir = mkdtempSync(join(tmpdir(), 'orch-postcompact-transcript-'));
+  const transcriptPath = join(tdir, 't.jsonl');
+  const line = o => JSON.stringify(o) + '\n';
+  const edit = (id, path) => line({ type: 'assistant', message: { id, model: 'claude-sonnet-5', usage: { input_tokens: 10 }, content: [{ type: 'tool_use', id: `tu-${id}`, name: 'Edit', input: { file_path: path } }] } });
+  const records = [
+    line({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'do the widget task' } }),
+    edit('a1', '/repo/widget.js'),
+    line({ type: 'assistant', message: { id: 'a2', model: 'claude-sonnet-5', usage: { input_tokens: 10 }, content: [{ type: 'text', text: 'The widget works.' }] } }),
+  ];
+  const sid = 'lead-snap-1';
+  const dir = join(home, '.claude', 'orchestrate', 'context', sid);
+  const hook = trigger => spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ hook_event_name: 'PostCompact', session_id: sid, transcript_path: transcriptPath, trigger, compact_summary: 'the summary' }),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home },
+  });
+  const read = name => readFileSync(join(dir, name), 'utf8');
+
+  writeFileSync(transcriptPath, records.join(''));
+  const r = hook('auto');
+  assert.equal(r.status, 0);
+  assert.equal(r.stdout.trim(), '');
+  const first = existsSync(dir) ? readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)) : [];
+  assert.deepEqual(first, [`checkpoint-${sid}.md`], 'the first summary: the file of the stretch before any boundary');
+  assert.match(read(first[0]), /compaction 1 \(auto\)/);
+  assert.match(read(first[0]), /Goal: do the widget task/);
+  assert.match(read(first[0]), /widget\.js/);
+
+  // The host writes the first boundary and its summary; work goes on.
+  records.push(
+    line({ type: 'system', subtype: 'compact_boundary', uuid: 'b1', timestamp: new Date().toISOString(), compactMetadata: { trigger: 'auto', preTokens: 200000, postTokens: 20000 } }),
+    line({ type: 'user', isCompactSummary: true, timestamp: new Date().toISOString(), message: { role: 'user', content: 'This session is being continued from a previous conversation.' } }),
+    line({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'now the gadget' } }),
+    edit('a3', '/repo/gadget.js'),
+    line({ type: 'assistant', message: { id: 'a4', model: 'claude-sonnet-5', usage: { input_tokens: 10 }, content: [{ type: 'text', text: 'The gadget works.' }] } }),
+  );
+  writeFileSync(transcriptPath, records.join(''));
+  hook('manual');
+  const second = read('checkpoint-b1.md');
+  assert.match(second, /compaction 2 \(manual\)/, 'the second summary is compaction 2');
+  assert.match(second, /Last message before compaction: now the gadget/, 'the stretch since the first boundary, not the summary text');
+  assert.match(second, /gadget\.js/);
+  assert.doesNotMatch(second, /widget\.js/, 'not the stretch before the first summary');
+  assert.match(read(`checkpoint-${sid}.md`), /compaction 1 \(auto\)/, 'the first stretch\'s file is left as it was');
+});
+
+// The first context reading after a boundary writes that epoch's file with the
+// stretch before it (lib/context-store.mjs), so the epoch's file can hold the
+// stretch before; the next summary's hook replaces that copy of the plugin's
+// own, and never a file the lead wrote.
+test('the next summary replaces the plugin\'s own earlier copy at that path, and never the lead\'s', () => {
   const tdir = mkdtempSync(join(tmpdir(), 'orch-postcompact-transcript-'));
   const transcriptPath = join(tdir, 't.jsonl');
   const line = o => JSON.stringify(o) + '\n';
   writeFileSync(transcriptPath, [
     line({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'do the widget task' } }),
-    line({ type: 'assistant', message: { id: 'a1', model: 'claude-sonnet-5', usage: { input_tokens: 10 }, content: [{ type: 'text', text: 'working on it' }] } }),
-    line({ type: 'system', subtype: 'compact_boundary', uuid: 'b1', timestamp: new Date().toISOString(), compactMetadata: { trigger: 'auto', preTokens: 200000, postTokens: 20000 } }),
+    line({ type: 'system', subtype: 'compact_boundary', uuid: 'b1', timestamp: new Date().toISOString(), compactMetadata: { trigger: 'auto' } }),
+    line({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'now the gadget' } }),
   ].join(''));
-
-  const r = spawnSync(process.execPath, [HOOK], {
-    input: JSON.stringify({ hook_event_name: 'PostCompact', session_id: 'lead-snap-1', transcript_path: transcriptPath }),
-    encoding: 'utf8',
-    env: { ...process.env, HOME: home, USERPROFILE: home },
-  });
-  assert.equal(r.status, 0);
-  assert.equal(r.stdout.trim(), '');
-  const dir = join(home, '.claude', 'orchestrate', 'context', 'lead-snap-1');
-  const files = existsSync(dir) ? readdirSync(dir).filter(n => /^checkpoint-.*\.md$/.test(n)) : [];
-  assert.equal(files.length, 1, `expected one checkpoint file, found: ${files.join(', ')}`);
-  const body = readFileSync(join(dir, files[0]), 'utf8');
-  assert.match(body, /compaction 1 \(auto\)/);
-  assert.match(body, /Goal: do the widget task/);
+  for (const [existing, kept] of [
+    ['This is a checkpoint the plugin wrote from the transcript at compaction 1 (auto), not the lead\'s own judgment.\n\nGoal: do the widget task\n', false],
+    ['My own notes before the summary: the gadget is next.\n', true],
+  ]) {
+    const home = mkdtempSync(join(tmpdir(), 'orch-postcompact-home-'));
+    const dir = join(home, '.claude', 'orchestrate', 'context', 'lead-snap-2');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'checkpoint-b1.md'), existing);
+    run({ hook_event_name: 'PostCompact', session_id: 'lead-snap-2', transcript_path: transcriptPath, trigger: 'auto' }, home);
+    const now = readFileSync(join(dir, 'checkpoint-b1.md'), 'utf8');
+    if (kept) assert.equal(now, existing, 'the lead\'s own file is left alone');
+    else assert.match(now, /compaction 2 \(auto\)[\s\S]*Last message before compaction: now the gadget/);
+  }
 });
 
 test('agent_id present keeps today\'s helper-side behaviour, never touching the context store', () => {
@@ -122,9 +178,9 @@ test("a lead-side payload seconds after a helper's own boundary writes no checkp
   const tdir = mkdtempSync(join(tmpdir(), 'orch-postcompact-transcript-'));
   const transcriptPath = join(tdir, 't.jsonl');
   const line = o => JSON.stringify(o) + '\n';
+  // The lead's own boundary is not on file yet when its hook runs.
   writeFileSync(transcriptPath, [
     line({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'do the widget task' } }),
-    line({ type: 'system', subtype: 'compact_boundary', uuid: 'b1', timestamp: new Date().toISOString(), compactMetadata: { trigger: 'auto', preTokens: 200000, postTokens: 20000 } }),
   ].join(''));
   const sid = 'lead-snap-helper';
   const sub = join(tdir, sid, 'subagents'); mkdirSync(sub, { recursive: true });

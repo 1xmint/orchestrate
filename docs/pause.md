@@ -10,7 +10,7 @@ been seen.
 
 | Pause | Terminal | Desktop | Headless |
 |---|---|---|---|
-| **Usage limit** | **Record:** `persist-check.mjs` on `StopFailure`, to `.orchestrator/pause.json`. Whether a subscription limit arrives there as `rate_limit` is unchecked, so every error kind is written.<br>**Wakes:** the host's own carry-on after the reset.<br>**Band:** "Paused for the usage limit", no clock unless one is known.<br>**Host wakes:** at most twice (the plan cites the interactive-mode page; not re-read here). | **Record:** the same hook; that `StopFailure` fires on this screen is unchecked.<br>**Wakes:** the "Auto-continue when limits reset" tick on the session-limit card (not the weekly one) retries the interrupted turn; its default is not stated.<br>**Band:** the same line; drawing on this screen is unseen until plan step 0.<br>**Host wakes:** unchecked. | **Record:** the same hook, where hooks run; unchecked for `StopFailure` in a headless run.<br>**Wakes:** nothing in this plugin; whether the host retries is unchecked.<br>**Band:** nothing is drawn.<br>**Host wakes:** unchecked. |
+| **Usage limit** | **Record:** `persist-check.mjs` on `StopFailure`, to `.orchestrator/pause.json`. Whether a subscription limit arrives there as `rate_limit` is unchecked, so every error kind is written.<br>**Wakes:** the host's own carry-on after the reset.<br>**Band:** "Paused for the usage limit", no clock unless one is known; after any other API error, what happened in plain words (the table under "The pause record").<br>**Host wakes:** at most twice (the plan cites the interactive-mode page; not re-read here). | **Record:** the same hook; that `StopFailure` fires on this screen is unchecked.<br>**Wakes:** the "Auto-continue when limits reset" tick on the session-limit card (not the weekly one) retries the interrupted turn; its default is not stated.<br>**Band:** the same line; drawing on this screen is unseen until plan step 0.<br>**Host wakes:** unchecked. | **Record:** the same hook, where hooks run; unchecked for `StopFailure` in a headless run.<br>**Wakes:** nothing in this plugin; whether the host retries is unchecked.<br>**Band:** nothing is drawn.<br>**Host wakes:** unchecked. |
 | **Helper out of turns** | **Record:** none; `ledger.mjs` files the helper's return.<br>**Wakes:** nothing is asleep; the return reaches the lead.<br>**Band:** nothing.<br>**Host wakes:** not applicable. | Same as Terminal. | Same as Terminal. |
 | **Background command still running** | **Record:** none. `persist-check.mjs` reads the Stop payload's `background_tasks` and `session_crons`; if either lists something, the "no visible work" stop does not fire, the Stop passes and keep-going stays armed. It waits again each time that work wakes the session (a helper landing, a Monitor line, a scheduled prompt); it ends keep-going only when nothing but background commands is out, none of them appeared with a Monitor started in this stretch (one that runs a command may be listed as a background command, so what first appears at the Stop after it is held while it is still listed), the user spoke since, and the step still did nothing, as with a dev server that never reports.<br>**Wakes:** the background work finishing, or the scheduled prompt firing.<br>**Band:** "Working on: waiting on a helper or background command" while keep-going is armed (`docs/band.md`); the draw is unseen.<br>**Host wakes:** unchecked. | Same as Terminal. | Same as Terminal. |
 | **A summary (compaction)** | **Record:** none; the session file keeps keep-going armed and `router.mjs` re-sends the goal at the `compact` session start. Reaching the compact line does not end keep-going; with no save point written, one continue per summary epoch says so and where it goes. Only a conversation still near the line right after a summary ends it.<br>**Wakes:** nothing is asleep; unchecked whether the host wakes anything.<br>**Band:** nothing.<br>**Host wakes:** unchecked. | Same as Terminal. | Same as Terminal. |
@@ -29,8 +29,36 @@ per project; a later pause replaces it.
 
 - `kind` is `usage_limit` for `rate_limit` and `api_error` for every other kind
   or an unknown one. `error` is the value the host sent, or `unknown`.
-- `text` says "keep-going stays on" only when the session is armed. An unarmed
-  session gets the same sentence without that clause.
+- `text` is what the band shows, word for word, so it never carries the host's
+  own name for the error (`ERROR_WORDS` in `lib/pause.mjs`):
+
+  | `error` | `text` |
+  |---|---|
+  | `rate_limit` | Paused for the usage limit; keep-going stays on. |
+  | `overloaded` | Stopped: Claude was too busy to answer. |
+  | `server_error` | Stopped on an error on Claude's side. |
+  | `authentication_failed` | Stopped: signing in to Claude failed. |
+  | `oauth_org_not_allowed` | Stopped: this Claude account is not allowed here. |
+  | `account_on_hold` | Stopped: this Claude account is on hold. |
+  | `verification_required` | Stopped: this Claude account needs to be verified. |
+  | `billing_error` | Stopped on a billing problem with this Claude account. |
+  | `invalid_request` | Stopped: Claude refused the request as it was sent. |
+  | `model_not_found` | Stopped: the chosen model is not available. |
+  | `max_output_tokens` | Stopped: the reply ran past its length limit. |
+  | `cloud_credential_error` | Stopped: signing in to the cloud provider failed. |
+  | anything else, `unknown` included | Stopped on an error. |
+
+- "keep-going stays on" is said only where something carries the turn on by
+  itself: the usage limit, which the host waits out (Terminal) or the tick on
+  the session-limit card retries (Desktop), and only in a session that armed
+  keep-going; an unarmed one gets the sentence without the clause. For any
+  other error no page under "Facts" says anything carries the turn on by itself
+  (and after a sign-in or a billing problem nothing could until the user acts),
+  so no promise is made; the loop's state is untouched either way, and the
+  user's next prompt picks it up.
+- Another session sees a pause only when it has nothing of its own to say, and
+  without the keep-going clause, which is true only of the session that wrote it
+  (`docs/band.md`).
 - Only `persist-check.mjs` writes it, and only at `StopFailure`. Inside a helper
   (`agent_id` on the payload) it writes nothing. The host ignores what a hook
   prints at `StopFailure`, so the hook cannot refuse anything there; it never

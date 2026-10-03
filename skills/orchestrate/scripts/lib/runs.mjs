@@ -327,7 +327,17 @@ export function bindSessionRun(sessionId, run) {
 // session's helper return into a four-day-old ledger.
 export function sessionRun(sessionId) {
   const state = loadSession(sessionId);
-  const r = state && state.run;
+  return boundRun(state && state.run);
+}
+
+// The run a session's binding (`state.run`) names, while that binding still
+// holds: a stale run keeps only a recent binding made on purpose, and a closed
+// run only one made on purpose after it was closed. Null otherwise. Every reader
+// of a bound run's tasks goes through this (the turn checks through sessionRun,
+// the band's open item and keep-going's next item through lib/band.mjs and
+// persist-check.mjs), so a run closed as dropped names no task anywhere.
+export function boundRun(binding) {
+  const r = binding;
   if (!r || !r.runMd || !existsSync(r.runMd)) return null;
   const run = readRun(r.runMd, r.root);
   if (run && run.stale && !(r.explicit && Date.now() - Date.parse(r.boundAt || 0) < STALE_RUN_MS)) return null;
@@ -428,10 +438,13 @@ const clip120 = s => { const t = String(s || '').replace(/\s+/g, ' ').trim(); re
 // Pickup and task changes are compared by the ISO dates written in them; a run
 // with no dates to compare ignores Pickup and uses the first open task. Every
 // task done is its own state, not a reason to name filler. Pure.
+// `pickup: false` leaves Pickup out: it is the lead's note to its next session
+// (role names, folders, task numbers, a time), so a line the user reads (the
+// band) names the task by its row instead.
 //   { state: 'open' | 'all-done' | 'none', source, text }
-export function nextOpen(runText, projectText) {
+export function nextOpen(runText, projectText, { pickup = true } = {}) {
   const { tasks, notDone } = runTasks(runText);
-  const pickupBody = sectionBody(runText, 'Pickup');
+  const pickupBody = pickup ? sectionBody(runText, 'Pickup') : '';
   const pm = /Pickup prompt:\s*(.*)/.exec(pickupBody);
   const pickupPrompt = pm && pm[1].trim() && !/^<.*>$/.test(pm[1].trim()) ? pm[1].trim() : '';
   const pickupAt = latestStamp(pickupBody);

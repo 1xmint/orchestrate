@@ -17,6 +17,7 @@ import { bandLine, parseBand, parsePauseText, WAITING_TEXT } from './lib/band-li
 const HERE = dirname(fileURLToPath(import.meta.url));
 const HOOK = join(HERE, 'persist-check.mjs');
 const ROUTER = join(HERE, 'router.mjs');
+const TURN = join(HERE, 'turn-check.mjs');
 
 // ---- transcript records, in the host's JSONL shape ----------------------------
 const asst = (...content) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', content } });
@@ -307,6 +308,64 @@ test('writing the band changes nothing the Stop hook prints or decides', () => {
   }
 });
 
+// turn-check.mjs runs beside this hook in one Stop group, and the host runs a
+// group's commands at once. It refused the Stop while this hook had written
+// "Needs you" for it, so the band said the turn was over while it went on
+// (whole-file review).
+test('a Stop turn-check refuses shows the turn going on, whichever of the two Stop hooks writes first', () => {
+  const closing = 'Footer updated. Do you want the header done the same way?';
+  for (const order of [['persist', 'turn'], ['turn', 'persist']]) {
+    const home = sandbox(); const dir = project({ page: PAGE });
+    prompt(home, 'tc', dir, 'change the footer markup to match the header');
+    // The third turn in a row that changed project files and not the page.
+    writeFileSync(join(home, '.claude', 'orchestrate', 'turn-checks.json'), JSON.stringify({ 'tc-project': { count: 2 } }));
+    const t = transcript(dir, JSON.stringify({ type: 'user', message: { role: 'user', content: 'change the footer markup' } }),
+      asst({ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: join(dir, 'footer.html') } }), result('e1', 'ok'), said(closing));
+    const payload = stopPayload('tc', dir, t, { last_assistant_message: closing });
+    const out = {};
+    for (const which of order) out[which] = run(which === 'turn' ? TURN : HOOK, payload, home);
+    assert.equal(out.turn.json && out.turn.json.decision, 'block', `${order}: turn-check refuses, as before`);
+    assert.equal(out.persist.stdout.trim(), '', `${order}: persist-check passes, as before`);
+    assert.equal(lineOf(dir, 'tc'), 'Working on: change the footer markup to match the header', order.join(' then '));
+  }
+});
+
+test('writing the band changes nothing turn-check prints or decides', () => {
+  const out = [];
+  for (const orch of [true, false]) {
+    const home = sandbox(); const dir = project({ orch });
+    // A task tagged for review came back done with none sent: refused once.
+    writeFileSync(sessionFile(home, 'same'), JSON.stringify({ v: 1, session_id: 'same', bandText: 'add the export', returned: [{ task: '10-3-0001', status: 'DONE', reviewGated: true, at: '2026-10-03T09:00:00.000Z' }], dispatches: [] }));
+    const r = run(TURN, stopPayload('same', dir, transcript(dir, said('The export is in.'))), home);
+    out.push({ status: r.status, stdout: r.stdout });
+    if (orch) assert.equal(lineOf(dir, 'same'), 'Working on: add the export', 'with the folder, the band says the turn goes on');
+    else assert.equal(existsSync(join(dir, '.orchestrator')), false, 'without it, no folder is made');
+  }
+  assert.match(out[0].stdout, /"decision":"block"/);
+  assert.deepEqual(out[0], out[1], 'the same output and the same decision with and without the band\'s folder');
+});
+
+// A session bound to a run closed as dropped kept naming its stuck row, on the
+// band and as keep-going's next step (whole-file review). Both read the binding
+// through lib/runs.mjs `boundRun`, the turn checks' own test.
+test('a run closed as dropped names none of its tasks: not on the band, not as keep-going\'s next step', () => {
+  const home = sandbox(); const dir = project();
+  const runDir = join(dir, '.orchestrator', 'runs', '20261003-dates');
+  mkdirSync(runDir, { recursive: true });
+  const runMd = join(runDir, 'RUN.md');
+  writeFileSync(runMd, ['# Run 20261003-dates', '', 'Closed: dropped, the user went another way', '', '## Goal', '', 'Rewrite the dates.', '', '## Tasks', '',
+    '| id | phase | role · model | task | acceptance evidence | attempts | result |', '|---|---|---|---|---|---|---|',
+    '| 10-3-0001 | 🧱 stuck | implementer · sonnet | rewrite the date parser | test passes | 1 | — |', ''].join('\n'));
+  const goal = 'add a dark mode toggle to the settings page';
+  writeFileSync(sessionFile(home, 'cl'), JSON.stringify({ v: 1, session_id: 'cl', goal, run: { root: dir, runId: '20261003-dates', runMd, boundAt: '2026-10-01T00:00:00.000Z' }, persist: { armed: true, goal, goalSource: 'prompt', armedAt: '2026-10-03T00:00:00.000Z', sizeAtArm: 0 } }));
+  prompt(home, 'cl', dir, 'continue');
+  assert.equal(lineOf(dir, 'cl'), `Working on: ${goal}`);
+  const r = stop(home, 'cl', dir, transcript(dir, ...EDITED));
+  assert.equal(r.json.decision, 'block', 'the loop goes on, as before');
+  assert.doesNotMatch(r.json.reason, /date parser/);
+  assert.equal(lineOf(dir, 'cl'), `Working on: ${goal}`);
+});
+
 test('a pause wins over a question on the line, and the Stop that ends the pause leaves the band\'s own line', () => {
   const home = sandbox(); const dir = project();
   stop(home, 'p1', dir, transcript(dir, said(ASKED)));
@@ -322,11 +381,19 @@ test('a pause wins over a question on the line, and the Stop that ends the pause
   assert.equal(lineOf(dir, 'p1'), `Needs you: ${ASKED}`);
 });
 
-test('a pause from another session in the same project shows to this one only as that session\'s', () => {
+// It used to beat this session's own question and stay after its next prompt,
+// promising keep-going for a session that is not this one (whole-file review).
+test('a pause from another session never covers this session\'s own line, and shows without a promise when there is none', () => {
   const home = sandbox(); const dir = project();
+  arm(home, 'theirs');
   stop(home, 'mine', dir, transcript(dir, said(ASKED)));
   run(HOOK, failurePayload('theirs', dir), home);
-  assert.match(lineOf(dir, 'mine'), /^\(another session\) Paused for the usage limit/);
+  assert.equal(lineOf(dir, 'mine'), `Needs you: ${ASKED}`, 'this session\'s question stands');
+  prompt(home, 'mine', dir, 'Postgres, and add a migration for it');
+  assert.equal(lineOf(dir, 'mine'), 'Working on: Postgres, and add a migration for it', 'and its next prompt is its line');
+  stop(home, 'mine', dir, transcript(dir, said('Migration added.')));
+  assert.equal(lineOf(dir, 'mine'), '(another session) Paused for the usage limit.', 'with nothing of its own to say, the other pause, and no keep-going promise');
+  assert.equal(lineOf(dir, 'theirs'), 'Paused for the usage limit; keep-going stays on.', 'the session that paused keeps its own words');
 });
 
 // =============================== the prompt hook ===============================
@@ -344,22 +411,64 @@ test('a real prompt writes working, on the request in the user\'s own words', ()
   assert.equal(lineOf(dir, 'r1'), `Working on: ${text}`);
 });
 
-test('the next step on the project page comes before the prompt\'s words, and a run\'s next task before both', () => {
-  const home = sandbox(); const dir = project({ page: PAGE });
-  prompt(home, 'r2', dir, 'ok go ahead with that');
-  assert.equal(bandRec(dir).text, 'Fix the date parser');
+// The band answers "what is Claude doing right now". The stored item used to
+// come first, so a finished first request, or the page's next step, stood above
+// every later prompt, a thank-you included (whole-file review).
+test('a new request names itself, whatever is stored: the first request done, the page\'s next step, a run\'s task', () => {
+  const home = sandbox(); const dir = project();
+  prompt(home, 'n1', dir, 'add a --json flag to the status command and test it');
+  stop(home, 'n1', dir, transcript(dir, said('Done: the flag is in and its test passes.')));
+  assert.equal(lineOf(dir, 'n1'), '');
+  prompt(home, 'n1', dir, 'now fix the login page so it remembers the user');
+  assert.equal(lineOf(dir, 'n1'), 'Working on: now fix the login page so it remembers the user');
 
-  addRun(dir);
-  prompt(home, 'r2', dir, 'and now the list command too, please');
-  assert.equal(bandRec(dir).text, 'add --since', 'the task by its words, without the ledger id');
+  const paged = project({ page: PAGE });
+  prompt(home, 'n2', paged, 'what does the export button in settings do?');
+  assert.equal(lineOf(paged, 'n2'), 'Working on: what does the export button in settings do?');
+  addRun(paged);
+  prompt(home, 'n2', paged, 'and now the list command too, please');
+  assert.equal(lineOf(paged, 'n2'), 'Working on: and now the list command too, please');
 });
 
-test('a short reply after a request keeps the session\'s goal on the line', () => {
-  const home = sandbox(); const dir = project();
+test('a prompt that only resumes names the stored next item, else the goal', () => {
+  const home = sandbox(); const dir = project({ page: PAGE });
+  for (const text of ['continue', 'keep going', 'ok go ahead with that', 'try again']) {
+    prompt(home, 'r2', dir, text);
+    assert.equal(lineOf(dir, 'r2'), 'Working on: Fix the date parser', text);
+  }
+  addRun(dir);
+  prompt(home, 'r2', dir, 'carry on');
+  assert.equal(bandRec(dir).text, 'add --since', 'a run\'s next task, by its words, without the ledger id');
+
+  const plain = project();
+  prompt(home, 'r2b', plain, 'add a --json flag to the status command and test it');
+  prompt(home, 'r2b', plain, 'continue');
+  assert.equal(lineOf(plain, 'r2b'), 'Working on: add a --json flag to the status command and test it', 'no item stored: the goal');
+  prompt(home, 'r2b', plain, 'keep going until the login page works');
+  assert.equal(lineOf(plain, 'r2b'), 'Working on: keep going until the login page works', 'keep-going with a goal of its own is a request');
+});
+
+test('a thank-you or an "ok" names nothing, so no older item is claimed, and it ends a question that was up', () => {
+  const home = sandbox(); const dir = project({ page: PAGE });
   prompt(home, 'r3', dir, 'add a --json flag to the status command and test it');
-  prompt(home, 'r3', dir, 'ok');
-  assert.equal(bandRec(dir).text, 'add a --json flag to the status command and test it');
-  assert.equal(bandRec(dir).kind, 'working');
+  stop(home, 'r3', dir, transcript(dir, said(ASKED)));
+  assert.equal(bandRec(dir).kind, 'needs');
+  for (const text of ['thanks', 'ok', 'where are we?']) {
+    prompt(home, 'r3', dir, text);
+    assert.equal(lineOf(dir, 'r3'), '', text);
+    assert.equal(bandRec(dir).kind, 'working', `${text}: the turn is on, it just names nothing`);
+  }
+});
+
+// A refused Stop's line used to be the stored item, so a turn that went on
+// claimed the page's next step instead of what the user had just asked.
+test('a Stop refused with keep-going off keeps the line on what the turn\'s prompt asked', () => {
+  const home = sandbox(); const dir = project({ page: PAGE });
+  prompt(home, 'r12', dir, 'now fix the login page so it remembers the user');
+  // A test count no output shows is refused once (lib/proof-claim.mjs).
+  const r = stop(home, 'r12', dir, transcript(dir, ...EDITED, said('Done. All 42 tests pass.')));
+  assert.equal(r.json && r.json.decision, 'block', 'the Stop is refused, as before');
+  assert.equal(lineOf(dir, 'r12'), 'Working on: now fix the login page so it remembers the user');
 });
 
 test('with keep-going, the goal in the user\'s words is what the line says', () => {
@@ -414,6 +523,27 @@ test('a muted router still writes the band, which is not model-facing', () => {
   const r = prompt(home, 'r10', dir, 'add a --json flag to the status command and test it');
   assert.equal(r.stdout.trim(), '', 'muted: nothing is said to the model');
   assert.equal(bandRec(dir).kind, 'working');
+});
+
+// With the router off a prompt wrote nothing while every Stop still wrote, so
+// an answered question stayed up through the whole next turn (whole-file
+// review). The router off still says nothing and arms nothing.
+test('with the router off in its settings, a prompt still leaves its line and says nothing', () => {
+  const home = sandbox(); const dir = project();
+  const profile = join(home, '.claude', 'orchestrate', 'profile.json');
+  writeFileSync(profile, JSON.stringify({ ...JSON.parse(readFileSync(profile, 'utf8')), router: { enabled: false } }));
+  stop(home, 'off1', dir, transcript(dir, said(ASKED)));
+  assert.equal(lineOf(dir, 'off1'), `Needs you: ${ASKED}`);
+  const r = prompt(home, 'off1', dir, 'Postgres, and add a migration for it');
+  assert.equal(r.stdout, '', 'nothing is said to the model');
+  assert.equal(lineOf(dir, 'off1'), 'Working on: Postgres, and add a migration for it');
+  assert.equal(existsSync(sessionFile(home, 'off1')), false, 'and no session file is made for it');
+  prompt(home, 'off1', dir, 'keep going until the migration runs');
+  assert.equal(existsSync(sessionFile(home, 'off1')), false, 'nothing is armed');
+  const prior = readFileSync(bandFile(dir), 'utf8');
+  prompt(home, 'off1', dir, '/help');
+  prompt(home, 'off1', dir, '<task-notification><task-id>b1</task-id><status>completed</status></task-notification>');
+  assert.equal(readFileSync(bandFile(dir), 'utf8'), prior, 'a slash command or a host notice writes nothing, as with the router on');
 });
 
 test('the record sits at the git root when the prompt names a folder inside the repository', () => {

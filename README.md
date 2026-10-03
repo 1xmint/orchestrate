@@ -234,7 +234,7 @@ install. You should not need to type them.
 | `persist-check.mjs` | when a turn ends, and when a turn ends in an API error | only after you said to keep going until done: continues the goal without waiting for you, and stops on a question, a refused dispatch (budget or credential), the same error twice, three continues on the same open item, or 25 steps. A usage limit does not stop it: a helper refused for usage is stated in the next continue, and a turn that ends in an API error, a usage limit among them, leaves keep-going armed and writes `.orchestrator/pause.json` (see `docs/pause.md`). While the Stop payload lists a helper, background command or scheduled prompt still out, a step that did no work waits instead of ending the loop; it ends only when nothing but background commands is out, no Monitor started in this stretch is still listed, you spoke since, and the step still did nothing (a dev server never reports back). A helper send refused for usage is not work. The context reader's advice rides along when it changes. On every ordinary Stop, whether or not that loop is armed, it also checks the closing message's own claim about `git commit` against `git status`: a message that says nothing is committed while the tree is clean, or that says the work is committed while files are still uncommitted, is sent back with the exact `git status` reading, once per claim per session. The plugin's own untracked folders (`.claude/` for helper worktrees, `.orchestrator/` for the ledger) do not count as uncommitted work. A closing message that promises to wait or check back ("I'll let you know when CI finishes") while the Stop payload lists nothing out that would wake the session is sent back once with that fact (once per keep-going stretch, or once per message with it off), unless the record shows a reminder or scheduled task was set. A count of passing tests in the closing message ("all 42 tests pass") that no command output, helper report or message in the recent record shows is sent back once with that fact |
 | `ledger.mjs` | when a subagent stops | saves the full return under the run this session is bound to, prices it, and records which run and task it belongs to in `returns/returns.jsonl`. It does not touch the task rows: two returns landing together each rewrote the whole file, and the second erased the first |
 | `turn-check.mjs` | when a turn ends | one rule, and only for a run this session is bound to: it asks once for the Pickup line when that line has not moved since the last dispatch, so a session that dies is still resumable |
-| `postcompact-check.mjs` | just after a helper's own conversation is compacted | saves the summary the helper was left with under the run it belongs to, so when its return lands the ledger can say that it lost its earlier context along the way. Does nothing for your own session |
+| `postcompact-check.mjs` | just after a conversation is compacted | for a helper, saves the summary it was left with under the run it belongs to, so when its return lands the ledger can say that it lost its earlier context along the way. For your own session, writes the checkpoint of the stretch that was just summarised, from the conversation itself |
 
 `guard-agent.mjs` only refuses `general-purpose`/`claude` once all eight role agents are installed; on a partial install that guard is silently off, so `router.mjs` says so once on the first card of a session, naming how many of the eight are present.
 
@@ -313,7 +313,11 @@ node skills/orchestrate/scripts/statusline.mjs --install
 
 It backs up `~/.claude/settings.json` first. If you already had a status line,
 yours keeps running, with the usage shown after it. `--uninstall` puts back what
-was there.
+was there. The setting names the copy you installed it from, which for a plugin
+install sits in a folder named for its version. After an update that copy hands
+over to the one Claude Code now has installed (a copy older than this handover
+does not), and running `--install` again from the new version points the
+setting at it.
 
 **The Claude desktop app does not run status lines.** On one machine the status
 line was installed and working when run by hand, yet the desktop app never ran
