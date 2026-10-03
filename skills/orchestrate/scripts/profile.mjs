@@ -333,12 +333,6 @@ function codexBriefLine(c) {
   return `codex: ${c.model || 'model unknown'} · ${tier} · ok`;
 }
 
-function cachedProviders() {
-  const c = readJson(PROVIDER_CACHE);
-  if (!c || !c.at || Date.now() - Date.parse(c.at) > CACHE_MS) return null;
-  return c.providers || null;
-}
-
 function cacheProviders(providers) {
   try {
     mkdirSync(dirname(PROVIDER_CACHE), { recursive: true });
@@ -460,17 +454,19 @@ const tier = detectTier();
 const agents = detectAgents();
 const repo = findRepoRoot(process.cwd());
 const runs = detectRuns(repo);
-const skills = detectSkills(repo);
 
 // --brief is injected into SKILL.md with `!`…``, where a slow or failing
 // command would abort the invocation. So: cache only, no probes, no network,
 // and every path exits 0.
 if (brief) {
   try {
-    const p = cachedProviders();
-    const prov = p
-      ? Object.entries(p).filter(([, v]) => v.installed).map(([n, v]) => `${n} ${v.auth}`).join(', ') || 'none on PATH'
-      : 'not probed today (run profile.mjs for the full picture)';
+    // Only what the lead can act on, since this runs on every skill load and is
+    // read on every later turn. Dropped 2026-10-03 (plan 0010 step 2e): the
+    // skills on disk (the host already lists them to the model), the providers
+    // on PATH (the codex line covers the one lane that uses them), the
+    // auto-compact hint (the router offers it once), the live-usage hint (an
+    // offer the lead cannot act on without the user, repeated every load), and
+    // the prices line and the paid-skills line while they say nothing new.
     // No spend counter here on purpose. A running total reads as an allowance
     // and invites spending it; the tier is what the model actually reasons
     // from, and measure.mjs reports what a finished run cost.
@@ -481,30 +477,15 @@ if (brief) {
     const fix = agents.source === 'plugin' ? 'update the plugin' : 'run scripts/install-agents.mjs';
     console.log(`orchestrate: tier ${tier.tier} · host ${host.split(' ')[0]} · node ${process.version} · agents ${agents.installed}/${agents.expected}${agents.missing.length ? ` (missing ${agents.missing.join(', ')}; ${fix})` : ''}`);
     console.log(codexBriefLine(cachedCodexStatus()));
-    const auto = (readJson(join(HOME, '.claude', 'settings.json')) || {}).env || {};
-    if (!auto.CLAUDE_CODE_AUTO_COMPACT_WINDOW) console.log('auto-compact is at the window limit; run `profile.mjs --autocompact 200k`');
     console.log(`repo ${repo || 'none (no worktree isolation)'} · runs ${runs.count}${runs.latest ? ` · latest ${runs.latest}` : ''}`);
     console.log(`this plan includes: ${included}`);
     const paidMode = loadProfile().paidServices || 'ask';
     const paidAllowed = Array.isArray(loadProfile().paidAllowed) ? loadProfile().paidAllowed : [];
-    console.log(`skills that call a paid outside service (they need their own API key or credits): ${{ never: 'never use them — the user said so', ask: 'ask the user once per job before using one', free: 'use them when they fit' }[paidMode] || 'ask first'}${paidAllowed.length ? `; except these, which the user allowed by name: ${paidAllowed.join(', ')}` : ''}`);
-    // Live usage exists only where the host runs the status line: a terminal.
-    // Said as a fact with the one-time command, never installed from here.
-    try {
-      const { readQuota } = await import('./lib/quota.mjs');
-      if (!readQuota()) {
-        const desktop = /desktop/i.test(process.env.CLAUDE_CODE_ENTRYPOINT || '');
-        const sl = (readJson(join(HOME, '.claude', 'settings.json')) || {}).statusLine;
-        const ours = sl && /orchestrate\/scripts\/statusline\.mjs/.test(String(sl.command || '').replace(/\\/g, '/'));
-        console.log(desktop
-          ? 'live usage: not available in the desktop app (it does not run status lines); usage stops fall back to the host\'s limit messages'
-          : ours ? 'live usage: status line installed, no reading in the last 10 minutes'
-            : `live usage: off. With the user's yes, once: node "${join(dirname(fileURLToPath(import.meta.url)), 'statusline.mjs')}" --install`);
-      }
-    } catch {}
-    console.log(`providers: ${prov}`);
-    console.log(`skills on disk (route a step to one instead of re-deriving it; your own listing may have more): ${skills.length ? skills.join(', ') : 'none found on disk (this is not the session\'s own listing, which may hold more)'}`);
-    console.log(pricesLine(tier.tier));
+    // The default ("ask once per job") is what the skill already says about
+    // money, so the line is printed only when the user chose otherwise.
+    if (paidMode !== 'ask' || paidAllowed.length) console.log(`skills that call a paid outside service (they need their own API key or credits): ${{ never: 'never use them — the user said so', ask: 'ask the user once per job before using one', free: 'use them when they fit' }[paidMode] || 'ask first'}${paidAllowed.length ? `; except these, which the user allowed by name: ${paidAllowed.join(', ')}` : ''}`);
+    const prices = pricesLine(tier.tier);
+    if (!/none yet|unavailable/.test(prices)) console.log(prices);
   } catch {}
   process.exit(0);
 }
@@ -523,6 +504,8 @@ try {
   writeFileSync(CODEX_STATUS_CACHE, JSON.stringify({ at: new Date().toISOString(), ...value }, null, 2) + '\n');
 } catch {}
 
+// Only the full report lists skills on disk; the brief line no longer does.
+const skills = detectSkills(repo);
 const result = { host, tier: tier.tier, tierSource: tier.source, providers, agents, repo, runs, skills, skillDir, node: process.version, platform: process.platform };
 
 if (wantJson) {
