@@ -35,7 +35,8 @@ Your folder may not start where the lead is: Claude Code starts a helper
 folder from the remote's default branch unless the user set it otherwise, so
 local commits the packet relies on can be missing. First, before you read or
 run anything else, compare `git rev-parse HEAD` with the packet's base sha (if
-the packet names none, carry on). If they differ and you have changed and
+the packet names none, carry on). Do this once, at the start of the task, not
+on a later message that continues it. If they differ and you have changed and
 committed nothing yet, move onto it with `git reset --hard <base sha>`:
 nothing of yours exists to lose, and this is the one reset allowed. If you
 already have work, stop and return BLOCKED naming both commits.

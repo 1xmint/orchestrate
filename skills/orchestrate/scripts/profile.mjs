@@ -487,13 +487,14 @@ if (brief) {
     if (!/none yet|unavailable/.test(prices)) console.log(prices);
     // Without the status line no usage reading exists, and every usage check
     // (helpers paused near the limit, the usage notes) is silent: the lead is
-    // the one who can offer the fix. Not said in the desktop app, which runs no
-    // status line, so there is nothing to offer there (independent review,
-    // round 2: the first cut of this line dropped it too).
+    // the one who can offer the fix. Said only in a terminal, the one place a
+    // status line runs (independent review, rounds 2 and 3).
     try {
       const { readQuota } = await import('./lib/quota.mjs');
-      const desktop = /desktop/i.test(process.env.CLAUDE_CODE_ENTRYPOINT || '');
-      if (!readQuota() && !desktop) {
+      // A terminal is the one place a status line runs. The entrypoint names
+      // the surface; an unset one is an older terminal build.
+      const entry = process.env.CLAUDE_CODE_ENTRYPOINT || '';
+      if (!readQuota() && (entry === '' || entry === 'cli')) {
         const sl = (readJson(join(HOME, '.claude', 'settings.json')) || {}).statusLine;
         const ours = sl && /orchestrate\/scripts\/statusline\.mjs/.test(String(sl.command || '').replace(/\\/g, '/'));
         console.log(ours ? 'live usage: status line installed, no reading in the last 10 minutes'

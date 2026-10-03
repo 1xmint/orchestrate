@@ -88,10 +88,17 @@ test('the brief line carries only what the lead can act on', () => {
   assert.doesNotMatch(r.stdout, /skills on disk|^providers:|auto-compact|prices measured here: none|skills that call a paid/m);
   assert.match(r.stdout, /^live usage: off, so no usage check can see the limit\. With the user's yes, once: node ".*statusline\.mjs" --install$/m);
   assert.ok(Buffer.byteLength(r.stdout) < 800, `the brief is ${Buffer.byteLength(r.stdout)} bytes`);
-  const desk = spawnSync(process.execPath, [PROFILE, '--brief'], {
+  for (const entry of ['claude-desktop', 'remote_cowork', 'claude-vscode', 'sdk-ts']) {
+    const other = spawnSync(process.execPath, [PROFILE, '--brief'], {
+      cwd: home, encoding: 'utf8', timeout: 30000,
+      env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_ENTRYPOINT: entry },
+    });
+    assert.equal(other.status, 0, other.stderr);
+    assert.doesNotMatch(other.stdout, /live usage/, `${entry}: nothing to offer where no status line runs`);
+  }
+  const cli = spawnSync(process.execPath, [PROFILE, '--brief'], {
     cwd: home, encoding: 'utf8', timeout: 30000,
-    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' },
+    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_ENTRYPOINT: 'cli' },
   });
-  assert.equal(desk.status, 0, desk.stderr);
-  assert.doesNotMatch(desk.stdout, /live usage/, 'nothing to offer where no status line runs');
+  assert.match(cli.stdout, /^live usage: off/m, 'the terminal entrypoint says it');
 });

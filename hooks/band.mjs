@@ -109,6 +109,8 @@ async function begin($) {
   try {
     if (!(await drawsHere($))) return
     try { await look($) } catch { /* the poll tries again */ }
+    // A reload's own start may have begun a poll while this one waited.
+    if (timer) return
     timer = $.clock.every(EVERY_MS, async () => {
       try { await look($) } catch { /* the next look tries again */ }
     })

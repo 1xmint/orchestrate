@@ -26,7 +26,7 @@
 //   same error came back twice · the last message asks a question · the
 //   last message says the goal is met · the same open item named three continues
 //   in a row · the step cap · a step that did no work while nothing is out, or
-//   with the same work still out after the user spoke.
+//   with only a background command out after the user spoke.
 //
 // A usage limit is not a stop. The plugin's own 90% five-hour stop is gone (it
 // turned the loop off just before the host's resume), and a helper refused for
@@ -50,6 +50,7 @@ import { checkpointPath, contextEpoch, contextEpochStart, hasCheckpoint, thresho
 import { nextOpen, ALL_DONE_TEXT } from './lib/runs.mjs';
 import { recordBand, bandAtStop, openItem, sessionGoal, stopQuestion, withoutTaskIds } from './lib/band.mjs';
 import { syntheticPrompt } from './lib/persist-words.mjs';
+import { ownerTextOf } from './lib/compaction-snapshot.mjs';
 import { readProject } from './lib/project.mjs';
 import { sampleContext, markAnnounced, markTicked } from './lib/context-store.mjs';
 import { modeOf } from './lib/modes.mjs';
@@ -128,14 +129,18 @@ export function scanTurn(tail) {
     try { rec = JSON.parse(line); } catch { continue; }
     const msg = rec && rec.message;
     const content = msg && Array.isArray(msg.content) ? msg.content : null;
-    // Did the user say something in this slice? Their own words only: not a
-    // tool result, not the host's notice that a helper or a Monitor reported
-    // (those wake the session on purpose), not this hook's own block text.
-    if (rec.type === 'user' && msg && !rec.isMeta) {
-      const said = typeof msg.content === 'string' ? msg.content
-        : content ? content.filter(b => b && b.type === 'text' && typeof b.text === 'string').map(b => b.text).join('\n') : '';
-      // A message that opens with a tag is the host's, whatever the tag.
-      if (said.trim() && !syntheticPrompt(said) && !/^\s*Stop hook feedback:/.test(said) && !/^\s*<[a-z][\w-]*[\s>]/i.test(said)) prompted = true;
+    // Did the user say something in this slice? Their own words only, read the
+    // way the save point reads them (ownerTextOf: system notes stuck to the
+    // front of a typed prompt are cut off, a message typed mid-turn counts):
+    // not a tool result, not the host's notice that a helper or a Monitor
+    // reported (those wake the session on purpose), not this hook's own block
+    // text, not a summary of the conversation. Where the host marks who sent a
+    // record (origin.kind), that mark decides.
+    if (!rec.isCompactSummary) {
+      const origin = (rec.origin && rec.origin.kind) || (rec.attachment && rec.attachment.origin && rec.attachment.origin.kind) || null;
+      const said = origin && origin !== 'human' ? '' : ownerTextOf(rec);
+      if (said.trim() && !syntheticPrompt(said) && !/^\s*Stop hook feedback:/.test(said)
+        && (origin === 'human' || !/^\s*<[a-z][\w-]*[\s>]/i.test(said))) prompted = true;
     }
     if (rec.type === 'assistant' && content) {
       for (const b of content) {
@@ -150,7 +155,9 @@ export function scanTurn(tail) {
       for (const b of content) {
         if (!b || b.type !== 'tool_result') continue;
         const t = textOf(b.content);
-        if (/orchestrate (budget|guard):/.test(t)) denied = true;
+        // Anchored like the usage refusal below: only the guard's own error for
+        // this call, never a helper's report that quotes one.
+        if (b.is_error && /^\s*orchestrate (budget|guard):/.test(t)) denied = true;
         // Anchored to a refusal the guard returned for this very call, so a
         // helper's report that only quotes one is still that helper's work.
         const usageRefusal = Boolean(b.is_error) && /^\s*orchestrate quota:/.test(t);
@@ -180,6 +187,16 @@ export function workOut(input) {
 // or a monitor started in the background, or a recurring scheduled prompt, stays
 // in these lists for the whole session; without this a step that did nothing
 // would wait on them forever and keep-going would never stop.
+// True when every piece of work out is a background command and nothing is
+// scheduled. A helper, a Monitor, a workflow or a scheduled prompt reports
+// back and wakes the session; a background command may never (a dev server),
+// and one that runs for good cannot be told from a long build.
+export function onlyCommandsOut(input) {
+  const tasks = input && Array.isArray(input.background_tasks) ? input.background_tasks : [];
+  const crons = input && Array.isArray(input.session_crons) ? input.session_crons : [];
+  return crons.length === 0 && tasks.length > 0 && tasks.every(t => t && t.type === 'shell');
+}
+
 export function outKey(input) {
   const ids = v => (Array.isArray(v) ? v : []).map(x => String((x && x.id) || '')).filter(Boolean);
   return [...ids(input && input.background_tasks), ...ids(input && input.session_crons)].sort().join(',');
@@ -195,7 +212,7 @@ export const QUOTA_FACT = "helpers are refused while the plan's usage is past th
 // read files. `outstanding` is true when the Stop payload lists work that will
 // wake the session (see workOut); a step that did nothing then is a wait, not
 // a stop.
-export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '' }) {
+export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdvice = null, contextReading = null, goal = '', workCalls = null, next = null, outstanding = false, waitingOn = '', commandsOnly = false }) {
   const steps = (Number(rec.steps) || 0) + 1;
   const seen = new Set(rec.errors || []);
   const repeat = scan.errors.find((e, i) => seen.has(e) || scan.errors.indexOf(e) !== i);
@@ -228,14 +245,16 @@ export function persistDecision({ rec = {}, scan, contextNotice = '', contextAdv
     // keep-going off before that. The Stop passes unblocked and the loop stays
     // armed. It is neither a continue (an idle turn re-reads the whole
     // conversation for nothing) nor a step, so the counters stand as they were.
-    // A Monitor or a recurring scheduled prompt stays listed and wakes the
-    // session again and again, so the same work still out is a wait each time
-    // it is what woke the session. It ends keep-going only when the user spoke
-    // since the last Stop and the step still did nothing: the session was not
-    // woken by what is running (a dev server never reports), and nothing else
-    // will wake it (independent review, 2026-10-03, rounds 1 and 2).
-    if (outstanding && !(scan.prompted && rec.waitingOn != null && rec.waitingOn === waitingOn)) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn }, kind: 'wait', why: 'a helper or background command is still out' };
-    if (outstanding) return stop('two steps in a row did no visible work while the same thing kept running in the background');
+    // A helper, a Monitor, a workflow or a scheduled prompt reports back and
+    // wakes the session, so with any of them out an idle step is always a wait:
+    // a user asking "how's it going?" meanwhile must not switch keep-going off
+    // before the helper lands. Only background commands may never report (a
+    // dev server), so with nothing but commands out, the same ones still out,
+    // and a step after the user's own message that still did nothing, keep-going
+    // ends (independent review, 2026-10-03, rounds 1 to 3).
+    const settled = scan.prompted && commandsOnly && rec.waitingOn != null && rec.waitingOn === waitingOn;
+    if (outstanding && !settled) return { rec: { ...out, steps: Number(rec.steps) || 0, lastItem: rec.lastItem ?? null, sameItem: Number(rec.sameItem) || 0, waitingOn }, kind: 'wait', why: 'a helper or background command is still out' };
+    if (outstanding) return stop('the step after your message did no visible work while only a background command kept running');
     return stop('the last step did no visible work (no edit, command or helper)');
   }
 
@@ -430,7 +449,7 @@ export function check(input) {
   // Sampled without announcing: the notice is only delivered if this Stop is
   // refused, and the store is marked as announced only then.
   const workCalls = state && state.workCalls && Number.isFinite(state.workCalls.count) ? state.workCalls.count : null;
-  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input) });
+  const dec = persistDecision({ rec, scan: scanTurn(tail), contextNotice: ctx ? ctx.notice : '', contextAdvice: ctx ? ctx.advice : null, contextReading: ctx ? ctx.reading : null, goal: persistGoal(p, bound), workCalls, next: nextFor(state, input), outstanding: workOut(input), waitingOn: outKey(input), commandsOnly: onlyCommandsOut(input) });
   if (dec.kind === 'continue' && ctx && ctx.notice) { try { markAnnounced(input.session_id || null, null, ctx.advice.key); if (ctx.tick) markTicked(input.session_id || null, null, ctx.tick); } catch {} }
 
   store[key] = { ...dec.rec, lastSize: size, checkedAt: new Date().toISOString() };

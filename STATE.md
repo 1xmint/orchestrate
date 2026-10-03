@@ -67,7 +67,7 @@ release's section when it ships.
     and task ids; all are in plain words now, and the lead keeps the details.
   - **Step 2e, the per-run read: 27,278 to 13,481 bytes (51% less).** SKILL.md
     19,994 to 7,625; the Plain style 5,094 to 3,669; the card 2,190 to 2,187.
-    The profile line the skill loads with, not counted before, 991 to 384.
+    The profile line the skill loads with, not counted before, 991 to 384 (plus about 230 in a terminal with no usage reading, where it names the one-time status-line install).
     Where each rule went is in commit `e014f77`'s message; the auto-merge rule
     came back after the review. The prompting-guidance page was not re-read
     tonight (fetching it needed the owner's approval); these wording choices

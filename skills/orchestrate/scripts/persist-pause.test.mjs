@@ -324,7 +324,7 @@ test('the same work still out after a wait with nothing done since ends the loop
   // still does nothing.
   writeFileSync(t, lines(said('The site is up at localhost:3000.'), JSON.stringify({ type: 'user', message: { role: 'user', content: 'is it done?' } }), said('Still waiting.')));
   const second = run(HOOK, stopPayload('b4', dir, t, server), home);
-  assert.match(second.json.systemMessage, /^Keep-going stopped: two steps in a row did no visible work while the same thing kept running/);
+  assert.match(second.json.systemMessage, /^Keep-going stopped: the step after your message did no visible work while only a background command kept running/);
   assert.equal(session(home, 'b4').persist.armed, false);
 
   const home2 = sandbox(); const dir2 = cwdDir();

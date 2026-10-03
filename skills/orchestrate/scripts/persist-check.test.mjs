@@ -173,9 +173,14 @@ test('the same work out after a wait with nothing done since is a stop; other wo
   const woken = persistDecision({ rec: first.rec, scan: idle, outstanding: true, waitingOn: 'srv' });
   assert.equal(woken.kind, 'wait', 'the same work woke the session; it is still a wait');
   // The user spoke and the step still did nothing: what runs will not wake it.
-  const again = persistDecision({ rec: first.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'srv' });
+  // The user spoke and the step still did nothing, with only a background
+  // command out (a dev server never reports): keep-going ends.
+  const again = persistDecision({ rec: first.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'srv', commandsOnly: true });
   assert.equal(again.kind, 'stop');
-  assert.match(again.why, /two steps in a row did no visible work/);
+  assert.match(again.why, /the step after your message did no visible work while only a background command kept running/);
+  // The same, with a helper, a Monitor or a scheduled prompt out: they report
+  // back, so a user's "how's it going?" meanwhile is still a wait.
+  assert.equal(persistDecision({ rec: first.rec, scan: { ...idle, prompted: true }, outstanding: true, waitingOn: 'srv', commandsOnly: false }).kind, 'wait');
   assert.equal(persistDecision({ rec: first.rec, scan: idle, outstanding: true, waitingOn: 'r2' }).kind, 'wait', 'something landed, something else is out');
   const worked = persistDecision({ rec: first.rec, scan: { ...idle, progressed: true }, outstanding: true, waitingOn: 'srv' });
   assert.equal(worked.kind, 'continue');
@@ -389,4 +394,36 @@ test('no git repo at cwd is silent, whatever the transcript claims', () => {
   writeSession(home, 'sess-6', {});
   const r = run({ hook_event_name: 'Stop', session_id: 'sess-6', cwd: notARepo, transcript_path }, home);
   assert.equal(r.stdout.trim(), '');
+});
+
+test('onlyCommandsOut: only background commands, nothing scheduled', async () => {
+  const { onlyCommandsOut } = await import('./persist-check.mjs');
+  assert.equal(onlyCommandsOut({ background_tasks: [{ id: 's', type: 'shell' }] }), true);
+  assert.equal(onlyCommandsOut({ background_tasks: [{ id: 's', type: 'shell' }, { id: 'h', type: 'subagent' }] }), false, 'a helper reports back');
+  assert.equal(onlyCommandsOut({ background_tasks: [{ id: 'm', type: 'monitor' }] }), false, 'a Monitor reports back');
+  assert.equal(onlyCommandsOut({ background_tasks: [{ id: 's', type: 'shell' }], session_crons: [{ id: 'c', recurring: true }] }), false, 'a scheduled prompt wakes the session');
+  assert.equal(onlyCommandsOut({}), false);
+});
+
+test('the user speaking is read the way the save point reads it: notes stuck to the front, a message typed mid-turn, the host\'s own mark', () => {
+  // The record shape seen live on 2026-10-03: a typed prompt whose content
+  // opens with a system note block.
+  const typed = JSON.stringify({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: [
+    { type: 'text', text: '<system-reminder>The user\'s timezone is America/New_York.</system-reminder>' },
+    { type: 'text', text: 'is the site up?' },
+  ] } });
+  assert.equal(scanTurn(typed).prompted, true);
+  const queued = JSON.stringify({ type: 'attachment', attachment: { type: 'queued_command', origin: { kind: 'human' }, prompt: 'how is it going?' } });
+  assert.equal(scanTurn(queued).prompted, true, 'a message typed while the turn ran');
+  const summary = JSON.stringify({ type: 'user', isCompactSummary: true, message: { role: 'user', content: 'This session is being continued from a previous conversation.' } });
+  assert.equal(scanTurn(summary).prompted, false, 'a summary of the conversation is not the user speaking');
+  const pasted = JSON.stringify({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: '<div>why does this not render?</div>' } });
+  assert.equal(scanTurn(pasted).prompted, true, 'pasted markup the host marks as typed by the user');
+  const hostMarked = JSON.stringify({ type: 'user', origin: { kind: 'task-notification' }, message: { role: 'user', content: 'lint passed' } });
+  assert.equal(scanTurn(hostMarked).prompted, false);
+});
+
+test('a helper\'s report that quotes a budget or guard refusal is not a refusal of this call', () => {
+  const quoted = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'a1', content: 'Done; note that orchestrate guard: refused one command along the way.' }] } });
+  assert.equal(scanTurn(quoted).denied, false);
 });
