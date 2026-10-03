@@ -197,7 +197,8 @@ test('StopFailure writes every error kind it sees, and a payload with no usable 
     const rec = pauseRec(dir);
     assert.equal(rec.kind, 'api_error', kind);
     assert.equal(rec.error, kind);
-    assert.equal(rec.text, `Stopped on an API error (${kind}); keep-going stays on.`);
+    assert.doesNotMatch(rec.text, /keep-going|_/, `${kind}: nothing resumes after it, and the host's own name is not shown`);
+    assert.match(rec.text, /^Stopped\b/);
     assert.equal(session(home, 'f2').persist.armed, true, `${kind}: keep-going stays armed`);
   }
 });

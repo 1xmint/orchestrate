@@ -24,9 +24,16 @@ const EVERY_MS = 2000
 // line is kept two cells short of the width it is given.
 const CLOSE_MARK = 2
 
-let shown = ''
+// The line to draw, worked out at each look: `busy` while a turn of this
+// session is running, `idle` while none is (the band's slot says which,
+// `e.props.isWorking`). They differ only for this session's own "Working on"
+// line, which a turn stopped with Esc leaves behind with no Stop to rewrite it.
+let shown = { busy: '', idle: '' }
 let timer = null
-// What the last look found. A file is read again only when its modified time moved.
+// What the last look found. A file is read again only when its modified time
+// moved, and that time is kept only once a read of it gave whole JSON: a read
+// that failed (a file busy in the hooks' rename on Windows, a network folder)
+// or caught it half written is tried again at the next look.
 const seen = { cwd: '', root: '', bandAt: undefined, pauseAt: undefined, band: null, pause: null }
 
 // The folder the hooks write in: the git root of the session's folder, or the
@@ -59,6 +66,20 @@ async function modified($, path) {
   try { return (await $.fs.stat(path)).mtimeMs } catch { return null }
 }
 
+// Reads a record whose modified time moved. Returns whether the read settled
+// that time: true for whole JSON (a record or not, a cleared pause among them)
+// or a file that is gone; false for a read that threw or text that is not
+// whole JSON, so the next look reads it again. On a throw the last record read
+// stays, so a moment's refusal does not blank the line.
+async function reread($, path, at, parse, put) {
+  if (at === null) { put(null); return true }
+  let text
+  try { text = await $.fs.read(path) } catch { return false }
+  try { JSON.parse(text) } catch { put(null); return false }
+  put(parse(text))
+  return true
+}
+
 // Looks at the two files, reads the one whose modified time moved, and asks for
 // a redraw only when the line changed. The line is worked out on every look from
 // what was read, since a record from another session stops showing with time.
@@ -75,25 +96,14 @@ async function look($) {
   const pauseFile = root + '/.orchestrator/pause.json'
 
   const bandAt = await modified($, bandFile)
-  if (bandAt !== seen.bandAt) {
-    seen.bandAt = bandAt
-    seen.band = null
-    if (bandAt !== null) {
-      try { seen.band = parseBand(await $.fs.read(bandFile)) } catch { seen.band = null }
-    }
-  }
+  if (bandAt !== seen.bandAt && await reread($, bandFile, bandAt, parseBand, rec => { seen.band = rec })) seen.bandAt = bandAt
   const pauseAt = await modified($, pauseFile)
-  if (pauseAt !== seen.pauseAt) {
-    seen.pauseAt = pauseAt
-    seen.pause = null
-    if (pauseAt !== null) {
-      try { seen.pause = parsePauseText(await $.fs.read(pauseFile)) } catch { seen.pause = null }
-    }
-  }
+  if (pauseAt !== seen.pauseAt && await reread($, pauseFile, pauseAt, parsePauseText, rec => { seen.pause = rec })) seen.pauseAt = pauseAt
 
-  const line = bandLine({ pause: seen.pause, band: seen.band, session: await $.session.id(), now: await $.clock.now() })
-  if (line !== shown) {
-    shown = line
+  const records = { pause: seen.pause, band: seen.band, session: await $.session.id(), now: await $.clock.now() }
+  const lines = { busy: bandLine(records), idle: bandLine({ ...records, working: false }) }
+  if (lines.busy !== shown.busy || lines.idle !== shown.idle) {
+    shown = lines
     $.ui.invalidate('ui.render')
   }
 }
@@ -137,11 +147,14 @@ export function register(on) {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    // A host that does not say whether a turn is running gets the line as the
+    // record has it.
+    const line = e.props.isWorking === false ? shown.idle : shown.busy
     // Nothing to say, or the feedback survey has the spot: Claude Code's own.
-    if (shown === '' || e.props.hasSurvey) return next(e)
+    if (line === '' || e.props.hasSurvey) return next(e)
     const { Text } = $.ui.resolve(e)
     const room = (e.props.bodyColumns || 80) - CLOSE_MARK
-    const text = room > 1 && shown.length > room ? shown.slice(0, room - 1) + '…' : shown
+    const text = room > 1 && line.length > room ? line.slice(0, room - 1) + '…' : line
     return Text({ dimColor: true, wrap: 'truncate-end', children: text })
   })
 }

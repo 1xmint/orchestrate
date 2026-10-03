@@ -98,6 +98,47 @@ test('a message typed mid-turn (a queued command from a human) is the last messa
   assert.doesNotMatch(body, /task-notification/);
 });
 
+// After a boundary the host files the summary itself as a user record; a
+// stretch with no message typed since then reported the summary as the last
+// thing the user said.
+test('the summary the host files after a boundary is not the user\'s last message', () => {
+  const home = makeHome();
+  const dir = join(home, 'store');
+  const summary = line({ type: 'user', isCompactSummary: true, timestamp: new Date().toISOString(), message: { role: 'user', content: 'This session is being continued from a previous conversation that ran out of context.' } });
+  const transcriptPath = writeTranscript(home, [user('do the thing: fix the widget'), boundary('b1'), summary, edit('/repo/src/gadget.mjs'), boundary('b2')].join(''));
+  const reading = readContext(transcriptPath, { session: 'ss' });
+  const body = readFileSync(writeCompactionSnapshot({ session: 'ss', reading, transcriptPath, ctx: { dir } }), 'utf8');
+  assert.match(body, /Last message before compaction: none seen/);
+  assert.doesNotMatch(body, /being continued/);
+});
+
+// The compaction hooks run before the host writes this summary's boundary:
+// `pending` reads the stretch after the newest boundary on file, as the next
+// compaction, at the path of the epoch that just ended.
+test('pending: the stretch after the newest boundary on file, numbered as the next compaction', () => {
+  const home = makeHome();
+  const dir = join(home, 'store');
+  const transcriptPath = writeTranscript(home, [user('do the thing: fix the widget'), edit('/repo/src/widget.mjs'), boundary('b1'), user('now fix the gadget'), edit('/repo/src/gadget.mjs'), userResult('Tests: 4 passed, 0 failed')].join(''));
+  const reading = readContext(transcriptPath, { session: 'sp' });
+  const path = writeCompactionSnapshot({ session: 'sp', reading, transcriptPath, ctx: { dir }, pending: true, trigger: 'manual' });
+  assert.equal(path, checkpointPath('sp', reading, dir));
+  const body = readFileSync(path, 'utf8');
+  assert.match(body, /compaction 2 \(manual\)/);
+  assert.match(body, /Last message before compaction: now fix the gadget/);
+  assert.match(body, /gadget\.mjs/);
+  assert.doesNotMatch(body, /widget\.mjs/);
+  assert.match(body, /Tests: 4 passed/);
+  assert.equal(writeCompactionSnapshot({ session: 'sp', reading, transcriptPath, ctx: { dir }, pending: true, trigger: 'auto' }), path, 'the other hook for the same summary');
+  assert.equal(readFileSync(path, 'utf8'), body, 'leaves it as it is');
+
+  const none = writeTranscript(makeHome(), [user('hello')].join(''));
+  const r0 = readContext(none, { session: 'sp0' });
+  const p0 = writeCompactionSnapshot({ session: 'sp0', reading: r0, transcriptPath: none, ctx: { dir }, pending: true });
+  assert.match(readFileSync(p0, 'utf8'), /compaction 1\b/, 'no boundary on file: the first summary');
+  const empty = writeTranscript(makeHome(), [user('hello'), boundary('b9')].join(''));
+  assert.equal(writeCompactionSnapshot({ session: 'sp1', reading: readContext(empty, { session: 'sp1' }), transcriptPath: empty, ctx: { dir }, pending: true }), null, 'nothing since the boundary: nothing to write');
+});
+
 test('a second call does not rewrite the file', () => {
   const home = makeHome();
   const dir = join(home, 'store');

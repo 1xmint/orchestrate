@@ -372,3 +372,24 @@ test('a run reports what is owed and what is ready side by side', () => {
   assert.deepEqual(run.ready, ['9-9-0003'], '0002 waits on a row nobody has set');
   assert.equal(run.open, true);
 });
+
+// The band's open item and keep-going's next item read a session's binding
+// directly and named a run closed as dropped (whole-file review). All three
+// readers now go through boundRun, the check sessionRun always made.
+test('boundRun keeps a binding to a live run, and drops a closed one unless it was bound on purpose after it closed', async () => {
+  const { boundRun } = await import('./runs.mjs');
+  const repo = mkdtempSync(join(tmpdir(), 'orch-bound-'));
+  const dir = join(repo, '.orchestrator', 'runs', '20261003-dates');
+  mkdirSync(dir, { recursive: true });
+  const runMd = join(dir, 'RUN.md');
+  const body = closed => ['# Run', '', ...(closed ? ['Closed: dropped, the user went another way', ''] : []), '## Tasks', '', HEADER, '|---|---|---|---|---|---|---|---|---|', row('10-3-0001', '🔨 running'), ''].join('\n');
+  writeFileSync(runMd, body(false));
+  const binding = { root: repo, runMd, boundAt: '2026-10-01T00:00:00.000Z' };
+  assert.equal(boundRun(binding).runId, '20261003-dates');
+  writeFileSync(runMd, body(true));
+  assert.equal(boundRun(binding), null, 'closed: the binding no longer holds');
+  assert.equal(boundRun({ ...binding, explicit: true, boundAt: new Date(Date.now() + 60000).toISOString() }).runId, '20261003-dates', 'bound on purpose after it closed');
+  assert.equal(boundRun({ ...binding, explicit: true }), null, 'bound on purpose before it closed: not enough');
+  assert.equal(boundRun(null), null);
+  assert.equal(boundRun({ runMd: join(dir, 'missing.md') }), null);
+});

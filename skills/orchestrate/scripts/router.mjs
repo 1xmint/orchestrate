@@ -28,7 +28,7 @@
 //   node router.mjs --prune                       delete session state older than 7 days
 
 import { readFileSync, existsSync, unlinkSync, statSync, writeFileSync, mkdirSync, createHash, spawnSync } from './lib/node.mjs';
-import { join, dirname, resolve, basename } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   detectTier, routerSettings, agentsInstalled, findRepoRoot, resolveRun,
@@ -37,7 +37,7 @@ import {
   SESSIONS_DIR, PROFILE_PATH,
 } from './lib/tier.mjs';
 import { sampleContext, storedContext } from './lib/context-store.mjs';
-import { readContext, idPart, countBoundaries } from './lib/context-scan.mjs';
+import { readContext, countBoundaries } from './lib/context-scan.mjs';
 import { writeCompactionSnapshot } from './lib/compaction-snapshot.mjs';
 import { helperJustCompacted } from './lib/helper-compaction.mjs';
 import { readGoal, goalLine, goalDue, markShown } from './lib/goal.mjs';
@@ -52,7 +52,7 @@ import { projectNote } from './lib/project.mjs';
 import { pauseRoot, clearPause } from './lib/pause.mjs';
 import { lastQuestion, nextAsked, askedLine } from './lib/asked.mjs';
 import { lastAssistantText } from './lib/commit-claim.mjs';
-import { recordBand, openItem, sessionGoal } from './lib/band.mjs';
+import { recordBand, openItem, sessionGoal, bandAtPrompt, bandClip } from './lib/band.mjs';
 import { CARD, CARD_CAP, cardBody, shortCard, compactNote, autocompactTip, autocompactOffNote } from './lib/card.mjs';
 import { BRIEF_CAP, briefState, briefNote } from './lib/brief.mjs';
 import {
@@ -66,7 +66,7 @@ import {
   stateHash, codexState,
 } from './lib/state-line.mjs';
 import {
-  RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt, latestCheckpointFor,
+  RESUME_CAP, sectionExcerpt, resumeExcerpt, checkpointExcerpt,
   handoffLine, continueIntent, CONTINUE_WORD,
 } from './lib/resume.mjs';
 
@@ -117,20 +117,9 @@ export function leadNote(self, tier, now = Date.now(), path = LEAD_NOTE_PATH) {
   return `[orchestrate · lead setting] this session runs ${self.model} at ${self.effort} effort on plan ${tier}. Effort multiplies the output and thinking of every step; on Opus 5, Anthropic measured medium at about 2 points below high for half the cost. A change takes effect in a new session; switching mid-session re-reads everything uncached.`;
 }
 
-// The id of the newest compaction boundary this hook can see in the transcript.
-function newestBoundaryId(input) {
-  try {
-    const c = readContext(input.transcript_path, { session: input.session_id }).compaction;
-    return c && c.uuid ? idPart(c.uuid) : null;
-  } catch { return null; }
-}
-
-// A checkpoint file counts as this compaction's when its name carries the
-// newest visible boundary's id and it was written in the last two minutes.
-function checkpointIsFresh(path, boundaryId, now = Date.now()) {
-  try {
-    return Boolean(boundaryId) && basename(path).includes(boundaryId) && now - statSync(path).mtimeMs <= 120000;
-  } catch { return false; }
+// A checkpoint file written in the last two minutes.
+function writtenLately(path, now = Date.now()) {
+  try { return now - statSync(path).mtimeMs <= 120000; } catch { return false; }
 }
 
 function gatherContext(input, state) {
@@ -292,18 +281,45 @@ function promptText(input) {
 // state, and the old router treated it as one.
 const HOST_TAGS = /<(system-reminder|local-command-caveat|local-command-stdout|command-name|command-message|command-args)>[\s\S]*?<\/\1>/g;
 
-// What the band shows from a real prompt on: this session is working, on the
-// next open item if the run or project page names one, else on the goal in the
-// user's own words (the keep-going goal, the first request pinned, or this
-// prompt when it is a request). A slash command starts no work, so it leaves the
-// record alone. Written for the muted router too: the band is not model-facing.
-// Reads and writes a small file; never changes what this hook prints or saves
-// (lib/band.mjs, docs/band.md).
-function bandAtPrompt(input, state, trimmed) {
+// What the band shows from a real prompt on (lib/band-line.mjs `bandAtPrompt`,
+// docs/band.md): what Claude is doing right now. A prompt that asks for
+// something names itself, whatever is stored; one that only resumes
+// ("continue", "go ahead", "try again", or keep-going armed on a goal already
+// pinned) names the stored next open item, else the goal; anything else (a
+// thank-you, an "ok") names nothing, so a finished or older item is never
+// claimed. The text is kept in the session as `bandText` for a Stop refused in
+// this turn (lib/band.mjs `turnText`). A slash command starts no work, so it
+// leaves the record alone. Written for the muted router and the router turned
+// off too: the band is not model-facing. Reads and writes small files; never
+// changes what this hook prints (lib/band.mjs, docs/band.md).
+function recordBandAtPrompt(input, state, trimmed, { armedNow = false } = {}) {
   try {
     if (/^\s*\//.test(trimmed)) return;
-    const text = openItem(state, input.cwd) || sessionGoal(state) || (isSubstantive(trimmed) ? trimmed : '');
-    recordBand({ cwd: input.cwd, session: input.session_id, kind: 'working', text });
+    const intent = promptIntent(trimmed);
+    // "keep going until the login page works" names a goal of its own; "keep
+    // going until it's done" only resumes.
+    const ownGoal = persistIntent(trimmed) && !barePersistPhrase(trimmed);
+    const resumes = !ownGoal && (intent === 'resume' || intent === 'retry' || Boolean(armedNow));
+    const request = ownGoal || (!resumes && isSubstantive(trimmed)) ? trimmed : '';
+    const note = bandAtPrompt({ request, resumes, open: resumes ? openItem(state, input.cwd) : '', goal: resumes ? sessionGoal(state) : '' });
+    if (state) state.bandText = bandClip(note.text);
+    recordBand({ cwd: input.cwd, session: input.session_id, kind: note.kind, text: note.text });
+  } catch {}
+}
+
+// The router turned off in its settings says nothing and arms nothing, but the
+// Stop hook still writes the band at every Stop, so a prompt still leaves its
+// line: otherwise a question the user has just answered stays up through the
+// whole next turn. The same filters as a prompt with the router on (a notice
+// the host submits, a slash command); the session file is read and, when there
+// is one, the line's text is saved beside it, and none is made.
+function bandWhileOff(input, text) {
+  try {
+    const trimmed = text.replace(HOST_TAGS, ' ').trim();
+    if (syntheticPrompt(trimmed) || input.source === 'system' || !trimmed) return;
+    const state = loadSession(input.session_id);
+    recordBandAtPrompt(input, state || {}, trimmed);
+    if (state) saveSession(state);
   } catch {}
 }
 
@@ -316,9 +332,9 @@ function handlePrompt(input) {
   // A prompt of this session ends any pause recorded for it (lib/pause.mjs).
   // This hook already runs on every prompt, so nothing new is registered for it.
   try { clearPause(pauseRoot(input.cwd), input.session_id, 'prompt'); } catch {}
-  if (!routerSettings().enabled) return;
   const text = promptText(input);
   if (text == null) return;
+  if (!routerSettings().enabled) { bandWhileOff(input, text); return; }
   const state = loadSession(input.session_id) || newState(input);
   // A session recorded before this field existed has no startHead yet; fill
   // it in from whatever the repo's HEAD is now, the same as a brand-new one.
@@ -479,7 +495,7 @@ function handlePrompt(input) {
     state.persist = { ...rest, armed: true, armedAt: new Date().toISOString(), sizeAtArm: transcriptSize(input.transcript_path) };
     armedNow = true;
   }
-  if (state.muted) { bandAtPrompt(input, state, trimmed); saveSession(state); return; }
+  if (state.muted) { recordBandAtPrompt(input, state, trimmed, { armedNow }); saveSession(state); return; }
 
   const substantive = isSubstantive(trimmed);
 
@@ -692,7 +708,7 @@ function handlePrompt(input) {
   }
 
   if (substantive) state.prompts++;
-  bandAtPrompt(input, state, trimmed);
+  recordBandAtPrompt(input, state, trimmed, { armedNow });
   saveSession(state);
   maybePrune();
   emit('UserPromptSubmit', out.join('\n'));
@@ -742,9 +758,12 @@ function handleSessionStart(input) {
   // The working project is learned from touched paths since the last
   // compaction (context-check.mjs), so it is relearned after this one too.
   if (source === 'compact') { state.compactions = nextCompactions(state, input.transcript_path); state.work = null; }
-  // Write the plugin's own checkpoint before anything below names it, so the
-  // compacted line names the file whichever hook ran first — this one, or
-  // postcompact-check.mjs on the lead side. Idempotent and silent on error.
+  // Write the plugin's own checkpoint of the stretch just summarised before
+  // anything below names it, so the compacted line names the file whichever
+  // hook ran first — this one, or postcompact-check.mjs on the lead side. This
+  // hook runs before the host writes the summary's boundary (nextCompactions
+  // above), so the stretch is everything after the newest boundary on file
+  // (`pending`, lib/compaction-snapshot.mjs). Idempotent and silent on error.
   let snapshotPath = null;
   if (source === 'compact') {
     try {
@@ -752,6 +771,7 @@ function handleSessionStart(input) {
       snapshotPath = writeCompactionSnapshot({
         session: input.session_id, reading, transcriptPath: input.transcript_path,
         ctx: { runMd: ctx.run && ctx.run.runMd, runDir: ctx.run && ctx.run.dir, cwd: input.cwd },
+        pending: true,
       });
     } catch { snapshotPath = null; }
   }
@@ -768,14 +788,12 @@ function handleSessionStart(input) {
   } else if (source === 'compact') {
     // Name the file, never inject its text: one line naming the path is the
     // whole context cost of a compaction; the lead reads the file when it
-    // needs it. `latestCheckpointFor` finds whichever checkpoint is newest —
-    // the plugin's own snapshot just written, or one the lead wrote itself.
-    // The host writes the boundary record after this hook, so the newest
-    // boundary visible here can be the previous compaction's. The path is
-    // named only when it belongs to that boundary and was written in the last
-    // two minutes; otherwise the note is promised for the first action.
-    const cp = snapshotPath || latestCheckpointFor(input.session_id);
-    out.push(`[orchestrate · compacted] ${cp && checkpointIsFresh(cp, newestBoundaryId(input)) ? `checkpoint: ${cp}` : 'checkpoint note follows at first action'}`);
+    // needs it. The writer above returns the file for the stretch just
+    // summarised: the plugin's own, or one the lead wrote at that path. It is
+    // named only when it was written in the last two minutes, so a lead's file
+    // from long before the summary is not passed off as this one; otherwise
+    // the note is promised for the first action.
+    out.push(`[orchestrate · compacted] ${snapshotPath && writtenLately(snapshotPath) ? `checkpoint: ${snapshotPath}` : 'checkpoint note follows at first action'}`);
   } else if (ctx.candidates.length) {
     out.push(`[orchestrate · ${word}] no run is bound to this session. ${ctx.runHow}. Candidates: ${ctx.candidates.map(c => c.runMd).join(', ')}. Bind one before a dispatch writes through it.`);
   }

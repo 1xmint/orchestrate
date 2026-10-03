@@ -100,6 +100,39 @@ test('the band names a run\'s task by its words, never its ledger id', async () 
   }
 });
 
+// The checks above ran on a tidied sample; a run whose dated Pickup was newer
+// than its rows put the lead's own note on the band as written (whole-file
+// review). This reads the line from a run on disk, as the hooks do.
+test('the band\'s item from a real run is in plain words, a dated Pickup newer than the rows included', async () => {
+  const { openItem } = await import('./lib/band.mjs');
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const repo = mkdtempSync(join(tmpdir(), 'orch-plain-run-'));
+  mkdirSync(join(repo, '.git'));
+  const runDir = join(repo, '.orchestrator', 'runs', '20261003-x');
+  mkdirSync(runDir, { recursive: true });
+  const runMd = join(runDir, 'RUN.md');
+  writeFileSync(runMd, ['# Run', '', '## Goal', '', 'Ship it.', '', '## Tasks', '',
+    '| id | phase | role · model | task | acceptance evidence | attempts | result |', '|---|---|---|---|---|---|---|',
+    '| 10-3-0002 | 🔨 running | implementer · sonnet | add the export button | test | 1 | sent 2026-10-03 09:00 |', '',
+    '## Pickup', '', 'Pickup prompt: dispatch orch-reviewer on with the packet in returns/, then 0003 (2026-10-03 11:00)', ''].join('\n'));
+  const now = Date.parse('2026-10-03T12:00:00.000Z');
+  const text = openItem({ run: { root: repo, runMd, boundAt: new Date().toISOString() } }, repo);
+  const line = bandLine({ band: { session: 's', kind: 'working', text, at: new Date(now).toISOString() }, session: 's', now });
+  check('working on a run with a newer Pickup', line);
+  assert.doesNotMatch(line, /returns\/|\b0003\b|11:00/, `the lead's note is not the line: "${line}"`);
+  const dec = persistDecision({ rec: { lastItem: 'dispatch orch-reviewer on with the packet in returns/, then 0003', sameItem: 3 }, scan: scan(), next: { state: 'open', source: 'pickup', text: 'dispatch orch-reviewer on with the packet in returns/, then 0003' } });
+  check('the same step still open, from a Pickup', stopLine(dec));
+});
+
+test('every error the pause record can name is in plain words', async () => {
+  const { ERROR_WORDS } = await import('./lib/pause.mjs');
+  const now = Date.parse('2026-10-03T09:00:00.000Z');
+  for (const error of [...Object.keys(ERROR_WORDS), 'rate_limit', 'unknown', 'a_kind_nobody_has_seen']) {
+    for (const armed of [true, false]) check(`paused on ${error}`, bandLine({ pause: pauseRecord({ error, session: 's', now: new Date(now), armed }), session: 's', now }));
+  }
+});
+
 test('the status line footer is in plain words', () => {
   check('footer', footer({ model: 'Opus 5', contextPct: 34, fiveHour: { pct: 24, resetsAt: Math.floor(Date.now() / 1000) + 3600 }, week: { pct: 41 } }));
 });

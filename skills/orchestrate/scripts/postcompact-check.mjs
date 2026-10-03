@@ -15,10 +15,13 @@
 // returns.jsonl. ledger.mjs reads those rows back when the helper's return
 // lands, and turns them into one fact the lead sees.
 //
-// Lead-side PostCompact (no `agent_id`) writes the plugin's own checkpoint
-// from the transcript (lib/compaction-snapshot.mjs), the same file
-// context-advice.mjs's post-compaction ask already looks for — so the ask is
-// silent once this has run, and stays as the fallback when it has not.
+// Lead-side PostCompact (no `agent_id`) writes the plugin's own checkpoint of
+// the stretch just summarised, from the transcript (lib/compaction-snapshot.mjs
+// `pending`). The host calls this hook before it writes the summary's boundary
+// record (lib/helper-compaction.mjs), so that stretch is everything after the
+// newest boundary on file, and the payload's `trigger` (manual or auto) labels
+// it. The first context reading after the boundary lands writes the copy the
+// post-compaction ask looks for (lib/context-store.mjs).
 //
 // It never fails the compaction on its own errors; exit 0 always.
 
@@ -85,6 +88,7 @@ function main() {
       writeCompactionSnapshot({
         session: input.session_id, reading, transcriptPath: input.transcript_path,
         ctx: { runMd: run && run.runMd, runDir: run && run.dir },
+        pending: true, trigger: input.trigger,
       });
     } catch {}
     return;

@@ -2,8 +2,9 @@
 // never anything else. The band itself is a mod (hooks/band.mjs) that only
 // reads it; docs/band.md says what it shows and where each line comes from.
 //
-//   router.mjs         at a real prompt          -> working (the next open item, else the goal)
+//   router.mjs         at a real prompt           -> working (the request, a resumed item, or nothing named)
 //   persist-check.mjs  at a Stop, not in a helper -> working | needs | idle
+//   turn-check.mjs     at a Stop it refuses       -> working, held for that Stop
 //
 // The record is `<project root>/.orchestrator/band.json`, in the same folder as
 // the pause record and found the same way (`pauseRoot`), so the hooks that write
@@ -13,14 +14,14 @@
 // has done nothing in. Nothing here throws, and nothing here changes what a hook
 // prints or decides: a failed write is a silent skip.
 //
-// The pure half (the line, the record's shape, what a Stop leaves) is in
-// lib/band-line.mjs, which imports nothing so the mod can import it too.
+// The pure half (the line, the record's shape, what a prompt and a Stop leave)
+// is in lib/band-line.mjs, which imports nothing so the mod can import it too.
 
-import { existsSync, readFileSync } from './node.mjs';
+import { existsSync, readFileSync, createHash } from './node.mjs';
 import { join } from 'node:path';
-import { writeJsonAtomic, readTail } from './tier.mjs';
+import { writeJsonAtomic, readTail, withFileLock } from './tier.mjs';
 import { pauseRoot, ignoreStateFiles } from './pause.mjs';
-import { nextOpen } from './runs.mjs';
+import { nextOpen, boundRun } from './runs.mjs';
 import { readProject } from './project.mjs';
 import { lastQuestion } from './asked.mjs';
 import { lastAssistantText } from './commit-claim.mjs';
@@ -62,21 +63,62 @@ export function recordBand({ cwd, session = null, kind, text = '', now = new Dat
   } catch { return null; }
 }
 
+// One Stop, named the same way by both Stop hooks: they get the same payload.
+// The flag is part of it because the Stop after a refusal can close on the same
+// words, and it is a different Stop.
+export function stopKey(input) {
+  const i = input || {};
+  const parts = [i.session_id || null, i.transcript_path || null, typeof i.last_assistant_message === 'string' ? i.last_assistant_message : null, Boolean(i.stop_hook_active)];
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 16);
+}
+
+// How long a refusal's hold counts. Both Stop hooks have a five-second timeout
+// in hooks.json, so the other one has finished well inside this.
+export const HOLD_MS = 30000;
+
+// What a Stop leaves, written under the record's lock. The two Stop hooks run
+// side by side (one group in hooks.json, whose commands the host runs at once),
+// and either may refuse the Stop. One that refuses writes `working` with this
+// Stop's key as `hold` (turn-check.mjs); the other's write for the same Stop
+// (needs, idle, a wait) then leaves that line alone, in whichever order the two
+// ran, so a turn that goes on never shows "Needs you" or nothing. Returns the
+// record written, or null.
+export function recordStopBand({ cwd, session = null, kind, text = '', now = new Date(), since = null, hold = null, key = null } = {}) {
+  try {
+    const root = pauseRoot(cwd);
+    if (!root || !existsSync(join(root, '.orchestrator'))) return null;
+    return withFileLock(bandPath(root), () => {
+      if (!hold && key) {
+        const cur = readBand(root);
+        const same = cur && cur.kind === 'working' && cur.hold === key
+          && (cur.session == null ? null : String(cur.session)) === (session == null || session === '' ? null : String(session));
+        const age = cur ? Number(now) - Date.parse(cur.at) : NaN;
+        if (same && age >= -HOLD_MS && age <= HOLD_MS) return null;
+      }
+      const rec = bandRecord({ session, kind, text, now, since, hold });
+      return writeBand(root, rec) ? rec : null;
+    });
+  } catch { return null; }
+}
+
 // The next open item, from the run this session is bound to and the project
-// page; '' when there is none to name (nothing open, or every task done). The
-// page is looked for at the run's root, then the git root, then the payload's
-// folder, because the page sits at the repository root and a session may have
-// started below it.
+// page; '' when there is none to name (nothing open, or every task done). A
+// binding that no longer holds (the run closed, or stale: `boundRun`) names
+// nothing from that run. The run's Pickup is left out: it is the lead's note to
+// itself, not the user's words. The page is looked for at the run's root, then
+// the git root, then the payload's folder, because the page sits at the
+// repository root and a session may have started below it.
 export function openItem(state, cwd) {
   try {
-    const run = state && state.run;
+    const binding = state && state.run;
+    const run = boundRun(binding);
     let runText = '';
-    if (run && run.runMd) { try { runText = readFileSync(run.runMd, 'utf8'); } catch {} }
+    if (run) { try { runText = readFileSync(run.runMd, 'utf8'); } catch {} }
     let project = null;
-    for (const r of [run && run.root, pauseRoot(cwd), cwd]) {
+    for (const r of [binding && binding.root, pauseRoot(cwd), cwd]) {
       if (r) { project = readProject(r); if (project) break; }
     }
-    const n = nextOpen(runText, project);
+    const n = nextOpen(runText, project, { pickup: false });
     return n.state === 'open' && n.text ? withoutTaskIds(n.text) : '';
   } catch { return ''; }
 }
@@ -86,6 +128,18 @@ export function openItem(state, cwd) {
 export function sessionGoal(state) {
   const p = state && state.persist;
   return (p && p.armed && p.goal) || (state && state.goal) || '';
+}
+
+// What a turn that goes on past a refused Stop is about. With keep-going on,
+// the loop works toward the next open item, else the goal, re-read at each step.
+// Otherwise the turn is still the one the user's last prompt started: the text
+// that prompt put on the band (router.mjs keeps it as `bandText`), which is
+// nothing when the prompt asked for nothing new. Never a stored item the prompt
+// did not name.
+export function turnText(state, cwd) {
+  const p = state && state.persist;
+  if (p && p.armed) return openItem(state, cwd) || sessionGoal(state);
+  return state && typeof state.bandText === 'string' ? state.bandText : '';
 }
 
 // The question the turn closed on, or null. The Stop payload's own closing
