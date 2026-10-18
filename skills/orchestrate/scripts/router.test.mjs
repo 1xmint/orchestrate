@@ -884,7 +884,7 @@ test('a fresh session that says "continue" in the same folder gets the previous 
   seedSession(home, 'sess-prev', { cwd: repo, goal: 'add a --json flag to the status command', lastSeen });
   const out = prompt(home, repo, 'continue', { session_id: 'sess-new' });
   assert.match(out, /Your last session in this folder, 30 minutes ago, was working on: "add a --json flag to the status command"\./);
-  assert.match(out, /run `git status`/, 'no run and no checkpoint here, so the plain git-status clause');
+  assert.match(out, /`git status` lists them/, 'no run and no checkpoint here, so the plain git-status clause');
 });
 
 test('a fresh session that asks "where were we?" (with the question mark) also gets the previous goal', () => {

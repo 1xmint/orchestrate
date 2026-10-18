@@ -1,0 +1,9 @@
+{
+  "questions": [
+    {
+      "id": "late-fee-rule",
+      "match": "(late fees?|fees?|charge|per day|a day|each day)[^?]{0,400}\\?",
+      "answer": "Fifty cents for each day a book is late, starting the day after it is due. Nobody should owe more than 10 dollars on one book, so stop at $10.00."
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "claudeVersion": "0.0.0-synthetic",
+  "startedAt": "2000-01-01T00:00:00.000Z",
+  "durationSeconds": 100,
+  "costUsd": 1.5,
+  "partial": true,
+  "partialReason": "cost_ceiling",
+  "suite": { "ablation": "with-without", "concurrency": 2 },
+  "cases": [
+    {
+      "name": "alpha",
+      "runsPerCase": 3,
+      "timeoutSeconds": 60,
+      "maxTurns": 10,
+      "arms": {
+        "with": [
+          {
+            "score": 1, "passed": true, "turns": 4, "costUsd": 0.5, "judgeCostUsd": 0.01, "durationSeconds": 40, "error": null,
+            "tracePath": "/tmp/claude-eval-AAAA/out/trace.jsonl",
+            "graders": [
+              { "name": "claims-done", "passed": true },
+              { "name": "keeps-tests", "passed": true }
+            ]
+          },
+          {
+            "score": 0, "passed": false, "turns": 10, "costUsd": 0.7, "judgeCostUsd": 0.01, "durationSeconds": 60, "error": "timed out after 60s",
+            "tracePath": "/tmp/claude-eval-BBBB/out/trace.jsonl",
+            "graders": [
+              { "name": "claims-done", "passed": false },
+              { "name": "keeps-tests", "passed": false }
+            ]
+          }
+        ],
+        "without": [
+          {
+            "score": 0, "passed": false, "turns": 2, "costUsd": 0.1, "judgeCostUsd": 0, "durationSeconds": 5, "error": "usage limit reached",
+            "tracePath": "/tmp/claude-eval-CCCC/out/trace.jsonl",
+            "graders": []
+          },
+          {
+            "score": 1, "passed": true, "turns": 5, "costUsd": 0.3, "judgeCostUsd": 0.01, "durationSeconds": 30, "error": null,
+            "tracePath": "/tmp/claude-eval-DDDD/out/trace.jsonl",
+            "graders": [
+              { "name": "claims-done", "passed": true },
+              { "name": "keeps-tests", "passed": true }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

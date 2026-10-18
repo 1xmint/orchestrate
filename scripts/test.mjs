@@ -6,7 +6,8 @@
 // and hands the file list straight to `node --test`, no shell substitution.
 //
 //   node scripts/test.mjs         -> run every *.test.mjs under skills/ and
-//                                    evals/no-machinery.test.mjs
+//                                    evals/*.test.mjs, bench/*.test.mjs and
+//                                    bench/scenarios/*.test.mjs
 //   node scripts/test.mjs --help  -> print the file list and exit 0, run
 //                                    nothing (a dry check the drift test uses)
 
@@ -30,6 +31,17 @@ export function collectTestFiles(root = ROOT) {
   const files = walk(join(root, 'skills'));
   const noMachinery = join(root, 'evals', 'no-machinery.test.mjs');
   if (existsSync(noMachinery)) files.push(noMachinery);
+  // The eval and bench harness tests are offline and quota-free. Only the
+  // top level of each folder plus bench/scenarios: never bench-hidden/, and
+  // never the fixture files a case carries.
+  for (const sub of ['evals', 'bench', join('bench', 'scenarios')]) {
+    const dir = join(root, sub);
+    if (!existsSync(dir)) continue;
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      if (name.endsWith('.test.mjs') && statSync(p).isFile() && !files.includes(p)) files.push(p);
+    }
+  }
   return files.sort();
 }
 

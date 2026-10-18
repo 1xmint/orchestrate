@@ -80,7 +80,7 @@ const STATUS_QUESTION = /^(where are we|where('?s| is) (this|it|that)|what'?s (l
 // A build verb followed by another word means the prompt names a new goal,
 // even when it opens with a continue-word ("continue and add a login page").
 // This is the one signal that overrides an otherwise-matching lead phrase.
-const NEW_GOAL_VERB = /\b(build|add|make|fix|create|write|implement|change|remove|update|refactor)\b\s+\S/i;
+export const NEW_GOAL_VERB = /\b(build|add|make|fix|create|write|implement|change|remove|update|refactor)\b\s+\S/i;
 
 // True for a prompt that means "tell me what I was doing / keep doing it",
 // false the moment it also names a new goal. CONTINUE_WORD is the strict
@@ -113,16 +113,16 @@ export function latestCheckpointFor(sessionId) {
 // written, else that session's own checkpoint file, else plain `git status`.
 export function handoffLine(prev, ctx) {
   const ago = formatAgo(Date.now() - Date.parse(prev.lastSeen));
-  let tail = 'Uncommitted changes, if any, are what it left behind; run `git status` to see them, then carry on from there or say what you want instead.';
+  let tail = 'Uncommitted changes, if any, are what it left behind (`git status` lists them).';
   let runText = '';
   if (ctx && ctx.run && ctx.run.runMd) {
     try { runText = readFileSync(ctx.run.runMd, 'utf8'); } catch { runText = ''; }
   }
   if (runText && pickupWritten(pickupSection(runText))) {
-    tail = `The Pickup section of ${ctx.run.runMd} has what it left off at; open it, then carry on from there or say what you want instead.`;
+    tail = `The Pickup section of ${ctx.run.runMd} has what it left off at.`;
   } else {
     const cp = latestCheckpointFor(prev.session_id);
-    if (cp) tail = `${cp} has what it left off at; open it, then carry on from there or say what you want instead.`;
+    if (cp) tail = `${cp} has what it left off at.`;
   }
   return `Your last session in this folder, ${ago} ago, was working on: "${prev.goal}". ${tail}`;
 }

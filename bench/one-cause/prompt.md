@@ -1,0 +1,1 @@
+Our hours report app has three problems people keep sending me. On the file from the Windows machine the "open" count is always zero. The names list ends with a blank name. And the total hours sometimes says NaN. Can you fix all three? The tests must keep passing.

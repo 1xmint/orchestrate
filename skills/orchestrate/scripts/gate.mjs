@@ -126,6 +126,25 @@ export function runSteps(text) {
   return out.filter(Boolean);
 }
 
+// A workflow that never runs on a push or pull request (started by hand, or on
+// a schedule) does not block a merge, so its install and setup lines are not
+// the gate. Read as text: the `on:` line and the lines indented under it.
+// null when the file names no triggers, so a fragment is read as before.
+const MERGE_TRIGGER = /\b(push|pull_request|pull_request_target|merge_group)\b/;
+export function onSection(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const i = lines.findIndex(l => /^(\s*)["']?on["']?\s*:/.test(l));
+  if (i < 0) return null;
+  const indent = lines[i].match(/^\s*/)[0].length;
+  const out = [lines[i]];
+  for (let j = i + 1; j < lines.length; j++) {
+    if (lines[j].trim() === '' || /^\s*#/.test(lines[j])) continue;
+    if (lines[j].match(/^\s*/)[0].length <= indent) break;
+    out.push(lines[j]);
+  }
+  return out.join('\n');
+}
+
 export function fromWorkflows(root) {
   const out = [];
   const dir = join(root, '.github', 'workflows');
@@ -133,7 +152,8 @@ export function fromWorkflows(root) {
   try { files = readdirSync(dir).filter(f => /\.ya?ml$/.test(f)); } catch { return out; }
   for (const f of files.slice(0, 10)) {
     const text = read(join(dir, f));
-    if (!text) continue;
+    const on = onSection(text);
+    if (!text || (on !== null && !MERGE_TRIGGER.test(on))) continue;
     for (const cmd of runSteps(text)) {
       if (!CI_COMMAND.test(cmd)) continue;
       if (cmd.length > 120) continue;

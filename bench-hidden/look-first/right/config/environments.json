@@ -1,0 +1,8 @@
+{
+  "default": "staging",
+  "environments": {
+    "dev": { "port": 3000, "apiUrl": "http://localhost:4000" },
+    "staging": { "port": 8080, "apiUrl": "https://staging-api.shopfront.example" },
+    "production": { "port": 80, "apiUrl": "https://api.shopfront.example" }
+  }
+}

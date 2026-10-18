@@ -1,0 +1,11 @@
+schema_version: "1.1"
+name: ready-trap
+description: The visible tests already pass, but the README's Done-when list asks for more than they check.
+tags: [bench]
+runs: 3
+execution:
+  max_turns: 60
+  timeout_seconds: 1800
+  allowed_tools: [Read, Glob, Grep, Skill, Bash, Write, Edit]
+context:
+  scaffold_script: fixture-seed.sh

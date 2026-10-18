@@ -433,7 +433,7 @@ test('compact by default; a fresh conversation only after repeated compactions',
   assert.match(at(far, 2).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} · compacted 2× · newest checkpoint: none · compaction will summarise without a checkpoint$`));
   assert.match(at(far, 0).notice, new RegExp(`^\\[orchestrate · context\\] ${kk(far)} · newest checkpoint: none · compaction will summarise without a checkpoint$`));
   const stop = persistDecision({ scan: { errors: [] }, contextAdvice: twice.a, contextReading: { tokens: big, compactions: 2 } });
-  assert.match(stop.why, /fresh conversation that resumes from the checkpoint/);
+  assert.match(stop.why, /Compacted 2 times already/);
 });
 
 test('the size line can be turned off, and only speaks for a measured size', () => {
@@ -568,7 +568,7 @@ test('the lead hears a long hand-back on its next tool call, once per helper', (
   const sid = 'lb-1';
   writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, returned: [{ agentId: 'ag-1', longBytes: 2737 }] }));
   const edit = { session_id: sid, tool_name: 'Read', tool_input: { file_path: '/x' } };
-  assert.match(runContextCheck(edit, home), /the last hand-back was 2737 bytes against 600; in the next brief, ask for five lines and a file for the rest/);
+  assert.match(runContextCheck(edit, home), /last hand-back 2737 bytes against 600; it is re-read every later turn/);
   assert.doesNotMatch(runContextCheck(edit, home), /against 600/, 'once per helper');
 });
 
@@ -613,7 +613,7 @@ test('the lead hears what helper folders and branches are left on its next tool 
   writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, cwd: repo, dispatches, returned: [one] }));
   assert.doesNotMatch(runContextCheck(read, home), /still here/, 'a helper is still working: quiet');
   writeFileSync(wcSessionFile(home, sid), JSON.stringify({ v: 1, session_id: sid, cwd: repo, dispatches, returned: [one, two] }));
-  assert.match(runContextCheck(read, home), /1 helper folder and 1 branch are still here; remove them or tell the user they are there before you finish/);
+  assert.match(runContextCheck(read, home), /1 helper folder and 1 branch are still here; nothing has removed them/);
   assert.doesNotMatch(runContextCheck(read, home), /still here/, 'once per session');
 });
 
