@@ -2,6 +2,14 @@
 
 Resume point for building the `orchestrate` skill.
 
+**Frozen 2026-10-17.** The bench came out level with plain Claude at about
+1.36x the cost, and the extra cost came from always-on instruction size. It is
+replaced by one shared instruction file, `~/.codex/AGENTS.md`, which Claude
+Code also reads through `~/.claude/CLAUDE.md`, plus an AGENTS.md and STATE.md
+in each repo. The plugin stays disabled. The research below and the
+`phase/0009-bench` branch are kept for reference. Don't resume without a new
+decision here.
+
 **In progress: 0009 — measure against plain Claude before changing,
 2026-10-01.** Plan: `docs/research/0010-master-plan.md` (revision 4, approved
 2026-10-03; it builds on `docs/research/0009-plan.md` revision 2 and wins
