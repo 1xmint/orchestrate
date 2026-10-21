@@ -13,7 +13,7 @@
 // ('first-request', labelled as not confirmed). Nothing at all is null.
 // Nothing here throws.
 
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from './node.mjs';
 import { join } from 'node:path';
 import { sectionExcerpt } from './resume.mjs';
 import { loadSession } from './tier.mjs';

@@ -29,10 +29,32 @@ jobs:
       - name: Run the offline test suite
         run: node scripts/test.mjs
 
+  # The band's mod (hooks/band.mjs) is read by Claude Code before it loads: a
+  # module that imports a Node module, or spells a call any way but
+  # $.<namespace>.<method>, or is a second one in the plugin, is refused at load.
+  # Node cannot see those rules, so this installs the Claude Code the bench pins
+  # and asks it. It needs no sign-in and sends nothing (docs/band.md, "Checks").
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code at the version the bench pins
+        # No run line starts with npm: orchestrate reads such a line in any
+        # workflow as this repo's build check (see bench.yml).
+        run: cd "$RUNNER_TEMP" && npm i -g @anthropic-ai/claude-code@2.1.286
+      - name: Validate the plugin, its hooks and its mod
+        run: claude plugin validate .claude-plugin/plugin.json
+      - name: Validate the marketplace
+        run: claude plugin validate .
+
   # A single context to require in branch protection, green only when every Node
-  # version above passed. Requiring one gate is simpler than requiring each leg.
+  # version above passed and the plugin validated. Requiring one gate is simpler
+  # than requiring each leg.
   ci-ok:
-    needs: test
+    needs: [test, validate]
     runs-on: ubuntu-latest
     steps:
       - run: echo "all test legs passed"

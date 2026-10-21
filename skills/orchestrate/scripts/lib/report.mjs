@@ -8,7 +8,7 @@
 // case to PARTIAL; nothing here writes anything or corrects the text — a
 // missing field is reported, never invented.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync } from './node.mjs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { taskIdIn } from './task-id.mjs';

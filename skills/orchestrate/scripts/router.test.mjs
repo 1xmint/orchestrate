@@ -530,6 +530,42 @@ test('SessionStart compact with no bound run names the checkpoint file, not its 
   assert.ok(!out.includes('checkpoint text checkpoint text'), 'never injects the file\'s own text');
 });
 
+// This hook runs before the host writes the summary's boundary record
+// (nextCompactions above). The checkpoint it writes and names is of the stretch
+// just summarised: everything after the newest boundary on file. It used to
+// write nothing at the first summary and, at the second, name a file of the
+// stretch before the first (whole-file review).
+test('the compacted line names a checkpoint of the stretch just summarised, in the order the host runs it', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const sid = 's-cp-order';
+  const t = join(mkdtempSync(join(tmpdir(), 'orch-cp-order-')), 'session.jsonl');
+  const L = o => JSON.stringify(o) + '\n';
+  const edit = (id, path) => L({ type: 'assistant', message: { id, model: 'claude-sonnet-5', content: [{ type: 'tool_use', id: `tu-${id}`, name: 'Edit', input: { file_path: path } }] } });
+  const records = [L({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'fix the widget' } }), edit('a1', '/r/widget.js')];
+  const hook = () => run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo, transcript_path: t });
+  const named = out => (/\[orchestrate · compacted\] checkpoint: (\S+)/.exec(out) || [])[1] || null;
+
+  writeFileSync(t, records.join(''));
+  const first = named(hook());
+  assert.ok(first, 'the first summary names a checkpoint');
+  const one = readFileSync(first, 'utf8');
+  assert.match(one, /at compaction 1\b/);
+  assert.match(one, /widget\.js/);
+
+  records.push(
+    L({ type: 'system', subtype: 'compact_boundary', uuid: 'b1', timestamp: new Date().toISOString(), compactMetadata: { trigger: 'auto' } }),
+    L({ type: 'user', timestamp: new Date().toISOString(), message: { role: 'user', content: 'now the gadget' } }),
+    edit('a2', '/r/gadget.js'),
+  );
+  writeFileSync(t, records.join(''));
+  const second = named(hook());
+  assert.ok(second && second !== first, 'the second summary names another file');
+  const two = readFileSync(second, 'utf8');
+  assert.match(two, /at compaction 2\b/);
+  assert.match(two, /Last message before compaction: now the gadget/);
+  assert.doesNotMatch(two, /widget\.js/, 'not the stretch before the first summary');
+});
+
 test('the compacted line names no checkpoint that is old or has no boundary to belong to', () => {
   const stale = (file, mtimeAgoMs, uuid) => {
     const home = makeHome(); const repo = makeRepo(false);
@@ -1097,4 +1133,24 @@ test("a helper's compaction leaves the lead's working project in place", () => {
   writeFileSync(join(sub, 'agent-a1.jsonl'), JSON.stringify({ type: 'system', subtype: 'compact_boundary', uuid: 'h1', timestamp: new Date(Date.now() - 500).toISOString() }) + '\n');
   run(home, { hook_event_name: 'SessionStart', source: 'compact', session_id: sid, cwd: repo, transcript_path: t });
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).work, join(repo, 'app'), "the helper's compaction kept the lead's working project");
+});
+
+// Decision 2c (2026-10-03): the same product question went to the owner three
+// times unchanged in the record. The router counts a question left open and
+// says so from the second time, with the replies, so the count survives a
+// summary; the card says what to do about it.
+test('the same question left open twice is stated, with the replies', () => {
+  const home = makeHome(); const repo = makeRepo(false);
+  const tr = join(repo, 'asked.jsonl');
+  const ask = text => writeFileSync(tr, JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) + '\n');
+  prompt(home, repo, 'build the reminder feature for the bakery app', { session_id: 's-ask', transcript_path: tr });
+  ask('The reminders work. Do you want email or SMS for them?');
+  const first = prompt(home, repo, 'continue', { session_id: 's-ask', transcript_path: tr });
+  assert.doesNotMatch(first, /orchestrate · question/, 'once is not yet a pattern');
+  ask('Still open before I wire it: Do you want email or SMS for them?');
+  const second = prompt(home, repo, 'keep going', { session_id: 's-ask', transcript_path: tr });
+  assert.match(second, /\[orchestrate · question\] This question has gone out 2 times unchanged; the replies were "continue", "keep going": "Do you want email or SMS for them\?"/);
+  ask('Do you want email or SMS for them?');
+  const answered = prompt(home, repo, 'email is fine', { session_id: 's-ask', transcript_path: tr });
+  assert.doesNotMatch(answered, /orchestrate · question/, 'an answer clears it');
 });

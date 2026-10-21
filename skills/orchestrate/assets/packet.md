@@ -67,7 +67,7 @@ PATTERNS: <path to an existing example of the shape wanted>
 SKILLS: <invoke `/name` through the Skill tool for step N, because it already
        does that procedure>
 REVIEW QUESTIONS: <the reviewer's ACCEPTANCE list, verbatim>  when the work
-       owes a review (SKILL.md §6): a planner answers each in the design; a
+       owes a review (SKILL.md, Independent review): a planner answers each in the design; a
        builder makes each a DONE WHEN line, naming the test or code answering it
 STOP AND REPORT: <a condition meaning the packet was wrong or the world differs
        from CONTEXT>              always implied: a credential, payment,

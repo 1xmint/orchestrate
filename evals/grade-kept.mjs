@@ -76,7 +76,11 @@ const realFs = {
 export function evalRootOf(tracePath, fs = realFs) {
   const parts = slash(tracePath).split('/').filter((s, i) => s !== '' || i === 0);
   const dirs = [];
-  for (let n = parts.length - 1; n >= 1; n--) dirs.push(parts.slice(0, n).join('/') || '/');
+  // The filesystem root is never an eval root. `/home` exists on every Linux
+  // machine, so when the eval's temp folder was gone the root passed the check
+  // below, and the scorer graded whatever folder sat first under /home as the
+  // run's work folder: the missing folder never showed as missing.
+  for (let n = parts.length - 1; n >= 1; n--) { const d = parts.slice(0, n).join('/') || '/'; if (d !== '/') dirs.push(d); }
   // dirs[0] is the trace's folder, dirs[1] its parent, and so on.
   for (const d of dirs.slice(0, 4)) if (fs.isDir(`${d}/home`) || fs.isDir(`${d}/config`)) return d;
   return dirs[1] || dirs[0] || null;
@@ -155,13 +159,23 @@ export function readMust(caseHiddenDir) {
 
 // Run each hidden test against a copy of the finished workspace. Pass means
 // `node --test <file>` exits 0. Combine with the deciding graders' verdicts.
+//
+// `failure` is why there was nothing to grade, or null. A work folder that is
+// missing or empty is a failed run, not a machine fault: bench/RULE.md "Failure"
+// counts its cost, and it must never read as a success, whatever the judges say.
+// It used to be a note, which let the pilot's first run read as a clean job
+// when the folder had most likely never reached the scorer.
 export function runHidden(workspace, caseHiddenDir, graders = {}) {
   const must = (caseHiddenDir && readMust(caseHiddenDir)) || { hidden: [], graders: null, timeoutSeconds: 120 };
   const deciding = must.graders || Object.keys(graders).filter(n => !REPORT_ONLY.includes(n));
   const graderVerdicts = Object.fromEntries(deciding.map(n => [n, graders[n] === true]));
-  const out = { tests: [], graders: graderVerdicts, hiddenPass: false, correct: false, note: null };
-  if (!workspace || !existsSync(workspace)) {
-    out.note = 'no workspace';
+  const out = { tests: [], graders: graderVerdicts, hiddenPass: false, correct: false, failure: null };
+  if (!workspace || !realFs.isDir(workspace)) {
+    out.failure = 'the work folder is missing';
+    return out;
+  }
+  if (realFs.list(workspace).length === 0) {
+    out.failure = 'the work folder is empty';
     return out;
   }
   const tmp = mkdtempSync(join(tmpdir(), 'bench-ws-'));
@@ -268,42 +282,74 @@ export function table(rows) {
     L.push('', 'Voided (machine faults, not counted):');
     for (const r of voided) L.push(`- ${r.arm} / ${r.case} / run ${r.index + 1}: ${r.voidReason}`);
   }
+  // A voided run's folder does not matter, so only valid runs are listed here.
+  const nothing = rows.filter(r => r.valid !== false && r.failure);
+  if (nothing.length) {
+    L.push('', 'Failed with nothing to grade (counted as failures, cost included):');
+    for (const r of nothing) L.push(`- ${r.arm} / ${r.case} / run ${r.index + 1}: ${r.failure}`);
+  }
   return L.join('\n') + '\n';
 }
 
 // ----------------------------------------------------------------- verdict
+
+// The first column of the outcome table in bench/RULE.md (added 2026-10-03), in
+// table order. verdict() names the row a result lands on by its place here, so
+// the words in the verdict are the words written in the rule; a test holds
+// these to the rule's table.
+export const OUTCOME_ROWS = [
+  'Fails a gate, or finishes fewer tasks in total',
+  'One task finishes fewer',
+  'Gates and finishes no worse; cost per finished task 1.15x or more',
+  'Gates and finishes no worse; cost between 0.85x and 1.15x',
+  'Two or more finishes more, or cost at or under 0.85x with no fewer finishes',
+  "Any row, with the candidate's middle time per finished task more than 1.25x plain Claude's",
+];
+
+// The rows a verdict landed on, in words, or why none did.
+export function rowsPhrase(v) {
+  if (!v.rows.length) return 'no row of the outcome table applies (cost per finished task cannot be worked out), so the Inconclusive rule decides';
+  return v.rows.map(n => `row ${n} of the outcome table, "${OUTCOME_ROWS[n - 1]}"`).join('; and ');
+}
 
 // RULE.md's decision order, exactly. `incumbent` and `candidate` are one arm's
 // summary from summarize(). Pass { confirmed: true } on the second look, when
 // the extra runs on a short case are already in the summaries: a case that is
 // still short then loses. Pass { safetyStopRemoved: true } if the change
 // removes guard-bash or a stop-and-ask rule (a fact only a reader can supply).
+//
+// `rows` lists the rows of RULE.md's outcome table the result lands on (1 to 6,
+// as OUTCOME_ROWS): the row for how the order ended, and row 6 as well when
+// step 4 asks for a written reason for the time. It is empty only when no cost
+// per success can be worked out (an arm finished nothing), which the table has
+// no row for. Naming a row does not change how the order decides.
 export function verdict(incumbent, candidate, { confirmed = false, safetyStopRemoved = false } = {}) {
   const reasons = [];
-  const loss = why => ({ result: 'clear-loss', reasons: [...reasons, why], needsConfirmation: [], needsReason: false });
+  const loss = (why, row) => ({ result: 'clear-loss', reasons: [...reasons, why], needsConfirmation: [], needsReason: false, rows: [row] });
 
   // 1. Gates.
-  if (candidate.falseDone > incumbent.falseDone) return loss(`gate: false "done" ${candidate.falseDone} vs ${incumbent.falseDone}`);
-  if (safetyStopRemoved) return loss('gate: removes a safety stop');
+  if (candidate.falseDone > incumbent.falseDone) return loss(`gate: false "done" ${candidate.falseDone} vs ${incumbent.falseDone}`, 1);
+  if (safetyStopRemoved) return loss('gate: removes a safety stop', 1);
   reasons.push('gates pass');
 
   // 2. Successes.
-  if (candidate.successes < incumbent.successes) return loss(`successes: ${candidate.successes} vs ${incumbent.successes}`);
+  if (candidate.successes < incumbent.successes) return loss(`successes: ${candidate.successes} vs ${incumbent.successes}`, 1);
   const short = Object.keys(incumbent.cases || {}).filter(c => ((candidate.cases || {})[c] || { successes: 0 }).successes < incumbent.cases[c].successes);
-  if (short.length && confirmed) return loss(`successes: still short after extra runs on ${short.join(', ')}`);
+  if (short.length && confirmed) return loss(`successes: still short after extra runs on ${short.join(', ')}`, 1);
   if (short.length) {
     reasons.push(`case shortfall on ${short.join(', ')}: both arms get 3 more runs there`);
-    return { result: 'inconclusive', reasons, needsConfirmation: short, needsReason: false };
+    return { result: 'inconclusive', reasons, needsConfirmation: short, needsReason: false, rows: [2] };
   }
   reasons.push(`successes ${candidate.successes} vs ${incumbent.successes}`);
 
   // 3. Cost per success.
   let costWin = false;
+  let inBand = false;
   if (incumbent.perSuccess != null && candidate.perSuccess != null && incumbent.perSuccess > 0) {
     const ratio = candidate.perSuccess / incumbent.perSuccess;
-    if (ratio >= 1.15) return loss(`cost per success ${ratio.toFixed(2)}x`);
+    if (ratio >= 1.15) return loss(`cost per success ${ratio.toFixed(2)}x`, 3);
     if (ratio <= 0.85) { costWin = true; reasons.push(`cost per success ${ratio.toFixed(2)}x`); }
-    else reasons.push(`cost per success ${ratio.toFixed(2)}x, inside the band`);
+    else { inBand = true; reasons.push(`cost per success ${ratio.toFixed(2)}x, inside the band`); }
   } else reasons.push('cost per success not comparable (an arm has no successes)');
 
   // 4. Time.
@@ -314,8 +360,9 @@ export function verdict(incumbent, candidate, { confirmed = false, safetyStopRem
   }
 
   const more = candidate.successes - incumbent.successes;
-  if (more >= 2 || costWin) return { result: 'clear-win', reasons, needsConfirmation: [], needsReason };
-  return { result: 'inconclusive', reasons, needsConfirmation: [], needsReason };
+  const win = more >= 2 || costWin;
+  const rows = [...(win ? [5] : inBand ? [4] : []), ...(needsReason ? [6] : [])];
+  return { result: win ? 'clear-win' : 'inconclusive', reasons, needsConfirmation: [], needsReason, rows };
 }
 
 // ----------------------------------------------------------------- combine
@@ -347,7 +394,7 @@ export function combine(rowSets, { incumbent, candidate, confirmed = false, safe
   const v = missing.length ? null : verdict(s[incumbent], s[candidate], { confirmed, safetyStopRemoved });
   const L = [`# Bench verdict: ${candidate} against ${incumbent}`, ''];
   if (v) {
-    L.push(`**${v.result}**`, '', ...v.reasons.map(r => `- ${r}`));
+    L.push(`**${v.result}**`, '', ...v.reasons.map(r => `- ${r}`), `- ${rowsPhrase(v)} (bench/RULE.md)`);
     if (v.needsConfirmation.length) L.push(`- next: 3 more runs for both arms on ${v.needsConfirmation.join(', ')}, then combine with --confirmed`);
     if (v.needsReason) L.push('- a written reason for the slower time is needed before it ships');
   } else L.push(`No verdict: no rows for ${missing.join(' and ')}.`);
@@ -355,7 +402,7 @@ export function combine(rowSets, { incumbent, candidate, confirmed = false, safe
     L.push('', 'Against no plugin (reported, not deciding):');
     for (const a of Object.keys(s).filter(a => a !== NO_PLUGIN)) {
       const w = verdict(s[NO_PLUGIN], s[a]);
-      L.push(`- ${a}: ${w.result}; ${w.reasons.join('; ')}`);
+      L.push(`- ${a}: ${w.result}; ${w.reasons.join('; ')}; ${rowsPhrase(w)}`);
     }
   }
   L.push('', table(rows));
@@ -372,9 +419,9 @@ export function gradeAggregate(aggregate, { hiddenDir, arm }) {
     const v = validity(r, traceText);
     const ws = workspaceOf(r.tracePath);
     const x = execUsd(r.tracePath || '');
-    let h = { tests: [], graders: {}, hiddenPass: false, correct: false, note: null };
+    let h = { tests: [], graders: {}, hiddenPass: false, correct: false, failure: null };
     if (!r.unstarted) h = runHidden(ws, hiddenDir ? join(hiddenDir, r.case) : null, r.graders);
-    const row = { ...r, valid: v.valid, voidReason: v.reason || null, workspace: ws, hidden: h.tests, deciding: h.graders, hiddenPass: h.hiddenPass, correct: h.correct, note: h.note, execUsd: x.dollars, unpriced: x.unpriced };
+    const row = { ...r, valid: v.valid, voidReason: v.reason || null, workspace: ws, hidden: h.tests, deciding: h.graders, hiddenPass: h.hiddenPass, correct: h.correct, failure: h.failure, execUsd: x.dollars, unpriced: x.unpriced };
     row.falseDone = falseDone(row);
     return row;
   });

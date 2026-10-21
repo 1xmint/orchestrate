@@ -2,7 +2,7 @@
 // guard-agent.mjs. No network, no child processes.
 
 import { priceTag, priceTagPair, estimateDollars, normalizeRole } from './prices.mjs';
-import { readJson, detectTier, PROFILE_PATH, sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer } from './tier.mjs';
+import { sessionRun, findRepoRoot, runsUnder, openRunsUnder, activeRunPointer } from './tier.mjs';
 import { readCosts } from '../ledger.mjs';
 import { roleModel } from './workers.mjs';
 
@@ -28,16 +28,16 @@ export function effectiveModel(ti) {
 // asked to change.
 // `pair`: true only for the first orch-implementer dispatch of a session with
 // no run ledger open (guard-agent.mjs decides that; this just prints the
-// extra figure when told to).
-export function tagFor(ti, { pair = false } = {}) {
+// extra figure when told to). `rows`: the cost history, when the caller has
+// already read it. The plan and the profile are not read: the tag does not
+// use them, and reading the plan parses ~/.claude.json, which can be megabytes.
+export function tagFor(ti, { pair = false, rows = null } = {}) {
   try {
     const role = String(ti.subagent_type || 'claude');
     const model = effectiveModel(ti);
     if (!model) return '';
-    const rows = readCosts();
-    const t = detectTier().tier;
-    const profile = readJson(PROFILE_PATH);
-    return pair ? priceTagPair(role, model, rows, t, profile) : priceTag(role, model, rows, t, profile);
+    const r = rows || readCosts();
+    return pair ? priceTagPair(role, model, r) : priceTag(role, model, r);
   } catch { return ''; }
 }
 
@@ -90,14 +90,24 @@ export function overCeiling(already, est, ceiling) {
     : null;
 }
 
-// Would this dispatch push the run past its budget ceiling? Null when there is
-// nothing to gate on: no model named (so no price), no run resolved, or no
-// ceiling set. Otherwise the numbers the deny reason needs.
-export function budgetDecision(input, ti, run = resolveRunObj(input, ti, { forBudget: true })) {
-  const model = String(ti.model || '');
-  if (!model) return null;
+// Would this dispatch push the run past its budget ceiling? Priced on the model
+// it will actually run on (effectiveModel): an orch-* role that names none runs
+// on its own file's model, and skipping it let a builder or a coordinator past
+// a ceiling a named one was refused at. Null when there is nothing to gate on:
+// no run resolved, no ceiling set, or a dispatch that fits under it. A dispatch
+// nobody can price (a role or model with no figure) is refused only once the
+// run has already reached its ceiling, since then any helper crosses it.
+// Otherwise the numbers the deny reason needs; `est` is null when unpriced.
+export function budgetDecision(input, ti, run = resolveRunObj(input, ti, { forBudget: true }), rows = null) {
   if (!run || !run.budget || run.budget.ceiling == null) return null;
-  const est = estimateDollars(String(ti.subagent_type || 'claude'), model, readCosts());
-  const over = overCeiling(Number(run.spend) || 0, est, run.budget.ceiling);
-  return over ? { runId: run.runId, ...over } : null;
+  const model = effectiveModel(ti);
+  const est = model ? estimateDollars(String(ti.subagent_type || 'claude'), model, rows || readCosts()) : null;
+  const already = Number(run.spend) || 0;
+  if (est == null) {
+    return already >= run.budget.ceiling
+      ? { runId: run.runId, model, already: round2(already), est: null, total: round2(already), ceiling: run.budget.ceiling }
+      : null;
+  }
+  const over = overCeiling(already, est, run.budget.ceiling);
+  return over ? { runId: run.runId, model, ...over } : null;
 }

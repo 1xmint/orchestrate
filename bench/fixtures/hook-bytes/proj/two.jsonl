@@ -2,3 +2,4 @@
 {"type":"attachment","uuid":"a1","sessionId":"s2","attachment":{"type":"hook_additional_context","hookEvent":"PostToolUse","content":["[orchestrate · size] SECRETWORD aaaa"]}}
 {"type":"attachment","uuid":"b2","attachment":{"type":"hook_additional_context","content":["orchestrate guard: no PROGRESS SECRETWORD"]}}
 {"type":"attachment","uuid":"b3","attachment":{"type":"skill_listing","content":"- orchestrate: skill SECRETWORD"}}
+{"type":"user","uuid":"a5","isMeta":true,"message":{"role":"user","content":"Stop hook feedback:\norchestrate: \"SECRETWORD goal\" · next open item: finish b"}}

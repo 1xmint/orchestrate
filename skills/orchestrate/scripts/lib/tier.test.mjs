@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { isWritten, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, seenRecently, recordSeen, trimLog, isUnderRoot } from './tier.mjs';
+import { isWritten, selfModel, shortModel, strongerThan, applyLimits, mapTier, today, sanitizeId, seenRecently, recordSeen, trimLog, isUnderRoot, writtenLine, putEntry } from './tier.mjs';
 
 // ---- append-only seen-log (R4: dispatch-events.json under concurrent writers) --
 
@@ -145,4 +145,41 @@ test('dates are local, and ids are safe to use as filenames', () => {
   assert.equal(mapTier('MAX'), 'max5', 'unversioned max is assumed to be the smaller one');
   assert.equal(mapTier('anything else'), null);
   assert.equal(sanitizeId('a/b\\c:d'), 'a_b_c_d');
+});
+
+// ---- writtenLine: a line someone wrote, not the run template's own ----------
+
+test('writtenLine refuses the run template\'s own lines and keeps real ones', () => {
+  // The template's lines (review of the hook fixes, 2026-10-03): a "continue"
+  // armed toward these words when they counted as written.
+  for (const t of [
+    '', '   ', '- <evidence that would prove it, one line each; a command, a file, a page state>',
+    'Why it matters: <what the user gets when it is done>', '<~N fresh sessions>',
+    'When it ends, met or dropped: say which and why', '{{GOAL}}', 'Goal: {{GOAL}}',
+    'Pickup confidence: high | medium | low', 'Resume risk: none | mild | serious', 'Why it matters:',
+    'Why it matters: <What the user gets>', 'Done when: <TODO fill in>', 'Sessions: <N>',
+  ]) assert.equal(writtenLine(t), false, JSON.stringify(t));
+  for (const t of [
+    '- `pytest -q` passes', 'Why it matters: notes stop piling up',
+    'Run `rg TODO | wc -l` and get 0', 'The page renders <Header /> with the new logo',
+    'Spec: <https://example.com/spec>', '1. the export button downloads a CSV',
+    'Check: `a | b` prints ok', 'Either the build passes or we roll back | noted in STATE.md as the plan',
+    'Check: npm test | grep pass', 'Verify: ls dist | wc -l', 'Status: open | done',
+    'Shows: <Header />', 'Renders: <Button onClick={go}>',
+  ]) assert.equal(writtenLine(t), true, JSON.stringify(t));
+});
+
+// ---- putEntry: one session's entry in a file shared by every session -------
+
+test('putEntry sets one entry, keeps the others, and keeps only the newest when the file is full', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-store-'));
+  const path = join(dir, 'persist-checks.json');
+  writeFileSync(path, JSON.stringify({ old: { steps: 1, checkedAt: '2026-01-01T00:00:00.000Z' }, older: { steps: 2 }, mid: { steps: 3, t: Date.now() - 1000 } }));
+  putEntry(path, 'mine', { steps: 4 }, 3);
+  const s = JSON.parse(readFileSync(path, 'utf8'));
+  assert.deepEqual(Object.keys(s).sort(), ['mid', 'mine', 'old'], 'the entry with no time at all goes first');
+  assert.equal(s.mine.steps, 4);
+  assert.ok(Number.isFinite(s.mine.t), 'stamped, so it is kept over older entries');
+  putEntry(path, 'mid', { steps: 5 }, 3);
+  assert.equal(JSON.parse(readFileSync(path, 'utf8')).mid.steps, 5, 'an existing entry is replaced in place');
 });

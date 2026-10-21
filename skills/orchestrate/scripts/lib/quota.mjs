@@ -7,7 +7,7 @@
 // that usage stood still.
 
 import { join } from 'node:path';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync } from './node.mjs';
 import { DIR, readJson, currentAccount, readTail } from './tier.mjs';
 
 export const QUOTA_PATH = join(DIR, 'quota.json');
@@ -17,10 +17,11 @@ export const QUOTA_FRESH_MS = 10 * 60 * 1000;
 // gets cut off mid-edit, and the host's own auto-continue resumes after reset.
 export const HELPER_STOP_FIVE_HOUR = 80;
 export const HELPER_STOP_WEEK = 90;
-// Stop auto-continuing the lead here.
-export const PERSIST_STOP_FIVE_HOUR = 90;
 // Say "go serial and cheap" from here.
 export const CAUTION_FIVE_HOUR = 60;
+// No line here stops the lead's keep-going: where the host waits and resumes at
+// a limit, that stop turned the loop off just before the host's own resume
+// (docs/pause.md). A helper refused at the lines above is a fact it states.
 
 const win = w => w && Number.isFinite(Number(w.used_percentage))
   ? { pct: Number(w.used_percentage), resetsAt: Number(w.resets_at) || null }

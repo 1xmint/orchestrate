@@ -104,7 +104,8 @@ test('budgetDecision denies over the ceiling, passes under it, and passes with n
   assert.equal(budgetDecision(input, ti, under), null);
   const noCeiling = { runId: '20260910-x', budget: { ceiling: null }, spend: 0 };
   assert.equal(budgetDecision(input, ti, noCeiling), null);
-  assert.equal(budgetDecision(input, { subagent_type: 'x', model: '', prompt: '' }, over), null, 'no model named, no gate');
+  assert.equal(budgetDecision(input, { subagent_type: 'x', model: '', prompt: '' }, over), null, 'a dispatch nobody can price passes while the run is under its ceiling');
+  assert.ok(budgetDecision(input, { subagent_type: 'orch-implementer', prompt: 'TASK: 9-9-0009' }, over), 'a role that names no model is priced on its own file\'s model');
 });
 
 // Proof on the real ledger this whole effort came from: the run that cost ~20%

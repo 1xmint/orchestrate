@@ -40,7 +40,8 @@ export function persistIntent(text) {
 // work by hand about twelve times with "continue", "resume" or "try again" and
 // none of those armed keep-going.
 //   status  whats left, where are we, status: never arms, "?" or not.
-//   resume  continue, resume, carry on, pick up, go on, keep going: arms only
+//   resume  continue, resume, carry on, pick up, go on, keep going, and
+//           "proceed" or "go ahead" as the whole reply: arms only
 //           when the router's gate finds an open run (see router.mjs).
 //   retry   try again: restores keep-going only if it was on before the stop.
 // A resume or retry is 12 words or fewer, names no new goal, and has no word
@@ -48,13 +49,25 @@ export function persistIntent(text) {
 const STATUS_WORDS = /^(what'?s left|whats left|where are we|status)$/i;
 const RESUME_WORDS = /\b(continue|resume|carry on|pick up|go on|keep going)\b/i;
 const RETRY_WORDS = /\btry again\b/i;
-const HOLD_BACK = /\b(don'?t|do not|stop|wait|hold|pause|no)\b/i;
+const HOLD_BACK = /\b(don'?t|do not|stop|wait|hold|pause|no|not|never|before|yet|cancel|won'?t|can'?t|doesn'?t|didn'?t)\b/i;
+
+// "proceed" and "go ahead" are how a plan is most often approved. They are a
+// resume only as the whole reply ("ok, go ahead", "proceed with the plan"):
+// "go ahead and push to main" names a new step, "why did you go ahead?" is a
+// question, and "I will go ahead and test it myself" is not an approval
+// (independent review, round 8). An approval also answers a question the lead
+// asked, which "continue" does not (lib/asked.mjs).
+const APPROVE = /^(?:(?:yes|yeah|yep|ok|okay|sure|please|alright|great|fine|good|cool|then|so|perfect|sounds good|looks good|lgtm)[,!.]?\s+)*(?:proceed|go ahead)(?:\s+(?:with (?:it|that|this|the plan|the next (?:step|task|one))|then|now|please))?$/i;
+export function approves(text) {
+  return APPROVE.test(String(text || '').trim().replace(/[.!\s]+$/, ''));
+}
 const RESUME_MAX_WORDS = 12;
 
 export function promptIntent(text) {
   const t = String(text || '').trim().replace(/[.!?\s]+$/, '').trim();
   if (!t) return null;
   if (STATUS_WORDS.test(t)) return 'status';
+  if (approves(text)) return 'resume';
   if (t.split(/\s+/).length > RESUME_MAX_WORDS || HOLD_BACK.test(t) || NEW_GOAL_VERB.test(t)) return null;
   if (RETRY_WORDS.test(t)) return 'retry';
   if (RESUME_WORDS.test(t)) return 'resume';
@@ -76,5 +89,9 @@ export function persistLine(persist) {
   if (!persist || !persist.armed) return '';
   const g = String(persist.goal || '').replace(/\s+/g, ' ').trim();
   const lead = g ? `auto-continue is on toward: "${g.length > GOAL_CAP ? `${g.slice(0, GOAL_CAP - 3)}...` : g}"` : 'auto-continue is on; no goal is recorded (the prompt named none and no open run has one)';
-  return `${lead}. A Stop is refused while each step does real work; it ends when you say the goal is met, ask the user something, a dispatch is denied, the same error repeats, a step does nothing, three continues on the same open item, or after 25 steps. "persist off" turns it off.`;
+  // Said at arming and after each resume or summary while armed. What the hook
+  // weighs inside "no work" (a helper refused for usage, a background command
+  // out) is the hook's to judge, not the lead's to act on, so it is not spelled
+  // out here (prompt review, 2026-10-03: 467 bytes to about 360).
+  return `${lead}. A Stop is refused while each step does real work. It ends when you say the goal is met or ask the user something, or on a helper refused by the budget or the credential check, the same error twice, a step that does no work while nothing is out, three continues on the same open item, or 25 steps. A usage limit does not end it. "persist off" turns it off.`;
 }

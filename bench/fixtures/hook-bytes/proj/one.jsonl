@@ -2,7 +2,10 @@
 {"type":"attachment","uuid":"a2","sessionId":"s1","attachment":{"type":"hook_additional_context","hookEvent":"PostToolUse","content":["[orchestrate · size] bb"]}}
 {"type":"attachment","uuid":"a3","attachment":{"type":"hook_success","hookEvent":"PostToolUse","stdout":"[orchestrate · size] SECRETWORD aaaa","content":"[orchestrate · size] SECRETWORD aaaa"}}
 {"type":"attachment","uuid":"a4","sessionId":"s1","attachment":{"type":"hook_additional_context","hookEvent":"PostToolUse","content":["[orchestrate] untagged text"]}}
-{"type":"user","uuid":"a5","message":{"content":"orchestrate: Stop hold SECRETWORD"}}
-{"type":"system","subtype":"stop_hook_summary","uuid":"a6","hasOutput":true,"preventedContinuation":false}
+{"type":"user","uuid":"a5","isMeta":true,"message":{"role":"user","content":"Stop hook feedback:\norchestrate: \"SECRETWORD goal\" · next open item: finish b"}}
+{"type":"system","subtype":"stop_hook_summary","uuid":"a6","hookCount":2,"hookInfos":[{"command":"node persist-check.mjs"},{"command":"node turn-check.mjs"}],"hookErrors":["orchestrate: \"SECRETWORD goal\" · next open item: finish b"],"preventedContinuation":false,"stopReason":"","hasOutput":true,"level":"suggestion","toolUseID":"t1"}
 {"type":"assistant","uuid":"a7","message":{"content":"ordinary orchestrate chat SECRETWORD"}}
+{"type":"user","uuid":"a8","isMeta":true,"message":{"role":"user","content":"Stop hook feedback:\nYour last message says nothing is committed; git status shows a clean tree. A reply to this block becomes the report the user sees. SECRETWORD"}}
+{"type":"user","uuid":"a9","isMeta":true,"message":{"role":"user","content":"Stop hook feedback:\nlint found 3 problems in SECRETWORD.js"}}
+{"type":"user","uuid":"a10","message":{"role":"user","content":"why did I see this? Stop hook feedback:\norchestrate: SECRETWORD"}}
 not json orchestrate

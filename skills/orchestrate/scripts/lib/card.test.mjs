@@ -29,10 +29,14 @@ test('the card body stays inside the cap it names, and has one home in code', ()
   assert.ok(!existsSync(join(HERE, '..', '..', 'references', 'ladder.md')), 'ladder.md is gone; the card text has one home now');
 });
 
-test('the card has the user pick before a small build is split across helpers', () => {
+test('the card weighs a helper by overall cost and carries the measured split cost', () => {
   // Live runs put the helper path at two to three times the lead's own cost on
-  // a small app, and the user had never been shown the pair before it was chosen.
-  assert.match(CARD, /Before splitting a small build across helpers, tell the user it has cost about two to three times doing it alone, and let them pick\./);
+  // a small app. The lead decides on overall cost, counting the cheaper model as
+  // a saving (quota first); it no longer stops to ask, because how to build is
+  // the lead's call (STATE.md, 0009 Stage 2).
+  assert.match(CARD, /hand it over when that costs less overall: a cheaper model and reads kept out of your context, against the brief, the return you keep and checks\./);
+  assert.match(CARD, /A small build split across helpers has cost two to three times doing it alone\./);
+  assert.doesNotMatch(CARD, /let them pick/);
 });
 
 test('the card points at the project page\'s Next as the plan, and no longer asks for three plain lines', () => {
@@ -59,7 +63,8 @@ test('the card names the helper kinds, and its builder advice clears the guard o
 test('the card keeps risky work and a request for a helper out of the do-it-yourself rule', () => {
   // A live lead built a password check on a payments page alone, with no
   // second look, though the user had asked for a helper and for safety.
-  assert.match(CARD, /about eight small tool calls and the user asked for no helper;/);
+  assert.match(CARD, /about eight tool calls;/);
+  assert.match(CARD, /Use the helper or model the user names for a step\./);
   assert.match(CARD, /Buy independent review, even of your own work, for money, auth,/);
 });
 
@@ -75,9 +80,12 @@ test('the card tells the lead to say "helper folder", never worktree, harness or
 test('the card makes who can see or change the user\'s data their call', () => {
   // The 0.18.0 release check: Claude built a no-password server any device on
   // the home wifi could open, said so, and asked only about the paid option.
-  // "A public surface" did not read as covering the home wifi.
+  // "A public surface" did not read as covering the home wifi. The Plain style
+  // says the same at more length, but a script install leaves the style off
+  // while the router still sends this card.
   assert.match(CARD, /Stop and ask only about what the product should do, money, who can see or change their data, credentials/);
   assert.doesNotMatch(CARD, /a public surface/);
+  assert.doesNotMatch(CARD, /not a menu/, 'how to end a message is the style\'s');
 });
 
 test('the model the card names for each helper matches that helper\'s own definition', async () => {
@@ -102,4 +110,14 @@ test('the card says not to test what can be known, and to stop at the same kind 
   assert.match(CARD, /Proof of your change runs; an experiment you can predict, read or look up does not\./);
   assert.match(CARD, /The same kind of failure twice: stop and name what they share\./);
   assert.match(CARD, /show a test that failed before, look for the same mistake elsewhere\./);
+});
+
+test('the card carries decision 2c: a question back is not a decision, and a twice-unanswered question is settled by the lead', () => {
+  // The record (plan 0010 step 2c): a reply that only asked back was written
+  // down as the owner's decision, and the same product question went out three
+  // times unchanged. Decided 2026-10-03: after "you decide" for the job, or a
+  // product question twice unanswered with the work blocked, the lead takes its
+  // own recommendation, records it as its pick and says so; one word reverses it.
+  assert.match(CARD, /A reply that only asks back is not a decision\./);
+  assert.match(CARD, /After "you decide" for this job, or a product question twice unanswered with the work blocked: take your recommendation, record it under Decisions as your pick, say so in one line\./);
 });

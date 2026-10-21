@@ -13,7 +13,7 @@ nobody pays for it, so what it costs is the user's quota and attention.
 Deciding documents (these win when the code and the intent disagree):
 - `STATE.md` — every decision and why; the newest entry is where we are and
   what comes next
-- `skills/orchestrate/SKILL.md` — the method the lead follows; §10 says what may
+- `skills/orchestrate/SKILL.md` — the method the lead follows; its Rails say what may
   be added to it
 - `CARD` in `skills/orchestrate/scripts/lib/card.mjs` — the card, the guidance a
   session is sure to see; it carries behaviour rules only, never state

@@ -313,6 +313,37 @@ test('contextTick keys by epoch and step, and is silent for an unknown reading',
   assert.deepEqual(contextTick({ state: 'unknown', tokens: null }, p, { dir }), { key: null, text: '' });
 });
 
+test('contextTick builds no line for the key already said, and builds it for a new step', () => {
+  // The line reads the transcript's first 64 KB and checks several files, and
+  // the hook that asks for it runs after every tool call, almost always with a
+  // key it has already said. `dir` is read only when the line is built, so a
+  // counting getter on it shows whether it was.
+  const p = policy();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-adv-'));
+  const transcript = join(dir, 'session.jsonl');
+  writeFileSync(transcript, `${JSON.stringify({ type: 'user', timestamp: now() })}\n`);
+  const every = p.context.tickEvery;
+  let built = 0;
+  const ctx = { get dir() { built++; return dir; } };
+  const at = tokens => measured(tokens, { transcript });
+
+  const first = contextTick(at(every * 2 + 1), p, ctx);
+  assert.equal(first.key, 'none|2');
+  assert.match(first.text, /^\[orchestrate · context\]/);
+  assert.equal(built, 1, 'with nothing said before, the line is built');
+
+  built = 0;
+  const same = contextTick(at(every * 2 + 900), p, ctx, first.key);
+  assert.deepEqual(same, { key: 'none|2', text: '' });
+  assert.equal(built, 0, 'the key already said: no line built, nothing read');
+
+  const next = contextTick(at(every * 3 + 1), p, ctx, first.key);
+  assert.equal(next.key, 'none|3');
+  assert.match(next.text, /^\[orchestrate · context\]/);
+  assert.equal(built, 1, 'a new step is built as before');
+  assert.deepEqual(contextTick({ state: 'unknown', tokens: null }, p, ctx, first.key), { key: null, text: '' });
+});
+
 test('formatReading states the size, the state, and the recommendation', () => {
   const r = measured(42000, { capacity: 200000, pct: 21 });
   const text = formatReading(r, adviseContext(r, policy()));

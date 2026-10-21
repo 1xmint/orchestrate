@@ -19,10 +19,9 @@
 // also the lock on its worktree: no native helper is sent into a worktree a
 // live Codex process holds.
 
-import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync, mkdirSync, renameSync, createHash } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, basename, resolve } from 'node:path';
-import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { loadPolicy } from './policy.mjs';
 import { normalizeRole } from './prices.mjs';
@@ -99,6 +98,11 @@ export function segmentTurns(path) {
       if (!line.trim()) continue;
       let o; try { o = JSON.parse(line); } catch { continue; }
       if (o && o.type === 'user') {
+        // A skill's body loaded mid-run (isMeta) and a compaction summary are
+        // the host's text, not a message that resumed the helper; they do not
+        // start a new segment (whole-file review, 2026-10-03: a reviewer that
+        // used every turn read as having used a few).
+        if (o.isMeta || o.isCompactSummary) continue;
         const c = o.message && o.message.content;
         const hasText = typeof c === 'string' || (Array.isArray(c) && c.some(b => b && b.type === 'text'));
         if (hasText) segment = new Set();

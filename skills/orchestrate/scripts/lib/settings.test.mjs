@@ -85,7 +85,7 @@ test('registering router and guard keeps every entry that is not ours', () => {
   const report = applyRegistrations(s, entries);
 
   assert.equal(report.removed, 0);
-  assert.equal(report.added, 9);
+  assert.equal(report.added, 10);
   const gate = s.hooks.PreToolUse.find(g => JSON.stringify(g).includes('memory-write-gate.mjs'));
   assert.deepEqual(gate, REAL_SHAPE.hooks.PreToolUse[0], 'the memory-write-gate entry is untouched');
   assert.deepEqual(s.permissions, REAL_SHAPE.permissions);
@@ -101,6 +101,9 @@ test('registering router and guard keeps every entry that is not ours', () => {
   assert.match(s.hooks.PreToolUse.map(g => JSON.stringify(g)).join(''), /Agent\|Task/, 'the guard matches a future Task-named tool too');
   const stops = s.hooks.Stop.map(g => g.hooks[0].command);
   assert.ok(stops.includes(commandFor(join(SCRIPTS, 'persist-check.mjs'))), 'the router flag brings the persist loop that acts on its arming');
+  assert.equal(s.hooks.StopFailure.length, 1, 'and the same script at the turn that ended in an API error, where it writes the pause record');
+  assert.equal(s.hooks.StopFailure[0].matcher, undefined, 'no matcher: every error kind reaches it');
+  assert.equal(s.hooks.StopFailure[0].hooks[0].command, commandFor(join(SCRIPTS, 'persist-check.mjs')));
   assert.ok(stops.includes(commandFor(join(SCRIPTS, 'turn-check.mjs'))), 'the Pickup check is pinned by a script install too, not just SKILL.md\'s bare `node`');
   assert.ok(!JSON.stringify(s.hooks).includes('precompact-check.mjs'), 'the retired compaction block is not registered');
   assert.equal(s.hooks.PostCompact[0].hooks[0].command, commandFor(join(SCRIPTS, 'postcompact-check.mjs')), 'the compaction save is pinned by a script install too');
@@ -112,7 +115,7 @@ test('a second run replaces our entries instead of stacking them', () => {
   const once = clone(s);
   const report = applyRegistrations(s, registrations(SCRIPTS, { router: true, guard: true }));
 
-  assert.equal(report.removed, 9, 'the stale copies are found by basename and dropped');
+  assert.equal(report.removed, 10, 'the stale copies are found by basename and dropped');
   assert.equal(s.hooks.PostToolUse.length, 1, 'the context sampler, once');
   assert.equal(s.hooks.UserPromptSubmit.length, 1);
   assert.equal(s.hooks.SessionStart.length, 1);

@@ -10,7 +10,7 @@
 //   node context.mjs ... --agent <agent id>      one helper's own context
 //   node context.mjs ... --json                  the same as JSON
 
-import { readdirSync, existsSync, statSync } from 'node:fs';
+import { readdirSync, existsSync, statSync } from './lib/node.mjs';
 import { join, basename, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readContext, CONTEXT_DIR } from './lib/context-scan.mjs';

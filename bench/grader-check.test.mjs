@@ -36,6 +36,14 @@ function findBash() {
 }
 const BASH = findBash();
 
+// Turns off Git's background upkeep (auto gc and auto maintenance) for one
+// command, through Git's own environment config.
+const NO_GIT_UPKEEP = {
+  GIT_CONFIG_COUNT: '2',
+  GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false',
+  GIT_CONFIG_KEY_1: 'gc.auto', GIT_CONFIG_VALUE_1: '0',
+};
+
 const cleanEnv = () => {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
@@ -63,7 +71,11 @@ function buildStart(c, tmp) {
   const r = spawnSync(BASH, [script], {
     cwd: ws,
     encoding: 'utf8',
-    env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, TMPDIR: tmp, TERM: 'dumb', GIT_CONFIG_GLOBAL: join(home, '.gitconfig'), GIT_CONFIG_NOSYSTEM: '1' },
+    // Git's automatic upkeep runs in the background after a commit and writes
+    // .git/objects/maintenance.lock while the copy below walks the folder, so
+    // the copy failed now and then with ENOENT on that lock (CI, 2026-10-03).
+    // The scaffold needs none of it.
+    env: { PATH: process.env.PATH, HOME: home, USERPROFILE: home, TMPDIR: tmp, TERM: 'dumb', GIT_CONFIG_GLOBAL: join(home, '.gitconfig'), GIT_CONFIG_NOSYSTEM: '1', ...NO_GIT_UPKEEP },
     timeout: 120000,
   });
   assert.equal(r.status, 0, `scaffold failed: ${r.stderr}`);

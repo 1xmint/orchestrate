@@ -45,8 +45,10 @@ test('missingFact reads fields from a packet file the prompt points at', () => {
 test('estimateWording says an estimate, before the work, for this helper, and never as a price tag', () => {
   const tag = 'price tag: orch-implementer on sonnet ≈ $1.50 at list price, not subscription usage (reasoned 2026-09-09, not yet measured here)';
   const out = estimateWording(tag);
-  assert.match(out, /^estimate before work, this helper: orch-implementer on sonnet ≈ \$1\.50 at list price/);
+  assert.match(out, /^estimate before work, this helper: a builder on sonnet ≈ \$1\.50 at list price/);
   assert.doesNotMatch(out, /price tag|cost/);
+  assert.doesNotMatch(out, /orch-/, 'a note names the helper by what it does, never by role id');
+  assert.doesNotMatch(estimateWording('price tag: orch-implementer on haiku — no figure yet, measured or reasoned'), /orch-/, 'nor a tag with no figure');
   assert.ok(Buffer.byteLength(out) <= Buffer.byteLength(tag));
   const unpriced = 'price tag: r on s — no figure yet, measured or reasoned';
   assert.equal(estimateWording(unpriced), unpriced, 'a tag with no figure is left alone');
@@ -147,7 +149,7 @@ test('the first orch-implementer dispatch of a session with no run ledger open c
   const sid = 's-pair-first';
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /estimate before work, this helper: orch-implementer on sonnet ≈ \$1\.50/);
+  assert.match(ctx, /estimate before work, this helper: a builder on sonnet ≈ \$1\.50/);
   assert.match(ctx, /≈ \$0\.60 done in this chat \(measured ratio over five live rounds\)/);
 });
 
@@ -157,7 +159,7 @@ test('a second orch-implementer dispatch in the same session gets today\'s tag o
   dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRename a CSS class\nCONTEXT\nmore' });
   const { json } = dispatch(home, sid, { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: y\nOBJECTIVE\nRename another CSS class\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /estimate before work, this helper: orch-implementer on sonnet ≈ \$1\.50/);
+  assert.match(ctx, /estimate before work, this helper: a builder on sonnet ≈ \$1\.50/);
   assert.doesNotMatch(ctx, /done in this chat/);
 });
 
@@ -166,7 +168,7 @@ test('a dispatch with no REVIEW-triggering context but a role other than orch-im
   const sid = 's-pair-role';
   const { json } = dispatch(home, sid, { subagent_type: 'orch-researcher', model: 'sonnet', prompt: 'TASK: x\nOBJECTIVE\nRead a file\nCONTEXT\nmore' });
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /estimate before work, this helper: orch-researcher on sonnet/);
+  assert.match(ctx, /estimate before work, this helper: a researcher on sonnet/);
   assert.doesNotMatch(ctx, /done in this chat/);
 });
 
@@ -190,8 +192,50 @@ test('the first orch-implementer dispatch of a session bound to an open run ledg
   });
   const json = r.stdout.trim() ? JSON.parse(r.stdout) : null;
   const ctx = json && json.hookSpecificOutput && json.hookSpecificOutput.additionalContext || '';
-  assert.match(ctx, /estimate before work, this helper: orch-implementer on sonnet/);
+  assert.match(ctx, /estimate before work, this helper: a builder on sonnet/);
   assert.doesNotMatch(ctx, /done in this chat/);
+});
+
+// A bound run with a $2 ceiling and $1.90 already spent.
+function nearCeiling(home, sid) {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-repo-'));
+  mkdirSync(join(dir, '.git'), { recursive: true });
+  const runDir = join(dir, '.orchestrator', 'runs', '20261003-near');
+  mkdirSync(join(runDir, 'returns'), { recursive: true });
+  const runMd = join(runDir, 'RUN.md');
+  writeFileSync(runMd, '# Run\n\n## Budget\n\nCeiling: $2 at list price\n\n## Tasks\n\n| id | phase | role · model | task | acceptance | attempts | result |\n|---|---|---|---|---|---|---|\n| 10-3-0001 | 📋 planned | i · sonnet | do it | ev | 0 | — |\n');
+  writeFileSync(join(runDir, 'returns', 'returns.jsonl'), JSON.stringify({ agentId: 'a1', dollars: 1.9 }) + '\n');
+  writeFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${sid}.json`), JSON.stringify({ v: 1, session_id: sid, run: { root: dir, runId: '20261003-near', runMd, boundAt: new Date().toISOString(), explicit: true } }));
+  return dir;
+}
+function hookIn(home, sid, cwd, ti) {
+  const r = spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: sid, cwd, tool_use_id: `u-${Math.random()}`, tool_input: ti }),
+    encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' },
+  });
+  try { return r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput : {}; } catch { return {}; }
+}
+
+test('the budget gate prices a helper that names no model on its own file\'s model, says so plainly, and records the refusal', () => {
+  // Named sonnet was refused at $1.90 of $2; the same builder naming nothing
+  // passed, and so did a coordinator (Opus from its file).
+  const home = sandboxHome();
+  const P = 'TASK: 10-3-0001\nFOR: x\nDONE WHEN\n- y\nPROGRESS: /r/p.md\nworktree: yes';
+  for (const [sid, ti, who] of [
+    ['b-named', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: P }, 'a builder on sonnet'],
+    ['b-unnamed', { subagent_type: 'orch-implementer', prompt: P }, 'a builder on sonnet'],
+    ['b-coord', { subagent_type: 'orchestrate:orch-coordinator', prompt: P }, 'a coordinator on opus'],
+  ]) {
+    const out = hookIn(home, sid, nearCeiling(home, sid), ti);
+    assert.equal(out.permissionDecision, 'deny', sid);
+    assert.match(out.permissionDecisionReason, new RegExp(`^orchestrate budget: ${who} is estimated at \\$\\d+\\.\\d\\d at list price`), sid);
+    assert.doesNotMatch(out.permissionDecisionReason, /orch-|Raise the ceiling|or stop/, 'a fact naming the helper by what it does');
+    const state = JSON.parse(readFileSync(join(home, '.claude', 'orchestrate', 'sessions', `${sid}.json`), 'utf8'));
+    assert.equal((state.dispatches || []).length, 0, 'nothing dispatched');
+    assert.match(state.denials.at(-1).reason, /^budget: would cross the \$2 ceiling of run 20261003-near/, 'recorded like every other refusal');
+  }
+  const fits = hookIn(home, 'b-fits', nearCeiling(home, 'b-fits'), { subagent_type: 'Explore', model: 'haiku', prompt: 'find x' });
+  assert.notEqual(fits.permissionDecision, 'deny', 'a helper that fits under the ceiling passes');
 });
 
 test('on a subscription the first implementer dispatch is told its size against a solo build, with no dollar sign', () => {
@@ -268,12 +312,84 @@ test('a quoted value that is plainly made up for a test is not refused; a real-l
 
 const NO_HEADINGS_BRIEF = `Repo: a small club server (clean).\n\nFull current contents:\n\n\`\`\`js\n${'const members = [];\n'.repeat(40)}\`\`\`\n\nTask: add a password check so only people who know the password can see /members.\n\nReport back what you changed.`;
 
-test('a brief that asks for pasted contents gets a note to ask for a file path; one that does not, none', () => {
+test('a brief that asks for pasted contents gets a fact about the five-line hand-back; one that does not, none', () => {
   const home = sandboxHome();
   const a = dispatch(home, 's-paste', { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-1-0101\nOBJECTIVE\nList the settings\nRETURN: paste the full output of the run' });
-  assert.match(a.stdout, /the hand-back is five lines, so ask for a file path instead/);
+  assert.match(a.stdout, /this brief asks for contents in the hand-back, and the helper's own instructions keep the hand-back to five lines with the rest in a file/);
+  assert.doesNotMatch(a.stdout, /ask for a file path instead/, 'a fact, not an order');
   const b = dispatch(home, 's-nopaste', { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-1-0102\nOBJECTIVE\nList the settings\nRETURN: five lines and a file path' });
-  assert.doesNotMatch(b.stdout, /hand-back is five lines/);
+  assert.doesNotMatch(b.stdout, /hand-back/);
   assert.equal(asksForPastedContents('report back the file'), true);
   assert.equal(asksForPastedContents('the pasted server code is below'), false);
+});
+
+test('an ask said in the negative is not an ask for pasted contents', () => {
+  // A brief that says "Do not paste file contents" was told it asked for them.
+  for (const no of ['Do not paste file contents back; name the file.', "Don't include the full output.", 'Never paste the exact contents, report back the file path.', 'Write it to a file instead of the full output.']) {
+    assert.equal(asksForPastedContents(no), false, no);
+  }
+  for (const yes of ['RETURN: paste the full output of the run', 'If the test does not pass, paste the full output.', 'Do not edit anything. Paste the exact contents of config.json.']) {
+    assert.equal(asksForPastedContents(yes), true, yes);
+  }
+  const { stdout } = dispatch(sandboxHome(), 's-nopaste-neg', { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'TASK: 9-1-0103\nList the settings. Do not paste file contents back; name the file.' });
+  assert.doesNotMatch(stdout, /hand-back/);
+});
+
+test('the note on a long packet is a fact about its size, not an order', () => {
+  const { stdout } = dispatch(sandboxHome(), 's-long', { subagent_type: 'orch-researcher', model: 'sonnet', prompt: `TASK: 9-1-0104\n${'x'.repeat(9000)}` });
+  assert.match(stdout, /this packet is 9\d{3} characters, and the helper re-reads it on every step it takes/);
+  assert.doesNotMatch(stdout, /instead of pasting/);
+});
+
+// ---- inside a helper the guard refuses but says nothing else ---------------
+
+test('inside a helper the dispatch is recorded and refused as usual, but no note is sent', () => {
+  // AGENTS.md: the only hook text that reaches a helper's context is
+  // context-check's size fact. A nested dispatch is allowed here by policy so
+  // the note path is reached.
+  const home = sandboxHome();
+  writeFileSync(join(home, '.claude', 'orchestrate', 'profile.json'), JSON.stringify({ tier: 'pro', policy: { workers: { nested: 'allow' } } }));
+  const run = (sid, prompt) => spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Agent', session_id: sid, cwd: home, agent_id: 'helper-1', tool_use_id: `u-${Math.random()}`, tool_input: { subagent_type: 'orch-implementer', model: 'sonnet', prompt } }),
+    encoding: 'utf8', env: { ...process.env, HOME: home, USERPROFILE: home, ANTHROPIC_API_KEY: '' },
+  }).stdout;
+  assert.equal(run('s-nested-note', 'TASK: 9-1-0105\nfind it\nworktree: yes').trim(), '', 'no size line, no brief facts');
+  const row = lastDispatch(home, 's-nested-note');
+  assert.equal(row.parent, 'helper-1', 'the dispatch is still recorded, with its parent');
+  assert.equal(row.task, '9-1-0105');
+  assert.match(run('s-nested-cred', 'TASK: 9-1-0106\nuse ghp_abcdefghijklmnopqrstuvwxyz0123'), /"permissionDecision":"deny"/, 'a refusal still holds inside a helper');
+});
+
+// ---- the packet a short prompt points at is the packet ------------------------
+
+test('a prompt that only points at its packet file is recorded from that file: task, progress and review', () => {
+  const home = sandboxHome();
+  const dir = mkdtempSync(join(tmpdir(), 'orch-pk-'));
+  const file = join(dir, '10-3-0002.md');
+  writeFileSync(file, 'TASK: 10-3-0002\nFOR: the notes app gets search\nOBJECTIVE\nAdd the search box\nDONE WHEN\n- npm test passes\nPROGRESS: /r/p2.md\nREVIEW: yes\nRUN: 20261003-notes\nWHERE: worktree: yes\n');
+  const { stdout } = dispatch(home, 's-pointer', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: `Your packet is in ${file}` });
+  assert.doesNotMatch(stdout, /brief lacks/);
+  const row = lastDispatch(home, 's-pointer');
+  assert.equal(row.task, '10-3-0002');
+  assert.equal(row.key, '10-3-0002');
+  assert.equal(row.progress, '/r/p2.md');
+  assert.equal(row.review, true, 'the ledger holds this DONE back for review');
+  assert.equal(row.run, '20261003-notes');
+});
+
+test('a PROGRESS line written mid-line is recorded, the same line the brief fact counts', () => {
+  const home = sandboxHome();
+  const { stdout } = dispatch(home, 's-midline', { subagent_type: 'orch-implementer', model: 'sonnet', prompt: 'TASK: 10-3-0003\nFOR: x\nDONE WHEN tests pass. Write progress at the end. PROGRESS: /r/p6.md\nworktree: yes' });
+  assert.doesNotMatch(stdout, /a PROGRESS path/);
+  assert.equal(lastDispatch(home, 's-midline').progress, '/r/p6.md');
+});
+
+test('the named packet file is read once for both brief facts', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'orch-pk-'));
+  const file = join(dir, 'p.md');
+  writeFileSync(file, 'TASK: 1\nfind it\n');
+  let reads = 0;
+  const readFile = (p, enc) => { reads++; return readFileSync(p, enc); };
+  assert.equal(missingFact('orch-implementer', `packet: ${file}`, false, readFile), 'brief lacks: what it is for, a check it is done, a PROGRESS path');
+  assert.equal(reads, 1);
 });

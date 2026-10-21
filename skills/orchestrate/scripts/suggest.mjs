@@ -12,7 +12,7 @@
 // growing the file. Text is capped at 240 chars; the file keeps the last 300
 // rows.
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from './lib/node.mjs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DIR } from './lib/tier.mjs';

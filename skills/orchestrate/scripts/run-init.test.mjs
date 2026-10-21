@@ -1,9 +1,5 @@
 // run-init.test.mjs — the script that creates every ledger. It had no test,
 // and it is the one file whose output a later session depends on to resume.
-//
-// smoke.mjs is the only script here with no test on purpose: it exists to spend
-// a little of a provider's quota to prove that provider answers, so testing it
-// would spend quota on every run of the suite.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

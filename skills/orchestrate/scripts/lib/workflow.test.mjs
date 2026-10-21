@@ -5,7 +5,9 @@
 //   node --test skills/orchestrate/scripts/lib/workflow.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { workflowDecision, nestedReason } from './workflow.mjs';
+import { readFileSync } from 'node:fs';
+import * as workflow from './workflow.mjs';
+import { workflowDecision, nestedReason, PLAN_READ_ROLES } from './workflow.mjs';
 import { loadPolicy } from './policy.mjs';
 import { AGENT_NAMES } from './tier.mjs';
 
@@ -56,6 +58,30 @@ test('plan mode denies a role that can change files, naming the read-only altern
   assert.match(d.reason, /orch-advisor/);
 });
 
+test('plan mode admits the browser helper, whose agent file gives it no tool that changes a file', () => {
+  // It was refused as one that "can change files"; its file disallows Edit,
+  // Write, NotebookEdit and Bash.
+  const browser = readFileSync(new URL('../../assets/agents/orch-browser.md', import.meta.url), 'utf8');
+  assert.match(browser, /^disallowedTools:.*\bEdit\b.*\bWrite\b.*\bNotebookEdit\b.*\bBash\b/m);
+  assert.equal(PLAN_READ_ROLES.has('orch-browser'), true);
+  assert.equal(workflowDecision({ permission_mode: 'plan' }, { subagent_type: 'orchestrate:orch-browser', model: 'sonnet', prompt: 'open the page and say what renders' }, { policy: policy() }), null);
+  assert.match(workflowDecision({ permission_mode: 'plan' }, { subagent_type: 'orch-browser', model: 'sonnet', prompt: 'PROGRESS: /r/p.md' }, { policy: policy() }).reason, /no progress files/);
+  // A role in neither list is refused without a claim about what it can do.
+  const d = workflowDecision({ permission_mode: 'plan' }, { subagent_type: 'my-linter', model: 'sonnet', prompt: 'x' }, { policy: policy() });
+  assert.match(d.reason, /my-linter is not known to only read/);
+  // One home: no role is both a reader and a builder.
+  for (const r of PLAN_READ_ROLES) assert.equal(workflow.BUILD_ROLES.has(r), false, r);
+});
+
+test('the two role lists agree with the tools each agent file gives its role', async () => {
+  const { roleCanEdit } = await import('../context-check.mjs');
+  for (const r of workflow.BUILD_ROLES) if (/^orch-/.test(r)) assert.equal(roleCanEdit(r), true, r);
+  // The researcher and the planner keep their own report or progress file, so
+  // their files allow a write; plan mode refuses their PROGRESS line instead.
+  for (const r of PLAN_READ_ROLES) if (/^orch-/.test(r) && r !== 'orch-researcher' && r !== 'orch-planner') assert.equal(roleCanEdit(r), false, r);
+  for (const r of AGENT_NAMES) assert.notEqual(PLAN_READ_ROLES.has(r), workflow.BUILD_ROLES.has(r), `${r} is in exactly one list`);
+});
+
 test('plan mode allows a read-only role, but still refuses one aimed at a worktree or carrying a PROGRESS line', () => {
   const ok = workflowDecision({ permission_mode: 'plan' }, { subagent_type: 'orch-researcher', model: 'haiku', prompt: 'find things' }, { policy: policy() });
   assert.equal(ok, null);
@@ -84,8 +110,16 @@ test('a brief that only says where a file lives is not refused, with or without 
   assert.equal(workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', prompt }, { policy: policy() }), null);
 });
 
+test('a test command run from the project root is a check, not a place to work', () => {
+  // Without "worktree: yes", this DONE WHEN line was refused as sending the
+  // builder into the shared checkout.
+  for (const prompt of ['TASK: 10-3-0007\nDONE WHEN\n- `npm test` run from the project root passes', 'DONE WHEN: running from the project root, `make check` exits 0']) {
+    assert.equal(workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', prompt }, { policy: policy() }), null, prompt);
+  }
+});
+
 test('a brief that really says to work in the shared checkout is still refused', () => {
-  for (const prompt of ['Work directly in the project root.', 'Edit in the shared checkout.', 'Do not use a separate worktree.']) {
+  for (const prompt of ['Work directly in the project root.', 'Edit in the shared checkout.', 'Do not use a separate worktree.', 'Run directly in the main checkout.', 'Running in the shared checkout is fine.', 'Write from the project root.']) {
     const d = workflowDecision({}, { subagent_type: 'orch-implementer', model: 'sonnet', prompt }, { policy: policy() });
     assert.ok(d, prompt);
     assert.match(d.reason, /always works in its own worktree/);

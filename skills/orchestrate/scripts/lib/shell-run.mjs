@@ -9,11 +9,15 @@
 // unwrapped. They lean towards reading more as code, never less: `$(…)` and
 // backticks are read wherever they appear.
 //
-// The parser does not model every shell shape, so it only ever NARROWS a check
-// on a plain line (plainLine below): every segment a search, a read, or text
-// going into a file, and no construct it cannot follow. Any other line is read
-// word by word, as before (review 9-30-0004: `cat <<EOF | bash`, `for … do`,
-// `timeout`, `eval` all slipped past a parser that guessed).
+// The parser does not model every shell shape, so for the payment rule and the
+// merge check it only ever NARROWS a check on a plain line (plainLine below):
+// every segment a search, a read, or text going into a file, and no construct
+// it cannot follow. Any other line is read word by word, as before (review
+// 9-30-0004: `cat <<EOF | bash`, `for … do`, `timeout`, `eval` all slipped
+// past a parser that guessed). The guard's other rules read every line
+// command by command through commandsIn, at the end of this file, which leans
+// the same way: what a shell is handed is read as commands, and a line that
+// starts a shell reads what it writes.
 
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh', 'pwsh', 'powershell', 'cmd']);
 const LANGS = new Set(['node', 'nodejs', 'python', 'python3', 'py', 'ruby', 'deno', 'bun', 'php', 'perl', 'tsx', 'ts-node']);
@@ -340,6 +344,286 @@ export function runsPayment(text) {
     if (FETCHERS.has(b) && w.slice(1).some(x => PAYMENT_HOSTS_RE.test(x))) return true;
   }
   return lang.some(code => PAYMENT_SDK_RE.test(code) || PAYMENT_HOSTS_RE.test(code));
+}
+
+// ---- Every command a line runs, word by word -------------------------------
+//
+// guard-bash.mjs reads its rules for destructive commands one command at a
+// time, on what commandsIn returns: each command the line runs, as its words
+// ({ value, quoted }) with the quotes taken off. The line splits where the
+// shell splits it: ; & && | || and newlines, ( ), and a { or } standing as a
+// word (a bash group or a PowerShell script block; a list such as {a,b} stays
+// in its word). A redirection (>out, 2>/dev/null, 2>&1, <in, 2>$null) is not a
+// word, and a comment is skipped. Quoted text is one word whatever it says, and
+// a heredoc body is text. What does run is read as commands of its own: $(…),
+// backticks and <(…), anywhere but inside single quotes or a quoted heredoc
+// body; the string handed to a shell (bash, sh, zsh … -c, pwsh -Command,
+// powershell -c, cmd /c), wherever the shell word stands (sudo, xargs, docker
+// exec, find -exec); and what eval and ssh host are given. When any command on
+// the line starts a shell (bash x.sh, | sh, source x.sh, ./x.sh), heredoc
+// bodies, here-strings (<<<) and echo or printf text are read as commands too:
+// what they write or feed may be the script that shell runs. A PowerShell
+// here-string (@'…'@) is text.
+//
+// Like the rest of this file it is not a full shell parser. It is built to read
+// what Claude writes by mistake, not a line built to slip past it.
+
+const SH_RE = /^(?:ba|da|z|k|a|fi)?sh$/;
+// Commands whose words are a search pattern, text to show, or a name to look
+// up: nothing in them runs. $(…) inside them is still read.
+const DATA_CMDS = new Set(['grep', 'egrep', 'fgrep', 'zgrep', 'rg', 'ag', 'ack', 'findstr', 'select-string', 'sls', 'echo', 'printf', 'write-output', 'write-host', 'man', 'which', 'whereis', 'type', 'help', 'get-help', 'get-command']);
+const SAYERS = new Set(['echo', 'printf', 'write-output']);
+const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const HEREDOC_AT_RE = /^<<(-?)[ \t]*(["']?)([A-Za-z_][\w.-]*)\2/;
+export const PS_HERE_STRING_RE = /@(["'])[ \t]*\r?\n[\s\S]*?\r?\n[ \t]*\1@/g;
+
+const firstAt = words => { let k = 0; while (k < words.length && !words[k].quoted && ASSIGN_RE.test(words[k].value)) k++; return k; };
+
+// A search, a text echo or a name lookup: `git grep` counts, after git's own
+// options.
+export function isDataCommand(words) {
+  const k = firstAt(words);
+  const b = base(words[k] && words[k].value);
+  if (DATA_CMDS.has(b)) return true;
+  if (b !== 'git') return false;
+  let j = k + 1;
+  while (j < words.length && words[j].value.startsWith('-')) j += /^(-C|-c|--git-dir|--work-tree|--namespace|--exec-path|--config-env)$/.test(words[j].value) ? 2 : 1;
+  return Boolean(words[j]) && words[j].value === 'grep';
+}
+
+export function commandsIn(text) {
+  const src = String(text || '').replace(PS_HERE_STRING_RE, "''");
+  const first = readAll(src, false, 0);
+  return first.some(startsShell) ? readAll(src, true, 0) : first;
+}
+
+function readAll(text, bodiesRun, depth) {
+  const ctx = { out: [], bodiesRun };
+  scan(String(text), 0, false, ctx);
+  const all = [];
+  for (const words of ctx.out) {
+    all.push(words);
+    if (depth < 4) for (const inner of handedOn(words, bodiesRun)) all.push(...readAll(inner, bodiesRun, depth + 1));
+  }
+  return all;
+}
+
+// A command that starts a shell, so the files and text the line writes may run:
+// a shell anywhere in it, source or ., or a script run by its path (./x.sh).
+function startsShell(words) {
+  if (isDataCommand(words)) return false;
+  const k = firstAt(words);
+  if (words[k] && (/^(source|\.)$/.test(words[k].value) || /\.(sh|bash|zsh|ps1)$/i.test(words[k].value))) return true;
+  return words.some(w => !w.quoted && (SH_RE.test(base(w.value)) || /^(pwsh|powershell|cmd)$/.test(base(w.value))));
+}
+
+// The text a command hands on to be run as shell: a shell's -c string, the rest
+// after pwsh -Command or cmd /c, what eval and ssh host are given, and, once
+// the line starts a shell, what echo or printf writes.
+function handedOn(words, bodiesRun) {
+  const v = words.map(w => w.value);
+  if (isDataCommand(words)) {
+    const k = firstAt(words);
+    return bodiesRun && SAYERS.has(base(v[k])) ? [v.slice(k + 1).join(' ')] : [];
+  }
+  const out = [];
+  for (let k = 0; k < v.length; k++) {
+    if (words[k].quoted) continue;
+    const b = base(v[k]);
+    if (b === 'eval') { out.push(v.slice(k + 1).join(' ')); break; }
+    if (b === 'ssh') {
+      let j = k + 1;
+      while (j < v.length && v[j].startsWith('-')) j += /^-[BbcDEeFIiJLlmOoPpQRSWw]$/.test(v[j]) ? 2 : 1;
+      if (j + 1 < v.length) out.push(v.slice(j + 1).join(' '));
+      break;
+    }
+    const at = b === 'cmd' ? v.findIndex((x, m) => m > k && /^\/[ck]$/i.test(x))
+      : b === 'pwsh' || b === 'powershell' ? v.findIndex((x, m) => m > k && /^-(c|co|com|comm|comma|comman|command)$/i.test(x)) : -1;
+    if (at > k) { out.push(v.slice(at + 1).join(' ')); break; }
+    if (!SH_RE.test(b)) continue;
+    for (let j = k + 1; j < v.length && /^[-+]/.test(v[j]) && v[j] !== '--'; j++) {
+      if (/^-[A-Za-z]*c[A-Za-z]*$/.test(v[j])) { if (j + 1 < v.length) out.push(v[j + 1]); break; }
+      if (/^[-+]o$/.test(v[j])) j++;
+    }
+  }
+  return out;
+}
+
+// Reads `s` from `i` into commands on ctx.out. Nested (inside $( or <( ), it
+// stops at the ) that closes it and returns that index. Substitutions nested
+// past 40 deep are left unread, so no line can exhaust the stack.
+function scan(s, i, nested, ctx) {
+  ctx.nest = (ctx.nest || 0) + 1;
+  try { return ctx.nest > 40 ? s.length : scanFrom(s, i, nested, ctx); } finally { ctx.nest--; }
+}
+function scanFrom(s, i, nested, ctx) {
+  // drop: the next word is a redirection's target ('target'), or a
+  // here-string's text ('stdin'), read as commands once the line starts a shell.
+  let words = [], w = null, drop = false, pending = [], depth = 0;
+  const word = () => (w ||= { value: '', quoted: false });
+  const endWord = () => {
+    if (w && !drop) words.push(w);
+    if (w && drop === 'stdin' && ctx.bodiesRun) scan(w.value, 0, false, ctx);
+    if (w) drop = false;
+    w = null;
+  };
+  const endCmd = () => { endWord(); drop = false; if (words.length) ctx.out.push(words); words = []; };
+  // A file number before a redirection (2>, PowerShell's *>) is not a word.
+  const fd = () => { if (w && !w.quoted && /^(\d+|\*)$/.test(w.value)) w = null; else endWord(); };
+  for (; i < s.length; i++) {
+    const c = s[i], n = s[i + 1];
+    if (c === '\\') {
+      if (n === '\n') { i++; continue; }
+      if (n === '\r' && s[i + 2] === '\n') { i += 2; continue; }
+      // Inside a word a backslash stays as written (C:\work\src); before a
+      // space, quote or separator, or at a word's start, it escapes.
+      if (n !== undefined && (!w || /[\s"'`;&|()<>{}$\\#]/.test(n))) { word().value += n; w.quoted = true; i++; continue; }
+      word().value += c; continue;
+    }
+    if (c === "'") { let j = s.indexOf("'", i + 1); if (j < 0) j = s.length; word().value += s.slice(i + 1, j); w.quoted = true; i = j; continue; }
+    if (c === '"') { const at = word(); at.quoted = true; i = dquote(s, i + 1, at, ctx); continue; }
+    if (c === '`') {
+      const j = closingTick(s, i + 1);
+      if (j < 0) { word().value += c; continue; }
+      scan(s.slice(i + 1, j).replace(/\\`/g, '`'), 0, false, ctx); word().value += '$(…)'; i = j; continue;
+    }
+    if (c === '$' && n === '(') {
+      if (s[i + 2] === '(') { i = arithEnd(s, i + 3); word().value += '$((…))'; continue; }
+      i = scan(s, i + 2, true, ctx); word().value += '$(…)'; continue;
+    }
+    if (c === '$' && n === '{') {
+      const j = braceEnd(s, i + 1);
+      if (j < 0) { word().value += '${'; i++; continue; }
+      word().value += s.slice(i, j + 1); i = j; continue;
+    }
+    if (c === '$' && n === "'") {
+      let j = i + 2;
+      while (j < s.length && s[j] !== "'") j += s[j] === '\\' ? 2 : 1;
+      word().value += s.slice(i + 2, j); w.quoted = true; i = j; continue;
+    }
+    if (c === '#' && !w) { while (i + 1 < s.length && s[i + 1] !== '\n') i++; continue; }
+    if (c === '\n') { endCmd(); if (pending.length) { i = heredocBodies(s, i + 1, pending, nested, ctx) - 1; pending = []; } continue; }
+    if (/\s/.test(c)) { endWord(); continue; }
+    if (c === ';') { endCmd(); continue; }
+    if (c === '&') {
+      if (n === '>') { endWord(); i += s[i + 2] === '>' ? 2 : 1; drop = 'target'; continue; }
+      endCmd(); if (n === '&') i++; continue;
+    }
+    if (c === '|') { endCmd(); if (n === '|' || n === '&') i++; continue; }
+    if (c === '(') {
+      if (!w && n === '(') { i = arithEnd(s, i + 2); continue; }
+      endCmd(); depth++; continue;
+    }
+    if (c === ')') { endCmd(); if (nested && !depth) return i; if (depth) depth--; continue; }
+    if (c === '<' || c === '>') {
+      if (n === '(') { endWord(); i = scan(s, i + 2, true, ctx); word().value += '<(…)'; continue; }
+      if (c === '<' && n === '#') { const j = s.indexOf('#>', i + 2); i = j < 0 ? s.length : j + 1; continue; }
+      const here = c === '<' && n === '<' && s[i + 2] !== '<' && HEREDOC_AT_RE.exec(s.slice(i));
+      if (here) { fd(); pending.push({ dash: Boolean(here[1]), quoted: Boolean(here[2]), word: here[3] }); i += here[0].length - 1; continue; }
+      // A redirection and its target, or a here-string (<<<), are not words.
+      fd();
+      if (c === '<' && n === '<' && s[i + 2] === '<') { i += 2; drop = 'stdin'; continue; }
+      let j = i + 1;
+      if ((c === '>' && (n === '>' || n === '|')) || (c === '<' && n === '>')) j++;
+      if (s[j] === '&' && /[\d-]/.test(s[j + 1] ?? '')) { j++; while (/[\d-]/.test(s[j] ?? '')) j++; i = j - 1; continue; }
+      if (s[j] === '&') j++;
+      i = j - 1; drop = 'target'; continue;
+    }
+    if (c === '{') {
+      const j = braceEnd(s, i);
+      // A PowerShell hashtable (@{…}), {} (find -exec's slot) and a brace list
+      // or range ({a,b}, {1..3}) stay in their word.
+      const inner = j < 0 ? '' : s.slice(i + 1, j);
+      if (j > 0 && ((w && w.value.endsWith('@')) || j === i + 1 || (!/\s/.test(inner) && /,|\.\./.test(inner)))) { word().value += s.slice(i, j + 1); i = j; continue; }
+      endCmd(); continue;
+    }
+    if (c === '}') { endCmd(); continue; }
+    word().value += c;
+  }
+  endCmd();
+  return i;
+}
+
+// Inside double quotes: \ escapes " \ $ ` and a newline; $(…) and backticks run.
+function dquote(s, j, w, ctx) {
+  for (; j < s.length; j++) {
+    const c = s[j];
+    if (c === '"') return j;
+    if (c === '\\' && /["\\$`\n]/.test(s[j + 1] ?? '')) { if (s[j + 1] !== '\n') w.value += s[j + 1]; j++; continue; }
+    if (c === '`') {
+      const k = closingTick(s, j + 1);
+      if (k >= 0) { scan(s.slice(j + 1, k).replace(/\\`/g, '`'), 0, false, ctx); w.value += '$(…)'; j = k; continue; }
+    }
+    if (c === '$' && s[j + 1] === '(') {
+      j = s[j + 2] === '(' ? arithEnd(s, j + 3) : scan(s, j + 2, true, ctx);
+      w.value += '$(…)'; continue;
+    }
+    w.value += c;
+  }
+  return s.length;
+}
+
+// The bodies of the heredocs started on the line just ended, from `p`; returns
+// where the next line starts. A body is text, read as commands when the line
+// starts a shell; an unquoted one still runs its $(…) and backticks.
+function heredocBodies(s, p, pending, nested, ctx) {
+  for (const h of pending) {
+    const lines = [];
+    while (p < s.length) {
+      let e = s.indexOf('\n', p);
+      if (e < 0) e = s.length;
+      const line = s.slice(p, e).replace(/\r$/, '');
+      const bare = h.dash ? line.replace(/^\t+/, '') : line;
+      if (bare === h.word) { p = e + 1; break; }
+      // In $( ), bash also ends a body at its word followed by the closing ).
+      if (nested && bare.startsWith(h.word) && /^\s*\)/.test(bare.slice(h.word.length))) { p += line.indexOf(h.word) + h.word.length; break; }
+      lines.push(line);
+      p = e + 1;
+    }
+    const body = lines.join('\n');
+    if (ctx.bodiesRun) scan(body, 0, false, ctx);
+    else if (!h.quoted) substitutions(body, ctx);
+  }
+  return Math.min(p, s.length);
+}
+
+function substitutions(text, ctx) {
+  for (let j = 0; j < text.length; j++) {
+    const c = text[j];
+    if (c === '\\') { j++; continue; }
+    if (c === '`') { const k = closingTick(text, j + 1); if (k >= 0) { scan(text.slice(j + 1, k).replace(/\\`/g, '`'), 0, false, ctx); j = k; } continue; }
+    if (c === '$' && text[j + 1] === '(') j = text[j + 2] === '(' ? arithEnd(text, j + 3) : scan(text, j + 2, true, ctx);
+  }
+}
+
+function closingTick(s, j) {
+  for (; j < s.length; j++) {
+    if (s[j] === '\\') j++;
+    else if (s[j] === '`') return j;
+  }
+  return -1;
+}
+// The ) that closes $(( … )) or (( … )), counted from just inside it.
+function arithEnd(s, j) {
+  for (let d = 2; j < s.length; j++) {
+    if (s[j] === '(') d++;
+    else if (s[j] === ')' && --d === 0) return j;
+  }
+  return s.length;
+}
+// The } that closes the { at `i`, looked for within 256 characters, or -1.
+// What has to stay one word (${name}, {a,b}, {}) is short; a longer group
+// read as a separator only splits the line in more places.
+function braceEnd(s, i) {
+  let d = 0, q = '';
+  for (let j = i; j < s.length && j < i + 256; j++) {
+    const c = s[j];
+    if (q) { if (c === q) q = ''; continue; }
+    if (c === '"' || c === "'") q = c;
+    else if (c === '{') d++;
+    else if (c === '}' && --d === 0) return j;
+  }
+  return -1;
 }
 
 // The line with text bound for files removed, on a plain line only: heredoc

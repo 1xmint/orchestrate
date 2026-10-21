@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -346,7 +346,7 @@ test('a process kill by name is stopped, with the process-kill reason', () => {
     const d = decide(command);
     assert.equal(d.kind, 'ask', command);
     assert.match(d.reason, /^This would end every running program with that name on this machine, not only the one you started/, command);
-    assert.match(d.reason, /Say yes to continue./, command);
+    assert.match(d.reason, /Saying yes runs it\./, command);
   }
 });
 
@@ -367,12 +367,12 @@ test('a kill of one known process id is not stopped', () => {
 test('a process kill by name from a helper or in headless mode is refused, not asked', () => {
   const helper = decide('taskkill //F //IM node.exe', { subagent: true });
   assert.equal(helper.kind, 'deny');
-  assert.match(helper.reason, /cannot be answered here/);
-  assert.doesNotMatch(helper.reason, /Say yes/);
+  assert.match(helper.reason, /cannot be answered from inside a helper/);
+  assert.doesNotMatch(helper.reason, /Saying yes/);
   const headless = decide('pkill -f node', { headless: true, mode: 'auto' });
   assert.equal(headless.kind, 'deny');
   assert.match(headless.reason, /nobody will be asked to say yes to it here/);
-  assert.doesNotMatch(headless.reason, /Say yes|auto mode|allow-bash|\.json/);
+  assert.doesNotMatch(headless.reason, /Saying yes|auto mode|allow-bash|\.json/);
 });
 
 test('a process kill by name sent as a PowerShell tool call is stopped too', () => {
@@ -381,10 +381,10 @@ test('a process kill by name sent as a PowerShell tool call is stopped too', () 
   assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /^This would end every running program with that name/);
 });
 
-test('a drop-database command from a subagent is denied with a report-back reason', () => {
+test('a drop-database command from a subagent is denied, saying who can run it', () => {
   const r = run(bash('psql -c "drop table users"', { agent_id: 'helper-1' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /The session that started this helper can run it/);
 });
 
 test('the same drop-database command asked twice in one session gets "Asked already: " the second time', () => {
@@ -413,10 +413,14 @@ test('PowerShell Remove-Item -Recurse -Force node_modules is ordinary and passes
   assert.equal(decide('Remove-Item -Recurse -Force node_modules', { cwd: '/home/user/project' }).kind, 'pass');
 });
 
-test('PowerShell Remove-Item without both -Recurse and -Force passes through', () => {
+// With -Recurse, PowerShell deletes a folder and everything in it without
+// asking; it asks "are you sure" only for a folder with children and no
+// -Recurse, and -Force only adds hidden and read-only files (learn.microsoft.com,
+// Remove-Item, read 2026-10-03). So -Recurse alone is the recursive delete.
+test('PowerShell Remove-Item without -Recurse passes through; -Recurse alone is a recursive delete', () => {
   assert.equal(decide('Remove-Item -Force src', { cwd: '/home/user/project' }).kind, 'pass');
-  assert.equal(decide('Remove-Item -Recurse src', { cwd: '/home/user/project' }).kind, 'pass');
   assert.equal(decide('Remove-Item src', { cwd: '/home/user/project' }).kind, 'pass');
+  assert.equal(decide('Remove-Item -Recurse src', { cwd: '/home/user/project' }).kind, 'ask');
 });
 
 test('git branch -D via the PowerShell tool is stopped, same as Bash', () => {
@@ -436,9 +440,9 @@ test('a PowerShell tool call is recognised by the hook process, same as Bash', (
 test('an unsafe Bash rm -rf under bypassPermissions is denied, not silently allowed', () => {
   const r = run(bash('rm -rf src', { permission_mode: 'bypassPermissions', cwd: '/home/user/project' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /inside a helper/);
   // Nobody can answer in this mode, so the reason must not invite a "yes".
-  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Saying yes/);
   assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /allow-bash|\.json|mode/i);
 });
@@ -446,15 +450,15 @@ test('an unsafe Bash rm -rf under bypassPermissions is denied, not silently allo
 test('an unsafe PowerShell Remove-Item under bypassPermissions is denied, not silently allowed', () => {
   const r = run(powershell('Remove-Item -Recurse -Force src', { permission_mode: 'bypassPermissions', cwd: '/home/user/project' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /inside a helper/);
 });
 
-test('an unsafe Bash rm -rf from a subagent is denied with a report-back reason', () => {
+test('an unsafe Bash rm -rf from a subagent is denied, saying who can run it', () => {
   const r = run(bash('rm -rf src', { agent_id: 'helper-1', cwd: '/home/user/project' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /The session that started this helper can run it/);
   // Nobody can answer inside a helper, so the reason must not invite a "yes".
-  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Saying yes/);
 });
 
 // ---- ordinary commands pass through with no output -------------------------
@@ -469,24 +473,24 @@ test('ordinary commands pass through with no output', () => {
 
 // ---- who is asking changes ask vs. deny, never which commands match --------
 
-test('the same command from a subagent payload is denied with a report-back reason, not asked', () => {
+test('the same command from a subagent payload is denied, saying who can run it, not asked', () => {
   const r = run(bash('git push --force', { agent_id: 'helper-1' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
-  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /The session that started this helper can run it/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Saying yes/);
 });
 
 test('the same command from the main interactive session asks, with a plain sentence', () => {
   const r = run(bash('git push --force'));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'ask');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes to continue/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /Saying yes runs it\./);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /\borch-/);
 });
 
 test('a session with no one able to answer an interactive prompt (bypassPermissions) is denied outright, not asked', () => {
   const r = run(bash('git push --force', { permission_mode: 'bypassPermissions' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /inside a helper/);
 });
 
 test('auto mode has nobody to answer an ask, so it is denied in plain words with no mode named', () => {
@@ -494,7 +498,7 @@ test('auto mode has nobody to answer an ask, so it is denied in plain words with
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /auto mode|allow-bash|\.json/i);
-  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Saying yes/);
 });
 
 test('dontAsk mode has nobody to answer an ask, so it is denied in plain words with no mode named', () => {
@@ -502,13 +506,13 @@ test('dontAsk mode has nobody to answer an ask, so it is denied in plain words w
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
   assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /nobody will be asked to say yes to it here/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /dontAsk|allow-bash|\.json/i);
-  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes/);
+  assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /Saying yes/);
 });
 
 test('default mode still asks: someone is there to answer', () => {
   const r = run(bash('git push --force', { permission_mode: 'default' }));
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'ask');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /Say yes to continue/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /Saying yes runs it\./);
 });
 
 test('deny reasons in modes with nobody to answer name no drive letter or account detail', () => {
@@ -520,14 +524,16 @@ test('deny reasons in modes with nobody to answer name no drive letter or accoun
   }
 });
 
-// ---- the "ask" tail tells a headless model to stop instead of retrying -----
+// ---- the "ask" tail states what the question decides, as facts ------------
 
-test('every "ask" reason ends with the plain instruction to stop and tell the user rather than retry', () => {
+test('every "ask" reason ends saying a yes runs it, nothing ran yet, and sending it again asks again', () => {
   const commands = ['git push --force', 'git push origin --delete a', 'git branch -D x', 'git rm -r uploads', 'git clean -fd', 'npm publish', 'gh release create v1.0.0', 'vercel --prod', 'stripe charges create --amount=1000'];
   for (const command of commands) {
     const d = decide(command);
     assert.equal(d.kind, 'ask');
-    assert.match(d.reason, /Say yes to continue\. If nobody can answer here, stop and tell the user what you were about to run instead of trying again\.$/);
+    assert.match(d.reason, /Saying yes runs it\. Until someone says yes, nothing has run, and sending the same line again asks the same question\.$/);
+    // Facts, not orders (AGENTS.md: hooks state facts).
+    assert.doesNotMatch(d.reason, /\b(stop|tell the user|instead of trying again)\b/i);
   }
 });
 
@@ -571,15 +577,16 @@ test('a helper in a mode where a person answers prompts gets the same ask as the
   assert.equal(ps.json.hookSpecificOutput.permissionDecision, 'ask');
 });
 
-test('a helper where nobody can say yes is refused because the question cannot be answered here', () => {
+test('a helper where nobody can say yes is refused because the question cannot be answered there', () => {
   for (const mode of ['auto', 'bypassPermissions', 'dontAsk', undefined]) {
     const extra = { agent_id: 'helper-1', cwd: '/home/user/project' };
     if (mode) extra.permission_mode = mode;
     for (const r of [run(bash('git push --force', extra)), run(powershell('Remove-Item -Recurse -Force src', extra))]) {
       assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny', String(mode));
       const reason = r.json.hookSpecificOutput.permissionDecisionReason;
-      assert.match(reason, /cannot be answered here/);
-      assert.doesNotMatch(reason, /cannot ask|Say yes|\blead\b/);
+      assert.match(reason, /cannot be answered from inside a helper/);
+      assert.match(reason, /sent again from here it is refused again/);
+      assert.doesNotMatch(reason, /cannot ask|Saying yes|\blead\b|report back|instead of retrying/);
     }
   }
 });
@@ -595,7 +602,7 @@ test('every refusal where nobody can say yes is plain: no mode, no file name, an
   for (const c of cmds) {
     const d = decide(c, { headless: true, mode: 'auto' });
     assert.equal(d.kind, 'deny', c);
-    assert.doesNotMatch(d.reason, /\bmode\b|allow-bash|\.json|\.orchestrator|Say yes to continue/i, c);
+    assert.doesNotMatch(d.reason, /\bmode\b|allow-bash|\.json|\.orchestrator|Saying yes runs it/i, c);
     if (!/branch -D/.test(c)) assert.match(d.reason, /nobody will be asked to say yes to it here/, c);
     if (!/branch -D/.test(c)) assert.match(d.reason, /tell the user|run it themselves/, c);
   }
@@ -617,7 +624,7 @@ test('a helper folder with unsaved changes is refused in plain words: save first
     assert.match(d.reason, /copy the files into the main folder/);
     assert.match(d.reason, /without force/);
     assert.match(d.reason, /leave the folder where it is and tell the user/);
-    assert.doesNotMatch(d.reason, /\bmode\b|allow-bash|\.json|Say yes to continue/i, c);
+    assert.doesNotMatch(d.reason, /\bmode\b|allow-bash|\.json|Saying yes runs it/i, c);
   }
 });
 
@@ -626,7 +633,7 @@ test('the subagent deny path is unchanged by the repeat guard', () => {
   run(bash('git push --force'), home);
   const r = run(bash('git push --force', { agent_id: 'helper-1' }), home);
   assert.equal(r.json.hookSpecificOutput.permissionDecision, 'deny');
-  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /report back/);
+  assert.match(r.json.hookSpecificOutput.permissionDecisionReason, /cannot be answered from inside a helper/);
   assert.doesNotMatch(r.json.hookSpecificOutput.permissionDecisionReason, /^Asked already:/);
 });
 
@@ -1100,7 +1107,7 @@ test('reviewer round 1: a merge in the same line as a push, a branch switch or a
     'git switch other && gh pr merge --squash',
     `export GH_REPO=o/r; gh pr merge 36 --merge --match-head-commit ${HEAD}`,
     `gh pr merge 36 -Ro/r --merge --match-head-commit ${HEAD}`,
-    `cd /c/Users/Josh/Desktop/GitHub/orchestrate && gh pr merge 36 --merge --match-head-commit ${HEAD}`,
+    `cd /c/Users/someone/work/orchestrate && gh pr merge 36 --merge --match-head-commit ${HEAD}`,
     `gh pr merge 36 --merge --match-head-commit ${HEAD}\ngh pr merge 37 --merge --match-head-commit ${HEAD}`,
   ]) assert.equal(decide(cmd, merging(prView()).ctx).kind, 'deny', cmd);
 });
@@ -1681,4 +1688,188 @@ test('a read of one pull request after one plain cd passes; other shapes with a 
     'cd "-"; gh pr view 1 --json mergeable',
     'cd "a*"; gh pr view 1 --json mergeable',
   ]) assert.notEqual(decide(bad, ctx).kind, 'pass', bad);
+});
+
+// ---- one command at a time (independent review of 6180c70) -----------------
+// The rules read the whole line, so a safe delete followed by `&& npm install`
+// read `&&` and `npm` as targets, a commit message that named a dangerous
+// command was taken for one, and in a helper or auto mode each of those was a
+// refusal. Every line here was run through the real hook before the fix.
+
+const PROJECT = '/home/user/project';
+const viaHook = (command, extra = {}, tool = bash) => {
+  const r = run(tool(command, { cwd: PROJECT, ...extra }));
+  return r.json ? r.json.hookSpecificOutput.permissionDecision : 'pass';
+};
+
+test('rm reads only its own targets: what follows &&, ;, ||, a newline or a redirection is not one, and quotes come off', () => {
+  for (const ok of [
+    'rm -rf node_modules && npm install',
+    'rm -rf dist && npm run build',
+    'rm -rf dist; npm run build',
+    'rm -rf build 2>/dev/null',
+    'rm -rf build > /dev/null 2>&1',
+    'rm -rf dist || true',
+    'cd frontend\nrm -rf node_modules\nnpm install',
+    'rm -rf "dist"',
+    "rm -rf 'node_modules'",
+    'Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue',
+    'if (Test-Path dist) { Remove-Item -Recurse -Force dist }',
+    'Remove-Item dist, node_modules -Recurse -Force',
+    'rm -f out.log && npx mocha -r x -f y',
+  ]) {
+    assert.equal(decide(ok, { cwd: PROJECT }).kind, 'pass', ok);
+    assert.equal(decide(ok, { cwd: PROJECT, subagent: true }).kind, 'pass', ok);
+  }
+  assert.equal(viaHook('rm -rf node_modules && npm install', { agent_id: 'helper-1', permission_mode: 'auto' }), 'pass');
+  assert.equal(viaHook('Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue', { permission_mode: 'auto' }, powershell), 'pass');
+  for (const bad of [
+    'rm -rf src && npm install',
+    'npm install && rm -rf src',
+    'rm -rf node_modules src',
+    'rm -rf src 2>/dev/null',
+    'rm -rf "src"',
+    'cd frontend\nrm -rf src\nnpm install',
+    'Remove-Item -Recurse -Force src -ErrorAction SilentlyContinue',
+    'if (Test-Path src) { Remove-Item -Recurse -Force src }',
+    'find . -name x -exec rm -rf {} +',
+  ]) {
+    const d = decide(bad, { cwd: PROJECT });
+    assert.equal(d.kind, 'ask', bad);
+    assert.match(d.reason, /permanently delete files or folders/, bad);
+  }
+});
+
+test('a kill of one process id passes whatever follows it; a kill by name still asks', () => {
+  for (const ok of ['kill -9 12345 && npm start', 'kill -9 12345 2>/dev/null', 'kill -9 12345 || true', 'kill -9 12345; sleep 1']) {
+    assert.equal(decide(ok).kind, 'pass', ok);
+  }
+  for (const bad of ['kill -9 $(pgrep node) && npm start', 'pkill -f node || true', 'Get-Process node | Stop-Process -Force', 'npm start & kill -9 %1']) {
+    assert.equal(decide(bad).kind, 'ask', bad);
+  }
+});
+
+test('quoted text, a heredoc body and a search pattern are text, not commands', () => {
+  const commit = "git commit -m \"$(cat <<'EOF'\ndocs: never use git push --force on main (see notes)\n\nCo-Authored-By: someone <noreply@example.com>\nEOF\n)\" && git push";
+  for (const ok of [
+    'git commit -m "docs: never use git push --force on main"',
+    'git commit -m "add DROP TABLE guard to psql wrapper"',
+    'git commit -m "remove rm -rf from install script"',
+    'git commit -m "kill -9 on the dev server, pkill fallback"',
+    commit,
+    'echo "run: git push --force" > notes.txt',
+    "cat > notes.md <<'EOF'\nNever run git push --force or rm -rf src.\nnpm publish happens in CI; pkill is banned.\nEOF",
+    'grep -rn "git push --force" docs',
+    'rg "git push -f" docs',
+    'grep -n pkill scripts/dev.sh',
+    'grep -rn "npm publish" .github/',
+    'grep -rn "vercel --prod" .',
+    'git grep -n "rm -rf" -- scripts',
+    'echo "Done. Next: npm publish"',
+    'echo hi # rm -rf src',
+    'git log -S "npm publish" --oneline',
+  ]) {
+    assert.equal(decide(ok, { cwd: PROJECT }).kind, 'pass', ok);
+    assert.equal(decide(ok, { cwd: PROJECT, subagent: true }).kind, 'pass', ok);
+  }
+  assert.equal(viaHook(commit, { agent_id: 'helper-1', permission_mode: 'auto' }), 'pass');
+});
+
+test('quoted text a shell is handed to run is still read as commands', () => {
+  for (const [bad, why] of [
+    ['bash -c "git push --force"', /history of a shared branch/],
+    ["sh -c 'rm -rf src'", /files or folders/],
+    ['zsh -c "npm publish"', /publish/],
+    ['eval "git push -f origin main"', /history of a shared branch/],
+    ['ssh host "rm -rf /srv/app"', /files or folders/],
+    [`docker exec db sh -c "psql -c 'drop table users'"`, /database/],
+    ["ls | xargs sh -c 'git push --force'", /history of a shared branch/],
+    ['pwsh -Command "Remove-Item -Recurse -Force src"', /files or folders/],
+    ['powershell -c "git push --force"', /history of a shared branch/],
+    ['cmd /c "git push --force"', /history of a shared branch/],
+    ['echo "$(git push --force)"', /history of a shared branch/],
+    ['echo `rm -rf src`', /files or folders/],
+    ['git commit -m "x" && git push --force', /history of a shared branch/],
+    ["cat <<'EOF' | bash\ngit push --force\nEOF", /history of a shared branch/],
+    ['bash <<< "rm -rf src"', /files or folders/],
+    // An unquoted heredoc runs its $( ) and backticks even when written to a file.
+    ['cat > notes.md <<EOF\nclean with `rm -rf src`\nEOF', /files or folders/],
+    // A line that writes a script and runs a shell reads what it writes.
+    ["cat > x.sh <<'EOF'\nrm -rf src\nEOF\nbash x.sh", /files or folders/],
+    ["printf 'git push --force\\n' > p.sh; bash p.sh", /history of a shared branch/],
+    ['echo "DROP TABLE users;" | psql mydb', /database/],
+    ["psql mydb <<'EOF'\nDROP TABLE users;\nEOF", /database/],
+  ]) {
+    const d = decide(bad, { cwd: PROJECT });
+    assert.equal(d.kind, 'ask', bad);
+    assert.match(d.reason, why, bad);
+  }
+});
+
+test('plain spellings of the stopped shapes are caught: rm -R, --recursive, git push -d/-fu/+branch, clean --force, workspace publishes, flyctl, wrangler pages', () => {
+  for (const bad of [
+    'rm -Rf src', 'rm -fR src', 'rm --recursive --force src', 'rm -r -f src', 'rm -f -r src', 'rm -R src',
+    'git push -d origin feature', 'git push -fu origin main', 'git push -uf origin main', 'git push origin +main',
+    'git clean --force -d',
+    'pnpm -r publish', 'pnpm --filter x publish', 'npm -w pkg publish', 'npm --workspace pkg publish', 'npm --workspace=pkg publish', 'yarn npm publish',
+    'flyctl deploy', 'wrangler pages deploy dist', 'npx vercel deploy --prod',
+  ]) assert.equal(decide(bad, { cwd: PROJECT }).kind, 'ask', bad);
+  for (const ok of ['npm run publish', 'git push -u origin feature', 'git push -o ci.skip origin feature', 'git clean -n', 'wrangler dev', 'fly logs', 'vercel env pull', 'npm i -D publish']) {
+    assert.equal(decide(ok, { cwd: PROJECT }).kind, 'pass', ok);
+  }
+});
+
+test('PowerShell parameters are read by any start that names them alone, and -Recurse is the recursive delete', () => {
+  for (const bad of ['Remove-Item -Recurse -Fo src', 'ri -r -fo src', 'del -r -fo src', 'Remove-Item -Rec src', 'Remove-Item -Path src -Recurse', 'Remove-Item -LiteralPath:src -Recurse', 'Remove-Item src, lib -Recurse']) {
+    assert.equal(decide(bad, { cwd: PROJECT }).kind, 'ask', bad);
+  }
+  assert.equal(viaHook('ri -r -fo src', {}, powershell), 'ask');
+  for (const ok of ['Remove-Item -Force src', 'Remove-Item src', 'Remove-Item -Recurse:$false src', 'Get-ChildItem dist | Remove-Item -Recurse -Force']) {
+    assert.equal(decide(ok, { cwd: PROJECT }).kind, 'pass', ok);
+  }
+});
+
+test('the merge check reads merge as a word: "emergency" is not one, and a read with its errors sent nowhere is still a read', () => {
+  const m = merging(prView({ checks: [running()] }));
+  for (const ok of [
+    'gh issue list --label emergency',
+    'gh issue create --title "Emergency: login down"',
+    'gh pr view 12 --json state,mergeable 2>&1',
+    'gh pr list --state merged --limit 5 2>&1',
+    'gh pr checks 12 2>/dev/null',
+    'git merge main 2>&1',
+  ]) assert.equal(decide(ok, m.ctx).kind, 'pass', ok);
+  assert.equal(m.calls.length, 0);
+  for (const bad of [
+    'gh pr merge 12 --merge',
+    'gh pr mer""ge 12',
+    'gh pr mer\\ge 12',
+    'gh api -X PUT repos/o/r/pulls/12/merge',
+    'gh api graphql -f query="mutation{enablePullRequestAutoMerge(input:{}){clientMutationId}}"',
+    'gh pr view 12 --json mergeable 2>&1 | sh',
+    'gh pr view 12 2>&1; gh pr merge 12',
+    'gh pr view 12 --json mergeable > out.txt; gh pr merge 12',
+  ]) assert.equal(decide(bad, merging(prView()).ctx).kind, 'deny', bad);
+});
+
+test('a publish that is only a dry run passes', () => {
+  for (const ok of ['npm publish --dry-run', 'pnpm publish --dry-run', 'yarn npm publish --dry-run', 'wrangler deploy --dry-run']) assert.equal(decide(ok).kind, 'pass', ok);
+  assert.equal(decide('npm publish --access public').kind, 'ask');
+});
+
+test('the temp folder is judged where it really is: /tmp counts whatever TMPDIR says, and a link out of temp does not', t => {
+  if (process.platform === 'win32') return t.skip('/tmp and links are read the POSIX way here');
+  // TMPDIR names another folder, as on macOS (/var/folders/…): /tmp still counts.
+  const elsewhere = mkdtempSync(join(tmpdir(), 'orch-tmpdir-'));
+  const r = spawnSync(process.execPath, [GUARD], {
+    input: JSON.stringify(bash('rm -rf /tmp/orch-guard-scratch', { cwd: PROJECT })),
+    encoding: 'utf8',
+    env: { ...process.env, HOME: elsewhere, TMPDIR: elsewhere },
+  });
+  assert.equal(r.stdout, '');
+  // A link inside temp that leads out of it is where it leads.
+  const link = join(mkdtempSync(join(tmpdir(), 'orch-link-')), 'to-root');
+  symlinkSync('/', link);
+  assert.equal(isSafeDeleteTarget(join(link, 'etc'), '/anywhere'), false);
+  assert.equal(isSafeDeleteTarget(join(dirname(link), 'scratch'), '/anywhere'), true);
 });

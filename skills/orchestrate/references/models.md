@@ -129,12 +129,16 @@ that recognising a name is not knowing its current state.
 
 ## When a helper is worth it at all
 
-The manager's context is for judgment. Do a step there only when it fits in
-about eight tool calls with small outputs, or about 15k tokens of growth. Always
-use a worker for a file over about 150 lines, three or more changed files, a
-build or test suite, or a large read that returns a paragraph. The manager keeps
-only the packet and return. Workers still need tight packets and turn caps,
-because each step re-reads their own growing context.
+The rule is SKILL.md's **Direct**: do a step yourself when it fits in about
+eight tool calls with small outputs, or about 15k tokens of growth; past that,
+hand it over when that costs less overall. A worker saves by running on a
+cheaper model and by keeping a file over about 150 lines, a build or test
+suite, or a large read that returns a paragraph out of the manager's context,
+which is re-read every turn. It costs the brief, the return the manager keeps,
+and checking it. A small build split across helpers cost two to three times
+doing it alone in live runs r4–r6 (`docs/audits/2026-09-26-live-runs-r4.md`
+onward). Workers still need tight packets and turn caps, because each step
+re-reads their own growing context.
 
 Use `orch-coordinator` for a wave of three or more independent tasks with
 `OWNS` and `DONE WHEN` already written, or for one plan step whose independent

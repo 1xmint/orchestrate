@@ -6,7 +6,7 @@
 // write anything, and it does not know about the per-session store; that is
 // lib/context-store.mjs, which imports from here.
 
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from './node.mjs';
 import { homedir } from 'node:os';
 import { join, dirname, relative } from 'node:path';
 import { loadPolicy } from './policy.mjs';
@@ -340,14 +340,17 @@ export function contextNotice(reading, advice, ctx = {}) {
 // The measured size as a short line, keyed by compaction epoch and a step of
 // `tickEvery` tokens, so it is said once per step and again after a compaction.
 // Same shape as `contextNotice`'s checkpoint/compact text — see `factLine`.
-export function contextTick(reading, policy = loadPolicy(), ctx = {}) {
+// `said` is the key the caller last said: when this reading has the same key,
+// the line would be thrown away, so it is not built (`text` is ''). Building it
+// reads the transcript's first 64 KB and checks several files, and the hook
+// that calls this runs after every tool call, nearly all with an unchanged key.
+export function contextTick(reading, policy = loadPolicy(), ctx = {}, said = null) {
   const every = policy.context.tickEvery;
   if (!every || !reading || reading.tokens == null || !Number.isFinite(reading.tokens)) return { key: null, text: '' };
   if (reading.state !== 'measured' && reading.state !== 'provisional') return { key: null, text: '' };
-  return {
-    key: `${contextEpoch(reading)}|${Math.floor(reading.tokens / every)}`,
-    text: factLine(reading, policy, ctx),
-  };
+  const key = `${contextEpoch(reading)}|${Math.floor(reading.tokens / every)}`;
+  if (said != null && key === said) return { key, text: '' };
+  return { key, text: factLine(reading, policy, ctx) };
 }
 
 // ---- readable report --------------------------------------------------------

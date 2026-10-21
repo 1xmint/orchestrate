@@ -11,7 +11,6 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanTurn, persistDecision, errorKey, PERSIST_STEP_CAP, runGoalLine } from './persist-check.mjs';
 import { persistIntent, persistLine } from './router.mjs';
-import { PERSIST_STOP_FIVE_HOUR } from './lib/quota.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -33,11 +32,33 @@ test('arms on an explicit ask to keep going, never on a question or a one-off', 
   }
 });
 
-test('context compact advice stops an armed loop before its did-work check', () => {
-  const d = persistDecision({ scan: { progressed: true, denied: false, errors: [], asked: false, goalMet: false }, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: { session: 's', tokens: 151000, compaction: null } });
-  assert.equal(d.kind, 'stop');
-  assert.match(d.why, /~151k/);
-  assert.match(d.why, /checkpoint/);
+test('at the compact line keep-going carries on: once per summary epoch it says there is no save point', () => {
+  // Claude Code summarises the conversation by itself at the compact line and
+  // keep-going stays on through it (plan 0010 step 2b). Ending the loop there
+  // turned it off just before the host carried on (whole-file review,
+  // 2026-10-03).
+  const scan = { progressed: true, denied: false, errors: [], asked: false, goalMet: false };
+  const reading = { session: 's', tokens: 151000, compaction: null };
+  const first = persistDecision({ scan, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: reading, epoch: 'e1' });
+  assert.equal(first.kind, 'continue');
+  assert.match(first.why, /~151k/);
+  assert.match(first.why, /checkpoint/i);
+  assert.equal(first.rec.compactToldFor, 'e1');
+  const again = persistDecision({ rec: first.rec, scan, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: reading, epoch: 'e1' });
+  assert.equal(again.kind, 'continue');
+  assert.doesNotMatch(again.why, /checkpoint/i, 'said once per epoch; an ordinary continue after');
+  const saved = persistDecision({ scan, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: reading, epoch: 'e1', checkpointSaved: true });
+  assert.doesNotMatch(saved.why, /No checkpoint/, 'with a save point there is nothing to say');
+  // Still near the limit right after a summary: another one will not help.
+  const after = persistDecision({ scan, goal: 'g', contextAdvice: { action: 'investigate' }, contextReading: reading });
+  assert.equal(after.kind, 'stop');
+  assert.match(after.why, /~151k/);
+  assert.doesNotMatch(after.why, /No checkpoint/, 'it does not claim what it did not check');
+  // A step long enough to get past "investigate" still ends it: the first Stop
+  // in a new summary epoch that is still at the line (review of the hook fixes).
+  const later = persistDecision({ rec: again.rec, scan, goal: 'g', contextAdvice: { action: 'compact' }, contextReading: { ...reading, compactions: 1 }, epoch: 'e2', checkpointSaved: true });
+  assert.equal(later.kind, 'stop');
+  assert.match(later.why, /after a summary/);
 });
 
 test('the armed line carries the goal verbatim and the ways out', () => {
@@ -127,20 +148,10 @@ test('every hardstop fires', () => {
   assert.equal(first.kind, 'continue');
   assert.equal(persistDecision({ rec: first.rec, scan: { ...base, errors: ['Error: x'] } }).kind, 'stop');
   assert.equal(persistDecision({ rec: first.rec, scan: { ...base, errors: ['Error: y'] } }).kind, 'continue');
-});
-
-test('the loop\'s 5-hour stop default is 90, on purpose', () => {
-  assert.equal(PERSIST_STOP_FIVE_HOUR, 90);
-});
-
-test('the loop stops near the 5-hour limit, and only there', () => {
-  const at = pct => ({ fiveHour: { pct, resetsAt: null }, week: null });
-  const above = PERSIST_STOP_FIVE_HOUR + 1;
-  const below = PERSIST_STOP_FIVE_HOUR - 20;
-  assert.equal(persistDecision({ scan: base, quota: at(above) }).kind, 'stop');
-  assert.match(persistDecision({ scan: base, quota: at(above) }).why, new RegExp(`${above}%`));
-  assert.equal(persistDecision({ scan: base, quota: at(below) }).kind, 'continue');
-  assert.equal(persistDecision({ scan: base, quota: null }).kind, 'continue', 'no status line means no usage stop');
+  // A helper refused for usage is the one refusal that is not a stop: the lead
+  // can still work, and the next continue says so. The usage line itself is gone
+  // (persist-pause.test.mjs holds the 90% case end to end).
+  assert.equal(persistDecision({ scan: { ...base, quotaRefused: true } }).kind, 'continue');
 });
 
 test('context advice rides along only when given', () => {
@@ -198,7 +209,7 @@ test('replay: the stall — no ledger, a step with work, then a step that only t
   appendFileSync(transcript, tail(said('The header and footer are in; CI is still running.')));
   const ended = run('persist-check.mjs', { ...stop, stop_hook_active: true }, home);
   assert.equal(ended.json.decision, undefined, 'a Stop that ends the loop never blocks');
-  assert.match(ended.json.systemMessage, /^Auto-continue stopped: the last step did no visible work/);
+  assert.match(ended.json.systemMessage, /^Keep-going stopped: the last step did no visible work/);
   assert.match(ended.json.systemMessage, /keep going/i);
   const s = session(home, 'p1');
   assert.equal(s.persist.armed, false);
@@ -221,7 +232,7 @@ test('replay: stuck on one open item, the loop stops; "try again" starts the cou
   for (let i = 1; i <= 3; i++) assert.equal(step().decision, 'block', `continue ${i}: each step did work`);
   const ended = step();
   assert.equal(ended.decision, undefined);
-  assert.match(ended.systemMessage, /3 continues in a row named the same open item, and it is still open: Fix the date parser/);
+  assert.match(ended.systemMessage, /3 steps in a row ended with the same step still open: Fix the date parser/);
   assert.equal(session(home, 'p2').persist.armed, false);
 
   appendFileSync(transcript, tail(userSays('try again')));

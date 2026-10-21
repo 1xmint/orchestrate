@@ -4,7 +4,7 @@
 // because locating and reading that one section is a self-contained job
 // nothing else in router.mjs needs to know the shape of.
 
-import { readFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, statSync } from './node.mjs';
 import { join, dirname, resolve } from 'node:path';
 import { sectionExcerpt } from './resume.mjs';
 import { DIR, readJson, writeJsonAtomic } from './tier.mjs';
@@ -166,7 +166,11 @@ export function briefNote(ctx, state, { force = false, store = BRIEF_MISSING_STO
     state.briefMissingShown = true;
     if (alreadyToldAcrossSessions(store, b.root)) return '';
     rememberToldAcrossSessions(store, b.root);
-    return `[orchestrate · brief] This project has no "What this is for" section; add one (what it is for, who it serves, which documents decide) to CLAUDE.md or AGENTS.md.`;
+    // A fact and a pointer, not a file to write: which file the section goes in
+    // depends on whether the repo is public (references/brief.md), and a
+    // tracked CLAUDE.md in a public repo would be published on the next push
+    // (prompt review, 2026-10-03).
+    return `[orchestrate · brief] CLAUDE.md and AGENTS.md have no "What this is for" section; the skill's brief.md says what goes in it and where (untracked in a public repo).`;
   }
   if (b.kind === 'kept') { state.briefSentFor = null; return ''; }
   if (!force && state.briefSentFor === b.file) return '';

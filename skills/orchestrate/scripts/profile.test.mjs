@@ -73,26 +73,32 @@ test('--brief prints the codex line in each shape from the cache', () => {
   assert.equal(codexLine(home), 'codex: gpt-5.6-terra · plus · ok');
 });
 
-test('the skills line counts skills of installed plugins and the user\'s own, and never says "none" when none are found', () => {
+test('the brief line carries only what the lead can act on', () => {
+  // It runs on every skill load and is read on every later turn (plan 0010
+  // step 2e): no skills-on-disk list (the host lists them), no providers, no
+  // auto-compact hint, and no prices or paid-skills line while they say nothing
+  // beyond the skill. Live usage stays where it can be fixed: in a terminal
+  // with no reading, the line names the one-time install (independent review,
+  // round 2); the desktop app runs no status line, so it is not said there.
   const home = sandbox();
-  // none anywhere: says none were found on disk, without claiming the listing is empty
-  const empty = profile(home, ['--brief']);
-  assert.equal(empty.status, 0, empty.stderr);
-  const emptyLine = empty.stdout.split('\n').find(l => l.startsWith('skills on disk'));
-  assert.match(emptyLine, /none found on disk/);
-  assert.match(emptyLine, /not the session's own listing/);
-  // an installed plugin (named by installed_plugins.json, kept outside ~/.claude/plugins) and a user skill
-  const inst = join(home, 'elsewhere', 'docs-plugin');
-  mkdirSync(join(inst, 'skills', 'pdf'), { recursive: true });
-  writeFileSync(join(inst, 'skills', 'pdf', 'SKILL.md'), '---\nname: pdf\n---\n');
-  mkdirSync(join(inst, 'skills', 'not-a-skill'), { recursive: true });
-  mkdirSync(join(home, '.claude', 'plugins'), { recursive: true });
-  writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: { 'docs-plugin@market': [{ scope: 'user', installPath: inst, version: '1' }] } }));
-  mkdirSync(join(home, '.claude', 'skills', 'mine'), { recursive: true });
-  writeFileSync(join(home, '.claude', 'skills', 'mine', 'SKILL.md'), '---\nname: mine\n---\n');
   const r = profile(home, ['--brief']);
-  const line = r.stdout.split('\n').find(l => l.startsWith('skills on disk'));
-  assert.match(line, /docs-plugin:pdf/);
-  assert.match(line, /\bmine\b/);
-  assert.doesNotMatch(line, /not-a-skill|none/);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^orchestrate: tier /m);
+  assert.match(r.stdout, /^this plan includes: /m);
+  assert.doesNotMatch(r.stdout, /skills on disk|^providers:|auto-compact|prices measured here: none|skills that call a paid/m);
+  assert.match(r.stdout, /^live usage: off, so no usage check can see the limit\. With the user's yes, once: node ".*statusline\.mjs" --install$/m);
+  assert.ok(Buffer.byteLength(r.stdout) < 800, `the brief is ${Buffer.byteLength(r.stdout)} bytes`);
+  for (const entry of ['claude-desktop', 'remote_cowork', 'claude-vscode', 'sdk-ts']) {
+    const other = spawnSync(process.execPath, [PROFILE, '--brief'], {
+      cwd: home, encoding: 'utf8', timeout: 30000,
+      env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_ENTRYPOINT: entry },
+    });
+    assert.equal(other.status, 0, other.stderr);
+    assert.doesNotMatch(other.stdout, /live usage/, `${entry}: nothing to offer where no status line runs`);
+  }
+  const cli = spawnSync(process.execPath, [PROFILE, '--brief'], {
+    cwd: home, encoding: 'utf8', timeout: 30000,
+    env: { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CODE_ENTRYPOINT: 'cli' },
+  });
+  assert.match(cli.stdout, /^live usage: off/m, 'the terminal entrypoint says it');
 });

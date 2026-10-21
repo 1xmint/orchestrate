@@ -7,7 +7,7 @@ import { PERSIST_INTENT, syntheticPrompt, persistIntent, GOAL_CAP, persistLine }
 
 test('lib/persist-words.mjs exports exactly the names this concern owns', async () => {
   const mod = await import('./persist-words.mjs');
-  assert.deepEqual(Object.keys(mod).sort(), ['GOAL_CAP', 'PERSIST_INTENT', 'barePersistPhrase', 'promptIntent', 'persistIntent', 'persistLine', 'syntheticPrompt'].sort());
+  assert.deepEqual(Object.keys(mod).sort(), ['GOAL_CAP', 'PERSIST_INTENT', 'approves', 'barePersistPhrase', 'promptIntent', 'persistIntent', 'persistLine', 'syntheticPrompt'].sort());
 });
 
 test('syntheticPrompt recognizes a background-task notice and a hand-back, not ordinary talk about them', () => {

@@ -36,7 +36,7 @@ can start here (above). `scripts/batch.mjs <RUN.md> --spec "…" --files
 "a,b,c" [--done-when "…"] [--concurrency 2] [--per-task N]` reads the run's own
 task id sequence and groups the files into a few tasks, each `OWNS` its own
 file set so the `orch-implementer` worktrees can run at once with no merge
-conflict — the same rule SKILL.md §4 already states for parallel tasks, just
+conflict — the same rule SKILL.md states for concurrent writers, just
 generated rather than typed by hand. Default concurrency 2, the plugin's own
 worker limit across Claude and Codex; by default the files are split evenly
 across that many tasks, at most 15 files each. It used to be concurrency 20 with
@@ -64,8 +64,8 @@ run's `packets/` directory and always pass the model and effort:
 The report lands at `<run dir>/workers/<task>/report.json`. A usage-limit error
 stops Codex until the reset and writes a Claude packet for only the unfinished
 part. Login, throttling, permission, timeout, malformed output and failing
-checks are each reported as themselves. SKILL.md §5 has the full start,
-monitor, grade, commit and merge recipe.
+checks are each reported as themselves. `dispatch.md`'s Codex workers has the
+full start, monitor, grade, commit and merge recipe.
 
 ## `fork`
 
@@ -131,9 +131,14 @@ cloud with no session open. A Bash sleep loop spends a turn per check and is nev
 When the user asks in plain words to keep going toward a goal ("keep coding until the site is
 done", "execute the plan"), the router pins that goal and `persist-check.mjs` refuses a Stop while
 each step does real work (an edit, a command, a dispatch). It needs no run ledger. It ends, and
-disarms, on the first of: you say the goal is met; your last message asks the user something; a
-dispatch is denied; the same error comes back twice; a step does no work; three continues on
-the same open item; 25 steps; the 5-hour usage window passes 90%. Each continued step's
+disarms, on the first of: you say the goal is met; your last message asks a question; a
+helper is refused by the budget or the credential check; the same error comes back twice; a
+step does no work (a helper refused for usage is not work) while nothing is out, or, with only a
+background command out (not a Monitor started in this stretch), after the user spoke and the step
+still did nothing; three continues on the same open
+item; 25 steps. A step whose message only promises to wait or check back, with nothing out that
+would wake the session, is told so once before that stop applies. A usage limit is not on that
+list: the host waits and resumes, and a helper refused for usage is stated in the next continue. Each continued step's
 message names the step count, the goal and the last file changed, so the user can catch drift
 without a separate check-in. After a compaction the goal is restored verbatim.
 `persist off` turns it off for the session.

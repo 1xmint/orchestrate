@@ -56,19 +56,44 @@ test('SKILL.md frontmatter metadata.version matches plugin.json', () => {
   assert.equal(skillVersion, plugin.version);
 });
 
-test('every hook script is registered exactly once overall, except router.mjs which fires on two distinct events by design', () => {
+// The named exceptions, each with the reason it is on two events by design:
+//  - router.mjs reads the prompt on UserPromptSubmit and re-sends the goal and
+//    the run on SessionStart (resume, compact, clear).
+//  - persist-check.mjs is the keep-going loop and the commit-claim check on Stop,
+//    and the pause-record writer on StopFailure, the host's moment for a turn
+//    that ended in an API error (a usage limit among them). It is one script on
+//    both because the record needs the same session state, project root and
+//    helper-silence rule, and the host ignores a hook's output at StopFailure,
+//    so the second registration can never refuse or disarm anything (docs/pause.md).
+const TWICE = {
+  'router.mjs': ['SessionStart', 'UserPromptSubmit'],
+  'persist-check.mjs': ['Stop', 'StopFailure'],
+};
+
+test('every hook script is registered exactly once overall, except router.mjs and persist-check.mjs, each on two distinct events by design', () => {
   const json = JSON.parse(readFileSync(HOOKS_JSON, 'utf8'));
   const regs = registrationsFromHooksJson(json);
 
   const counts = new Map();
   for (const r of regs) counts.set(r.script, (counts.get(r.script) || 0) + 1);
 
-  assert.equal(counts.get('router.mjs'), 2, 'router.mjs runs on UserPromptSubmit and SessionStart, both by design');
+  for (const [script, events] of Object.entries(TWICE)) {
+    assert.equal(counts.get(script), 2, `${script} runs on ${events.join(' and ')}, both by design`);
+    assert.deepEqual(regs.filter(r => r.script === script).map(r => r.event).sort(), events, `${script} is on exactly ${events.join(' and ')}`);
+  }
 
   for (const [script, count] of counts) {
-    if (script === 'router.mjs') continue;
-    assert.equal(count, 1, `${script} is registered ${count} times; a script other than router.mjs must be registered exactly once`);
+    if (TWICE[script]) continue;
+    assert.equal(count, 1, `${script} is registered ${count} times; a script other than ${Object.keys(TWICE).join(' and ')} must be registered exactly once`);
   }
+});
+
+test('persist-check.mjs on StopFailure has no matcher, so every error kind the host sends reaches it', () => {
+  const json = JSON.parse(readFileSync(HOOKS_JSON, 'utf8'));
+  const groups = json.hooks.StopFailure || [];
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].matcher, undefined, 'a matcher would drop the error kinds nobody has seen yet');
+  assert.deepEqual(groups[0].hooks.map(h => scriptName(h.command)), ['persist-check.mjs']);
 });
 
 test('no event lists the same script twice within itself', () => {

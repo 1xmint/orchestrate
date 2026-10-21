@@ -48,10 +48,13 @@ test('a first writing dispatch with no page is held, naming the file and the com
   assert.match(a.reason, /^orchestrate project: /);
   assert.match(a.reason, /PROJECT\.md is missing/);
   assert.match(a.reason, /project\.mjs" init /);
-  assert.match(a.reason, /fill Next/);
+  assert.match(a.reason, /Next step/);
   // A 0.18.0 release-check reply told the user "the helper system refused to
-  // run anything until a plan existed on file". Routine set-up is not news.
-  assert.match(a.reason, /routine set-up, not news for the user/);
+  // run anything until a plan existed on file". Routine set-up is not news,
+  // and the refusal says so as a fact, not as an order to keep quiet.
+  assert.match(a.reason, /routine set-up, not a fault/);
+  assert.doesNotMatch(a.reason, /don't mention|Create it with/);
+  assert.match(a.reason, /This dispatch passes once Next has a step/, 'it says what passes');
 });
 
 test('a page whose Next is still blanks holds it too; a filled Next lets it through', () => {
@@ -69,6 +72,22 @@ test('a read-only role is never held, and does not use the check up', () => {
   }
   seed(h, 's5', 'Explore');
   assert.equal(hook(h, r, 's5', 'orch-implementer').denied, true, 'a builder sent after only an Explore is still held');
+});
+
+test('Claude Code\'s own agents and agents the user wrote are not held; every builder of the plugin is', () => {
+  // /statusline dispatches the built-in statusline-setup; it was refused with
+  // "no project page yet" in a repo with no page, and so was any agent the
+  // user wrote themselves.
+  const h = home();
+  const r = repo(null);
+  for (const role of ['statusline-setup', 'my-linter', 'acme:release-notes']) {
+    assert.equal(hook(h, r, `s9-${role}`, role).denied, false, role);
+  }
+  for (const role of ['orch-implementer', 'orchestrate:orch-debugger', 'orch-coordinator', 'general-purpose', 'claude']) {
+    assert.match(hook(h, r, `s10-${role}`, role).reason, /^orchestrate project: /, role);
+  }
+  seed(h, 's11', 'statusline-setup');
+  assert.equal(hook(h, r, 's11', 'orch-implementer').denied, true, 'a builder sent after only a built-in agent is still held');
 });
 
 test('an earlier writing dispatch in the session means the check was already met', () => {
